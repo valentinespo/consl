@@ -1,10 +1,14 @@
 /**
- * Image storage. In production, uploads go to Cloudflare R2 (S3-compatible) because Railway's
- * disk is ephemeral. Locally (no R2 env), it falls back to writing into public/uploads so dev
- * works with zero config.
+ * Image storage, with three backends, picked by env:
+ *  1. Cloudflare R2 (if R2_* set) — S3-compatible object storage.
+ *  2. A persistent disk (if UPLOAD_DIR set, e.g. a Railway volume) — files served via /media/*.
+ *  3. Local dev fallback — public/uploads, served statically at /uploads/*.
+ * Railway's container disk is ephemeral, hence (1)/(2) in production.
  */
 import { writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
+
+const UPLOAD_DIR = process.env.UPLOAD_DIR; // persistent volume mount, e.g. /data/uploads
 
 const R2 = {
   endpoint: process.env.R2_ENDPOINT, // https://<accountid>.r2.cloudflarestorage.com
@@ -29,7 +33,15 @@ export async function saveImage(key: string, body: Buffer, contentType: string):
     return `${R2.publicUrl!.replace(/\/+$/, "")}/${key}`;
   }
 
-  // Local dev: write under public/uploads/<key>.
+  if (UPLOAD_DIR) {
+    // Persistent volume (production). Served back through the /media route handler.
+    const full = path.join(UPLOAD_DIR, key);
+    await mkdir(path.dirname(full), { recursive: true });
+    await writeFile(full, body);
+    return `/media/${key}`;
+  }
+
+  // Local dev: write under public/uploads/<key>, served statically at /uploads/*.
   const full = path.join(process.cwd(), "public", "uploads", key);
   await mkdir(path.dirname(full), { recursive: true });
   await writeFile(full, body);
