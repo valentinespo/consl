@@ -79,23 +79,28 @@ export async function computeEngineResult() {
 export async function recomputeAll() {
   const { result, lines } = await computeEngineResult();
 
+  // Interactive transaction with a generous timeout: the per-query round-trip is fast on
+  // Railway's internal network, but seeding from a laptop goes over the slower public proxy.
   await prisma.$transaction(
-    lines.map((line) => {
-      const lc = result.lines.get(line.key)!;
-      const mat = lc.materialCostsPerUnit;
-      return prisma.lotLine.update({
-        where: { id: line.key },
-        data: {
-          teaCostPerUnit: lc.teaCostPerUnit,
-          otherCostPerUnit: lc.otherCostPerUnit,
-          teabagCostPerUnit: mat["TEABAG"] ?? 0,
-          pouchCostPerUnit: mat["POUCH"] ?? 0,
-          cogPerUnit: lc.cogPerUnit,
-          materialCostsJson: JSON.stringify(mat),
-          shortfallsJson: JSON.stringify(lc.shortfalls),
-        },
-      });
-    }),
+    async (tx) => {
+      for (const line of lines) {
+        const lc = result.lines.get(line.key)!;
+        const mat = lc.materialCostsPerUnit;
+        await tx.lotLine.update({
+          where: { id: line.key },
+          data: {
+            teaCostPerUnit: lc.teaCostPerUnit,
+            otherCostPerUnit: lc.otherCostPerUnit,
+            teabagCostPerUnit: mat["TEABAG"] ?? 0,
+            pouchCostPerUnit: mat["POUCH"] ?? 0,
+            cogPerUnit: lc.cogPerUnit,
+            materialCostsJson: JSON.stringify(mat),
+            shortfallsJson: JSON.stringify(lc.shortfalls),
+          },
+        });
+      }
+    },
+    { timeout: 120_000, maxWait: 15_000 },
   );
 
   return result;
