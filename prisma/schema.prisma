@@ -1,0 +1,226 @@
+// Herbl Management App — data model
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+/// Production facility / co-packer (also acts as a supplier).
+/// e.g. STC = SpecialTea Company, CCP = Custom Co-Pak, CRW = Caraway
+model Facility {
+  id        String     @id @default(cuid())
+  code      String     @unique
+  name      String
+  type      String     @default("co-packer") // co-packer | warehouse
+  notes     String?
+  lots      Lot[]
+  purchases Purchase[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+/// A vendor we pay (may also be a facility, matched loosely by name).
+model Supplier {
+  id           String        @id @default(cuid())
+  name         String        @unique
+  photoUrl     String?
+  email        String?
+  phone        String?
+  address      String?
+  notes        String?
+  purchases    Purchase[]
+  transactions Transaction[]
+  transactionInvoices TransactionInvoice[]
+  purchaseInvoices    PurchaseInvoice[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+/// Finished product (SKU). e.g. LKD = Liver and Kidney Detox Tea
+model Product {
+  id           String        @id @default(cuid())
+  code         String        @unique
+  name         String
+  imageUrl     String?
+  notes        String?
+  lotLines     LotLine[]
+  purchases    Purchase[]
+  lotMaterials LotMaterial[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+/// Extensible raw-material catalog (Tea Bag, Pouch, ...).
+/// poolKey decides how FIFO stock is segmented.
+model MaterialType {
+  id             String        @id @default(cuid())
+  code           String        @unique // TEABAG | POUCH | ...
+  name           String
+  unitLabel      String        @default("unit") // "bag", "pouch"
+  defaultPerUnit Float         @default(1) // default consumed per finished unit
+  poolKey        String        @default("FACILITY") // FACILITY | FACILITY_SKU
+  skuSpecific    Boolean       @default(false) // purchases & pools are per-SKU
+  imageUrl       String?
+  purchases      Purchase[]
+  purchaseInvoices PurchaseInvoice[]
+  lotMaterials   LotMaterial[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+/// One real purchase payment (a single material), fanning out into per-facility/SKU lines.
+model PurchaseInvoice {
+  id             String       @id @default(cuid())
+  supplier       Supplier?    @relation(fields: [supplierId], references: [id])
+  supplierId     String?
+  materialType   MaterialType @relation(fields: [materialTypeId], references: [id])
+  materialTypeId String
+  date           DateTime
+  invoiceTotal   Float        @default(0)
+  isAdjustment   Boolean      @default(false) // lost-inventory invoice
+  notes          String?
+  documentUrl    String?
+  lines          Purchase[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+/// A raw-material purchase line. Feeds the FIFO pools.
+model Purchase {
+  id             String           @id @default(cuid())
+  invoice        PurchaseInvoice? @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoiceId      String?
+  materialType   MaterialType @relation(fields: [materialTypeId], references: [id])
+  materialTypeId String
+  date           DateTime
+  supplier       Supplier?    @relation(fields: [supplierId], references: [id])
+  supplierId     String?
+  facility       Facility     @relation(fields: [facilityId], references: [id])
+  facilityId     String
+  // Only set for SKU-specific materials (e.g. pouches): which SKU this stock is for.
+  product        Product?     @relation(fields: [productId], references: [id])
+  productId      String?
+  quantity       Float
+  unitCost       Float
+  total          Float
+  seq            Int          @default(0) // stable FIFO tie-break within same date
+  // "Lost inventory" / corrections: a supply adjustment, not consumed demand.
+  isAdjustment   Boolean      @default(false)
+  notes          String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([materialTypeId, facilityId, productId, date])
+}
+
+enum LotStatus {
+  IN_PRODUCTION
+  FINISHED
+}
+
+/// A production batch / PO.
+model Lot {
+  id                 String        @id @default(cuid())
+  poNumber           String? // e.g. "#7-CCP"
+  lotNr              Int // numeric LOT NR used by transactions
+  poDate             DateTime?
+  facility           Facility      @relation(fields: [facilityId], references: [id])
+  facilityId         String
+  status             LotStatus     @default(IN_PRODUCTION)
+  notes              String?
+  // Informational only (NOT part of COG): what was actually paid inbound.
+  inboundPaidTotal   Float?
+  inboundPaidPerUnit Float?
+  lines              LotLine[]
+  transactions       Transaction[]
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@index([lotNr])
+}
+
+/// One SKU produced within a lot (a lot can produce multiple SKUs).
+model LotLine {
+  id        String        @id @default(cuid())
+  lot       Lot           @relation(fields: [lotId], references: [id], onDelete: Cascade)
+  lotId     String
+  product   Product       @relation(fields: [productId], references: [id])
+  productId String
+  units     Int
+  seq       Int           @default(0) // stable ordering within a lot
+  materials LotMaterial[]
+
+  // ---- Engine-computed cost snapshot (per unit). Recomputed on data change. ----
+  teaCostPerUnit    Float  @default(0) // herb, from TEA transactions
+  otherCostPerUnit  Float  @default(0) // shipping/misc, from OTHER transactions
+  teabagCostPerUnit Float  @default(0) // FIFO
+  pouchCostPerUnit  Float  @default(0) // FIFO
+  cogPerUnit        Float  @default(0)
+  // JSON map of materialCode -> per-unit cost, for extensibility/display.
+  materialCostsJson String @default("{}")
+  // JSON array of materials with insufficient stock for this lot (not yet purchased).
+  shortfallsJson    String @default("[]")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Bill of materials: how much of a material a lot line consumes per unit.
+model LotMaterial {
+  id             String       @id @default(cuid())
+  lotLine        LotLine      @relation(fields: [lotLineId], references: [id], onDelete: Cascade)
+  lotLineId      String
+  materialType   MaterialType @relation(fields: [materialTypeId], references: [id])
+  materialTypeId String
+  perUnit        Float // qty of this material per finished unit (e.g. 15 bags, 1 pouch)
+  // For SKU-specific pools, which product's stock to draw (defaults to the line's product).
+  product        Product?     @relation(fields: [productId], references: [id])
+  productId      String?
+
+  @@unique([lotLineId, materialTypeId])
+}
+
+/// One real payment. Fans out into transaction lines that allocate it to lots/SKUs.
+model TransactionInvoice {
+  id           String        @id @default(cuid())
+  supplier     Supplier?     @relation(fields: [supplierId], references: [id])
+  supplierId   String?
+  date         DateTime?
+  invoiceTotal Float         @default(0) // entered; lines must sum to this
+  documentUrl  String? // attached invoice document
+  lines        Transaction[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+/// A single allocation line of an invoice. category drives whether it hits COG.
+model Transaction {
+  id        String              @id @default(cuid())
+  invoice   TransactionInvoice? @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoiceId String?
+  // Per-line lot (transactions survive lot deletion -> become unassigned).
+  lot              Lot?      @relation(fields: [lotId], references: [id], onDelete: SetNull)
+  lotId            String?
+  date             DateTime?
+  supplier         Supplier? @relation(fields: [supplierId], references: [id])
+  supplierId       String?
+  invoiceAmount    Float? // (legacy) — invoice total now lives on TransactionInvoice
+  applicableAmount Float     @default(0) // this line's amount
+  category         String    @default("TEA") // TEA | OTHER | NOT_APPLICABLE
+  appliesToCog     Boolean   @default(true) // derived: false when category = NOT_APPLICABLE
+  skus             String? // SKU code, or null = spread proportionally by units
+  concept          String?
+  invoiceFileUrl   String?
+  notApplicableAmount  Float? // legacy (now modeled as a NOT_APPLICABLE line)
+  notApplicableConcept String? // legacy
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([lotId])
+  @@index([invoiceId])
+}

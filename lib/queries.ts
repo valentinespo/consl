@@ -1,0 +1,389 @@
+import "server-only";
+import { prisma } from "./prisma";
+import { computeEngineResult } from "./recompute";
+
+export type InventoryPool = {
+  materialCode: string;
+  materialName: string;
+  facility: string;
+  sku: string | null;
+  productName: string | null;
+  imageUrl: string | null;
+  quantityRemaining: number;
+  valueRemaining: number;
+};
+
+export async function getInventory() {
+  const { result } = await computeEngineResult();
+  const [products, materials] = await Promise.all([
+    prisma.product.findMany(),
+    prisma.materialType.findMany(),
+  ]);
+  const prodName = new Map(products.map((p) => [p.code, p.name]));
+  const prodImage = new Map(products.map((p) => [p.code, p.imageUrl]));
+  const matName = new Map(materials.map((m) => [m.code, m.name]));
+  const matImage = new Map(materials.map((m) => [m.code, m.imageUrl]));
+
+  const pools: InventoryPool[] = result.pools
+    .map((p) => ({
+      materialCode: p.materialCode,
+      materialName: matName.get(p.materialCode) ?? p.materialCode,
+      facility: p.facility,
+      sku: p.sku,
+      productName: p.sku ? prodName.get(p.sku) ?? p.sku : null,
+      imageUrl: p.sku ? prodImage.get(p.sku) ?? null : matImage.get(p.materialCode) ?? null,
+      quantityRemaining: p.quantityRemaining,
+      valueRemaining: p.valueRemaining,
+    }))
+    .sort((a, b) => b.valueRemaining - a.valueRemaining);
+
+  const totalValue = pools.reduce((s, p) => s + p.valueRemaining, 0);
+  const teabagUnits = pools.filter((p) => p.materialCode === "TEABAG").reduce((s, p) => s + p.quantityRemaining, 0);
+  const pouchUnits = pools.filter((p) => p.materialCode === "POUCH").reduce((s, p) => s + p.quantityRemaining, 0);
+
+  return { pools, totalValue, teabagUnits, pouchUnits };
+}
+
+export async function getDashboard() {
+  const inv = await getInventory();
+  const lots = await prisma.lot.findMany({ include: { lines: true, facility: true } });
+
+  let inProductionValue = 0;
+  let finishedValue = 0;
+  const byFacility = new Map<string, number>();
+  let totalUnits = 0;
+
+  for (const lot of lots) {
+    for (const ln of lot.lines) {
+      const v = ln.cogPerUnit * ln.units;
+      totalUnits += ln.units;
+      if (lot.status === "IN_PRODUCTION") inProductionValue += v;
+      else finishedValue += v;
+      byFacility.set(lot.facility.code, (byFacility.get(lot.facility.code) ?? 0) + v);
+    }
+  }
+
+  const counts = {
+    lots: lots.length,
+    inProduction: lots.filter((l) => l.status === "IN_PRODUCTION").length,
+    purchases: await prisma.purchase.count(),
+    transactions: await prisma.transaction.count(),
+    suppliers: await prisma.supplier.count(),
+    products: await prisma.product.count(),
+  };
+
+  return {
+    rawInventoryValue: inv.totalValue,
+    inProductionValue,
+    finishedValue,
+    productionCOGValue: inProductionValue + finishedValue,
+    totalUnits,
+    byFacility: [...byFacility.entries()].map(([code, value]) => ({ code, value })).sort((a, b) => b.value - a.value),
+    counts,
+  };
+}
+
+export async function getLots() {
+  const lots = await prisma.lot.findMany({
+    include: {
+      facility: true,
+      lines: { include: { product: true } },
+      _count: { select: { transactions: true } },
+    },
+    orderBy: { lotNr: "desc" },
+  });
+  return lots.map((lot) => {
+    const units = lot.lines.reduce((s, l) => s + l.units, 0);
+    const cog = lot.lines.reduce((s, l) => s + l.cogPerUnit * l.units, 0);
+    return {
+      id: lot.id,
+      lotNr: lot.lotNr,
+      poNumber: lot.poNumber,
+      poDate: lot.poDate,
+      facility: lot.facility.code,
+      facilityName: lot.facility.name,
+      status: lot.status,
+      skus: lot.lines.map((l) => ({ code: l.product.code, imageUrl: l.product.imageUrl })),
+      lines: lot.lines.map((l) => ({
+        sku: l.product.code,
+        productName: l.product.name,
+        imageUrl: l.product.imageUrl,
+        units: l.units,
+        cogPerUnit: l.cogPerUnit,
+        teaCostPerUnit: l.teaCostPerUnit,
+        teabagCostPerUnit: l.teabagCostPerUnit,
+        pouchCostPerUnit: l.pouchCostPerUnit,
+        otherCostPerUnit: l.otherCostPerUnit,
+        short: (JSON.parse(l.shortfallsJson) as { materialCode: string }[]).map((s) => s.materialCode),
+      })),
+      units,
+      cogTotal: cog,
+      avgCogPerUnit: units ? cog / units : 0,
+      txnCount: lot._count.transactions,
+      notes: lot.notes,
+    };
+  });
+}
+
+export async function getLot(id: string) {
+  return prisma.lot.findUnique({
+    where: { id },
+    include: {
+      facility: true,
+      lines: { include: { product: true, materials: { include: { materialType: true } } }, orderBy: { seq: "asc" } },
+      transactions: { include: { supplier: true }, orderBy: [{ date: "asc" }] },
+    },
+  });
+}
+
+export async function getProducts() {
+  return prisma.product.findMany({ orderBy: { code: "asc" } });
+}
+
+/** Map of SKU code → image URL, for avatars in forms/tables. */
+export async function getProductImageMap(): Promise<Record<string, string | null>> {
+  const products = await prisma.product.findMany();
+  return Object.fromEntries(products.map((p) => [p.code, p.imageUrl]));
+}
+
+export async function getAllTransactions() {
+  const txns = await prisma.transaction.findMany({
+    include: { supplier: true, lot: true },
+    orderBy: [{ date: "desc" }],
+  });
+  return txns.map((t) => ({
+    id: t.id,
+    dateISO: t.date ? t.date.toISOString().slice(0, 10) : null,
+    lotId: t.lotId,
+    lotNr: t.lot?.lotNr ?? null,
+    supplier: t.supplier?.name ?? null,
+    supplierPhotoUrl: t.supplier?.photoUrl ?? null,
+    concept: t.concept,
+    category: t.category as string,
+    applicable: t.applicableAmount,
+    appliesToCog: t.appliesToCog,
+    skus: t.skus,
+  }));
+}
+
+/** Transactions grouped into invoices (one real payment → many allocation lines). */
+export async function getTransactionInvoices(lotId?: string) {
+  const [invoices, products, lots] = await Promise.all([
+    prisma.transactionInvoice.findMany({
+      include: { supplier: true, lines: { include: { lot: true }, orderBy: { createdAt: "asc" } } },
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+    }),
+    prisma.product.findMany(),
+    prisma.lot.findMany({ include: { lines: { include: { product: true } } } }),
+  ]);
+  const prodImage = new Map(products.map((p) => [p.code, p.imageUrl]));
+  // Which SKUs each lot currently produces — used to detect a tag pointing at a removed SKU.
+  const lotSkus = new Map(lots.map((l) => [l.id, new Set(l.lines.map((x) => x.product.code))]));
+  const mapped = invoices.map((inv) => {
+    const lines = inv.lines.map((l) => ({
+      id: l.id,
+      lotId: l.lotId,
+      lotNr: l.lot?.lotNr ?? null,
+      category: l.category,
+      amount: l.applicableAmount,
+      sku: l.skus,
+      concept: l.concept,
+      appliesToCog: l.appliesToCog,
+      // SKU tag points to a SKU no longer in its (still-existing) lot → unassigned, out of COG.
+      skuMissing: !!(l.appliesToCog && l.lotId && l.skus && !lotSkus.get(l.lotId)?.has(l.skus)),
+    }));
+    const applicable = lines.filter((l) => l.appliesToCog).reduce((s, l) => s + l.amount, 0);
+    const notApplicable = lines.filter((l) => !l.appliesToCog).reduce((s, l) => s + l.amount, 0);
+    const unassignedAmount = lines
+      .filter((l) => l.appliesToCog && (!l.lotId || l.skuMissing))
+      .reduce((s, l) => s + l.amount, 0);
+    const skuMissingSet = new Set(lines.filter((l) => l.skuMissing).map((l) => l.sku));
+    const presentSkus = [...new Set(lines.map((l) => l.sku).filter((s): s is string => !!s))].map((code) => ({
+      code,
+      imageUrl: prodImage.get(code) ?? null,
+      missing: skuMissingSet.has(code),
+    }));
+    const presentLots = [
+      ...new Map(lines.filter((l) => l.lotNr != null).map((l) => [l.lotNr, { lotId: l.lotId, lotNr: l.lotNr! }])).values(),
+    ].sort((a, b) => a.lotNr - b.lotNr);
+    const presentCats = [...new Set(lines.map((l) => l.category))];
+    return {
+      id: inv.id,
+      dateISO: inv.date ? inv.date.toISOString().slice(0, 10) : null,
+      supplier: inv.supplier?.name ?? null,
+      supplierPhotoUrl: inv.supplier?.photoUrl ?? null,
+      invoiceTotal: inv.invoiceTotal,
+      applicable,
+      notApplicable,
+      unassignedAmount,
+      presentSkus,
+      presentLots,
+      presentCats,
+      hasUnassigned: lines.some((l) => l.appliesToCog && !l.lotId),
+      hasSkuUnassigned: lines.some((l) => l.skuMissing),
+      lines,
+    };
+  });
+  return lotId ? mapped.filter((inv) => inv.lines.some((l) => l.lotId === lotId)) : mapped;
+}
+
+/** Lot options for transaction assignment dropdowns. */
+export async function getLotOptions() {
+  const lots = await prisma.lot.findMany({
+    include: { facility: true, lines: { include: { product: true } } },
+    orderBy: { lotNr: "desc" },
+  });
+  return lots.map((l) => ({
+    id: l.id,
+    lotNr: l.lotNr,
+    label: `Lot #${l.lotNr} · ${l.facility.code} · ${l.lines.map((x) => x.product.code).join(", ")}`,
+    skus: l.lines.map((x) => x.product.code),
+  }));
+}
+
+export async function getFacilities() {
+  const f = await prisma.facility.findMany({ orderBy: { code: "asc" } });
+  return f.map((x) => ({ id: x.id, code: x.code, name: x.name }));
+}
+
+export async function getSupplierNames() {
+  const s = await prisma.supplier.findMany({ orderBy: { name: "asc" } });
+  return s.map((x) => x.name);
+}
+
+export async function getMaterialTypes() {
+  const m = await prisma.materialType.findMany({ orderBy: { name: "asc" } });
+  return m.map((x) => ({
+    id: x.id,
+    code: x.code,
+    name: x.name,
+    unitLabel: x.unitLabel,
+    defaultPerUnit: x.defaultPerUnit,
+    imageUrl: x.imageUrl,
+  }));
+}
+
+export async function getPurchasesByMaterial() {
+  const [materials, purchases] = await Promise.all([
+    prisma.materialType.findMany({ orderBy: { name: "asc" } }),
+    prisma.purchase.findMany({
+      include: { supplier: true, facility: true, product: true, materialType: true },
+      orderBy: [{ date: "desc" }],
+    }),
+  ]);
+  return materials.map((m) => {
+    const rows = purchases.filter((p) => p.materialTypeId === m.id);
+    return {
+      material: { id: m.id, code: m.code, name: m.name, unitLabel: m.unitLabel, skuSpecific: m.skuSpecific, imageUrl: m.imageUrl },
+      totalQty: rows.reduce((s, p) => s + (p.isAdjustment ? 0 : p.quantity), 0),
+      totalSpend: rows.reduce((s, p) => s + p.total, 0),
+      rows: rows.map((p) => ({
+        id: p.id,
+        materialTypeId: p.materialTypeId,
+        dateISO: p.date.toISOString().slice(0, 10),
+        supplier: p.supplier?.name ?? null,
+        facility: p.facility.code,
+        facilityId: p.facilityId,
+        sku: p.product?.code ?? null,
+        productId: p.productId,
+        imageUrl: p.product?.imageUrl ?? null,
+        quantity: p.quantity,
+        unitCost: p.unitCost,
+        total: p.total,
+        isAdjustment: p.isAdjustment,
+        notes: p.notes,
+      })),
+    };
+  });
+}
+
+/** Purchases grouped: per material → invoices → lines. One material per invoice. */
+export async function getPurchaseInvoicesByMaterial() {
+  const [materials, invoices] = await Promise.all([
+    prisma.materialType.findMany({ orderBy: { name: "asc" } }),
+    prisma.purchaseInvoice.findMany({
+      include: {
+        supplier: true,
+        lines: { include: { facility: true, product: true }, orderBy: { seq: "asc" } },
+      },
+      orderBy: [{ date: "desc" }],
+    }),
+  ]);
+  return materials.map((m) => {
+    const invs = invoices.filter((i) => i.materialTypeId === m.id);
+    return {
+      material: { id: m.id, code: m.code, name: m.name, unitLabel: m.unitLabel, skuSpecific: m.skuSpecific, imageUrl: m.imageUrl },
+      totalQty: invs.reduce((s, i) => s + i.lines.reduce((a, l) => a + (l.isAdjustment ? 0 : l.quantity), 0), 0),
+      totalSpend: invs.reduce((s, i) => s + i.invoiceTotal, 0),
+      invoices: invs.map((i) => ({
+        id: i.id,
+        dateISO: i.date.toISOString().slice(0, 10),
+        supplier: i.supplier?.name ?? null,
+        supplierPhotoUrl: i.supplier?.photoUrl ?? null,
+        isAdjustment: i.isAdjustment,
+        invoiceTotal: i.invoiceTotal,
+        totalQty: i.lines.reduce((a, l) => a + (l.isAdjustment ? 0 : l.quantity), 0),
+        facilities: [...new Set(i.lines.map((l) => l.facility.code))],
+        skus: [
+          ...new Map(
+            i.lines.filter((l) => l.product).map((l) => [l.product!.code, { code: l.product!.code, imageUrl: l.product!.imageUrl }]),
+          ).values(),
+        ],
+        lines: i.lines.map((l) => ({
+          id: l.id,
+          facilityId: l.facilityId,
+          facility: l.facility.code,
+          productId: l.productId,
+          sku: l.product?.code ?? null,
+          imageUrl: l.product?.imageUrl ?? null,
+          quantity: l.quantity,
+          unitCost: l.unitCost,
+          total: l.total,
+        })),
+      })),
+    };
+  });
+}
+
+export async function getPurchaseFormOptions() {
+  const [facilities, products, suppliers, materials] = await Promise.all([
+    prisma.facility.findMany({ orderBy: { code: "asc" } }),
+    prisma.product.findMany({ orderBy: { code: "asc" } }),
+    prisma.supplier.findMany({ orderBy: { name: "asc" } }),
+    prisma.materialType.findMany({ orderBy: { name: "asc" } }),
+  ]);
+  return {
+    facilities: facilities.map((f) => ({ id: f.id, code: f.code, name: f.name })),
+    products: products.map((p) => ({ id: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl })),
+    suppliers: suppliers.map((s) => s.name),
+    materials: materials.map((m) => ({ id: m.id, code: m.code, name: m.name, skuSpecific: m.skuSpecific, unitLabel: m.unitLabel })),
+  };
+}
+
+export async function getSuppliers() {
+  const suppliers = await prisma.supplier.findMany({
+    include: { _count: { select: { purchases: true, transactions: true } } },
+    orderBy: { name: "asc" },
+  });
+  const spendBySupplier = await prisma.transaction.groupBy({
+    by: ["supplierId"],
+    _sum: { applicableAmount: true },
+  });
+  const purchaseSpend = await prisma.purchase.groupBy({
+    by: ["supplierId"],
+    _sum: { total: true },
+  });
+  const txMap = new Map(spendBySupplier.map((s) => [s.supplierId, s._sum.applicableAmount ?? 0]));
+  const pMap = new Map(purchaseSpend.map((s) => [s.supplierId, s._sum.total ?? 0]));
+  return suppliers.map((s) => ({
+    id: s.id,
+    name: s.name,
+    photoUrl: s.photoUrl,
+    email: s.email,
+    phone: s.phone,
+    notes: s.notes,
+    purchases: s._count.purchases,
+    transactions: s._count.transactions,
+    totalSpend: (txMap.get(s.id) ?? 0) + (pMap.get(s.id) ?? 0),
+  }));
+}

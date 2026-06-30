@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+/* ---------------- Herbl brand theme ---------------- */
+@theme {
+  --color-bg: #f5f5ef; /* warm off-white background */
+  --color-surface: #ffffff; /* cards */
+  --color-surface-2: #fbfbf7; /* subtle raised */
+  --color-ink: #1a2f18; /* primary text / dark green */
+  --color-ink-soft: #35452f; /* secondary heading */
+  --color-muted: #74796b; /* muted text */
+  --color-accent: #d9e5ba; /* sage accent */
+  --color-accent-soft: #ecf1dc;
+  --color-accent-strong: #b9cd8e;
+  --color-border: #e6e6dd;
+  --color-line: #efefe7;
+  --color-positive: #2f6b3a;
+  --color-negative: #b4422f;
+  --color-warn: #9a7b1f;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --radius-card: 16px;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numeric alignment for money/qty tables */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Thin, branded scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-accent-strong) transparent;
+}
