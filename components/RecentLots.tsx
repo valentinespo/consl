@@ -29,7 +29,8 @@ export function RecentLots({ lots }: { lots: RecentLot[] }) {
     });
 
   return (
-    <table className="w-full text-[13px]">
+    <div className="overflow-x-auto">
+    <table className="w-full min-w-[620px] text-[13px]">
       <thead>
         <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-muted">
           <th className="px-5 py-2 font-medium">Lot</th>
@@ -93,5 +94,6 @@ export function RecentLots({ lots }: { lots: RecentLot[] }) {
         })}
       </tbody>
     </table>
+    </div>
   );
 }

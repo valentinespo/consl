@@ -69,8 +69,8 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
         </span>
       </div>
 
-      <div className="overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface">
-        <table className="w-full text-[13px]">
+      <div className="overflow-x-auto rounded-[var(--radius-card)] border border-border bg-surface">
+        <table className="w-full min-w-[720px] text-[13px]">
           <thead>
             <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-muted">
               <th className="px-4 py-2.5 font-medium">Lot</th>

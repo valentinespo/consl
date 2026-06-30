@@ -25,15 +25,17 @@ const NAV = [
   { href: "/catalog", label: "Catalog", icon: Images },
 ];
 
-export function Sidebar({ authEnabled = false }: { authEnabled?: boolean }) {
+export function Sidebar({ authEnabled = false, onNavigate }: { authEnabled?: boolean; onNavigate?: () => void }) {
   const pathname = usePathname();
   return (
-    <aside className="flex h-screen w-[230px] shrink-0 flex-col border-r border-border bg-surface">
+    <aside className="flex h-full w-[230px] shrink-0 flex-col border-r border-border bg-surface">
       <div className="flex items-center gap-2 px-5 py-5">
         <Image src="/brand/logo.png" alt="herbl" width={86} height={26} className="h-[22px] w-auto" priority />
-        <span className="ml-auto rounded-md bg-accent-soft px-2 py-0.5 text-[10px] font-semibold tracking-wide text-ink-soft">
-          OPS
-        </span>
+        {!onNavigate && (
+          <span className="ml-auto rounded-md bg-accent-soft px-2 py-0.5 text-[10px] font-semibold tracking-wide text-ink-soft">
+            OPS
+          </span>
+        )}
       </div>
 
       <nav className="flex-1 px-3 py-2">
@@ -44,6 +46,7 @@ export function Sidebar({ authEnabled = false }: { authEnabled?: boolean }) {
             <Link
               key={item.href}
               href={item.href}
+              onClick={onNavigate}
               className={`mb-0.5 flex items-center gap-3 rounded-lg px-3 py-2 text-[13.5px] font-medium transition-colors ${
                 active ? "bg-accent-soft text-ink" : "text-muted hover:bg-surface-2 hover:text-ink-soft"
               }`}

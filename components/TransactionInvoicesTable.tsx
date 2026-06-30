@@ -146,8 +146,8 @@ export function TransactionInvoicesTable({
         </div>
       )}
 
-      <div className="overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface">
-        <table className="w-full text-[13px]">
+      <div className="overflow-x-auto rounded-[var(--radius-card)] border border-border bg-surface">
+        <table className="w-full min-w-[820px] text-[13px]">
           <thead>
             <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-muted">
               <SortTh label="Date" onClick={() => toggleSort("date")} active={sortKey === "date"} dir={sortDir} className="px-4" />
