@@ -70,10 +70,11 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
       </div>
 
       <div className="overflow-x-auto rounded-[var(--radius-card)] border border-border bg-surface">
-        <table className="w-full min-w-[720px] text-[13px]">
+        <table className="w-full min-w-[800px] text-[13px]">
           <thead>
             <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-muted">
-              <th className="px-4 py-2.5 font-medium">Lot</th>
+              <th className="px-4 py-2.5 font-medium">PO date</th>
+              <th className="px-3 py-2.5 font-medium">Lot</th>
               <th className="px-3 py-2.5 font-medium">SKUs</th>
               <th className="px-3 py-2.5 font-medium">Facility</th>
               <th className="px-3 py-2.5 text-right font-medium">Units</th>
@@ -90,14 +91,15 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
               return (
               <Fragment key={l.id}>
               <tr onClick={() => toggle(l.id)} className="cursor-pointer border-b border-line last:border-0 hover:bg-surface-2">
-                <td className="px-4 py-3">
+                <td className="px-4 py-3 whitespace-nowrap text-ink-soft">
                   <div className="flex items-center gap-2">
                     <ChevronRight size={15} className={`text-muted transition-transform ${open ? "rotate-90" : ""}`} />
-                    <div>
-                      <div className="font-medium text-ink">#{l.lotNr}</div>
-                      <div className="text-[11px] text-muted">{l.poNumber ? `PO ${l.poNumber}` : date(l.poDate)}</div>
-                    </div>
+                    {date(l.poDate)}
                   </div>
+                </td>
+                <td className="px-3 py-3">
+                  <div className="font-medium text-ink">#{l.lotNr}</div>
+                  {l.poNumber && <div className="text-[11px] text-muted">PO {l.poNumber}</div>}
                 </td>
                 <td className="px-3 py-3">
                   <div className="flex -space-x-1.5">
@@ -127,7 +129,7 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
               </tr>
               {open && (
                 <tr className="border-b border-line bg-surface-2/60">
-                  <td colSpan={9} className="px-4 py-3">
+                  <td colSpan={10} className="px-4 py-3">
                     <LotLineCards lines={l.lines} />
                   </td>
                 </tr>
@@ -137,7 +139,7 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-10 text-center text-[13px] text-muted">
+                <td colSpan={10} className="px-4 py-10 text-center text-[13px] text-muted">
                   No lots match your filters.
                 </td>
               </tr>
