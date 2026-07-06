@@ -58,6 +58,8 @@ const PILL: Record<string, string> = {
   TEA: "bg-accent-soft text-ink-soft border-accent-strong",
   OTHER: "bg-[#f0eee6] text-muted border-border",
   NOT_APPLICABLE: "bg-[#fbeae6] text-negative border-[#f0d3cb]",
+  DRAFT: "bg-[#f0eee6] text-muted border-border",
+  SENT: "bg-accent-soft text-positive border-accent-strong",
 };
 
 export function Pill({ kind, children }: { kind?: keyof typeof PILL | string; children: React.ReactNode }) {

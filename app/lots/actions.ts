@@ -19,6 +19,14 @@ export async function deleteLot(formData: FormData) {
   redirect("/lots");
 }
 
+/** Smallest positive lot number not in use — deleted numbers get reused (e.g. a scrapped PO #21). */
+async function nextFreeLotNr(): Promise<number> {
+  const used = new Set((await prisma.lot.findMany({ select: { lotNr: true } })).map((l) => l.lotNr));
+  let n = 1;
+  while (used.has(n)) n++;
+  return n;
+}
+
 /** Create a new production lot with its SKU lines and default bill of materials. */
 export async function createLot(input: {
   poNumber: string | null;
@@ -30,8 +38,7 @@ export async function createLot(input: {
   const lines = input.lines.filter((l) => l.productId && l.units > 0);
   if (!input.facilityId || lines.length === 0) return { ok: false as const, error: "Pick a facility and at least one SKU with units" };
 
-  const maxLot = await prisma.lot.aggregate({ _max: { lotNr: true } });
-  const lotNr = (maxLot._max.lotNr ?? 0) + 1;
+  const lotNr = await nextFreeLotNr();
 
   const [teabag, pouch] = await Promise.all([
     prisma.materialType.findUnique({ where: { code: "TEABAG" } }),

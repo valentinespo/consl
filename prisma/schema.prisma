@@ -13,15 +13,19 @@ datasource db {
 /// Production facility / co-packer (also acts as a supplier).
 /// e.g. STC = SpecialTea Company, CCP = Custom Co-Pak, CRW = Caraway
 model Facility {
-  id        String     @id @default(cuid())
-  code      String     @unique
-  name      String
-  type      String     @default("co-packer") // co-packer | warehouse
-  notes     String?
-  lots      Lot[]
-  purchases Purchase[]
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id             String          @id @default(cuid())
+  code           String          @unique
+  name           String
+  type           String          @default("co-packer") // co-packer | warehouse
+  legalName      String? // vendor name printed on POs (falls back to name)
+  address        String? // multiline vendor address for POs
+  notes          String?
+  lots            Lot[]
+  purchases       Purchase[]
+  purchaseOrders  PurchaseOrder[]
+  supplierProfile Supplier?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 }
 
 /// A vendor we pay (may also be a facility, matched loosely by name).
@@ -33,6 +37,8 @@ model Supplier {
   phone        String?
   address      String?
   notes        String?
+  facility     Facility?     @relation(fields: [facilityId], references: [id], onDelete: SetNull)
+  facilityId   String?       @unique // set when this supplier IS one of our facilities
   purchases    Purchase[]
   transactions Transaction[]
   transactionInvoices TransactionInvoice[]
@@ -43,16 +49,17 @@ model Supplier {
 
 /// Finished product (SKU). e.g. LKD = Liver and Kidney Detox Tea
 model Product {
-  id           String        @id @default(cuid())
-  code         String        @unique
-  name         String
-  imageUrl     String?
-  notes        String?
-  lotLines     LotLine[]
-  purchases    Purchase[]
-  lotMaterials LotMaterial[]
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id                 String              @id @default(cuid())
+  code               String              @unique
+  name               String
+  imageUrl           String?
+  notes              String?
+  lotLines           LotLine[]
+  purchases          Purchase[]
+  lotMaterials       LotMaterial[]
+  purchaseOrderLines PurchaseOrderLine[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 }
 
 /// Extensible raw-material catalog (Tea Bag, Pouch, ...).
@@ -138,10 +145,47 @@ model Lot {
   inboundPaidPerUnit Float?
   lines              LotLine[]
   transactions       Transaction[]
+  purchaseOrder      PurchaseOrder?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
   @@index([lotNr])
+}
+
+/// A purchase order sent to a co-packer. Creating one also creates its production lot.
+model PurchaseOrder {
+  id         String              @id @default(cuid())
+  number     String              @unique // e.g. "#21-CRW"
+  date       DateTime
+  status     String              @default("DRAFT") // DRAFT | SENT
+  facility   Facility            @relation(fields: [facilityId], references: [id])
+  facilityId String
+  lot        Lot?                @relation(fields: [lotId], references: [id], onDelete: SetNull)
+  lotId      String?             @unique
+  pdfUrl     String?
+  total      Float? // null when any line is TBD
+  notes      String?
+  imported   Boolean             @default(false) // historical PO from the Drive archive (lot predates it)
+  lines      PurchaseOrderLine[]
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+}
+
+/// One line on a PO: a SKU being ordered, or a fee (COAs, testing, ...).
+model PurchaseOrderLine {
+  id          String        @id @default(cuid())
+  po          PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  poId        String
+  seq         Int           @default(0)
+  kind        String        @default("SKU") // SKU | FEE
+  product     Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productId   String?
+  description String
+  unitCost    Float? // null = TBD (price not agreed yet)
+  quantity    Float         @default(0)
+  lotUnits    Int? // SKU lines: finished units for the auto-created lot (qty may be in sachets)
+
+  @@index([poId])
 }
 
 /// One SKU produced within a lot (a lot can produce multiple SKUs).

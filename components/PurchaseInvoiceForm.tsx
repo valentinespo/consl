@@ -192,7 +192,7 @@ export function PurchaseInvoiceForm({
           const unit = q ? (Number(l.total) || 0) / q : 0;
           const prod = options.products.find((p) => p.id === l.productId);
           return (
-            <div key={l.key} className="rounded-lg border border-border bg-surface-2 p-2.5">
+            <div key={l.key} className="rounded-lg border border-border bg-surface p-2.5">
               <div className="flex flex-wrap items-end gap-2">
                 <MiniField label="Facility" className={material.skuSpecific ? "w-[88px]" : "min-w-[120px] flex-1"}>
                   <select value={l.facilityId} onChange={(e) => patch(l.key, { facilityId: e.target.value })} className={inputCls}>

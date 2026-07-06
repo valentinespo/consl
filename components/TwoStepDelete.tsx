@@ -12,12 +12,14 @@ export function TwoStepDelete({
   pending,
   onConfirm,
   noun = "item",
+  finalWarning,
 }: {
   step: number;
   setStep: (n: number) => void;
   pending: boolean;
   onConfirm: () => void;
   noun?: string;
+  finalWarning?: string; // extra consequence shown on the last confirm (e.g. "also deletes Lot #21")
 }) {
   if (step === 0) {
     return (
@@ -45,8 +47,10 @@ export function TwoStepDelete({
     );
   }
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-[12px] text-negative">Sure? This can&apos;t be undone.</span>
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-[12px] text-negative">
+        {finalWarning ? <><span className="font-semibold">{finalWarning}</span> This can&apos;t be undone.</> : <>Sure? This can&apos;t be undone.</>}
+      </span>
       <button type="button" onClick={onConfirm} disabled={pending} className="rounded-lg bg-negative px-2.5 py-1.5 text-[12.5px] font-medium text-white hover:opacity-90 disabled:opacity-50">
         {pending ? "Deleting…" : "Delete permanently"}
       </button>

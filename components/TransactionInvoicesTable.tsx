@@ -164,7 +164,7 @@ export function TransactionInvoicesTable({
               const open = expanded.has(inv.id);
               return (
                 <Fragment key={inv.id}>
-                  <tr onClick={() => toggle(inv.id)} className="cursor-pointer border-b border-line last:border-0 hover:bg-surface-2">
+                  <tr onClick={() => toggle(inv.id)} className={`cursor-pointer border-b border-line last:border-0 ${open ? "bg-surface-2" : "hover:bg-surface-2"}`}>
                     <td className="px-4 py-3 whitespace-nowrap text-muted align-middle">
                       <div className="flex items-center gap-1.5">
                         <ChevronRight size={14} className={`text-muted transition-transform ${open ? "rotate-90" : ""}`} />
@@ -232,7 +232,7 @@ export function TransactionInvoicesTable({
                     </td>
                   </tr>
                   {open && (
-                    <tr className="border-b border-line bg-surface">
+                    <tr className="border-b border-line bg-surface-2">
                       <td colSpan={colSpan} className="px-4 py-4">
                         <TransactionInvoiceForm
                           invoice={inv}

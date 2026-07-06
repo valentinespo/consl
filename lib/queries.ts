@@ -360,9 +360,91 @@ export async function getPurchaseFormOptions() {
   };
 }
 
+/** All purchase orders, newest first, for the archive tab. */
+export async function getPurchaseOrders() {
+  const pos = await prisma.purchaseOrder.findMany({
+    include: {
+      facility: true,
+      lot: { select: { id: true, lotNr: true } },
+      lines: { include: { product: true }, orderBy: { seq: "asc" } },
+    },
+    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+  });
+  return pos.map((po) => ({
+    id: po.id,
+    number: po.number,
+    dateISO: po.date.toISOString().slice(0, 10),
+    status: po.status,
+    facilityId: po.facilityId,
+    vendor: po.facility.legalName ?? po.facility.name,
+    facilityCode: po.facility.code,
+    lotId: po.lot?.id ?? null,
+    lotNr: po.lot?.lotNr ?? null,
+    total: po.total,
+    pdfUrl: po.pdfUrl,
+    imported: po.imported, // historical archive PO — read-only, its lot predates it
+    lines: po.lines.map((l) => ({
+      id: l.id,
+      kind: l.kind,
+      productId: l.productId,
+      sku: l.product?.code ?? null,
+      skuImageUrl: l.product?.imageUrl ?? null,
+      description: l.description,
+      unitCost: l.unitCost,
+      quantity: l.quantity,
+      lotUnits: l.lotUnits,
+    })),
+  }));
+}
+
+/** Options for the PO creation form. */
+export async function getPoFormOptions() {
+  const [facilities, products, lotNrs, pricedLines] = await Promise.all([
+    prisma.facility.findMany({ orderBy: { code: "asc" } }),
+    prisma.product.findMany({ orderBy: { code: "asc" } }),
+    prisma.lot.findMany({ select: { lotNr: true } }),
+    prisma.purchaseOrderLine.findMany({
+      where: { kind: "SKU", productId: { not: null } },
+      include: { po: { select: { number: true, date: true, createdAt: true, facilityId: true } } },
+      orderBy: [{ po: { date: "desc" } }, { po: { createdAt: "desc" } }, { seq: "asc" }],
+    }),
+  ]);
+  // Lowest free number — a deleted PO/lot's number gets reused.
+  const used = new Set(lotNrs.map((l) => l.lotNr));
+  let nextLotNr = 1;
+  while (used.has(nextLotNr)) nextLotNr++;
+  // Most recent PO price per product, and most recent printed description per vendor+product.
+  const lastPrice = new Map<string, { cost: number; poNumber: string }>();
+  const descSeeds: Record<string, string> = {};
+  for (const l of pricedLines) {
+    if (l.unitCost != null && !lastPrice.has(l.productId!)) lastPrice.set(l.productId!, { cost: l.unitCost, poNumber: l.po.number });
+    const dk = `${l.po.facilityId}|${l.productId}`;
+    if (l.description.trim() && !(dk in descSeeds)) descSeeds[dk] = l.description;
+  }
+  return {
+    facilities: facilities.map((f) => ({
+      id: f.id,
+      code: f.code,
+      name: f.name,
+      legalName: f.legalName ?? f.name,
+      address: f.address ?? "",
+    })),
+    products: products.map((p) => ({
+      id: p.id,
+      code: p.code,
+      name: p.name,
+      imageUrl: p.imageUrl,
+      lastCost: lastPrice.get(p.id)?.cost ?? null,
+      lastPoNumber: lastPrice.get(p.id)?.poNumber ?? null,
+    })),
+    descSeeds, // "facilityId|productId" -> description as printed on the most recent PO
+    nextLotNr,
+  };
+}
+
 export async function getSuppliers() {
   const suppliers = await prisma.supplier.findMany({
-    include: { _count: { select: { purchases: true, transactions: true } } },
+    include: { facility: true, _count: { select: { purchases: true, transactions: true } } },
     orderBy: { name: "asc" },
   });
   const spendBySupplier = await prisma.transaction.groupBy({
@@ -381,7 +463,10 @@ export async function getSuppliers() {
     photoUrl: s.photoUrl,
     email: s.email,
     phone: s.phone,
+    address: s.address,
     notes: s.notes,
+    facilityId: s.facilityId,
+    facilityCode: s.facility?.code ?? null,
     purchases: s._count.purchases,
     transactions: s._count.transactions,
     totalSpend: (txMap.get(s.id) ?? 0) + (pMap.get(s.id) ?? 0),

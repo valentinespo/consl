@@ -90,7 +90,7 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
               const open = expanded.has(l.id);
               return (
               <Fragment key={l.id}>
-              <tr onClick={() => toggle(l.id)} className="cursor-pointer border-b border-line last:border-0 hover:bg-surface-2">
+              <tr onClick={() => toggle(l.id)} className={`cursor-pointer border-b border-line last:border-0 ${open ? "bg-surface-2" : "hover:bg-surface-2"}`}>
                 <td className="px-4 py-3 whitespace-nowrap text-ink-soft">
                   <div className="flex items-center gap-2">
                     <ChevronRight size={15} className={`text-muted transition-transform ${open ? "rotate-90" : ""}`} />
@@ -128,7 +128,7 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
                 </td>
               </tr>
               {open && (
-                <tr className="border-b border-line bg-surface-2/60">
+                <tr className="border-b border-line bg-surface-2">
                   <td colSpan={10} className="px-4 py-3">
                     <LotLineCards lines={l.lines} />
                   </td>

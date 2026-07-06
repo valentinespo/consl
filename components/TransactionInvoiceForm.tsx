@@ -214,7 +214,7 @@ export function TransactionInvoiceForm({
           return (
             <div
               key={l.key}
-              className={`rounded-lg border p-2.5 ${na || orphaned ? "border-[#f0d3cb] bg-[#fdf2ef]" : "border-border bg-surface-2"}`}
+              className={`rounded-lg border p-2.5 ${na || orphaned ? "border-[#f0d3cb] bg-[#fdf2ef]" : "border-border bg-surface"}`}
             >
               <div className="flex flex-wrap items-end gap-2">
                 <MiniField label="Category" className="w-[130px]">

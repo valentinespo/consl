@@ -81,7 +81,7 @@ export function MaterialPurchaseInvoices({ group, options }: { group: Group; opt
                 const isOpen = expanded.has(inv.id);
                 return (
                   <Fragment key={inv.id}>
-                    <tr onClick={() => toggle(inv.id)} className={`cursor-pointer border-b border-line last:border-0 hover:bg-surface-2 ${inv.isAdjustment ? "text-negative" : ""}`}>
+                    <tr onClick={() => toggle(inv.id)} className={`cursor-pointer border-b border-line last:border-0 ${isOpen ? "bg-surface-2" : "hover:bg-surface-2"} ${inv.isAdjustment ? "text-negative" : ""}`}>
                       <td className="px-4 py-3 whitespace-nowrap text-muted align-middle">
                         <div className="flex items-center gap-1.5">
                           <ChevronRight size={14} className={`text-muted transition-transform ${isOpen ? "rotate-90" : ""}`} />
@@ -108,7 +108,7 @@ export function MaterialPurchaseInvoices({ group, options }: { group: Group; opt
                       <td className="px-4 py-3 text-right font-semibold tabular align-middle">{money(inv.invoiceTotal)}</td>
                     </tr>
                     {isOpen && (
-                      <tr className="border-b border-line bg-surface">
+                      <tr className="border-b border-line bg-surface-2">
                         <td colSpan={colSpan} className="px-4 py-4">
                           <PurchaseInvoiceForm material={material} options={options} invoice={inv} onDone={() => toggle(inv.id)} cancelLabel="Collapse" />
                         </td>

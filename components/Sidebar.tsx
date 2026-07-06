@@ -9,6 +9,7 @@ import {
   FlaskConical,
   ArrowLeftRight,
   ShoppingCart,
+  FileText,
   Building2,
   Images,
   LogOut,
@@ -21,6 +22,7 @@ const NAV = [
   { href: "/lots", label: "Production Lots", icon: FlaskConical },
   { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
   { href: "/purchases", label: "Purchases", icon: ShoppingCart },
+  { href: "/purchase-orders", label: "Purchase Orders", icon: FileText },
   { href: "/suppliers", label: "Suppliers", icon: Building2 },
   { href: "/catalog", label: "Catalog", icon: Images },
 ];

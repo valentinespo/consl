@@ -11,6 +11,14 @@ import { recomputeAll } from "../lib/recompute";
 
 const XLSX = path.resolve(process.cwd(), "../Lots, Inventory & Purchases (App).xlsx");
 
+// The app now runs against the hosted Postgres — this wipe-and-reload importer must never
+// hit it by accident. Set FORCE_IMPORT=1 to override deliberately.
+if ((process.env.DATABASE_URL ?? "").includes("rlwy.net") && process.env.FORCE_IMPORT !== "1") {
+  console.error("✋ DATABASE_URL points at the hosted Railway Postgres. Refusing to wipe it.");
+  console.error("   If you REALLY mean to re-import production, run with FORCE_IMPORT=1.");
+  process.exit(1);
+}
+
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 

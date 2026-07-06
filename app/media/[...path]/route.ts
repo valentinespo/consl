@@ -13,6 +13,7 @@ const TYPES: Record<string, string> = {
   gif: "image/gif",
   avif: "image/avif",
   svg: "image/svg+xml",
+  pdf: "application/pdf",
 };
 
 export async function GET(_req: Request, { params }: { params: Promise<{ path: string[] }> }) {
