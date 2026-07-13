@@ -91,7 +91,8 @@ model PurchaseInvoice {
   invoiceTotal   Float        @default(0)
   isAdjustment   Boolean      @default(false) // lost-inventory invoice
   notes          String?
-  documentUrl    String?
+  documentUrl    String? // legacy single-doc field (superseded by documents[])
+  documents      Document[]
   lines          Purchase[]
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
@@ -146,25 +147,35 @@ model Lot {
   lines              LotLine[]
   transactions       Transaction[]
   purchaseOrder      PurchaseOrder?
-  documents          LotDocument[]
+  documents          Document[]
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
   @@index([lotNr])
 }
 
-/// An uploaded document attached to a lot (COA, BOL, or any labeled file).
-model LotDocument {
-  id        String   @id @default(cuid())
-  lot       Lot      @relation(fields: [lotId], references: [id], onDelete: Cascade)
-  lotId     String
-  label     String // free text; conventionally "COA" or "BOL"
-  fileUrl   String
-  fileName  String?
-  seq       Int      @default(0)
-  createdAt DateTime @default(now())
+/// An uploaded document (COA, BOL, invoice, …). Attaches to exactly one parent:
+/// a lot, a transaction invoice, or a purchase invoice. Parents can hold many;
+/// the same physical file may be uploaded to several parents (an invoice that
+/// spans multiple transactions). Table kept as "LotDocument" for continuity.
+model Document {
+  id                   String              @id @default(cuid())
+  label                String? // free text; e.g. "COA", "BOL", "Invoice"
+  fileUrl              String
+  fileName             String?
+  seq                  Int                 @default(0)
+  lot                  Lot?                @relation(fields: [lotId], references: [id], onDelete: Cascade)
+  lotId                String?
+  transactionInvoice   TransactionInvoice? @relation(fields: [transactionInvoiceId], references: [id], onDelete: Cascade)
+  transactionInvoiceId String?
+  purchaseInvoice      PurchaseInvoice?    @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+  purchaseInvoiceId    String?
+  createdAt            DateTime            @default(now())
 
+  @@map("LotDocument")
   @@index([lotId])
+  @@index([transactionInvoiceId])
+  @@index([purchaseInvoiceId])
 }
 
 /// A purchase order sent to a co-packer. Creating one also creates its production lot.
@@ -251,7 +262,8 @@ model TransactionInvoice {
   supplierId   String?
   date         DateTime?
   invoiceTotal Float         @default(0) // entered; lines must sum to this
-  documentUrl  String? // attached invoice document
+  documentUrl  String? // legacy single-doc field (superseded by documents[])
+  documents    Document[]
   lines        Transaction[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
