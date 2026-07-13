@@ -6,7 +6,8 @@ import { Plus, ArrowUpDown, ChevronRight } from "lucide-react";
 import { Pill, SupplierAvatar, SkuAvatar } from "@/components/ui";
 import { money, date } from "@/lib/format";
 import { TransactionInvoiceForm, type InvoiceRow, type LotOption } from "@/components/TransactionInvoiceForm";
-import { InvoiceAttach } from "@/components/InvoiceAttach";
+import { DocumentList } from "@/components/DocumentList";
+import { Paperclip } from "lucide-react";
 
 type SortKey = "date" | "applicable";
 
@@ -230,9 +231,9 @@ export function TransactionInvoicesTable({
                       {inv.notApplicable > 0 && (
                         <div className="text-[11px] tabular text-negative/70">N/A {money(inv.notApplicable, 2)}</div>
                       )}
-                      {inv.documentUrl && (
-                        <div className="mt-0.5 flex justify-end">
-                          <InvoiceAttach kind="transaction" id={inv.id} url={inv.documentUrl} readOnly />
+                      {inv.documents.length > 0 && (
+                        <div className="mt-0.5 flex items-center justify-end gap-1 text-[11px] text-muted">
+                          <Paperclip size={11} /> {inv.documents.length}
                         </div>
                       )}
                     </td>
@@ -240,9 +241,9 @@ export function TransactionInvoicesTable({
                   {open && (
                     <tr className="border-b border-line bg-surface-2">
                       <td colSpan={colSpan} className="px-4 py-4">
-                        <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-2">
-                          <span className="text-[12px] font-medium uppercase tracking-wide text-muted">Invoice document</span>
-                          <InvoiceAttach kind="transaction" id={inv.id} url={inv.documentUrl} />
+                        <div className="mb-3 rounded-lg border border-border bg-surface px-3 py-2.5">
+                          <div className="mb-2 text-[12px] font-medium uppercase tracking-wide text-muted">Invoice documents</div>
+                          <DocumentList parent="transaction" parentId={inv.id} documents={inv.documents} emptyText="No invoice attached yet." />
                         </div>
                         <TransactionInvoiceForm
                           invoice={inv}

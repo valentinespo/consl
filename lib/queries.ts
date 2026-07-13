@@ -171,7 +171,11 @@ export async function getAllTransactions() {
 export async function getTransactionInvoices(lotId?: string) {
   const [invoices, products, lots] = await Promise.all([
     prisma.transactionInvoice.findMany({
-      include: { supplier: true, lines: { include: { lot: true }, orderBy: { createdAt: "asc" } } },
+      include: {
+        supplier: true,
+        lines: { include: { lot: true }, orderBy: { createdAt: "asc" } },
+        documents: { orderBy: [{ seq: "asc" }, { createdAt: "asc" }] },
+      },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
     }),
     prisma.product.findMany(),
@@ -214,7 +218,7 @@ export async function getTransactionInvoices(lotId?: string) {
       supplier: inv.supplier?.name ?? null,
       supplierPhotoUrl: inv.supplier?.photoUrl ?? null,
       invoiceTotal: inv.invoiceTotal,
-      documentUrl: inv.documentUrl,
+      documents: inv.documents.map((d) => ({ id: d.id, label: d.label, fileUrl: d.fileUrl, fileName: d.fileName })),
       applicable,
       notApplicable,
       unassignedAmount,
@@ -307,6 +311,7 @@ export async function getPurchaseInvoicesByMaterial() {
       include: {
         supplier: true,
         lines: { include: { facility: true, product: true }, orderBy: { seq: "asc" } },
+        documents: { orderBy: [{ seq: "asc" }, { createdAt: "asc" }] },
       },
       orderBy: [{ date: "desc" }],
     }),
@@ -324,7 +329,7 @@ export async function getPurchaseInvoicesByMaterial() {
         supplierPhotoUrl: i.supplier?.photoUrl ?? null,
         isAdjustment: i.isAdjustment,
         invoiceTotal: i.invoiceTotal,
-        documentUrl: i.documentUrl,
+        documents: i.documents.map((d) => ({ id: d.id, label: d.label, fileUrl: d.fileUrl, fileName: d.fileName })),
         totalQty: i.lines.reduce((a, l) => a + (l.isAdjustment ? 0 : l.quantity), 0),
         facilities: [...new Set(i.lines.map((l) => l.facility.code))],
         skus: [

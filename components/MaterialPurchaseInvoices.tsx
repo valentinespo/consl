@@ -5,7 +5,8 @@ import { Plus, ChevronRight } from "lucide-react";
 import { money, qty, date } from "@/lib/format";
 import { Card, FacilityTag, SkuAvatar, SupplierAvatar } from "@/components/ui";
 import { PurchaseInvoiceForm, type PurchaseInvoiceRow, type PurchaseOptions, type PurchaseMaterial } from "@/components/PurchaseInvoiceForm";
-import { InvoiceAttach } from "@/components/InvoiceAttach";
+import { DocumentList } from "@/components/DocumentList";
+import { Paperclip } from "lucide-react";
 
 type Group = {
   material: PurchaseMaterial & { code: string; imageUrl: string | null };
@@ -108,9 +109,9 @@ export function MaterialPurchaseInvoices({ group, options }: { group: Group; opt
                       <td className="px-3 py-3 text-right tabular align-middle">{qty(inv.totalQty)}</td>
                       <td className="px-4 py-3 text-right font-semibold tabular align-middle">
                         {money(inv.invoiceTotal)}
-                        {inv.documentUrl && (
-                          <div className="mt-0.5 flex justify-end">
-                            <InvoiceAttach kind="purchase" id={inv.id} url={inv.documentUrl} readOnly />
+                        {inv.documents.length > 0 && (
+                          <div className="mt-0.5 flex items-center justify-end gap-1 text-[11px] font-normal text-muted">
+                            <Paperclip size={11} /> {inv.documents.length}
                           </div>
                         )}
                       </td>
@@ -118,9 +119,9 @@ export function MaterialPurchaseInvoices({ group, options }: { group: Group; opt
                     {isOpen && (
                       <tr className="border-b border-line bg-surface-2">
                         <td colSpan={colSpan} className="px-4 py-4">
-                          <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-2">
-                            <span className="text-[12px] font-medium uppercase tracking-wide text-muted">Invoice document</span>
-                            <InvoiceAttach kind="purchase" id={inv.id} url={inv.documentUrl} />
+                          <div className="mb-3 rounded-lg border border-border bg-surface px-3 py-2.5">
+                            <div className="mb-2 text-[12px] font-medium uppercase tracking-wide text-muted">Invoice documents</div>
+                            <DocumentList parent="purchase" parentId={inv.id} documents={inv.documents} emptyText="No invoice attached yet." />
                           </div>
                           <PurchaseInvoiceForm material={material} options={options} invoice={inv} onDone={() => toggle(inv.id)} cancelLabel="Collapse" />
                         </td>

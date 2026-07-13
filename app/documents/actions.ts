@@ -4,8 +4,16 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { saveImage } from "@/lib/storage";
 
-const MAX_BYTES = 25 * 1024 * 1024; // 25 MB — PDFs (BOLs/COAs) can be large
+const MAX_BYTES = 25 * 1024 * 1024; // 25 MB — PDFs (BOLs/COAs/invoices) can be large
 const OK_EXT = new Set(["pdf", "png", "jpg", "jpeg", "webp", "gif", "avif"]);
+
+export type DocParent = "lot" | "transaction" | "purchase";
+const FIELD: Record<DocParent, "lotId" | "transactionInvoiceId" | "purchaseInvoiceId"> = {
+  lot: "lotId",
+  transaction: "transactionInvoiceId",
+  purchase: "purchaseInvoiceId",
+};
+const PREFIX: Record<DocParent, string> = { lot: "lot-docs", transaction: "txn-inv", purchase: "pur-inv" };
 
 type Fail = { ok: false; error: string };
 
@@ -17,53 +25,29 @@ function validate(file: File | null): Fail | { ok: true; ext: string } {
   return { ok: true, ext };
 }
 
-async function store(prefix: string, id: string, file: File, ext: string): Promise<string> {
-  const key = `${prefix}/${id}-${Date.now()}.${ext}`;
-  const type = file.type || (ext === "pdf" ? "application/pdf" : `image/${ext}`);
-  return saveImage(key, Buffer.from(await file.arrayBuffer()), type);
-}
-
-/** Add a labeled document (COA/BOL/…) to a lot. Lots can hold many. */
-export async function uploadLotDocument(formData: FormData) {
-  const lotId = String(formData.get("lotId"));
-  const label = String(formData.get("label") ?? "").trim() || "Document";
+/** Upload a document to a lot, transaction invoice, or purchase invoice. Parents can hold many. */
+export async function uploadDocument(formData: FormData) {
+  const parent = String(formData.get("parent")) as DocParent;
+  const parentId = String(formData.get("parentId"));
+  const label = String(formData.get("label") ?? "").trim() || null;
   const file = formData.get("file") as File | null;
+  if (!FIELD[parent]) return { ok: false as const, error: "Bad parent" };
   const v = validate(file);
   if (!v.ok) return v;
-  const url = await store("lot-docs", lotId, file!, v.ext);
-  const max = await prisma.lotDocument.aggregate({ where: { lotId }, _max: { seq: true } });
-  await prisma.lotDocument.create({
-    data: { lotId, label, fileUrl: url, fileName: file!.name, seq: (max._max.seq ?? -1) + 1 },
+  const key = `${PREFIX[parent]}/${parentId}-${Date.now()}.${v.ext}`;
+  const type = file!.type || (v.ext === "pdf" ? "application/pdf" : `image/${v.ext}`);
+  const url = await saveImage(key, Buffer.from(await file!.arrayBuffer()), type);
+  const field = FIELD[parent];
+  const max = await prisma.document.aggregate({ where: { [field]: parentId }, _max: { seq: true } });
+  await prisma.document.create({
+    data: { [field]: parentId, label, fileUrl: url, fileName: file!.name, seq: (max._max.seq ?? -1) + 1 },
   });
   revalidatePath("/", "layout");
   return { ok: true as const };
 }
 
-export async function deleteLotDocument(id: string) {
-  await prisma.lotDocument.delete({ where: { id } });
-  revalidatePath("/", "layout");
-  return { ok: true as const };
-}
-
-/** Attach / replace the single invoice document on a transaction or purchase invoice. */
-export async function setInvoiceDocument(formData: FormData) {
-  const kind = String(formData.get("kind")); // "transaction" | "purchase"
-  const id = String(formData.get("id"));
-  const file = formData.get("file") as File | null;
-  const v = validate(file);
-  if (!v.ok) return v;
-  const url = await store(kind === "purchase" ? "pur-inv" : "txn-inv", id, file!, v.ext);
-  if (kind === "purchase") await prisma.purchaseInvoice.update({ where: { id }, data: { documentUrl: url } });
-  else await prisma.transactionInvoice.update({ where: { id }, data: { documentUrl: url } });
-  revalidatePath("/", "layout");
-  return { ok: true as const };
-}
-
-export async function removeInvoiceDocument(formData: FormData) {
-  const kind = String(formData.get("kind"));
-  const id = String(formData.get("id"));
-  if (kind === "purchase") await prisma.purchaseInvoice.update({ where: { id }, data: { documentUrl: null } });
-  else await prisma.transactionInvoice.update({ where: { id }, data: { documentUrl: null } });
+export async function deleteDocument(id: string) {
+  await prisma.document.delete({ where: { id } });
   revalidatePath("/", "layout");
   return { ok: true as const };
 }
