@@ -5,6 +5,7 @@ import { Plus, ChevronRight } from "lucide-react";
 import { money, qty, date } from "@/lib/format";
 import { Card, FacilityTag, SkuAvatar, SupplierAvatar } from "@/components/ui";
 import { PurchaseInvoiceForm, type PurchaseInvoiceRow, type PurchaseOptions, type PurchaseMaterial } from "@/components/PurchaseInvoiceForm";
+import { InvoiceAttach } from "@/components/InvoiceAttach";
 
 type Group = {
   material: PurchaseMaterial & { code: string; imageUrl: string | null };
@@ -105,11 +106,22 @@ export function MaterialPurchaseInvoices({ group, options }: { group: Group; opt
                         </div>
                       </td>
                       <td className="px-3 py-3 text-right tabular align-middle">{qty(inv.totalQty)}</td>
-                      <td className="px-4 py-3 text-right font-semibold tabular align-middle">{money(inv.invoiceTotal)}</td>
+                      <td className="px-4 py-3 text-right font-semibold tabular align-middle">
+                        {money(inv.invoiceTotal)}
+                        {inv.documentUrl && (
+                          <div className="mt-0.5 flex justify-end">
+                            <InvoiceAttach kind="purchase" id={inv.id} url={inv.documentUrl} readOnly />
+                          </div>
+                        )}
+                      </td>
                     </tr>
                     {isOpen && (
                       <tr className="border-b border-line bg-surface-2">
                         <td colSpan={colSpan} className="px-4 py-4">
+                          <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-2">
+                            <span className="text-[12px] font-medium uppercase tracking-wide text-muted">Invoice document</span>
+                            <InvoiceAttach kind="purchase" id={inv.id} url={inv.documentUrl} />
+                          </div>
                           <PurchaseInvoiceForm material={material} options={options} invoice={inv} onDone={() => toggle(inv.id)} cancelLabel="Collapse" />
                         </td>
                       </tr>

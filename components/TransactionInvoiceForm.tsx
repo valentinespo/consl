@@ -25,6 +25,7 @@ export type InvoiceRow = {
   supplier: string | null;
   supplierPhotoUrl?: string | null;
   invoiceTotal: number;
+  documentUrl: string | null;
   applicable: number;
   notApplicable: number;
   unassignedAmount: number;

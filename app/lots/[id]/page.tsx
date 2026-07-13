@@ -14,6 +14,7 @@ import { money, qty, date } from "@/lib/format";
 import { PageHeader, Pill, FacilityTag } from "@/components/ui";
 import { TransactionInvoicesTable } from "@/components/TransactionInvoicesTable";
 import { LotEditor, type EditorLine } from "@/components/LotEditor";
+import { LotDocuments } from "@/components/LotDocuments";
 import { DeleteLot } from "@/components/DeleteLot";
 
 export const dynamic = "force-dynamic";
@@ -117,6 +118,13 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
           products={products.map((p) => ({ id: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl }))}
           materialTypes={materialTypes}
           skuTxnCounts={skuTxnCounts}
+        />
+      </div>
+
+      <div className="mt-8 max-w-2xl">
+        <LotDocuments
+          lotId={lot.id}
+          documents={lot.documents.map((d) => ({ id: d.id, label: d.label, fileUrl: d.fileUrl, fileName: d.fileName }))}
         />
       </div>
 

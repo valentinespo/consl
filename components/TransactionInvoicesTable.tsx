@@ -6,6 +6,7 @@ import { Plus, ArrowUpDown, ChevronRight } from "lucide-react";
 import { Pill, SupplierAvatar, SkuAvatar } from "@/components/ui";
 import { money, date } from "@/lib/format";
 import { TransactionInvoiceForm, type InvoiceRow, type LotOption } from "@/components/TransactionInvoiceForm";
+import { InvoiceAttach } from "@/components/InvoiceAttach";
 
 type SortKey = "date" | "applicable";
 
@@ -229,11 +230,20 @@ export function TransactionInvoicesTable({
                       {inv.notApplicable > 0 && (
                         <div className="text-[11px] tabular text-negative/70">N/A {money(inv.notApplicable, 2)}</div>
                       )}
+                      {inv.documentUrl && (
+                        <div className="mt-0.5 flex justify-end">
+                          <InvoiceAttach kind="transaction" id={inv.id} url={inv.documentUrl} readOnly />
+                        </div>
+                      )}
                     </td>
                   </tr>
                   {open && (
                     <tr className="border-b border-line bg-surface-2">
                       <td colSpan={colSpan} className="px-4 py-4">
+                        <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-2">
+                          <span className="text-[12px] font-medium uppercase tracking-wide text-muted">Invoice document</span>
+                          <InvoiceAttach kind="transaction" id={inv.id} url={inv.documentUrl} />
+                        </div>
                         <TransactionInvoiceForm
                           invoice={inv}
                           lots={lots}

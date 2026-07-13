@@ -17,6 +17,7 @@ export type PurchaseInvoiceRow = {
   supplierPhotoUrl?: string | null;
   isAdjustment: boolean;
   invoiceTotal: number;
+  documentUrl: string | null;
   totalQty: number;
   facilities: string[];
   skus: { code: string; imageUrl: string | null }[];
