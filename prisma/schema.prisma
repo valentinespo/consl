@@ -146,10 +146,25 @@ model Lot {
   lines              LotLine[]
   transactions       Transaction[]
   purchaseOrder      PurchaseOrder?
+  documents          LotDocument[]
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
   @@index([lotNr])
+}
+
+/// An uploaded document attached to a lot (COA, BOL, or any labeled file).
+model LotDocument {
+  id        String   @id @default(cuid())
+  lot       Lot      @relation(fields: [lotId], references: [id], onDelete: Cascade)
+  lotId     String
+  label     String // free text; conventionally "COA" or "BOL"
+  fileUrl   String
+  fileName  String?
+  seq       Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([lotId])
 }
 
 /// A purchase order sent to a co-packer. Creating one also creates its production lot.

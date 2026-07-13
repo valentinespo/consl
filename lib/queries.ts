@@ -132,6 +132,7 @@ export async function getLot(id: string) {
       facility: true,
       lines: { include: { product: true, materials: { include: { materialType: true } } }, orderBy: { seq: "asc" } },
       transactions: { include: { supplier: true }, orderBy: [{ date: "asc" }] },
+      documents: { orderBy: [{ seq: "asc" }, { createdAt: "asc" }] },
     },
   });
 }
@@ -213,6 +214,7 @@ export async function getTransactionInvoices(lotId?: string) {
       supplier: inv.supplier?.name ?? null,
       supplierPhotoUrl: inv.supplier?.photoUrl ?? null,
       invoiceTotal: inv.invoiceTotal,
+      documentUrl: inv.documentUrl,
       applicable,
       notApplicable,
       unassignedAmount,
@@ -322,6 +324,7 @@ export async function getPurchaseInvoicesByMaterial() {
         supplierPhotoUrl: i.supplier?.photoUrl ?? null,
         isAdjustment: i.isAdjustment,
         invoiceTotal: i.invoiceTotal,
+        documentUrl: i.documentUrl,
         totalQty: i.lines.reduce((a, l) => a + (l.isAdjustment ? 0 : l.quantity), 0),
         facilities: [...new Set(i.lines.map((l) => l.facility.code))],
         skus: [
