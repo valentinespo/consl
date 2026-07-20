@@ -54,12 +54,39 @@ model Product {
   name               String
   imageUrl           String?
   notes              String?
+  // --- Amazon mapping (for the FBA/restock dashboard) ---
+  asin               String? // Amazon ASIN, e.g. B0DQ62R6Q3
+  sellerSku          String? // Amazon Seller SKU, e.g. QC-6LN8-7BT8
+  fnsku              String? // Amazon FNSKU
+  // --- Per-SKU restock policy ---
+  minMonths          Float?  @default(5) // floor: reorder when cover drops below this
+  reorderToMonths    Float?  @default(12) // target: how much cover to bring back to
+  leadTimeDays       Int? // production + ship-to-FBA lead time
+  batchSize          Int? // co-packer minimum / standard run size
   lotLines           LotLine[]
   purchases          Purchase[]
   lotMaterials       LotMaterial[]
   purchaseOrderLines PurchaseOrderLine[]
+  snapshots          SkuSnapshot[]
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
+}
+
+/// A point-in-time capture of a SKU's Amazon FBA position + trailing sales, pulled from SP-API.
+model SkuSnapshot {
+  id               String   @id @default(cuid())
+  product          Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId        String
+  capturedAt       DateTime @default(now())
+  fbaAvailable     Int      @default(0) // fulfillable
+  fbaInbound       Int      @default(0) // working + shipped + receiving
+  fbaReserved      Int      @default(0)
+  fbaUnfulfillable Int      @default(0)
+  fbaTotal         Int      @default(0)
+  units30d         Int      @default(0)
+  units90d         Int      @default(0)
+
+  @@index([productId, capturedAt])
 }
 
 /// Extensible raw-material catalog (Tea Bag, Pouch, ...).
