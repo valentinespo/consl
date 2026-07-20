@@ -8,54 +8,69 @@ export type RestockRow = {
   imageUrl: string | null;
   fbaAvailable: number;
   fbaInbound: number;
-  fbaReserved: number; // reserved + in-transit-between-FCs + researching (so avail+inbound+reserved = fbaTotal)
+  fbaReserved: number;
   fbaTotal: number;
   awdOnhand: number;
   awdInbound: number;
   awdTotal: number;
   inProduction: number;
-  position: number; // fbaTotal + awdTotal + inProduction
+  onHand: number; // fbaTotal + awdTotal (everything at Amazon, excluding production)
+  soonestPoISO: string | null; // soonest open lot's PO date (fallback created date)
   units10d: number;
   units30d: number;
   units90d: number;
-  minMonths: number;
+  salesDays10: number;
+  salesDays30: number;
+  salesDays90: number;
+  minMonths: number; // resolved floor (per-SKU override or global default)
+  leadMonths: number; // resolved lead time
+  rawMinMonths: number | null; // per-SKU override, null = using default
+  rawLeadMonths: number | null;
   reorderToMonths: number;
   batchSize: number;
-  amazonValue: number; // reverse-FIFO COG of FBA + AWD units
 };
 
 export type RestockTotals = {
   raw: number;
   inProduction: number;
-  fba: number; // FBA inventory value (reverse-FIFO COG)
-  awd: number; // AWD inventory value (reverse-FIFO COG)
-  amazon: number; // fba + awd
+  fba: number;
+  awd: number;
+  amazon: number;
   total: number;
   fbaUnits: number;
   awdUnits: number;
   inProductionUnits: number;
 };
 
-/** Per-SKU raw position numbers + window sales + total inventory value. Window-dependent
- * metrics (velocity, cover, status) are computed client-side so the 10/30/90-day toggle is instant. */
-export async function getRestock(): Promise<{ rows: RestockRow[]; totals: RestockTotals; lastSync: Date | null }> {
-  const [products, snaps, lots, rawInv] = await Promise.all([
+export async function getRestock(): Promise<{
+  rows: RestockRow[];
+  lastSync: Date | null;
+  totals: RestockTotals;
+  defaults: { minMonths: number; leadMonths: number };
+}> {
+  const [products, snaps, lots, rawInv, settings] = await Promise.all([
     prisma.product.findMany({ where: { asin: { not: null } }, orderBy: { code: "asc" } }),
     prisma.skuSnapshot.findMany({ distinct: ["productId"], orderBy: { capturedAt: "desc" } }),
     prisma.lot.findMany({ include: { lines: true }, orderBy: [{ poDate: "desc" }, { createdAt: "desc" }] }),
     getInventory(),
+    prisma.settings.upsert({ where: { id: "singleton" }, create: { id: "singleton" }, update: {} }),
   ]);
   const snapByProduct = new Map(snaps.map((s) => [s.productId, s]));
   const lastSync = snaps.reduce<Date | null>((m, s) => (!m || s.capturedAt > m ? s.capturedAt : m), null);
 
+  // Per-SKU: in-production units/value, soonest open-lot PO date, and finished lots (reverse-FIFO).
   const inProdUnits = new Map<string, number>();
+  const soonestPo = new Map<string, Date>();
   let inProductionValue = 0;
   const finishedLots = new Map<string, { units: number; cog: number }[]>();
   for (const lot of lots) {
+    const poDate = lot.poDate ?? lot.createdAt;
     for (const ln of lot.lines) {
       if (lot.status === "IN_PRODUCTION") {
         inProdUnits.set(ln.productId, (inProdUnits.get(ln.productId) ?? 0) + ln.units);
         inProductionValue += ln.units * ln.cogPerUnit;
+        const cur = soonestPo.get(ln.productId);
+        if (!cur || poDate < cur) soonestPo.set(ln.productId, poDate);
       } else {
         if (!finishedLots.has(ln.productId)) finishedLots.set(ln.productId, []);
         finishedLots.get(ln.productId)!.push({ units: ln.units, cog: ln.cogPerUnit });
@@ -73,12 +88,11 @@ export async function getRestock(): Promise<{ rows: RestockRow[]; totals: Restoc
     const fbaTotal = s?.fbaTotal ?? 0;
     const awdTotal = (s?.awdOnhand ?? 0) + (s?.awdInbound ?? 0);
     const inProduction = inProdUnits.get(p.id) ?? 0;
-    const position = fbaTotal + awdTotal + inProduction;
     fbaUnits += fbaTotal;
     awdUnits += awdTotal;
     inProductionUnits += inProduction;
 
-    // Reverse-FIFO: units still at Amazon are the newest produced. Cost FBA first, then AWD, newest-lot-first.
+    // Reverse-FIFO value: cost FBA first, then AWD, newest lot first.
     let needFba = fbaTotal;
     let needAwd = awdTotal;
     let fbaVal = 0;
@@ -87,23 +101,22 @@ export async function getRestock(): Promise<{ rows: RestockRow[]; totals: Restoc
       if (needFba <= 0 && needAwd <= 0) break;
       let avail = l.units;
       if (needFba > 0 && avail > 0) {
-        const take = Math.min(needFba, avail);
-        fbaVal += take * l.cog;
-        needFba -= take;
-        avail -= take;
+        const t = Math.min(needFba, avail);
+        fbaVal += t * l.cog;
+        needFba -= t;
+        avail -= t;
       }
       if (needAwd > 0 && avail > 0) {
-        const take = Math.min(needAwd, avail);
-        awdVal += take * l.cog;
-        needAwd -= take;
+        const t = Math.min(needAwd, avail);
+        awdVal += t * l.cog;
+        needAwd -= t;
       }
     }
-    const fallback = finishedLots.get(p.id)?.[0]?.cog ?? 0;
-    if (needFba > 0) fbaVal += needFba * fallback;
-    if (needAwd > 0) awdVal += needAwd * fallback;
+    const fb = finishedLots.get(p.id)?.[0]?.cog ?? 0;
+    if (needFba > 0) fbaVal += needFba * fb;
+    if (needAwd > 0) awdVal += needAwd * fb;
     fbaValue += fbaVal;
     awdValue += awdVal;
-    const val = fbaVal + awdVal;
 
     return {
       id: p.id,
@@ -118,20 +131,27 @@ export async function getRestock(): Promise<{ rows: RestockRow[]; totals: Restoc
       awdInbound: s?.awdInbound ?? 0,
       awdTotal,
       inProduction,
-      position,
+      onHand: fbaTotal + awdTotal,
+      soonestPoISO: soonestPo.get(p.id)?.toISOString() ?? null,
       units10d: s?.units10d ?? 0,
       units30d: s?.units30d ?? 0,
       units90d: s?.units90d ?? 0,
-      minMonths: p.minMonths ?? 5,
+      salesDays10: s?.salesDays10 ?? 0,
+      salesDays30: s?.salesDays30 ?? 0,
+      salesDays90: s?.salesDays90 ?? 0,
+      minMonths: p.minMonths ?? settings.defaultMinMonths,
+      leadMonths: p.leadMonths ?? settings.defaultLeadMonths,
+      rawMinMonths: p.minMonths,
+      rawLeadMonths: p.leadMonths,
       reorderToMonths: p.reorderToMonths ?? 12,
       batchSize: p.batchSize ?? 0,
-      amazonValue: val,
     };
   });
 
   return {
     rows,
     lastSync,
+    defaults: { minMonths: settings.defaultMinMonths, leadMonths: settings.defaultLeadMonths },
     totals: {
       raw: rawInv.totalValue,
       inProduction: inProductionValue,

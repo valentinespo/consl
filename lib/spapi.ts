@@ -115,6 +115,86 @@ export async function getAwdInventory(): Promise<AwdRow[]> {
   return out;
 }
 
+/** Per-SKU, per-day units from the All Orders report. Amazon-fulfilled (FBA + MCF), non-cancelled.
+ * Returns { sellerSku: { "YYYY-MM-DD": units } }. Chunks into ≤30-day reports (API cap) run in parallel. */
+export async function getAllOrders(startISO: string, endISO: string): Promise<Record<string, Record<string, number>>> {
+  const start = new Date(startISO);
+  const end = new Date(endISO);
+  const chunks: [Date, Date][] = [];
+  let s = new Date(start);
+  while (s < end) {
+    const e = new Date(Math.min(s.getTime() + 30 * 86_400_000, end.getTime()));
+    chunks.push([new Date(s), e]);
+    s = e;
+  }
+  const iso = (d: Date) => d.toISOString().slice(0, 19) + "Z";
+  const results = await Promise.all(chunks.map(([cs, ce]) => oneOrdersChunk(iso(cs), iso(ce))));
+  const merged: Record<string, Record<string, number>> = {};
+  for (const chunk of results) {
+    for (const [sku, days] of Object.entries(chunk)) {
+      merged[sku] ??= {};
+      for (const [day, units] of Object.entries(days)) merged[sku][day] = (merged[sku][day] ?? 0) + units;
+    }
+  }
+  return merged;
+}
+
+async function oneOrdersChunk(startISO: string, endISO: string): Promise<Record<string, Record<string, number>>> {
+  let r = await sp("/reports/2021-06-30/reports", {
+    method: "POST",
+    body: JSON.stringify({
+      reportType: "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL",
+      marketplaceIds: [marketplace()],
+      dataStartTime: startISO,
+      dataEndTime: endISO,
+    }),
+  });
+  let j = await r.json();
+  if (!r.ok) throw new Error(`orders report create: ${JSON.stringify(j).slice(0, 160)}`);
+  const reportId = j.reportId;
+  let docId = "";
+  let status = "";
+  for (let i = 0; i < 60; i++) {
+    await new Promise((res) => setTimeout(res, 4000));
+    r = await sp(`/reports/2021-06-30/reports/${reportId}`);
+    j = await r.json();
+    status = j.processingStatus;
+    if (status === "DONE") {
+      docId = j.reportDocumentId;
+      break;
+    }
+    if (status === "FATAL" || status === "CANCELLED") throw new Error(`orders report ${status}`);
+  }
+  if (!docId) throw new Error(`orders report timeout (${status})`);
+
+  r = await sp(`/reports/2021-06-30/documents/${docId}`);
+  j = await r.json();
+  const dl = await fetch(j.url);
+  const buf = Buffer.from(await dl.arrayBuffer());
+  const text = j.compressionAlgorithm === "GZIP" ? gunzipSync(buf).toString("utf8") : buf.toString("utf8");
+  const lines = text.split("\n");
+  const h = lines[0].split("\t");
+  const iDate = h.indexOf("purchase-date");
+  const iStatus = h.indexOf("order-status");
+  const iFC = h.indexOf("fulfillment-channel");
+  const iSku = h.indexOf("sku");
+  const iQty = h.indexOf("quantity");
+  const out: Record<string, Record<string, number>> = {};
+  for (let i = 1; i < lines.length; i++) {
+    const c = lines[i].split("\t");
+    if (c.length <= iQty) continue;
+    if (c[iStatus] === "Cancelled") continue;
+    if (iFC >= 0 && c[iFC] && c[iFC] !== "Amazon") continue; // only FBA-fulfilled draws down our stock
+    const sku = c[iSku];
+    const day = (c[iDate] || "").slice(0, 10);
+    const qty = parseInt(c[iQty], 10) || 0;
+    if (!sku || !day || qty <= 0) continue;
+    out[sku] ??= {};
+    out[sku][day] = (out[sku][day] ?? 0) + qty;
+  }
+  return out;
+}
+
 /** Units ordered per child ASIN over [startISO, endISO] via the Sales & Traffic report (async). */
 export async function getSalesUnits(startISO: string, endISO: string): Promise<Record<string, number>> {
   let r = await sp("/reports/2021-06-30/reports", {

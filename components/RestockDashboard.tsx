@@ -2,82 +2,131 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Settings2, Check } from "lucide-react";
 import { money } from "@/lib/format";
 import { SkuAvatar } from "@/components/ui";
-import { syncAmazon } from "@/app/inventory/actions";
+import { syncAmazon, updateGlobalDefaults, updateSkuPolicy } from "@/app/inventory/actions";
 import type { RestockRow, RestockTotals } from "@/lib/restock";
 
 const MONTH = 30.44;
+const MONTH_MS = MONTH * 86_400_000;
 const WINDOWS = [10, 30, 90] as const;
 type Win = (typeof WINDOWS)[number];
 
-// Green scale for the "available now / available soon" buckets; AWD blue; production amber.
 const SEG = {
-  available: "#16a34a", // green — sellable now
-  inbound: "#4ade80", // soft green — inbound to FBA (available soon)
-  reserved: "#bbf7d0", // lighter green — reserved / in-transit between FCs
-  awd: "#2563eb", // blue — AWD warehouse
-  production: "#f59e0b", // amber — in production
+  available: "#16a34a",
+  inbound: "#4ade80",
+  reserved: "#bbf7d0",
+  awd: "#2563eb",
+  production: "#f59e0b",
 };
 
-type Status = "reorder" | "watch" | "ok" | "reordered";
+type Status = "ok" | "reordered" | "reorder" | "oos";
 const STATUS: Record<Status, { bg: string; fg: string; dot: string; label: string }> = {
-  reorder: { bg: "#ffedd5", fg: "#9a3412", dot: "#ea580c", label: "Reorder" },
-  watch: { bg: "#fef9c3", fg: "#854d0e", dot: "#ca8a04", label: "Watch" },
   ok: { bg: "#dcfce7", fg: "#166534", dot: "#16a34a", label: "Healthy" },
   reordered: { bg: "#dcfce7", fg: "#166534", dot: "#16a34a", label: "Reordered" },
+  reorder: { bg: "#ffedd5", fg: "#9a3412", dot: "#ea580c", label: "Reorder" },
+  oos: { bg: "#fee2e2", fg: "#b91c1c", dot: "#dc2626", label: "OOS" },
 };
 
 const n = (x: number) => Math.round(x).toLocaleString("en-US");
+const mo = (x: number) => (x === Infinity ? "∞" : x.toFixed(1));
 
-type Computed = RestockRow & { monthly: number; cover: number; status: Status; recommendedQty: number; effPosition: number; note?: string };
+type Computed = RestockRow & {
+  monthly: number;
+  onHandCover: number;
+  prodCover: number;
+  status: Status;
+  statusLabel: string;
+  note?: string;
+  recommendedQty: number;
+};
 
-function compute(r: RestockRow, days: Win, inclProd: boolean): Computed {
+function compute(r: RestockRow, days: Win, nowMs: number): Computed {
   const units = days === 10 ? r.units10d : days === 30 ? r.units30d : r.units90d;
-  const monthly = units > 0 ? (units / days) * MONTH : 0;
-  const availPos = r.fbaTotal + r.awdTotal;
-  const fullPos = availPos + r.inProduction;
-  const effPosition = inclProd ? fullPos : availPos;
-  const cover = monthly > 0 ? effPosition / monthly : effPosition > 0 ? Infinity : 0;
-  const fullCover = monthly > 0 ? fullPos / monthly : fullPos > 0 ? Infinity : 0;
-  const hasProduction = r.inProduction > 0;
-  // Production counts as incoming supply: order more only if even production won't hold the floor.
-  const needsOrder = fullCover < r.minMonths;
+  const salesDays = days === 10 ? r.salesDays10 : days === 30 ? r.salesDays30 : r.salesDays90;
+  const monthly = salesDays > 0 ? (units / salesDays) * MONTH : 0; // velocity over in-stock (selling) days
+  const A = monthly > 0 ? r.onHand / monthly : r.onHand > 0 ? Infinity : 0;
+  const P = monthly > 0 ? r.inProduction / monthly : r.inProduction > 0 ? Infinity : 0;
+  const hasPO = r.inProduction > 0;
+  const total = A + P;
 
-  let status: Status;
+  // Time until the soonest lot lands (PO date + lead), and whether it's overdue.
+  let Tc = 0;
+  let overdue = false;
+  if (hasPO && r.soonestPoISO) {
+    const t = (new Date(r.soonestPoISO).getTime() + r.leadMonths * MONTH_MS - nowMs) / MONTH_MS;
+    overdue = t < 0;
+    Tc = Math.max(0, t);
+  }
+
+  let status: Status = "ok";
+  let statusLabel = STATUS.ok.label;
   let note: string | undefined;
   let recommendedQty = 0;
-  if (needsOrder) {
-    status = "reorder";
-    const raw = Math.max(0, Math.ceil(r.reorderToMonths * monthly - fullPos));
-    recommendedQty = r.batchSize > 0 && raw > 0 ? Math.ceil(raw / r.batchSize) * r.batchSize : raw;
-    if (hasProduction) note = "reorder placed · still short";
-  } else if (!inclProd && hasProduction) {
-    status = "reordered"; // available is low, but a production order already covers the floor
+
+  if (monthly === 0) {
+    status = "ok";
+    statusLabel = "Healthy";
+  } else if (hasPO) {
+    if (A < Tc) {
+      status = "oos";
+      statusLabel = `OOS for ${Math.round((Tc - A) * MONTH)}d`;
+    } else if (total >= r.minMonths) {
+      status = "reordered";
+      statusLabel = "Reordered";
+    } else {
+      status = "reorder";
+      statusLabel = "Reorder";
+      if (total < r.leadMonths) note = `off by ${Math.round((r.leadMonths - total) * MONTH)}d`;
+    }
   } else {
-    status = cover < r.minMonths * 1.3 ? "watch" : "ok";
+    if (A >= r.minMonths) {
+      status = "ok";
+      statusLabel = "Healthy";
+    } else {
+      status = "reorder";
+      statusLabel = "Reorder";
+      if (A < r.leadMonths) note = `off by ${Math.round((r.leadMonths - A) * MONTH)}d`;
+    }
   }
-  return { ...r, monthly, cover, status, recommendedQty, effPosition, note };
+  if (overdue) note = note ? `${note} · production overdue` : "production overdue";
+  if (status === "reorder" || status === "oos") {
+    const raw = Math.max(0, Math.ceil(r.reorderToMonths * monthly - r.onHand - r.inProduction));
+    recommendedQty = r.batchSize > 0 && raw > 0 ? Math.ceil(raw / r.batchSize) * r.batchSize : raw;
+  }
+  return { ...r, monthly, onHandCover: A, prodCover: P, status, statusLabel, note, recommendedQty };
 }
 
-export function RestockDashboard({ rows, totals, lastSync }: { rows: RestockRow[]; totals: RestockTotals; lastSync: string | null }) {
+export function RestockDashboard({
+  rows,
+  totals,
+  lastSync,
+  defaults,
+  nowMs,
+}: {
+  rows: RestockRow[];
+  totals: RestockTotals;
+  lastSync: string | null;
+  defaults: { minMonths: number; leadMonths: number };
+  nowMs: number;
+}) {
   const [win, setWin] = useState<Win>(90);
-  const [inclProd, setInclProd] = useState(true);
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
+  const [editSku, setEditSku] = useState<string | null>(null);
+  const [editGlobal, setEditGlobal] = useState(false);
   const router = useRouter();
 
-  const computed = useMemo(() => rows.map((r) => compute(r, win, inclProd)).sort((a, b) => b.monthly - a.monthly), [rows, win, inclProd]);
-  const reorderCount = computed.filter((r) => r.status === "reorder").length;
-  const avgCover = computed.length ? computed.reduce((s, r) => s + Math.min(r.cover, 60), 0) / computed.length : 0;
+  const computed = useMemo(() => rows.map((r) => compute(r, win, nowMs)).sort((a, b) => b.monthly - a.monthly), [rows, win, nowMs]);
+  const reorderCount = computed.filter((r) => r.status === "reorder" || r.status === "oos").length;
+  const avgCover = computed.length ? computed.reduce((s, r) => s + Math.min(r.onHandCover, 60), 0) / computed.length : 0;
 
   function sync() {
     setMsg(null);
     start(async () => {
       const r = await syncAmazon();
-      if (!r.ok) setMsg(r.error);
-      else setMsg(r.salesOk ? "Synced with Amazon." : "Inventory synced (sales report lagging — kept last velocity).");
+      setMsg(r.ok ? (r.salesOk ? "Synced with Amazon." : "Inventory synced (sales lagging — kept last velocity).") : r.error);
       router.refresh();
     });
   }
@@ -97,11 +146,7 @@ export function RestockDashboard({ rows, totals, lastSync }: { rows: RestockRow[
           </div>
         </div>
         <div className="flex flex-col items-end gap-1.5">
-          <button
-            onClick={sync}
-            disabled={pending}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
-          >
+          <button onClick={sync} disabled={pending} className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60">
             <RefreshCw size={14} className={pending ? "animate-spin" : ""} /> {pending ? "Syncing…" : "Sync Amazon"}
           </button>
           <span className="text-[11px] text-muted">{lastSync ? `Updated ${lastSync}` : "Never synced"}</span>
@@ -111,34 +156,25 @@ export function RestockDashboard({ rows, totals, lastSync }: { rows: RestockRow[
 
       {/* KPIs */}
       <div className="mb-5 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-        <Kpi label="SKUs to reorder" value={String(reorderCount)} tone={reorderCount > 0 ? "#ea580c" : undefined} />
+        <Kpi label="Needs a PO" value={String(reorderCount)} tone={reorderCount > 0 ? "#ea580c" : undefined} />
         <Kpi label="Amazon (FBA + AWD)" value={n(totals.fbaUnits + totals.awdUnits)} />
         <Kpi label="In production" value={n(totals.inProductionUnits)} />
-        <Kpi label="Avg months cover" value={avgCover >= 60 ? "60+" : avgCover.toFixed(1)} />
+        <Kpi label="Avg on-hand cover" value={avgCover >= 60 ? "60+" : avgCover.toFixed(1)} />
       </div>
 
-      {/* Controls + legend */}
+      {/* Controls */}
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2.5">
           <span className="text-[13px] font-medium text-ink">By SKU</span>
           <div className="flex gap-0.5 rounded-lg border border-border bg-surface p-0.5">
             {WINDOWS.map((w) => (
-              <button
-                key={w}
-                onClick={() => setWin(w)}
-                className={`rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors ${
-                  win === w ? "bg-accent-soft text-accent" : "text-muted hover:text-ink-soft"
-                }`}
-              >
+              <button key={w} onClick={() => setWin(w)} className={`rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors ${win === w ? "bg-accent-soft text-accent" : "text-muted hover:text-ink-soft"}`}>
                 {w}d
               </button>
             ))}
           </div>
-          <button onClick={() => setInclProd((v) => !v)} className="inline-flex items-center gap-1.5 text-[12px] font-medium text-muted hover:text-ink-soft">
-            <span className={`relative h-4 w-7 rounded-full transition-colors ${inclProd ? "bg-accent" : "bg-border"}`}>
-              <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${inclProd ? "left-3.5" : "left-0.5"}`} />
-            </span>
-            Include production
+          <button onClick={() => setEditGlobal((v) => !v)} className="inline-flex items-center gap-1 text-[11.5px] text-muted hover:text-ink-soft">
+            <Settings2 size={12} /> floor {defaults.minMonths}mo · lead {defaults.leadMonths}mo
           </button>
         </div>
         <div className="flex flex-wrap gap-2.5 text-[11px] text-muted">
@@ -146,72 +182,145 @@ export function RestockDashboard({ rows, totals, lastSync }: { rows: RestockRow[
           <Legend color={SEG.inbound} label="inbound" />
           <Legend color={SEG.reserved} label="reserved" />
           <Legend color={SEG.awd} label="AWD" />
-          {inclProd && <Legend color={SEG.production} label="production" />}
+          <Legend color={SEG.production} label="production" />
         </div>
       </div>
+
+      {editGlobal && (
+        <GlobalDefaultsEditor
+          defaults={defaults}
+          pending={pending}
+          onSave={(f, l) => start(async () => { await updateGlobalDefaults(f, l); setEditGlobal(false); router.refresh(); })}
+          onClose={() => setEditGlobal(false)}
+        />
+      )}
 
       <div className="overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface">
         {computed.length === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">No Amazon-mapped SKUs yet — hit Sync.</div>}
         {computed.map((r, i) => {
           const st = STATUS[r.status];
-          const seg = (v: number, c: string) => (v > 0 ? <div key={c} style={{ width: `${(v / (r.effPosition || 1)) * 100}%`, background: c }} /> : null);
+          const totalUnits = r.onHand + r.inProduction;
+          const seg = (v: number, c: string) => (v > 0 ? <div key={c} style={{ width: `${(v / (totalUnits || 1)) * 100}%`, background: c }} /> : null);
           const parts = [
             r.fbaAvailable && `${n(r.fbaAvailable)} avail`,
             r.fbaInbound && `${n(r.fbaInbound)} inbound`,
             r.fbaReserved && `${n(r.fbaReserved)} reserved`,
             r.awdTotal && `${n(r.awdTotal)} AWD`,
-            inclProd && r.inProduction && `${n(r.inProduction)} prod`,
+            r.inProduction && `${n(r.inProduction)} prod`,
           ].filter(Boolean);
           return (
-            <div key={r.id} className={`grid grid-cols-[1.5fr_2.2fr_0.7fr_0.9fr_0.9fr] items-center gap-3 px-4 py-3 ${i < computed.length - 1 ? "border-b border-line" : ""}`}>
-              <div className="flex min-w-0 items-center gap-2.5">
-                <SkuAvatar code={r.code} imageUrl={r.imageUrl} size={30} />
-                <div className="min-w-0">
-                  <div className="truncate text-[13px] font-medium text-ink">{r.name}</div>
-                  <div className="text-[11px] tabular text-muted">{n(r.monthly)}/mo · {win}-day</div>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="w-[62px] shrink-0 text-right">
-                  <div className="text-[19px] font-medium leading-none tabular text-ink">{n(r.effPosition)}</div>
-                  <div className="text-[10px] text-muted">units</div>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex h-2.5 overflow-hidden rounded-full bg-surface-2">
-                    {seg(r.fbaAvailable, SEG.available)}
-                    {seg(r.fbaInbound, SEG.inbound)}
-                    {seg(r.fbaReserved, SEG.reserved)}
-                    {seg(r.awdTotal, SEG.awd)}
-                    {inclProd && seg(r.inProduction, SEG.production)}
+            <div key={r.id}>
+              <div className={`grid grid-cols-[1.5fr_1fr_1.9fr_1fr_0.85fr] items-center gap-3 px-4 py-3 ${i < computed.length - 1 && editSku !== r.id ? "border-b border-line" : ""}`}>
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <SkuAvatar code={r.code} imageUrl={r.imageUrl} size={30} />
+                  <div className="min-w-0">
+                    <div className="truncate text-[13px] font-medium text-ink">{r.name}</div>
+                    <div className="text-[11px] tabular text-muted">{n(r.monthly)}/mo · {win}-day</div>
                   </div>
-                  <div className="mt-1.5 truncate text-[11px] tabular text-muted">{parts.join(" · ")}</div>
+                </div>
+                {/* Two runways */}
+                <div>
+                  <div className="tabular text-[16px] font-medium leading-tight text-ink">{mo(r.onHandCover)}<span className="text-[11px] font-normal text-muted"> mo on hand</span></div>
+                  {r.inProduction > 0 ? (
+                    <div className="tabular text-[12px] font-medium leading-tight" style={{ color: SEG.production }}>+{mo(r.prodCover)}<span className="font-normal text-muted"> mo producing</span></div>
+                  ) : (
+                    <div className="text-[11px] text-muted">no production</div>
+                  )}
+                </div>
+                {/* Bar + total */}
+                <div className="flex items-center gap-3">
+                  <div className="w-[62px] shrink-0 text-right">
+                    <div className="text-[18px] font-medium leading-none tabular text-ink">{n(totalUnits)}</div>
+                    <div className="text-[10px] text-muted">units</div>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex h-2.5 overflow-hidden rounded-full bg-surface-2">
+                      {seg(r.fbaAvailable, SEG.available)}
+                      {seg(r.fbaInbound, SEG.inbound)}
+                      {seg(r.fbaReserved, SEG.reserved)}
+                      {seg(r.awdTotal, SEG.awd)}
+                      {seg(r.inProduction, SEG.production)}
+                    </div>
+                    <div className="mt-1.5 truncate text-[11px] tabular text-muted">{parts.join(" · ")}</div>
+                  </div>
+                </div>
+                {/* Status */}
+                <div>
+                  <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium" style={{ background: st.bg, color: st.fg }}>
+                    <span className="h-1.5 w-1.5 rounded-full" style={{ background: st.dot }} /> {r.statusLabel}
+                  </span>
+                  {r.note && <div className="mt-0.5 text-[10px] text-muted">{r.note}</div>}
+                </div>
+                {/* Action + gear */}
+                <div className="flex items-center justify-end gap-2 text-right">
+                  <div>
+                    {r.status === "reorder" || r.status === "oos" ? (
+                      <div className="text-[12px]">
+                        <div className="font-medium tabular text-ink">{r.recommendedQty > 0 ? `${n(r.recommendedQty)} units` : "Order"}</div>
+                        <div className="text-[11px] text-muted">recommended</div>
+                      </div>
+                    ) : (
+                      <span className="text-[12px] text-muted">Covered</span>
+                    )}
+                  </div>
+                  <button onClick={() => setEditSku(editSku === r.id ? null : r.id)} title="SKU settings" className="text-muted hover:text-ink-soft">
+                    <Settings2 size={14} />
+                  </button>
                 </div>
               </div>
-              <div className="tabular text-[16px] font-medium" style={{ color: r.status === "reorder" ? "#ea580c" : r.status === "reordered" || r.status === "ok" ? "#16a34a" : "#2563eb" }}>
-                {r.cover === Infinity ? "∞" : r.cover.toFixed(1)}
-                <span className="text-[11px] font-normal text-muted">mo</span>
-              </div>
-              <div>
-                <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium" style={{ background: st.bg, color: st.fg }}>
-                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: st.dot }} /> {st.label}
-                </span>
-                {r.note && <div className="mt-0.5 text-[10px] text-muted">{r.note}</div>}
-              </div>
-              <div className="text-right">
-                {r.status === "reorder" ? (
-                  <div className="text-[12px]">
-                    <div className="font-medium tabular text-ink">{r.recommendedQty > 0 ? `${n(r.recommendedQty)} units` : "Order"}</div>
-                    <div className="text-[11px] text-muted">recommended</div>
-                  </div>
-                ) : (
-                  <span className="text-[12px] text-muted">Covered</span>
-                )}
-              </div>
+              {editSku === r.id && (
+                <SkuPolicyEditor
+                  row={r}
+                  defaults={defaults}
+                  pending={pending}
+                  onSave={(f, l) => start(async () => { await updateSkuPolicy(r.id, f, l); setEditSku(null); router.refresh(); })}
+                  bordered={i < computed.length - 1}
+                />
+              )}
             </div>
           );
         })}
       </div>
     </div>
+  );
+}
+
+function GlobalDefaultsEditor({ defaults, pending, onSave, onClose }: { defaults: { minMonths: number; leadMonths: number }; pending: boolean; onSave: (f: number, l: number) => void; onClose: () => void }) {
+  const [f, setF] = useState(String(defaults.minMonths));
+  const [l, setL] = useState(String(defaults.leadMonths));
+  return (
+    <div className="mb-2 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface-2 px-3 py-2.5">
+      <NumField label="Default floor (months)" value={f} onChange={setF} />
+      <NumField label="Default lead time (months)" value={l} onChange={setL} />
+      <button onClick={() => onSave(parseFloat(f) || 5, parseFloat(l) || 4.5)} disabled={pending} className="inline-flex items-center gap-1 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-60">
+        <Check size={13} /> Save defaults
+      </button>
+      <button onClick={onClose} className="text-[12px] text-muted hover:text-ink-soft">Cancel</button>
+    </div>
+  );
+}
+
+function SkuPolicyEditor({ row, defaults, pending, onSave, bordered }: { row: RestockRow; defaults: { minMonths: number; leadMonths: number }; pending: boolean; onSave: (f: number | null, l: number | null) => void; bordered: boolean }) {
+  const [f, setF] = useState(row.rawMinMonths != null ? String(row.rawMinMonths) : "");
+  const [l, setL] = useState(row.rawLeadMonths != null ? String(row.rawLeadMonths) : "");
+  return (
+    <div className={`flex flex-wrap items-end gap-3 bg-surface-2 px-4 py-3 ${bordered ? "border-b border-line" : ""}`}>
+      <NumField label={`Floor (months) · default ${defaults.minMonths}`} value={f} onChange={setF} placeholder={String(defaults.minMonths)} />
+      <NumField label={`Lead time (months) · default ${defaults.leadMonths}`} value={l} onChange={setL} placeholder={String(defaults.leadMonths)} />
+      <button onClick={() => onSave(f.trim() === "" ? null : parseFloat(f), l.trim() === "" ? null : parseFloat(l))} disabled={pending} className="inline-flex items-center gap-1 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-60">
+        <Check size={13} /> Save
+      </button>
+      <button onClick={() => onSave(null, null)} className="text-[12px] text-muted hover:text-ink-soft">Use defaults</button>
+    </div>
+  );
+}
+
+function NumField({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+  return (
+    <label className="text-[11px] text-muted">
+      <div className="mb-1">{label}</div>
+      <input type="number" step="0.5" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="h-8 w-32 rounded-lg border border-border bg-surface px-2 text-[13px] text-ink outline-none focus:border-accent-strong" />
+    </label>
   );
 }
 

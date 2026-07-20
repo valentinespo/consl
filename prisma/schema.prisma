@@ -58,10 +58,10 @@ model Product {
   asin               String? // Amazon ASIN, e.g. B0DQ62R6Q3
   sellerSku          String? // Amazon Seller SKU, e.g. QC-6LN8-7BT8
   fnsku              String? // Amazon FNSKU
-  // --- Per-SKU restock policy ---
-  minMonths          Float?  @default(5) // floor: reorder when cover drops below this
+  // --- Per-SKU restock policy (null = use the global default) ---
+  minMonths          Float? // floor: months of stock to never fall below
+  leadMonths         Float? // production lead time: PO date → stock landing at FBA
   reorderToMonths    Float?  @default(12) // target: how much cover to bring back to
-  leadTimeDays       Int? // production + ship-to-FBA lead time
   batchSize          Int? // co-packer minimum / standard run size
   lotLines           LotLine[]
   purchases          Purchase[]
@@ -85,11 +85,22 @@ model SkuSnapshot {
   fbaTotal         Int      @default(0)
   awdOnhand        Int      @default(0) // Amazon Warehousing & Distribution on-hand
   awdInbound       Int      @default(0) // inbound to AWD
+  inStock          Boolean  @default(true) // was the SKU in stock at capture (for future exact velocity)
   units10d         Int      @default(0)
   units30d         Int      @default(0)
   units90d         Int      @default(0)
+  salesDays10      Int      @default(0) // days with ≥1 sale in the trailing 10/30/90 days
+  salesDays30      Int      @default(0)
+  salesDays90      Int      @default(0)
 
   @@index([productId, capturedAt])
+}
+
+/// Singleton global restock defaults, editable in-app. Per-SKU values override these.
+model Settings {
+  id                String @id @default("singleton")
+  defaultMinMonths  Float  @default(5) // months of stock to never fall below
+  defaultLeadMonths Float  @default(4.5) // production lead time (PO → landing at FBA)
 }
 
 /// Extensible raw-material catalog (Tea Bag, Pouch, ...).
