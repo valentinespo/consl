@@ -107,7 +107,7 @@ export function PurchaseOrdersView({
                       </td>
                       <td className="px-4 py-3 text-right">
                         {po.pdfUrl ? (
-                          <a href={po.pdfUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 text-[12.5px] font-medium text-positive hover:underline">
+                          <a href={po.pdfUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 text-[12.5px] font-medium text-accent hover:underline">
                             <FileText size={13} /> View
                           </a>
                         ) : (
@@ -226,7 +226,7 @@ function StatusSelect({ id, status }: { id: string; status: string }) {
       onChange={change}
       disabled={pending}
       className={`h-7 rounded-full border px-2 text-[11.5px] font-medium outline-none disabled:opacity-50 ${
-        status === "SENT" ? "border-accent-strong bg-accent-soft text-positive" : "border-border bg-[#f0eee6] text-muted"
+        status === "SENT" ? "border-[#bbf7d0] bg-[#dcfce7] text-[#166534]" : "border-border bg-[#f5f5f5] text-muted"
       }`}
     >
       <option value="DRAFT">Draft</option>

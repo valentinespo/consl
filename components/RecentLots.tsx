@@ -76,7 +76,7 @@ export function RecentLots({ lots }: { lots: RecentLot[] }) {
                   <Link
                     href={`/lots/${l.id}`}
                     onClick={(e) => e.stopPropagation()}
-                    className="text-[12.5px] font-medium text-positive hover:underline"
+                    className="text-[12.5px] font-medium text-accent hover:underline"
                   >
                     Open →
                   </Link>

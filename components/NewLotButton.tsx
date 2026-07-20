@@ -104,7 +104,7 @@ export function NewLotButton({ facilities, products }: { facilities: Facility[];
                   <span className="text-[12px] font-medium text-muted">SKUs produced</span>
                   <button
                     onClick={() => setLines((p) => [...p, { key: Date.now(), productId: "", units: "" }])}
-                    className="text-[12px] font-medium text-positive hover:underline"
+                    className="text-[12px] font-medium text-accent hover:underline"
                   >
                     + Add SKU
                   </button>

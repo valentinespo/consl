@@ -48,7 +48,7 @@ export default async function DashboardPage() {
         <Card className="lg:col-span-2" padded={false}>
           <div className="flex items-center justify-between px-5 pt-5">
             <SectionTitle>Recent production lots</SectionTitle>
-            <Link href="/lots" className="text-[12.5px] font-medium text-positive hover:underline">
+            <Link href="/lots" className="text-[12.5px] font-medium text-accent hover:underline">
               View all →
             </Link>
           </div>
