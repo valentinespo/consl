@@ -63,6 +63,7 @@ model Product {
   leadMonths         Float? // production lead time: PO date → stock landing at FBA
   reorderToMonths    Float?  @default(12) // target: how much cover to bring back to
   batchSize          Int? // co-packer minimum / standard run size
+  sortIndex          Int? // manual sort position on the inventory dashboard
   lotLines           LotLine[]
   purchases          Purchase[]
   lotMaterials       LotMaterial[]
@@ -101,6 +102,7 @@ model Settings {
   id                String @id @default("singleton")
   defaultMinMonths  Float  @default(5) // months of stock to never fall below
   defaultLeadMonths Float  @default(4.5) // production lead time (PO → landing at FBA)
+  sortMode          String @default("sales") // inventory dashboard sort: sales | available | manual
 }
 
 /// Extensible raw-material catalog (Tea Bag, Pouch, ...).

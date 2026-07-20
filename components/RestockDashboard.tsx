@@ -1,12 +1,15 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { RefreshCw, Settings2, Check } from "lucide-react";
+import { RefreshCw, Settings2, Check, GripVertical } from "lucide-react";
 import { money } from "@/lib/format";
 import { SkuAvatar } from "@/components/ui";
-import { syncAmazon, updateGlobalDefaults, updateSkuPolicy } from "@/app/inventory/actions";
+import { syncAmazon, updateGlobalDefaults, updateSkuPolicy, setSortMode, saveManualOrder } from "@/app/inventory/actions";
 import type { RestockRow, RestockTotals } from "@/lib/restock";
+
+type SortMode = "sales" | "available" | "manual";
+const SORT_LABEL: Record<SortMode, string> = { sales: "Monthly sales", available: "Units available", manual: "Manual" };
 
 const MONTH = 30.44;
 const MONTH_MS = MONTH * 86_400_000;
@@ -107,12 +110,14 @@ export function RestockDashboard({
   totals,
   lastSync,
   defaults,
+  sortMode: initialSort,
   nowMs,
 }: {
   rows: RestockRow[];
   totals: RestockTotals;
   lastSync: string | null;
   defaults: { minMonths: number; leadMonths: number };
+  sortMode: string;
   nowMs: number;
 }) {
   const [win, setWin] = useState<Win>(90);
@@ -120,11 +125,51 @@ export function RestockDashboard({
   const [msg, setMsg] = useState<string | null>(null);
   const [editSku, setEditSku] = useState<string | null>(null);
   const [editGlobal, setEditGlobal] = useState(false);
+  const [sort, setSort] = useState<SortMode>((["sales", "available", "manual"].includes(initialSort) ? initialSort : "sales") as SortMode);
+  const [arranging, setArranging] = useState(false); // manual drag mode active
+  const [order, setOrder] = useState<string[]>([]); // ids during manual arranging
+  const dragId = useRef<string | null>(null);
   const router = useRouter();
 
-  const computed = useMemo(() => rows.map((r) => compute(r, win, nowMs)).sort((a, b) => b.monthly - a.monthly), [rows, win, nowMs]);
+  const byId = useMemo(() => new Map(rows.map((r) => [r.id, compute(r, win, nowMs)])), [rows, win, nowMs]);
+  const computed = useMemo(() => {
+    const arr = [...byId.values()];
+    if (sort === "available") arr.sort((a, b) => b.onHand - a.onHand);
+    else if (sort === "manual") arr.sort((a, b) => (a.sortIndex ?? 9999) - (b.sortIndex ?? 9999) || b.monthly - a.monthly);
+    else arr.sort((a, b) => b.monthly - a.monthly);
+    return arr;
+  }, [byId, sort]);
+  const displayRows = arranging ? order.map((id) => byId.get(id)).filter((r): r is Computed => !!r) : computed;
   const reorderCount = computed.filter((r) => r.belowFloor).length;
   const avgCover = computed.length ? computed.reduce((s, r) => s + Math.min(r.onHandCover, 60), 0) / computed.length : 0;
+
+  function pickSort(m: SortMode) {
+    setSort(m);
+    if (m === "manual") {
+      setOrder(computed.map((r) => r.id));
+      setArranging(true);
+    } else {
+      setArranging(false);
+      start(async () => { await setSortMode(m); router.refresh(); });
+    }
+  }
+  function confirmOrder() {
+    setArranging(false);
+    start(async () => { await saveManualOrder(order); router.refresh(); });
+  }
+  function onDragOver(overId: string) {
+    const from = dragId.current;
+    if (!from || from === overId) return;
+    setOrder((prev) => {
+      const a = [...prev];
+      const fi = a.indexOf(from);
+      const ti = a.indexOf(overId);
+      if (fi < 0 || ti < 0) return prev;
+      a.splice(fi, 1);
+      a.splice(ti, 0, from);
+      return a;
+    });
+  }
 
   function sync() {
     setMsg(null);
@@ -177,6 +222,21 @@ export function RestockDashboard({
               </button>
             ))}
           </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] text-muted">sort</span>
+            <div className="flex gap-0.5 rounded-lg border border-border bg-surface p-0.5">
+              {(["sales", "available", "manual"] as SortMode[]).map((m) => (
+                <button key={m} onClick={() => pickSort(m)} className={`rounded-md px-2 py-1 text-[12px] font-medium transition-colors ${sort === m && !arranging ? "bg-accent-soft text-accent" : arranging && m === "manual" ? "bg-accent-soft text-accent" : "text-muted hover:text-ink-soft"}`}>
+                  {m === "sales" ? "Sales" : m === "available" ? "Available" : "Manual"}
+                </button>
+              ))}
+            </div>
+            {arranging && (
+              <button onClick={confirmOrder} disabled={pending} className="inline-flex items-center gap-1 rounded-lg bg-ink px-2.5 py-1.5 text-[12px] font-medium text-white disabled:opacity-60">
+                <Check size={13} /> Done
+              </button>
+            )}
+          </div>
           <button onClick={() => setEditGlobal((v) => !v)} className="inline-flex items-center gap-1 text-[11.5px] text-muted hover:text-ink-soft">
             <Settings2 size={12} /> floor {defaults.minMonths}mo · lead {defaults.leadMonths}mo
           </button>
@@ -200,8 +260,8 @@ export function RestockDashboard({
       )}
 
       <div className="overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface">
-        {computed.length === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">No Amazon-mapped SKUs yet — hit Sync.</div>}
-        {computed.map((r, i) => {
+        {displayRows.length === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">No Amazon-mapped SKUs yet — hit Sync.</div>}
+        {displayRows.map((r, i) => {
           const st = STATUS[r.status];
           const totalUnits = r.onHand + r.inProduction;
           const seg = (v: number, c: string) => (v > 0 ? <div key={c} style={{ width: `${(v / (totalUnits || 1)) * 100}%`, background: c }} /> : null);
@@ -213,10 +273,18 @@ export function RestockDashboard({
             r.inProduction && `${n(r.inProduction)} prod`,
           ].filter(Boolean);
           return (
-            <div key={r.id}>
-              <div className={`grid grid-cols-[minmax(180px,1.4fr)_84px_minmax(0,1.7fr)_112px_128px_112px] items-center gap-4 px-4 py-3 ${i < computed.length - 1 && editSku !== r.id ? "border-b border-line" : ""}`}>
+            <div
+              key={r.id}
+              draggable={arranging}
+              onDragStart={() => { dragId.current = r.id; }}
+              onDragOver={(e) => { if (arranging) { e.preventDefault(); onDragOver(r.id); } }}
+              onDragEnd={() => { dragId.current = null; }}
+              className={arranging ? "cursor-grab active:cursor-grabbing" : ""}
+            >
+              <div className={`grid grid-cols-[minmax(180px,1.4fr)_84px_minmax(0,1.7fr)_112px_128px_112px] items-center gap-4 px-4 py-3 ${i < displayRows.length - 1 && editSku !== r.id ? "border-b border-line" : ""}`}>
                 {/* SKU */}
                 <div className="flex min-w-0 items-center gap-2.5">
+                  {arranging && <GripVertical size={16} className="shrink-0 text-muted" />}
                   <SkuAvatar code={r.code} imageUrl={r.imageUrl} size={32} />
                   <div className="min-w-0">
                     <div className="truncate text-[13px] font-medium text-ink">{r.name}</div>

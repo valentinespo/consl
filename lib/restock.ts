@@ -28,6 +28,7 @@ export type RestockRow = {
   rawLeadMonths: number | null;
   reorderToMonths: number;
   batchSize: number;
+  sortIndex: number | null;
 };
 
 export type RestockTotals = {
@@ -47,6 +48,7 @@ export async function getRestock(): Promise<{
   lastSync: Date | null;
   totals: RestockTotals;
   defaults: { minMonths: number; leadMonths: number };
+  sortMode: string;
 }> {
   const [products, snaps, lots, rawInv, settings] = await Promise.all([
     prisma.product.findMany({ where: { asin: { not: null } }, orderBy: { code: "asc" } }),
@@ -145,12 +147,14 @@ export async function getRestock(): Promise<{
       rawLeadMonths: p.leadMonths,
       reorderToMonths: p.reorderToMonths ?? 12,
       batchSize: p.batchSize ?? 0,
+      sortIndex: p.sortIndex,
     };
   });
 
   return {
     rows,
     lastSync,
+    sortMode: settings.sortMode,
     defaults: { minMonths: settings.defaultMinMonths, leadMonths: settings.defaultLeadMonths },
     totals: {
       raw: rawInv.totalValue,

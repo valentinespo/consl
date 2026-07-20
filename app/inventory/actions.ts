@@ -95,3 +95,20 @@ export async function updateSkuPolicy(productId: string, minMonths: number | nul
   revalidatePath("/inventory");
   return { ok: true as const };
 }
+
+/** Set the inventory dashboard sort mode: "sales" | "available" | "manual". */
+export async function setSortMode(mode: string) {
+  await prisma.settings.upsert({ where: { id: "singleton" }, create: { id: "singleton", sortMode: mode }, update: { sortMode: mode } });
+  revalidatePath("/inventory");
+  return { ok: true as const };
+}
+
+/** Save a manual SKU order (array of product ids, top to bottom) and switch to manual sort. */
+export async function saveManualOrder(orderedIds: string[]) {
+  await prisma.$transaction([
+    ...orderedIds.map((id, i) => prisma.product.update({ where: { id }, data: { sortIndex: i } })),
+    prisma.settings.upsert({ where: { id: "singleton" }, create: { id: "singleton", sortMode: "manual" }, update: { sortMode: "manual" } }),
+  ]);
+  revalidatePath("/inventory");
+  return { ok: true as const };
+}
