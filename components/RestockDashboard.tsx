@@ -40,6 +40,7 @@ type Computed = RestockRow & {
   statusLabel: string;
   note?: string;
   recommendedQty: number;
+  belowFloor: boolean; // total supply (on-hand + production) below the floor → genuinely needs a new PO
 };
 
 function compute(r: RestockRow, days: Win, nowMs: number): Computed {
@@ -91,11 +92,14 @@ function compute(r: RestockRow, days: Win, nowMs: number): Computed {
     }
   }
   if (overdue) note = note ? `${note} · production overdue` : "production overdue";
-  if (status === "reorder" || status === "oos") {
+  // A new PO is only warranted when total supply (on-hand + production) is under the floor.
+  // If production already covers the floor, an OOS gap is a timing problem → expedite, don't order.
+  const belowFloor = monthly > 0 && total < r.minMonths;
+  if (belowFloor) {
     const raw = Math.max(0, Math.ceil(r.reorderToMonths * monthly - r.onHand - r.inProduction));
     recommendedQty = r.batchSize > 0 && raw > 0 ? Math.ceil(raw / r.batchSize) * r.batchSize : raw;
   }
-  return { ...r, monthly, onHandCover: A, prodCover: P, status, statusLabel, note, recommendedQty };
+  return { ...r, monthly, onHandCover: A, prodCover: P, status, statusLabel, note, recommendedQty, belowFloor };
 }
 
 export function RestockDashboard({
@@ -119,7 +123,7 @@ export function RestockDashboard({
   const router = useRouter();
 
   const computed = useMemo(() => rows.map((r) => compute(r, win, nowMs)).sort((a, b) => b.monthly - a.monthly), [rows, win, nowMs]);
-  const reorderCount = computed.filter((r) => r.status === "reorder" || r.status === "oos").length;
+  const reorderCount = computed.filter((r) => r.belowFloor).length;
   const avgCover = computed.length ? computed.reduce((s, r) => s + Math.min(r.onHandCover, 60), 0) / computed.length : 0;
 
   function sync() {
@@ -210,55 +214,61 @@ export function RestockDashboard({
           ].filter(Boolean);
           return (
             <div key={r.id}>
-              <div className={`grid grid-cols-[1.5fr_1fr_1.9fr_1fr_0.85fr] items-center gap-3 px-4 py-3 ${i < computed.length - 1 && editSku !== r.id ? "border-b border-line" : ""}`}>
+              <div className={`grid grid-cols-[minmax(180px,1.4fr)_112px_84px_minmax(0,1.7fr)_128px_112px] items-center gap-4 px-4 py-3 ${i < computed.length - 1 && editSku !== r.id ? "border-b border-line" : ""}`}>
+                {/* SKU */}
                 <div className="flex min-w-0 items-center gap-2.5">
-                  <SkuAvatar code={r.code} imageUrl={r.imageUrl} size={30} />
+                  <SkuAvatar code={r.code} imageUrl={r.imageUrl} size={32} />
                   <div className="min-w-0">
                     <div className="truncate text-[13px] font-medium text-ink">{r.name}</div>
                     <div className="text-[11px] tabular text-muted">{n(r.monthly)}/mo · {win}-day</div>
                   </div>
                 </div>
-                {/* Two runways */}
+                {/* Coverage: on-hand months + production months */}
                 <div>
-                  <div className="tabular text-[16px] font-medium leading-tight text-ink">{mo(r.onHandCover)}<span className="text-[11px] font-normal text-muted"> mo on hand</span></div>
+                  <div className="tabular text-[15px] font-medium leading-none text-ink">{mo(r.onHandCover)}<span className="text-[10.5px] font-normal text-muted"> mo</span></div>
+                  <div className="mt-0.5 text-[10px] uppercase tracking-wide text-muted">on hand</div>
                   {r.inProduction > 0 ? (
-                    <div className="tabular text-[12px] font-medium leading-tight" style={{ color: SEG.production }}>+{mo(r.prodCover)}<span className="font-normal text-muted"> mo producing</span></div>
+                    <div className="mt-1.5 tabular text-[13px] font-medium leading-none" style={{ color: SEG.production }}>+{mo(r.prodCover)}<span className="text-[10.5px] font-normal text-muted"> mo prod</span></div>
                   ) : (
-                    <div className="text-[11px] text-muted">no production</div>
+                    <div className="mt-1.5 text-[11px] text-muted">no prod</div>
                   )}
                 </div>
-                {/* Bar + total */}
-                <div className="flex items-center gap-3">
-                  <div className="w-[62px] shrink-0 text-right">
-                    <div className="text-[18px] font-medium leading-none tabular text-ink">{n(totalUnits)}</div>
-                    <div className="text-[10px] text-muted">units</div>
+                {/* Total units */}
+                <div>
+                  <div className="text-[15px] font-medium leading-none tabular text-ink">{n(totalUnits)}</div>
+                  <div className="mt-0.5 text-[10px] uppercase tracking-wide text-muted">units</div>
+                </div>
+                {/* Pipeline bar */}
+                <div className="min-w-0">
+                  <div className="flex h-2.5 overflow-hidden rounded-full bg-surface-2">
+                    {seg(r.fbaAvailable, SEG.available)}
+                    {seg(r.fbaInbound, SEG.inbound)}
+                    {seg(r.fbaReserved, SEG.reserved)}
+                    {seg(r.awdTotal, SEG.awd)}
+                    {seg(r.inProduction, SEG.production)}
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex h-2.5 overflow-hidden rounded-full bg-surface-2">
-                      {seg(r.fbaAvailable, SEG.available)}
-                      {seg(r.fbaInbound, SEG.inbound)}
-                      {seg(r.fbaReserved, SEG.reserved)}
-                      {seg(r.awdTotal, SEG.awd)}
-                      {seg(r.inProduction, SEG.production)}
-                    </div>
-                    <div className="mt-1.5 truncate text-[11px] tabular text-muted">{parts.join(" · ")}</div>
-                  </div>
+                  <div className="mt-1.5 truncate text-[11px] tabular text-muted">{parts.join(" · ")}</div>
                 </div>
                 {/* Status */}
                 <div>
                   <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium" style={{ background: st.bg, color: st.fg }}>
                     <span className="h-1.5 w-1.5 rounded-full" style={{ background: st.dot }} /> {r.statusLabel}
                   </span>
-                  {r.note && <div className="mt-0.5 text-[10px] text-muted">{r.note}</div>}
+                  {r.note && <div className="mt-1 text-[10px] text-muted">{r.note}</div>}
                 </div>
                 {/* Action + gear */}
-                <div className="flex items-center justify-end gap-2 text-right">
-                  <div>
-                    {r.status === "reorder" || r.status === "oos" ? (
-                      <div className="text-[12px]">
-                        <div className="font-medium tabular text-ink">{r.recommendedQty > 0 ? `${n(r.recommendedQty)} units` : "Order"}</div>
-                        <div className="text-[11px] text-muted">recommended</div>
-                      </div>
+                <div className="flex items-center justify-end gap-2">
+                  <div className="text-right">
+                    {r.belowFloor ? (
+                      <>
+                        <div className="text-[12.5px] font-medium tabular text-ink">{r.recommendedQty > 0 ? `${n(r.recommendedQty)} units` : "Order"}</div>
+                        <div className="text-[10.5px] text-muted">recommended</div>
+                      </>
+                    ) : r.status === "oos" ? (
+                      <>
+                        <div className="text-[12.5px] font-medium" style={{ color: "#b91c1c" }}>Expedite</div>
+                        <div className="text-[10.5px] text-muted">incoming lot</div>
+                      </>
                     ) : (
                       <span className="text-[12px] text-muted">Covered</span>
                     )}
