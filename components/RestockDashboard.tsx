@@ -12,12 +12,12 @@ const MONTH = 30.44;
 const WINDOWS = [10, 30, 90] as const;
 type Win = (typeof WINDOWS)[number];
 
-// Distinct, visible segment colors
+// Green scale for the "available now / available soon" buckets; AWD blue; production amber.
 const SEG = {
   available: "#16a34a", // green — sellable now
-  inbound: "#2563eb", // blue — inbound to FBA
-  reserved: "#94a3b8", // slate — reserved / in-transit between FCs
-  awd: "#8b5cf6", // violet — AWD warehouse
+  inbound: "#4ade80", // soft green — inbound to FBA (available soon)
+  reserved: "#bbf7d0", // lighter green — reserved / in-transit between FCs
+  awd: "#2563eb", // blue — AWD warehouse
   production: "#f59e0b", // amber — in production
 };
 
@@ -29,28 +29,30 @@ const STATUS: Record<"reorder" | "watch" | "ok", { bg: string; fg: string; dot: 
 
 const n = (x: number) => Math.round(x).toLocaleString("en-US");
 
-type Computed = RestockRow & { monthly: number; cover: number; status: "reorder" | "watch" | "ok"; recommendedQty: number };
+type Computed = RestockRow & { monthly: number; cover: number; status: "reorder" | "watch" | "ok"; recommendedQty: number; effPosition: number };
 
-function compute(r: RestockRow, days: Win): Computed {
+function compute(r: RestockRow, days: Win, inclProd: boolean): Computed {
   const units = days === 10 ? r.units10d : days === 30 ? r.units30d : r.units90d;
   const monthly = units > 0 ? (units / days) * MONTH : 0;
-  const cover = monthly > 0 ? r.position / monthly : r.position > 0 ? Infinity : 0;
+  const effPosition = r.fbaTotal + r.awdTotal + (inclProd ? r.inProduction : 0);
+  const cover = monthly > 0 ? effPosition / monthly : effPosition > 0 ? Infinity : 0;
   const status = cover < r.minMonths ? "reorder" : cover < r.minMonths * 1.3 ? "watch" : "ok";
   let recommendedQty = 0;
   if (status === "reorder") {
-    const raw = Math.max(0, Math.ceil(r.reorderToMonths * monthly - r.position));
+    const raw = Math.max(0, Math.ceil(r.reorderToMonths * monthly - effPosition));
     recommendedQty = r.batchSize > 0 && raw > 0 ? Math.ceil(raw / r.batchSize) * r.batchSize : raw;
   }
-  return { ...r, monthly, cover, status, recommendedQty };
+  return { ...r, monthly, cover, status, recommendedQty, effPosition };
 }
 
 export function RestockDashboard({ rows, totals, lastSync }: { rows: RestockRow[]; totals: RestockTotals; lastSync: string | null }) {
   const [win, setWin] = useState<Win>(90);
+  const [inclProd, setInclProd] = useState(true);
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
   const router = useRouter();
 
-  const computed = useMemo(() => rows.map((r) => compute(r, win)).sort((a, b) => a.cover - b.cover), [rows, win]);
+  const computed = useMemo(() => rows.map((r) => compute(r, win, inclProd)).sort((a, b) => a.cover - b.cover), [rows, win, inclProd]);
   const reorderCount = computed.filter((r) => r.status === "reorder").length;
   const avgCover = computed.length ? computed.reduce((s, r) => s + Math.min(r.cover, 60), 0) / computed.length : 0;
 
@@ -98,9 +100,9 @@ export function RestockDashboard({ rows, totals, lastSync }: { rows: RestockRow[
         <Kpi label="Avg months cover" value={avgCover >= 60 ? "60+" : avgCover.toFixed(1)} />
       </div>
 
-      {/* Window toggle + legend */}
+      {/* Controls + legend */}
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2.5">
           <span className="text-[13px] font-medium text-ink">By SKU</span>
           <div className="flex gap-0.5 rounded-lg border border-border bg-surface p-0.5">
             {WINDOWS.map((w) => (
@@ -115,14 +117,19 @@ export function RestockDashboard({ rows, totals, lastSync }: { rows: RestockRow[
               </button>
             ))}
           </div>
-          <span className="text-[11px] text-muted">velocity window</span>
+          <button onClick={() => setInclProd((v) => !v)} className="inline-flex items-center gap-1.5 text-[12px] font-medium text-muted hover:text-ink-soft">
+            <span className={`relative h-4 w-7 rounded-full transition-colors ${inclProd ? "bg-accent" : "bg-border"}`}>
+              <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${inclProd ? "left-3.5" : "left-0.5"}`} />
+            </span>
+            Include production
+          </button>
         </div>
         <div className="flex flex-wrap gap-2.5 text-[11px] text-muted">
           <Legend color={SEG.available} label="available" />
           <Legend color={SEG.inbound} label="inbound" />
           <Legend color={SEG.reserved} label="reserved" />
           <Legend color={SEG.awd} label="AWD" />
-          <Legend color={SEG.production} label="production" />
+          {inclProd && <Legend color={SEG.production} label="production" />}
         </div>
       </div>
 
@@ -130,16 +137,16 @@ export function RestockDashboard({ rows, totals, lastSync }: { rows: RestockRow[
         {computed.length === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">No Amazon-mapped SKUs yet — hit Sync.</div>}
         {computed.map((r, i) => {
           const st = STATUS[r.status];
-          const seg = (v: number, c: string) => (v > 0 ? <div key={c} style={{ width: `${(v / (r.position || 1)) * 100}%`, background: c }} /> : null);
+          const seg = (v: number, c: string) => (v > 0 ? <div key={c} style={{ width: `${(v / (r.effPosition || 1)) * 100}%`, background: c }} /> : null);
           const parts = [
             r.fbaAvailable && `${n(r.fbaAvailable)} avail`,
             r.fbaInbound && `${n(r.fbaInbound)} inbound`,
             r.fbaReserved && `${n(r.fbaReserved)} reserved`,
             r.awdTotal && `${n(r.awdTotal)} AWD`,
-            r.inProduction && `${n(r.inProduction)} prod`,
+            inclProd && r.inProduction && `${n(r.inProduction)} prod`,
           ].filter(Boolean);
           return (
-            <div key={r.id} className={`grid grid-cols-[1.6fr_2fr_0.7fr_0.9fr_0.9fr] items-center gap-3 px-4 py-3 ${i < computed.length - 1 ? "border-b border-line" : ""}`}>
+            <div key={r.id} className={`grid grid-cols-[1.5fr_2.2fr_0.7fr_0.9fr_0.9fr] items-center gap-3 px-4 py-3 ${i < computed.length - 1 ? "border-b border-line" : ""}`}>
               <div className="flex min-w-0 items-center gap-2.5">
                 <SkuAvatar code={r.code} imageUrl={r.imageUrl} size={30} />
                 <div className="min-w-0">
@@ -147,16 +154,20 @@ export function RestockDashboard({ rows, totals, lastSync }: { rows: RestockRow[
                   <div className="text-[11px] tabular text-muted">{n(r.monthly)}/mo · {win}-day</div>
                 </div>
               </div>
-              <div>
-                <div className="flex h-2 overflow-hidden rounded-full bg-surface-2">
-                  {seg(r.fbaAvailable, SEG.available)}
-                  {seg(r.fbaInbound, SEG.inbound)}
-                  {seg(r.fbaReserved, SEG.reserved)}
-                  {seg(r.awdTotal, SEG.awd)}
-                  {seg(r.inProduction, SEG.production)}
+              <div className="flex items-center gap-3">
+                <div className="w-[62px] shrink-0 text-right">
+                  <div className="text-[19px] font-medium leading-none tabular text-ink">{n(r.effPosition)}</div>
+                  <div className="text-[10px] text-muted">units</div>
                 </div>
-                <div className="mt-1.5 text-[11px] tabular text-muted">
-                  {parts.join(" · ")} = <span className="font-medium text-ink">{n(r.position)}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex h-2.5 overflow-hidden rounded-full bg-surface-2">
+                    {seg(r.fbaAvailable, SEG.available)}
+                    {seg(r.fbaInbound, SEG.inbound)}
+                    {seg(r.fbaReserved, SEG.reserved)}
+                    {seg(r.awdTotal, SEG.awd)}
+                    {inclProd && seg(r.inProduction, SEG.production)}
+                  </div>
+                  <div className="mt-1.5 truncate text-[11px] tabular text-muted">{parts.join(" · ")}</div>
                 </div>
               </div>
               <div className="tabular text-[16px] font-medium" style={{ color: r.status === "reorder" ? "#ea580c" : "#2563eb" }}>
