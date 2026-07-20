@@ -140,8 +140,10 @@ export function RestockDashboard({
     return arr;
   }, [byId, sort]);
   const displayRows = arranging ? order.map((id) => byId.get(id)).filter((r): r is Computed => !!r) : computed;
-  const reorderCount = computed.filter((r) => r.belowFloor).length;
-  const avgCover = computed.length ? computed.reduce((s, r) => s + Math.min(r.onHandCover, 60), 0) / computed.length : 0;
+  const needsPO = computed.filter((r) => r.belowFloor).length;
+  const expedite = computed.filter((r) => r.status === "oos" && !r.belowFloor).length;
+  const healthy = computed.filter((r) => r.status === "ok" || r.status === "reordered").length;
+  const unitsToOrder = computed.reduce((s, r) => s + (r.belowFloor ? r.recommendedQty : 0), 0);
 
   function pickSort(m: SortMode) {
     setSort(m);
@@ -205,10 +207,10 @@ export function RestockDashboard({
 
       {/* KPIs */}
       <div className="mb-5 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-        <Kpi label="Needs a PO" value={String(reorderCount)} tone={reorderCount > 0 ? "#ea580c" : undefined} />
-        <Kpi label="Amazon (FBA + AWD)" value={n(totals.fbaUnits + totals.awdUnits)} />
-        <Kpi label="In production" value={n(totals.inProductionUnits)} />
-        <Kpi label="Avg on-hand cover" value={avgCover >= 60 ? "60+" : avgCover.toFixed(1)} />
+        <Kpi label="Needs a PO" value={String(needsPO)} tone={needsPO > 0 ? "#ea580c" : undefined} />
+        <Kpi label="Expedite" value={String(expedite)} tone={expedite > 0 ? "#dc2626" : undefined} />
+        <Kpi label="Healthy" value={`${healthy} / ${computed.length}`} tone={computed.length > 0 && healthy === computed.length ? "#16a34a" : undefined} />
+        <Kpi label="Units to order" value={n(unitsToOrder)} />
       </div>
 
       {/* Controls */}
