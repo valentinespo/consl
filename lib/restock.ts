@@ -27,7 +27,9 @@ export type RestockRow = {
 export type RestockTotals = {
   raw: number;
   inProduction: number;
-  amazon: number;
+  fba: number; // FBA inventory value (reverse-FIFO COG)
+  awd: number; // AWD inventory value (reverse-FIFO COG)
+  amazon: number; // fba + awd
   total: number;
   fbaUnits: number;
   awdUnits: number;
@@ -61,7 +63,8 @@ export async function getRestock(): Promise<{ rows: RestockRow[]; totals: Restoc
     }
   }
 
-  let amazon = 0;
+  let fbaValue = 0;
+  let awdValue = 0;
   let fbaUnits = 0;
   let awdUnits = 0;
   let inProductionUnits = 0;
@@ -75,17 +78,32 @@ export async function getRestock(): Promise<{ rows: RestockRow[]; totals: Restoc
     awdUnits += awdTotal;
     inProductionUnits += inProduction;
 
-    // Reverse-FIFO: units still at Amazon (FBA + AWD) are the newest produced → cost newest-lot-first.
-    let need = fbaTotal + awdTotal;
-    let val = 0;
+    // Reverse-FIFO: units still at Amazon are the newest produced. Cost FBA first, then AWD, newest-lot-first.
+    let needFba = fbaTotal;
+    let needAwd = awdTotal;
+    let fbaVal = 0;
+    let awdVal = 0;
     for (const l of finishedLots.get(p.id) ?? []) {
-      if (need <= 0) break;
-      const take = Math.min(need, l.units);
-      val += take * l.cog;
-      need -= take;
+      if (needFba <= 0 && needAwd <= 0) break;
+      let avail = l.units;
+      if (needFba > 0 && avail > 0) {
+        const take = Math.min(needFba, avail);
+        fbaVal += take * l.cog;
+        needFba -= take;
+        avail -= take;
+      }
+      if (needAwd > 0 && avail > 0) {
+        const take = Math.min(needAwd, avail);
+        awdVal += take * l.cog;
+        needAwd -= take;
+      }
     }
-    if (need > 0) val += need * (finishedLots.get(p.id)?.[0]?.cog ?? 0);
-    amazon += val;
+    const fallback = finishedLots.get(p.id)?.[0]?.cog ?? 0;
+    if (needFba > 0) fbaVal += needFba * fallback;
+    if (needAwd > 0) awdVal += needAwd * fallback;
+    fbaValue += fbaVal;
+    awdValue += awdVal;
+    const val = fbaVal + awdVal;
 
     return {
       id: p.id,
@@ -117,8 +135,10 @@ export async function getRestock(): Promise<{ rows: RestockRow[]; totals: Restoc
     totals: {
       raw: rawInv.totalValue,
       inProduction: inProductionValue,
-      amazon,
-      total: rawInv.totalValue + inProductionValue + amazon,
+      fba: fbaValue,
+      awd: awdValue,
+      amazon: fbaValue + awdValue,
+      total: rawInv.totalValue + inProductionValue + fbaValue + awdValue,
       fbaUnits,
       awdUnits,
       inProductionUnits,

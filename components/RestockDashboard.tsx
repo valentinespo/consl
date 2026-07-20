@@ -21,28 +21,44 @@ const SEG = {
   production: "#f59e0b", // amber — in production
 };
 
-const STATUS: Record<"reorder" | "watch" | "ok", { bg: string; fg: string; dot: string; label: string }> = {
+type Status = "reorder" | "watch" | "ok" | "reordered";
+const STATUS: Record<Status, { bg: string; fg: string; dot: string; label: string }> = {
   reorder: { bg: "#ffedd5", fg: "#9a3412", dot: "#ea580c", label: "Reorder" },
   watch: { bg: "#fef9c3", fg: "#854d0e", dot: "#ca8a04", label: "Watch" },
   ok: { bg: "#dcfce7", fg: "#166534", dot: "#16a34a", label: "Healthy" },
+  reordered: { bg: "#dcfce7", fg: "#166534", dot: "#16a34a", label: "Reordered" },
 };
 
 const n = (x: number) => Math.round(x).toLocaleString("en-US");
 
-type Computed = RestockRow & { monthly: number; cover: number; status: "reorder" | "watch" | "ok"; recommendedQty: number; effPosition: number };
+type Computed = RestockRow & { monthly: number; cover: number; status: Status; recommendedQty: number; effPosition: number; note?: string };
 
 function compute(r: RestockRow, days: Win, inclProd: boolean): Computed {
   const units = days === 10 ? r.units10d : days === 30 ? r.units30d : r.units90d;
   const monthly = units > 0 ? (units / days) * MONTH : 0;
-  const effPosition = r.fbaTotal + r.awdTotal + (inclProd ? r.inProduction : 0);
+  const availPos = r.fbaTotal + r.awdTotal;
+  const fullPos = availPos + r.inProduction;
+  const effPosition = inclProd ? fullPos : availPos;
   const cover = monthly > 0 ? effPosition / monthly : effPosition > 0 ? Infinity : 0;
-  const status = cover < r.minMonths ? "reorder" : cover < r.minMonths * 1.3 ? "watch" : "ok";
+  const fullCover = monthly > 0 ? fullPos / monthly : fullPos > 0 ? Infinity : 0;
+  const hasProduction = r.inProduction > 0;
+  // Production counts as incoming supply: order more only if even production won't hold the floor.
+  const needsOrder = fullCover < r.minMonths;
+
+  let status: Status;
+  let note: string | undefined;
   let recommendedQty = 0;
-  if (status === "reorder") {
-    const raw = Math.max(0, Math.ceil(r.reorderToMonths * monthly - effPosition));
+  if (needsOrder) {
+    status = "reorder";
+    const raw = Math.max(0, Math.ceil(r.reorderToMonths * monthly - fullPos));
     recommendedQty = r.batchSize > 0 && raw > 0 ? Math.ceil(raw / r.batchSize) * r.batchSize : raw;
+    if (hasProduction) note = "reorder placed · still short";
+  } else if (!inclProd && hasProduction) {
+    status = "reordered"; // available is low, but a production order already covers the floor
+  } else {
+    status = cover < r.minMonths * 1.3 ? "watch" : "ok";
   }
-  return { ...r, monthly, cover, status, recommendedQty, effPosition };
+  return { ...r, monthly, cover, status, recommendedQty, effPosition, note };
 }
 
 export function RestockDashboard({ rows, totals, lastSync }: { rows: RestockRow[]; totals: RestockTotals; lastSync: string | null }) {
@@ -52,7 +68,7 @@ export function RestockDashboard({ rows, totals, lastSync }: { rows: RestockRow[
   const [msg, setMsg] = useState<string | null>(null);
   const router = useRouter();
 
-  const computed = useMemo(() => rows.map((r) => compute(r, win, inclProd)).sort((a, b) => a.cover - b.cover), [rows, win, inclProd]);
+  const computed = useMemo(() => rows.map((r) => compute(r, win, inclProd)).sort((a, b) => b.monthly - a.monthly), [rows, win, inclProd]);
   const reorderCount = computed.filter((r) => r.status === "reorder").length;
   const avgCover = computed.length ? computed.reduce((s, r) => s + Math.min(r.cover, 60), 0) / computed.length : 0;
 
@@ -74,9 +90,10 @@ export function RestockDashboard({ rows, totals, lastSync }: { rows: RestockRow[
           <div className="text-[11px] font-medium uppercase tracking-wide text-accent">Total inventory value</div>
           <div className="mt-1 text-[38px] font-medium leading-none tracking-tight text-ink tabular">{money(totals.total)}</div>
           <div className="mt-3.5 flex flex-wrap gap-2">
-            <ValuePill dot="#94a3b8" label="Raw materials" value={money(totals.raw)} />
+            <ValuePill dot={SEG.available} label="FBA" value={money(totals.fba)} />
+            <ValuePill dot={SEG.awd} label="AWD" value={money(totals.awd)} />
             <ValuePill dot={SEG.production} label="In production" value={money(totals.inProduction)} />
-            <ValuePill dot={SEG.inbound} label="Amazon (FBA + AWD)" value={money(totals.amazon)} />
+            <ValuePill dot="#94a3b8" label="Raw materials" value={money(totals.raw)} />
           </div>
         </div>
         <div className="flex flex-col items-end gap-1.5">
@@ -170,7 +187,7 @@ export function RestockDashboard({ rows, totals, lastSync }: { rows: RestockRow[
                   <div className="mt-1.5 truncate text-[11px] tabular text-muted">{parts.join(" · ")}</div>
                 </div>
               </div>
-              <div className="tabular text-[16px] font-medium" style={{ color: r.status === "reorder" ? "#ea580c" : "#2563eb" }}>
+              <div className="tabular text-[16px] font-medium" style={{ color: r.status === "reorder" ? "#ea580c" : r.status === "reordered" || r.status === "ok" ? "#16a34a" : "#2563eb" }}>
                 {r.cover === Infinity ? "∞" : r.cover.toFixed(1)}
                 <span className="text-[11px] font-normal text-muted">mo</span>
               </div>
@@ -178,6 +195,7 @@ export function RestockDashboard({ rows, totals, lastSync }: { rows: RestockRow[
                 <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium" style={{ background: st.bg, color: st.fg }}>
                   <span className="h-1.5 w-1.5 rounded-full" style={{ background: st.dot }} /> {st.label}
                 </span>
+                {r.note && <div className="mt-0.5 text-[10px] text-muted">{r.note}</div>}
               </div>
               <div className="text-right">
                 {r.status === "reorder" ? (
