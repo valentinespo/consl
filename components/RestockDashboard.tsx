@@ -214,7 +214,7 @@ export function RestockDashboard({
           ].filter(Boolean);
           return (
             <div key={r.id}>
-              <div className={`grid grid-cols-[minmax(180px,1.4fr)_112px_84px_minmax(0,1.7fr)_128px_112px] items-center gap-4 px-4 py-3 ${i < computed.length - 1 && editSku !== r.id ? "border-b border-line" : ""}`}>
+              <div className={`grid grid-cols-[minmax(180px,1.4fr)_84px_minmax(0,1.7fr)_112px_128px_112px] items-center gap-4 px-4 py-3 ${i < computed.length - 1 && editSku !== r.id ? "border-b border-line" : ""}`}>
                 {/* SKU */}
                 <div className="flex min-w-0 items-center gap-2.5">
                   <SkuAvatar code={r.code} imageUrl={r.imageUrl} size={32} />
@@ -222,16 +222,6 @@ export function RestockDashboard({
                     <div className="truncate text-[13px] font-medium text-ink">{r.name}</div>
                     <div className="text-[11px] tabular text-muted">{n(r.monthly)}/mo · {win}-day</div>
                   </div>
-                </div>
-                {/* Coverage: on-hand months + production months */}
-                <div>
-                  <div className="tabular text-[15px] font-medium leading-none text-ink">{mo(r.onHandCover)}<span className="text-[10.5px] font-normal text-muted"> mo</span></div>
-                  <div className="mt-0.5 text-[10px] uppercase tracking-wide text-muted">on hand</div>
-                  {r.inProduction > 0 ? (
-                    <div className="mt-1.5 tabular text-[13px] font-medium leading-none" style={{ color: SEG.production }}>+{mo(r.prodCover)}<span className="text-[10.5px] font-normal text-muted"> mo prod</span></div>
-                  ) : (
-                    <div className="mt-1.5 text-[11px] text-muted">no prod</div>
-                  )}
                 </div>
                 {/* Total units */}
                 <div>
@@ -248,6 +238,16 @@ export function RestockDashboard({
                     {seg(r.inProduction, SEG.production)}
                   </div>
                   <div className="mt-1.5 truncate text-[11px] tabular text-muted">{parts.join(" · ")}</div>
+                </div>
+                {/* Coverage: on-hand months + production months */}
+                <div>
+                  <div className="tabular text-[15px] font-medium leading-none text-ink">{mo(r.onHandCover)}<span className="text-[10.5px] font-normal text-muted"> mo</span></div>
+                  <div className="mt-0.5 text-[10px] uppercase tracking-wide text-muted">on hand</div>
+                  {r.inProduction > 0 ? (
+                    <div className="mt-1.5 tabular text-[13px] font-medium leading-none" style={{ color: SEG.production }}>+{mo(r.prodCover)}<span className="text-[10.5px] font-normal text-muted"> mo prod</span></div>
+                  ) : (
+                    <div className="mt-1.5 text-[11px] text-muted">no prod</div>
+                  )}
                 </div>
                 {/* Status */}
                 <div>
