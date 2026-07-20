@@ -89,6 +89,32 @@ export async function getFbaInventory(): Promise<FbaRow[]> {
   return out;
 }
 
+export type AwdRow = { sku: string; onhand: number; inbound: number };
+
+/** Amazon Warehousing & Distribution inventory per SKU (on-hand + inbound to AWD). */
+export async function getAwdInventory(): Promise<AwdRow[]> {
+  const out: AwdRow[] = [];
+  let next = "";
+  do {
+    const q = new URLSearchParams({ details: "SHOW" });
+    if (next) q.set("nextToken", next);
+    const r = await sp(`/awd/2024-05-09/inventory?${q.toString()}`);
+    if (r.status === 403 || r.status === 404) return out; // AWD not enabled — treat as none
+    const j = await r.json();
+    if (!r.ok) throw new Error(`AWD inventory: ${JSON.stringify(j).slice(0, 200)}`);
+    for (const it of j.inventory || []) {
+      const d = it.inventoryDetails || {};
+      out.push({
+        sku: it.sku,
+        onhand: it.totalOnhandQuantity ?? d.availableDistributableQuantity ?? 0,
+        inbound: it.totalInboundQuantity ?? d.inboundQuantity ?? 0,
+      });
+    }
+    next = j.nextToken || "";
+  } while (next);
+  return out;
+}
+
 /** Units ordered per child ASIN over [startISO, endISO] via the Sales & Traffic report (async). */
 export async function getSalesUnits(startISO: string, endISO: string): Promise<Record<string, number>> {
   let r = await sp("/reports/2021-06-30/reports", {

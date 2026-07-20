@@ -80,9 +80,12 @@ model SkuSnapshot {
   capturedAt       DateTime @default(now())
   fbaAvailable     Int      @default(0) // fulfillable
   fbaInbound       Int      @default(0) // working + shipped + receiving
-  fbaReserved      Int      @default(0)
+  fbaReserved      Int      @default(0) // reserved + in-transit-between-FCs + researching
   fbaUnfulfillable Int      @default(0)
   fbaTotal         Int      @default(0)
+  awdOnhand        Int      @default(0) // Amazon Warehousing & Distribution on-hand
+  awdInbound       Int      @default(0) // inbound to AWD
+  units10d         Int      @default(0)
   units30d         Int      @default(0)
   units90d         Int      @default(0)
 

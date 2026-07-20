@@ -1,8 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { getInventory } from "@/lib/queries";
 
-const MONTH = 30.44; // avg days/month
-
 export type RestockRow = {
   id: string;
   code: string;
@@ -10,33 +8,44 @@ export type RestockRow = {
   imageUrl: string | null;
   fbaAvailable: number;
   fbaInbound: number;
-  fbaReserved: number;
+  fbaReserved: number; // reserved + in-transit-between-FCs + researching (so avail+inbound+reserved = fbaTotal)
   fbaTotal: number;
+  awdOnhand: number;
+  awdInbound: number;
+  awdTotal: number;
   inProduction: number;
-  position: number;
-  monthly: number; // units/month, 90-day avg
-  cover: number; // months of cover
+  position: number; // fbaTotal + awdTotal + inProduction
+  units10d: number;
+  units30d: number;
+  units90d: number;
   minMonths: number;
-  status: "reorder" | "watch" | "ok";
-  recommendedQty: number;
-  amazonValue: number; // reverse-FIFO COG of the FBA units
+  reorderToMonths: number;
+  batchSize: number;
+  amazonValue: number; // reverse-FIFO COG of FBA + AWD units
 };
 
-/** The restock dashboard model: per-SKU position, velocity, cover, recommendations + total inventory value. */
-export async function getRestock() {
+export type RestockTotals = {
+  raw: number;
+  inProduction: number;
+  amazon: number;
+  total: number;
+  fbaUnits: number;
+  awdUnits: number;
+  inProductionUnits: number;
+};
+
+/** Per-SKU raw position numbers + window sales + total inventory value. Window-dependent
+ * metrics (velocity, cover, status) are computed client-side so the 10/30/90-day toggle is instant. */
+export async function getRestock(): Promise<{ rows: RestockRow[]; totals: RestockTotals; lastSync: Date | null }> {
   const [products, snaps, lots, rawInv] = await Promise.all([
     prisma.product.findMany({ where: { asin: { not: null } }, orderBy: { code: "asc" } }),
     prisma.skuSnapshot.findMany({ distinct: ["productId"], orderBy: { capturedAt: "desc" } }),
-    prisma.lot.findMany({
-      include: { lines: true },
-      orderBy: [{ poDate: "desc" }, { createdAt: "desc" }],
-    }),
+    prisma.lot.findMany({ include: { lines: true }, orderBy: [{ poDate: "desc" }, { createdAt: "desc" }] }),
     getInventory(),
   ]);
   const snapByProduct = new Map(snaps.map((s) => [s.productId, s]));
   const lastSync = snaps.reduce<Date | null>((m, s) => (!m || s.capturedAt > m ? s.capturedAt : m), null);
 
-  // Per-SKU: in-production units/value, and finished lots newest-first (for reverse-FIFO Amazon costing).
   const inProdUnits = new Map<string, number>();
   let inProductionValue = 0;
   const finishedLots = new Map<string, { units: number; cog: number }[]>();
@@ -52,19 +61,22 @@ export async function getRestock() {
     }
   }
 
-  let amazonValue = 0;
+  let amazon = 0;
+  let fbaUnits = 0;
+  let awdUnits = 0;
+  let inProductionUnits = 0;
   const rows: RestockRow[] = products.map((p) => {
     const s = snapByProduct.get(p.id);
     const fbaTotal = s?.fbaTotal ?? 0;
-    const units90 = s?.units90d ?? 0;
+    const awdTotal = (s?.awdOnhand ?? 0) + (s?.awdInbound ?? 0);
     const inProduction = inProdUnits.get(p.id) ?? 0;
-    const position = fbaTotal + inProduction;
-    const monthly = (units90 / 90) * MONTH;
-    const cover = monthly > 0 ? position / monthly : position > 0 ? 999 : 0;
-    const minMonths = p.minMonths ?? 5;
+    const position = fbaTotal + awdTotal + inProduction;
+    fbaUnits += fbaTotal;
+    awdUnits += awdTotal;
+    inProductionUnits += inProduction;
 
-    // Reverse-FIFO: the units still at FBA are the newest produced, so cost them newest-lot-first.
-    let need = fbaTotal;
+    // Reverse-FIFO: units still at Amazon (FBA + AWD) are the newest produced → cost newest-lot-first.
+    let need = fbaTotal + awdTotal;
     let val = 0;
     for (const l of finishedLots.get(p.id) ?? []) {
       if (need <= 0) break;
@@ -72,14 +84,8 @@ export async function getRestock() {
       val += take * l.cog;
       need -= take;
     }
-    if (need > 0) val += need * (finishedLots.get(p.id)?.[0]?.cog ?? 0); // fallback for uncovered units
-    amazonValue += val;
-
-    const status: RestockRow["status"] = cover < minMonths ? "reorder" : cover < minMonths * 1.3 ? "watch" : "ok";
-    const targetMonths = p.reorderToMonths ?? 12;
-    const raw = status === "reorder" ? Math.max(0, Math.ceil(targetMonths * monthly - position)) : 0;
-    const batch = p.batchSize ?? 0;
-    const recommendedQty = batch > 0 && raw > 0 ? Math.ceil(raw / batch) * batch : raw;
+    if (need > 0) val += need * (finishedLots.get(p.id)?.[0]?.cog ?? 0);
+    amazon += val;
 
     return {
       id: p.id,
@@ -90,17 +96,20 @@ export async function getRestock() {
       fbaInbound: s?.fbaInbound ?? 0,
       fbaReserved: s?.fbaReserved ?? 0,
       fbaTotal,
+      awdOnhand: s?.awdOnhand ?? 0,
+      awdInbound: s?.awdInbound ?? 0,
+      awdTotal,
       inProduction,
       position,
-      monthly,
-      cover,
-      minMonths,
-      status,
-      recommendedQty,
+      units10d: s?.units10d ?? 0,
+      units30d: s?.units30d ?? 0,
+      units90d: s?.units90d ?? 0,
+      minMonths: p.minMonths ?? 5,
+      reorderToMonths: p.reorderToMonths ?? 12,
+      batchSize: p.batchSize ?? 0,
       amazonValue: val,
     };
   });
-  rows.sort((a, b) => a.cover - b.cover); // most urgent first
 
   return {
     rows,
@@ -108,12 +117,11 @@ export async function getRestock() {
     totals: {
       raw: rawInv.totalValue,
       inProduction: inProductionValue,
-      amazon: amazonValue,
-      total: rawInv.totalValue + inProductionValue + amazonValue,
-      fbaUnits: rows.reduce((s, r) => s + r.fbaTotal, 0),
-      inProductionUnits: rows.reduce((s, r) => s + r.inProduction, 0),
-      reorderCount: rows.filter((r) => r.status === "reorder").length,
-      avgCover: rows.length ? rows.reduce((s, r) => s + Math.min(r.cover, 60), 0) / rows.length : 0,
+      amazon,
+      total: rawInv.totalValue + inProductionValue + amazon,
+      fbaUnits,
+      awdUnits,
+      inProductionUnits,
     },
   };
 }
