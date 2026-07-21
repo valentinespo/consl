@@ -121,6 +121,13 @@ model Settings {
   defaultMinMonths  Float  @default(5) // months of stock to never fall below
   defaultLeadMonths Float  @default(4.5) // production lead time (PO → landing at FBA)
   sortMode          String @default("sales") // inventory dashboard sort: sales | available | manual
+  // --- Automatic daily Amazon sync + inventory-value snapshot ---
+  syncEnabled Boolean   @default(true)
+  syncHour    Int       @default(5) // hour-of-day to run (in syncTz)
+  syncMinute  Int       @default(0)
+  syncTz      String    @default("America/Argentina/Buenos_Aires")
+  lastSyncRun String? // last completed run, "YYYY-MM-DD" in syncTz (idempotency guard)
+  lastSyncAt  DateTime? // exact timestamp of the last completed run
 }
 
 /// Extensible raw-material catalog (Tea Bag, Pouch, ...).

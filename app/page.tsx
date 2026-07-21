@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getDashboard, getLots } from "@/lib/queries";
-import { getRestock } from "@/lib/restock";
+import { getRestock, getInventoryValueHistory } from "@/lib/restock";
 import { money } from "@/lib/format";
 import { Card, PageHeader, SectionTitle, FacilityTag } from "@/components/ui";
 import { RecentLots } from "@/components/RecentLots";
@@ -9,7 +9,7 @@ import { TotalValueCard } from "@/components/TotalValueCard";
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const [d, lots, { totals }] = await Promise.all([getDashboard(), getLots(), getRestock()]);
+  const [d, lots, { totals }, history] = await Promise.all([getDashboard(), getLots(), getRestock(), getInventoryValueHistory()]);
   const recent = lots.slice(0, 6);
   const maxFac = Math.max(1, ...d.byFacility.map((f) => f.value));
 
@@ -17,7 +17,7 @@ export default async function DashboardPage() {
     <>
       <PageHeader title="Dashboard" subtitle="Production value, raw inventory and recent activity at a glance." />
 
-      <TotalValueCard totals={totals} />
+      <TotalValueCard totals={totals} history={history} />
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-1">

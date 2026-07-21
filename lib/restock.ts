@@ -182,6 +182,12 @@ export async function getRestock(): Promise<{
   };
 }
 
+/** Daily inventory-value history (oldest → newest) for the dashboard chart. */
+export async function getInventoryValueHistory(): Promise<{ day: string; total: number }[]> {
+  const rows = await prisma.inventoryValueSnapshot.findMany({ orderBy: { day: "asc" }, select: { day: true, total: true } });
+  return rows.map((r) => ({ day: r.day, total: r.total }));
+}
+
 /** Upsert today's inventory-value point (one row per calendar day). Non-fatal — never breaks a render. */
 async function recordDailyInventoryValue(t: RestockTotals) {
   const day = new Date().toISOString().slice(0, 10);

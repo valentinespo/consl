@@ -1,5 +1,6 @@
 import { money } from "@/lib/format";
 import type { RestockTotals } from "@/lib/restock";
+import { ValueSparkline } from "@/components/ValueSparkline";
 
 const PILLS = [
   { dot: "#16a34a", label: "FBA", key: "fba" },
@@ -8,8 +9,17 @@ const PILLS = [
   { dot: "#94a3b8", label: "Raw materials", key: "raw" },
 ] as const;
 
-/** The headline inventory-value card: total across FBA + AWD + production + raw materials. */
-export function TotalValueCard({ totals, className = "" }: { totals: RestockTotals; className?: string }) {
+/** The headline inventory-value card: total across FBA + AWD + production + raw materials.
+ *  Pass `history` (dashboard only) to render the value-over-time sparkline inside the card. */
+export function TotalValueCard({
+  totals,
+  history,
+  className = "",
+}: {
+  totals: RestockTotals;
+  history?: { day: string; total: number }[];
+  className?: string;
+}) {
   return (
     <div className={`rounded-[var(--radius-card)] border border-accent-strong bg-accent-soft p-5 ${className}`}>
       <div className="text-[11px] font-medium uppercase tracking-wide text-accent">Total inventory value</div>
@@ -22,6 +32,7 @@ export function TotalValueCard({ totals, className = "" }: { totals: RestockTota
           </span>
         ))}
       </div>
+      {history && history.length > 0 && <ValueSparkline data={history} />}
     </div>
   );
 }
