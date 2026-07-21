@@ -188,10 +188,14 @@ export async function getRestock(): Promise<{
   };
 }
 
-/** Daily inventory-value history (oldest → newest) for the dashboard chart. */
-export async function getInventoryValueHistory(): Promise<{ day: string; total: number }[]> {
-  const rows = await prisma.inventoryValueSnapshot.findMany({ orderBy: { day: "asc" }, select: { day: true, total: true } });
-  return rows.map((r) => ({ day: r.day, total: r.total }));
+export type ValueHistoryPoint = { day: string; total: number; raw: number; inProduction: number; fba: number; awd: number };
+
+/** Daily inventory-value history (oldest → newest) for the dashboard charts, split by bucket. */
+export async function getInventoryValueHistory(): Promise<ValueHistoryPoint[]> {
+  return prisma.inventoryValueSnapshot.findMany({
+    orderBy: { day: "asc" },
+    select: { day: true, total: true, raw: true, inProduction: true, fba: true, awd: true },
+  });
 }
 
 /** Upsert today's inventory-value point (one row per calendar day). Non-fatal — never breaks a render. */

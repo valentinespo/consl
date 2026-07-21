@@ -266,6 +266,7 @@ export async function getMaterialTypes() {
     name: x.name,
     unitLabel: x.unitLabel,
     defaultPerUnit: x.defaultPerUnit,
+    lowStockThreshold: x.lowStockThreshold,
     imageUrl: x.imageUrl,
   }));
 }

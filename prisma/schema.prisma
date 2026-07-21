@@ -101,6 +101,13 @@ model SkuSnapshot {
   @@index([productId, capturedAt])
 }
 
+/// Dashboard notifications the user manually dismissed. Pruned automatically once the
+/// underlying condition resolves, so a recurring alert reappears fresh.
+model DismissedNotification {
+  key         String   @id // stable alert key, e.g. "reorder:LDX" | "material:TEABAG"
+  dismissedAt DateTime @default(now())
+}
+
 /// One row per day: the total inventory value split by bucket, for the evolution chart.
 /// Captured going forward (upserted per calendar day) — the live total is already de-duplicated,
 /// so each daily point is internally consistent with no double-counting across buckets.
@@ -142,6 +149,7 @@ model MaterialType {
   defaultPerUnit Float         @default(1) // default consumed per finished unit
   poolKey        String        @default("FACILITY") // FACILITY | FACILITY_SKU
   skuSpecific    Boolean       @default(false) // purchases & pools are per-SKU
+  lowStockThreshold Float? // dashboard notifies when available qty drops below this (null = off)
   imageUrl       String?
   purchases      Purchase[]
   purchaseInvoices PurchaseInvoice[]

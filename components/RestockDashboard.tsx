@@ -7,12 +7,11 @@ import { SkuAvatar } from "@/components/ui";
 import { TotalValueCard } from "@/components/TotalValueCard";
 import { syncAmazon, updateGlobalDefaults, updateSkuPolicy, setSortMode, saveManualOrder, setSkuWindow } from "@/app/inventory/actions";
 import type { RestockRow, RestockTotals } from "@/lib/restock";
+import { computeReorder, type ReorderResult } from "@/lib/reorder";
 
 type SortMode = "sales" | "available" | "manual";
 const SORT_LABEL: Record<SortMode, string> = { sales: "Monthly sales", available: "Units available", manual: "Manual" };
 
-const MONTH = 30.44;
-const MONTH_MS = MONTH * 86_400_000;
 const WINDOWS = [10, 30, 90] as const;
 type Win = (typeof WINDOWS)[number];
 
@@ -35,96 +34,10 @@ const STATUS: Record<Status, { bg: string; fg: string; dot: string; label: strin
 const n = (x: number) => Math.round(x).toLocaleString("en-US");
 const mo = (x: number) => (x === Infinity ? "∞" : x.toFixed(1));
 
-type Computed = RestockRow & {
-  monthly: number;
-  win: Win; // effective window used (per-SKU override or global)
-  excl: number; // OOS days excluded from the end of the window
-  override: boolean; // this SKU has a custom window/exclude config
-  onHandCover: number;
-  prodCover: number;
-  status: Status;
-  statusLabel: string;
-  note?: string;
-  recommendedQty: number;
-  belowFloor: boolean; // total supply (on-hand + production) below the floor → genuinely needs a new PO
-};
-
-const DAY = 86_400_000;
+type Computed = RestockRow & ReorderResult;
 
 function compute(r: RestockRow, globalWin: Win, nowMs: number): Computed {
-  // Effective window: per-SKU override falls back to the global toggle.
-  const win: Win = r.windowDays === 10 || r.windowDays === 30 || r.windowDays === 90 ? r.windowDays : globalWin;
-  const override = r.windowDays != null || (r.excludeDays ?? 0) > 0;
-  const excl = Math.min(Math.max(0, r.excludeDays ?? 0), win - 1); // keep ≥1 day in the average
-
-  // Plain calendar-day average over [win] days, dropping the most recent [excl] (OOS) days.
-  // Anchored to the sync's window end (salesEnd), not "now", so the number is stable between syncs.
-  const endMs = r.salesEnd ? Date.parse(r.salesEnd) : nowMs - 2 * DAY;
-  const hasDaily = Object.keys(r.dailySales).length > 0;
-  let units = 0;
-  if (hasDaily) {
-    for (let i = excl; i < win; i++) {
-      const d = new Date(endMs - i * DAY).toISOString().slice(0, 10);
-      units += r.dailySales[d] ?? 0;
-    }
-  } else {
-    units = win === 10 ? r.units10d : win === 30 ? r.units30d : r.units90d;
-  }
-  const denomDays = hasDaily ? win - excl : win;
-  const monthly = denomDays > 0 ? (units / denomDays) * MONTH : 0;
-  const A = monthly > 0 ? r.onHand / monthly : r.onHand > 0 ? Infinity : 0;
-  const P = monthly > 0 ? r.inProduction / monthly : r.inProduction > 0 ? Infinity : 0;
-  const hasPO = r.inProduction > 0;
-  const total = A + P;
-
-  // Time until the soonest lot lands (PO date + lead), and whether it's overdue.
-  let Tc = 0;
-  let overdue = false;
-  if (hasPO && r.soonestPoISO) {
-    const t = (new Date(r.soonestPoISO).getTime() + r.leadMonths * MONTH_MS - nowMs) / MONTH_MS;
-    overdue = t < 0;
-    Tc = Math.max(0, t);
-  }
-
-  let status: Status = "ok";
-  let statusLabel = STATUS.ok.label;
-  let note: string | undefined;
-  let recommendedQty = 0;
-
-  if (monthly === 0) {
-    status = "ok";
-    statusLabel = "Healthy";
-  } else if (hasPO) {
-    if (A < Tc) {
-      status = "oos";
-      statusLabel = `OOS for ${Math.round((Tc - A) * MONTH)}d`;
-    } else if (total >= r.minMonths) {
-      status = "reordered";
-      statusLabel = "Reordered";
-    } else {
-      status = "reorder";
-      statusLabel = "Reorder";
-      if (total < r.leadMonths) note = `off by ${Math.round((r.leadMonths - total) * MONTH)}d`;
-    }
-  } else {
-    if (A >= r.minMonths) {
-      status = "ok";
-      statusLabel = "Healthy";
-    } else {
-      status = "reorder";
-      statusLabel = "Reorder";
-      if (A < r.leadMonths) note = `off by ${Math.round((r.leadMonths - A) * MONTH)}d`;
-    }
-  }
-  if (overdue) note = note ? `${note} · production overdue` : "production overdue";
-  // A new PO is only warranted when total supply (on-hand + production) is under the floor.
-  // If production already covers the floor, an OOS gap is a timing problem → expedite, don't order.
-  const belowFloor = monthly > 0 && total < r.minMonths;
-  if (belowFloor) {
-    const raw = Math.max(0, Math.ceil(r.reorderToMonths * monthly - r.onHand - r.inProduction));
-    recommendedQty = r.batchSize > 0 && raw > 0 ? Math.ceil(raw / r.batchSize) * r.batchSize : raw;
-  }
-  return { ...r, monthly, win, excl, override, onHandCover: A, prodCover: P, status, statusLabel, note, recommendedQty, belowFloor };
+  return { ...r, ...computeReorder(r, globalWin, nowMs) };
 }
 
 export function RestockDashboard({

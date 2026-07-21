@@ -73,22 +73,33 @@ export function EditableProductCard({ product }: { product: { id: string; code: 
 export function EditableMaterialCard({
   material,
 }: {
-  material: { id: string; code: string; name: string; unitLabel: string; defaultPerUnit: number; imageUrl: string | null };
+  material: { id: string; code: string; name: string; unitLabel: string; defaultPerUnit: number; lowStockThreshold: number | null; imageUrl: string | null };
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(material.name);
   const [unitLabel, setUnitLabel] = useState(material.unitLabel);
   const [defaultPerUnit, setDefaultPerUnit] = useState(String(material.defaultPerUnit));
+  const [threshold, setThreshold] = useState(material.lowStockThreshold != null ? String(material.lowStockThreshold) : "");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const dirty = name.trim() !== material.name || unitLabel.trim() !== material.unitLabel || (Number(defaultPerUnit) || 0) !== material.defaultPerUnit;
+  const dirty =
+    name.trim() !== material.name ||
+    unitLabel.trim() !== material.unitLabel ||
+    (Number(defaultPerUnit) || 0) !== material.defaultPerUnit ||
+    (threshold.trim() === "" ? null : Number(threshold)) !== material.lowStockThreshold;
 
   async function save() {
     setError(null);
     setPending(true);
-    const res = await updateMaterial({ id: material.id, name, unitLabel, defaultPerUnit: Number(defaultPerUnit) || 1 });
+    const res = await updateMaterial({
+      id: material.id,
+      name,
+      unitLabel,
+      defaultPerUnit: Number(defaultPerUnit) || 1,
+      lowStockThreshold: threshold.trim() === "" ? null : Number(threshold) || null,
+    });
     setPending(false);
     if (!res.ok) {
       setError(res.error);
@@ -101,6 +112,7 @@ export function EditableMaterialCard({
     setName(material.name);
     setUnitLabel(material.unitLabel);
     setDefaultPerUnit(String(material.defaultPerUnit));
+    setThreshold(material.lowStockThreshold != null ? String(material.lowStockThreshold) : "");
     setError(null);
     setEditing(false);
   }
@@ -123,6 +135,10 @@ export function EditableMaterialCard({
             <input value={unitLabel} onChange={(e) => setUnitLabel(e.target.value)} placeholder="unit label" className={inputCls} />
           </div>
           <div className="text-[10.5px] text-muted">default per finished unit · code {material.code} (fixed)</div>
+          <div className="flex items-center gap-1.5">
+            <input value={threshold} onChange={(e) => setThreshold(e.target.value)} type="number" step="any" min="0" placeholder="off" className={`${inputCls} w-20 text-right tabular`} />
+            <span className="text-[11px] text-muted">low-stock alert threshold ({material.unitLabel})</span>
+          </div>
           {error && <div className="text-[11px] text-negative">{error}</div>}
           <div className="flex gap-1.5 pt-0.5">
             <button onClick={save} disabled={pending || !dirty} className="rounded-lg bg-ink px-2.5 py-1 text-[12px] font-medium text-white hover:opacity-90 disabled:opacity-40">
@@ -137,7 +153,10 @@ export function EditableMaterialCard({
         <>
           <div className="min-w-0 flex-1">
             <div className="font-semibold text-ink">{material.name}</div>
-            <div className="truncate text-[12.5px] text-muted">{material.defaultPerUnit} {material.unitLabel}/unit default</div>
+            <div className="truncate text-[12.5px] text-muted">
+              {material.defaultPerUnit} {material.unitLabel}/unit default
+              {material.lowStockThreshold != null && ` · alert < ${material.lowStockThreshold.toLocaleString()}`}
+            </div>
           </div>
           <button onClick={() => setEditing(true)} title="Edit material" className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-ink-soft">
             <Pencil size={14} />

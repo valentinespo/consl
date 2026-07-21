@@ -43,6 +43,13 @@ export async function saveSettings(input: {
   return { ok: true as const };
 }
 
+/** Dismiss a dashboard notification (re-appears if the condition recurs after resolving). */
+export async function dismissNotification(key: string) {
+  await prisma.dismissedNotification.upsert({ where: { key }, create: { key }, update: {} });
+  revalidatePath("/");
+  return { ok: true as const };
+}
+
 /** Persist the dashboard widget layout (array of { id, x, y, w, h }). */
 export async function saveDashboardLayout(layout: { id: string; x: number; y: number; w: number; h: number }[]) {
   await prisma.settings.upsert({
