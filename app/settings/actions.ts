@@ -43,6 +43,16 @@ export async function saveSettings(input: {
   return { ok: true as const };
 }
 
+/** Persist the dashboard widget layout (array of { id, x, y, w, h }). */
+export async function saveDashboardLayout(layout: { id: string; x: number; y: number; w: number; h: number }[]) {
+  await prisma.settings.upsert({
+    where: { id: "singleton" },
+    create: { id: "singleton", dashboardLayout: layout },
+    update: { dashboardLayout: layout },
+  });
+  return { ok: true as const };
+}
+
 /** Manual "Run now" from the settings panel: sync Amazon + record the value snapshot immediately. */
 export async function runSyncNow() {
   try {

@@ -45,6 +45,8 @@ export type RestockTotals = {
   fbaUnits: number;
   awdUnits: number;
   inProductionUnits: number;
+  monthlyCOGS: number; // blended monthly sell-through valued at cost
+  coverMonths: number; // total inventory value ÷ monthlyCOGS = months of cover
 };
 
 export async function getRestock(): Promise<{
@@ -89,6 +91,7 @@ export async function getRestock(): Promise<{
   let fbaUnits = 0;
   let awdUnits = 0;
   let inProductionUnits = 0;
+  let monthlyCOGS = 0; // Σ monthly units sold × newest lot cost → blended sell-through at cost
   const rows: RestockRow[] = products.map((p) => {
     const s = snapByProduct.get(p.id);
     const fbaTotal = s?.fbaTotal ?? 0;
@@ -123,6 +126,7 @@ export async function getRestock(): Promise<{
     if (needAwd > 0) awdVal += needAwd * fb;
     fbaValue += fbaVal;
     awdValue += awdVal;
+    monthlyCOGS += ((s?.units90d ?? 0) / 90) * 30.44 * fb; // blended 90-day sell-through × unit cost
 
     return {
       id: p.id,
@@ -169,6 +173,8 @@ export async function getRestock(): Promise<{
     fbaUnits,
     awdUnits,
     inProductionUnits,
+    monthlyCOGS,
+    coverMonths: monthlyCOGS > 0 ? (rawInv.totalValue + inProductionValue + fbaValue + awdValue) / monthlyCOGS : 0,
   };
 
   await recordDailyInventoryValue(totals);

@@ -128,6 +128,8 @@ model Settings {
   syncTz      String    @default("America/Argentina/Buenos_Aires")
   lastSyncRun String? // last completed run, "YYYY-MM-DD" in syncTz (idempotency guard)
   lastSyncAt  DateTime? // exact timestamp of the last completed run
+  // Editable dashboard: [{ id, x, y, w, h }] of placed widgets (12-col grid). null = default layout.
+  dashboardLayout Json?
 }
 
 /// Extensible raw-material catalog (Tea Bag, Pouch, ...).
