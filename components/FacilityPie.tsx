@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import { money } from "@/lib/format";
 
 // Distinct-but-related blue tones, darkest → lightest.
@@ -11,11 +14,11 @@ function arc(cx: number, cy: number, r: number, a0: number, a1: number) {
   return `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1}`;
 }
 
-/** Donut pie of value-by-facility in graded blue tones; legend listed underneath. Hover a slice for its value. */
+/** Donut of value-by-facility in graded blue tones; hover a slice (or legend row) to focus it. */
 export function FacilityPie({ data }: { data: { code: string; value: number }[] }) {
+  const [hover, setHover] = useState<number | null>(null);
   const total = data.reduce((s, d) => s + d.value, 0) || 1;
   const R = 62;
-  const SW = 26;
   const C = 80;
   let angle = -Math.PI / 2;
   const segs = data.map((d, i) => {
@@ -24,27 +27,47 @@ export function FacilityPie({ data }: { data: { code: string; value: number }[] 
     const a1 = angle + frac * Math.PI * 2;
     angle = a1;
     const end = frac >= 0.9999 ? a1 - 0.0001 : a1;
-    return { ...d, color: BLUES[i % BLUES.length], d: arc(C, C, R, a0, end), pct: frac * 100 };
+    return { ...d, i, color: BLUES[i % BLUES.length], d: arc(C, C, R, a0, end), pct: frac * 100 };
   });
+  const focus = hover != null ? segs[hover] : null;
 
   return (
     <div className="flex flex-col items-center">
       <svg viewBox="0 0 160 160" className="h-[168px] w-[168px]">
         {segs.map((s) => (
-          <path key={s.code} d={s.d} fill="none" stroke={s.color} strokeWidth={SW} strokeLinecap="butt">
-            <title>{`${s.code} · ${money(s.value)} (${s.pct.toFixed(1)}%)`}</title>
-          </path>
+          <path
+            key={s.code}
+            d={s.d}
+            fill="none"
+            stroke={s.color}
+            strokeWidth={hover === s.i ? 30 : 26}
+            strokeLinecap="butt"
+            style={{ opacity: hover == null || hover === s.i ? 1 : 0.35, transition: "opacity .15s, stroke-width .15s", cursor: "pointer" }}
+            onMouseEnter={() => setHover(s.i)}
+            onMouseLeave={() => setHover(null)}
+          />
         ))}
-        <text x={C} y={C - 5} textAnchor="middle" className="fill-muted" style={{ fontSize: 9, letterSpacing: 0.5 }}>
-          TOTAL
+        <text x={C} y={C - 6} textAnchor="middle" className="fill-muted" style={{ fontSize: 9, letterSpacing: 0.5, pointerEvents: "none" }}>
+          {focus ? focus.code : "TOTAL"}
         </text>
-        <text x={C} y={C + 12} textAnchor="middle" className="fill-ink" style={{ fontSize: 15, fontWeight: 600 }}>
-          {money(total).replace(/\.\d+$/, "")}
+        <text x={C} y={C + 11} textAnchor="middle" className="fill-ink" style={{ fontSize: 15, fontWeight: 600, pointerEvents: "none" }}>
+          {money(focus ? focus.value : total).replace(/\.\d+$/, "")}
         </text>
+        {focus && (
+          <text x={C} y={C + 26} textAnchor="middle" className="fill-muted" style={{ fontSize: 10, pointerEvents: "none" }}>
+            {focus.pct.toFixed(1)}%
+          </text>
+        )}
       </svg>
       <div className="mt-4 w-full space-y-2">
         {segs.map((s) => (
-          <div key={s.code} className="flex items-center gap-2.5 text-[13px]" title={`${money(s.value)} (${s.pct.toFixed(1)}%)`}>
+          <div
+            key={s.code}
+            className="flex cursor-pointer items-center gap-2.5 rounded-md px-1.5 py-1 text-[13px] transition-colors"
+            style={{ background: hover === s.i ? "var(--color-surface-2)" : "transparent" }}
+            onMouseEnter={() => setHover(s.i)}
+            onMouseLeave={() => setHover(null)}
+          >
             <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: s.color }} />
             <span className="font-medium text-ink-soft">{s.code}</span>
             <span className="ml-auto tabular font-medium text-ink">{money(s.value)}</span>

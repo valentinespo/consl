@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Pencil, Check, Plus, X, Move, Scaling, Bell, AlertTriangle } from "lucide-react";
+import { Pencil, Check, Plus, X, Move, Scaling, Bell, AlertTriangle, Gauge } from "lucide-react";
 import { Card, SectionTitle } from "@/components/ui";
 import { TotalValueCard } from "@/components/TotalValueCard";
 import { FacilityPie } from "@/components/FacilityPie";
@@ -217,7 +217,7 @@ export function DashboardGrid({ data, initialLayout }: { data: DashboardData; in
         )}
         {!isMobile && (
           <button
-            onClick={() => { setEditing((v) => { if (v) persist(itemsRef.current); return !v; }); setAddOpen(false); }}
+            onClick={() => { if (editing) persist(itemsRef.current); setEditing((v) => !v); setAddOpen(false); }}
             className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition-colors ${
               editing ? "bg-ink text-white" : "border border-border bg-surface text-ink-soft hover:bg-surface-2"
             }`}
@@ -306,10 +306,38 @@ function renderContent(id: string, d: DashboardData) {
     case "reorderAlerts":
       return <ReorderAlertsWidget alerts={d.alerts} />;
     case "daysCover":
-      return <StatWidget label="Months of cover" value={`${d.totals.coverMonths.toFixed(1)} mo`} sub="how long current stock lasts at today's sell-through" />;
+      return <CoverWidget months={d.totals.coverMonths} />;
     default:
       return null;
   }
+}
+
+function CoverWidget({ months }: { months: number }) {
+  const target = 12;
+  const frac = Math.max(0.03, Math.min(1, months / target));
+  const healthy = months >= 6;
+  const bar = healthy ? "linear-gradient(90deg,#2563eb,#60a5fa)" : "linear-gradient(90deg,#ea580c,#f59e0b)";
+  return (
+    <Card className="flex h-full flex-col justify-between overflow-hidden bg-gradient-to-br from-accent-soft/70 to-surface">
+      <div className="flex items-center justify-between">
+        <span className="text-[12px] font-medium text-ink-soft">Months of cover</span>
+        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent-soft text-accent"><Gauge size={15} /></span>
+      </div>
+      <div className="flex items-end gap-1">
+        <span className="text-[34px] font-semibold leading-none tabular text-ink">{months.toFixed(1)}</span>
+        <span className="mb-1 text-[13px] font-medium text-muted">mo</span>
+      </div>
+      <div>
+        <div className="h-2 overflow-hidden rounded-full bg-line">
+          <div className="h-full rounded-full transition-all" style={{ width: `${frac * 100}%`, background: bar }} />
+        </div>
+        <div className="mt-1.5 flex justify-between text-[10.5px] text-muted">
+          <span>at today’s sell-through</span>
+          <span>target {target}mo</span>
+        </div>
+      </div>
+    </Card>
+  );
 }
 
 function FacilityWidget({ data, counts }: { data: { code: string; value: number }[]; counts: { purchases: number; transactions: number; suppliers: number } }) {
@@ -414,16 +442,6 @@ function ReorderAlertsWidget({ alerts }: { alerts: Alert[] }) {
         ))}
         {reorder.length + expedite.length === 0 && <div className="flex flex-1 items-center justify-center py-3 text-[12.5px] text-muted">Nothing to reorder 🎉</div>}
       </div>
-    </Card>
-  );
-}
-
-function StatWidget({ label, value, sub }: { label: string; value: string; sub: string }) {
-  return (
-    <Card className="flex h-full flex-col justify-center">
-      <div className="text-[12px] text-muted">{label}</div>
-      <div className="mt-1 text-[26px] font-semibold leading-none tabular text-ink">{value}</div>
-      <div className="mt-1.5 text-[11.5px] text-muted">{sub}</div>
     </Card>
   );
 }
