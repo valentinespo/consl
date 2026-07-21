@@ -57,6 +57,8 @@ export async function syncAmazon() {
     const w90 = w(90);
     return {
       productId: p.id,
+      dailySales: (salesOk ? days ?? {} : (last?.dailySales ?? {})) as object,
+      salesEnd: salesOk ? end : last?.salesEnd ?? end,
       fbaAvailable: row?.available ?? 0,
       fbaInbound: row?.inbound ?? 0,
       fbaReserved: row ? Math.max(0, row.total - row.available - row.inbound) : 0,
@@ -92,6 +94,13 @@ export async function updateGlobalDefaults(minMonths: number, leadMonths: number
 /** Set a per-SKU floor + lead override. Pass null to fall back to the global default. */
 export async function updateSkuPolicy(productId: string, minMonths: number | null, leadMonths: number | null) {
   await prisma.product.update({ where: { id: productId }, data: { minMonths, leadMonths } });
+  revalidatePath("/inventory");
+  return { ok: true as const };
+}
+
+/** Set (or clear) a per-SKU velocity window override + OOS-day exclusion. Pass nulls to clear. */
+export async function setSkuWindow(productId: string, windowDays: number | null, excludeDays: number | null) {
+  await prisma.product.update({ where: { id: productId }, data: { windowDays, excludeDays } });
   revalidatePath("/inventory");
   return { ok: true as const };
 }

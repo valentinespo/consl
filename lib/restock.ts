@@ -22,6 +22,10 @@ export type RestockRow = {
   salesDays10: number;
   salesDays30: number;
   salesDays90: number;
+  dailySales: Record<string, number>; // { "YYYY-MM-DD": units }, trailing ~90 days
+  salesEnd: string | null; // ISO anchor the daily series is measured to (sync time − 2d)
+  windowDays: number | null; // per-SKU window override, null = use global toggle
+  excludeDays: number | null; // OOS days to drop from the end of the window
   minMonths: number; // resolved floor (per-SKU override or global default)
   leadMonths: number; // resolved lead time
   rawMinMonths: number | null; // per-SKU override, null = using default
@@ -141,6 +145,10 @@ export async function getRestock(): Promise<{
       salesDays10: s?.salesDays10 ?? 0,
       salesDays30: s?.salesDays30 ?? 0,
       salesDays90: s?.salesDays90 ?? 0,
+      dailySales: (s?.dailySales as Record<string, number> | null) ?? {},
+      salesEnd: s?.salesEnd ? s.salesEnd.toISOString() : null,
+      windowDays: p.windowDays,
+      excludeDays: p.excludeDays,
       minMonths: p.minMonths ?? settings.defaultMinMonths,
       leadMonths: p.leadMonths ?? settings.defaultLeadMonths,
       rawMinMonths: p.minMonths,

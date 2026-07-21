@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { RefreshCw, Settings2, Check, GripVertical } from "lucide-react";
 import { money } from "@/lib/format";
 import { SkuAvatar } from "@/components/ui";
-import { syncAmazon, updateGlobalDefaults, updateSkuPolicy, setSortMode, saveManualOrder } from "@/app/inventory/actions";
+import { syncAmazon, updateGlobalDefaults, updateSkuPolicy, setSortMode, saveManualOrder, setSkuWindow } from "@/app/inventory/actions";
 import type { RestockRow, RestockTotals } from "@/lib/restock";
 
 type SortMode = "sales" | "available" | "manual";
@@ -37,6 +37,9 @@ const mo = (x: number) => (x === Infinity ? "∞" : x.toFixed(1));
 
 type Computed = RestockRow & {
   monthly: number;
+  win: Win; // effective window used (per-SKU override or global)
+  excl: number; // OOS days excluded from the end of the window
+  override: boolean; // this SKU has a custom window/exclude config
   onHandCover: number;
   prodCover: number;
   status: Status;
@@ -46,10 +49,29 @@ type Computed = RestockRow & {
   belowFloor: boolean; // total supply (on-hand + production) below the floor → genuinely needs a new PO
 };
 
-function compute(r: RestockRow, days: Win, nowMs: number): Computed {
-  const units = days === 10 ? r.units10d : days === 30 ? r.units30d : r.units90d;
-  const salesDays = days === 10 ? r.salesDays10 : days === 30 ? r.salesDays30 : r.salesDays90;
-  const monthly = salesDays > 0 ? (units / salesDays) * MONTH : 0; // velocity over in-stock (selling) days
+const DAY = 86_400_000;
+
+function compute(r: RestockRow, globalWin: Win, nowMs: number): Computed {
+  // Effective window: per-SKU override falls back to the global toggle.
+  const win: Win = r.windowDays === 10 || r.windowDays === 30 || r.windowDays === 90 ? r.windowDays : globalWin;
+  const override = r.windowDays != null || (r.excludeDays ?? 0) > 0;
+  const excl = Math.min(Math.max(0, r.excludeDays ?? 0), win - 1); // keep ≥1 day in the average
+
+  // Plain calendar-day average over [win] days, dropping the most recent [excl] (OOS) days.
+  // Anchored to the sync's window end (salesEnd), not "now", so the number is stable between syncs.
+  const endMs = r.salesEnd ? Date.parse(r.salesEnd) : nowMs - 2 * DAY;
+  const hasDaily = Object.keys(r.dailySales).length > 0;
+  let units = 0;
+  if (hasDaily) {
+    for (let i = excl; i < win; i++) {
+      const d = new Date(endMs - i * DAY).toISOString().slice(0, 10);
+      units += r.dailySales[d] ?? 0;
+    }
+  } else {
+    units = win === 10 ? r.units10d : win === 30 ? r.units30d : r.units90d;
+  }
+  const denomDays = hasDaily ? win - excl : win;
+  const monthly = denomDays > 0 ? (units / denomDays) * MONTH : 0;
   const A = monthly > 0 ? r.onHand / monthly : r.onHand > 0 ? Infinity : 0;
   const P = monthly > 0 ? r.inProduction / monthly : r.inProduction > 0 ? Infinity : 0;
   const hasPO = r.inProduction > 0;
@@ -102,7 +124,7 @@ function compute(r: RestockRow, days: Win, nowMs: number): Computed {
     const raw = Math.max(0, Math.ceil(r.reorderToMonths * monthly - r.onHand - r.inProduction));
     recommendedQty = r.batchSize > 0 && raw > 0 ? Math.ceil(raw / r.batchSize) * r.batchSize : raw;
   }
-  return { ...r, monthly, onHandCover: A, prodCover: P, status, statusLabel, note, recommendedQty, belowFloor };
+  return { ...r, monthly, win, excl, override, onHandCover: A, prodCover: P, status, statusLabel, note, recommendedQty, belowFloor };
 }
 
 export function RestockDashboard({
@@ -124,6 +146,7 @@ export function RestockDashboard({
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
   const [editSku, setEditSku] = useState<string | null>(null);
+  const [winSku, setWinSku] = useState<string | null>(null); // per-SKU window-override panel open
   const [editGlobal, setEditGlobal] = useState(false);
   const [sort, setSort] = useState<SortMode>((["sales", "available", "manual"].includes(initialSort) ? initialSort : "sales") as SortMode);
   const [arranging, setArranging] = useState(false); // manual drag mode active
@@ -283,14 +306,17 @@ export function RestockDashboard({
               onDragEnd={() => { dragId.current = null; }}
               className={arranging ? "cursor-grab active:cursor-grabbing" : ""}
             >
-              <div className={`grid grid-cols-[minmax(180px,1.4fr)_84px_minmax(0,1.7fr)_112px_128px_112px] items-center gap-4 px-4 py-3 ${i < displayRows.length - 1 && editSku !== r.id ? "border-b border-line" : ""}`}>
+              <div className={`grid grid-cols-[minmax(180px,1.4fr)_84px_minmax(0,1.7fr)_112px_128px_112px] items-center gap-4 px-4 py-3 ${i < displayRows.length - 1 && editSku !== r.id && winSku !== r.id ? "border-b border-line" : ""}`}>
                 {/* SKU */}
                 <div className="flex min-w-0 items-center gap-2.5">
                   {arranging && <GripVertical size={16} className="shrink-0 text-muted" />}
                   <SkuAvatar code={r.code} imageUrl={r.imageUrl} size={32} />
                   <div className="min-w-0">
                     <div className="truncate text-[13px] font-medium text-ink">{r.name}</div>
-                    <div className="text-[11px] tabular text-muted">{n(r.monthly)}/mo · {win}-day</div>
+                    <div className="text-[11px] tabular text-muted">{n(r.monthly)}/mo · {r.win}-day{r.excl > 0 ? ` · −${r.excl}d OOS` : ""}</div>
+                    <button onClick={() => setWinSku(winSku === r.id ? null : r.id)} className={`mt-0.5 text-[10px] hover:underline ${r.override ? "text-accent" : "text-muted"}`}>
+                      {r.override ? "Custom window" : "Override window"}
+                    </button>
                   </div>
                 </div>
                 {/* Total units */}
@@ -348,6 +374,16 @@ export function RestockDashboard({
                   </button>
                 </div>
               </div>
+              {winSku === r.id && (
+                <WindowOverrideEditor
+                  row={r}
+                  globalWin={win}
+                  pending={pending}
+                  onSave={(wd, ex) => start(async () => { await setSkuWindow(r.id, wd, ex); setWinSku(null); router.refresh(); })}
+                  onClear={() => start(async () => { await setSkuWindow(r.id, null, null); setWinSku(null); router.refresh(); })}
+                  bordered={i < displayRows.length - 1}
+                />
+              )}
               {editSku === r.id && (
                 <SkuPolicyEditor
                   row={r}
@@ -391,6 +427,57 @@ function SkuPolicyEditor({ row, defaults, pending, onSave, bordered }: { row: Re
         <Check size={13} /> Save
       </button>
       <button onClick={() => onSave(null, null)} className="text-[12px] text-muted hover:text-ink-soft">Use defaults</button>
+    </div>
+  );
+}
+
+function WindowOverrideEditor({
+  row,
+  globalWin,
+  pending,
+  onSave,
+  onClear,
+  bordered,
+}: {
+  row: RestockRow;
+  globalWin: Win;
+  pending: boolean;
+  onSave: (windowDays: number, excludeDays: number | null) => void;
+  onClear: () => void;
+  bordered: boolean;
+}) {
+  const initWin: Win = row.windowDays === 10 || row.windowDays === 30 || row.windowDays === 90 ? row.windowDays : globalWin;
+  const [w, setW] = useState<Win>(initWin);
+  const [ex, setEx] = useState(row.excludeDays != null ? String(row.excludeDays) : "");
+  const hasOverride = row.windowDays != null || (row.excludeDays ?? 0) > 0;
+  const exNum = ex.trim() === "" ? 0 : Math.max(0, Math.floor(Number(ex)) || 0);
+  return (
+    <div className={`flex flex-wrap items-end gap-4 bg-surface-2 px-4 py-3 ${bordered ? "border-b border-line" : ""}`}>
+      <div>
+        <div className="mb-1 text-[11px] text-muted">Window for this SKU</div>
+        <div className="flex gap-0.5 rounded-lg border border-border bg-surface p-0.5">
+          {WINDOWS.map((x) => (
+            <button key={x} onClick={() => setW(x)} className={`rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors ${w === x ? "bg-accent-soft text-accent" : "text-muted hover:text-ink-soft"}`}>
+              {x}d
+            </button>
+          ))}
+        </div>
+      </div>
+      <label className="text-[11px] text-muted">
+        <div className="mb-1">Exclude last OOS days</div>
+        <input type="number" min={0} step={1} value={ex} onChange={(e) => setEx(e.target.value)} placeholder="0" className="h-8 w-28 rounded-lg border border-border bg-surface px-2 text-[13px] text-ink outline-none focus:border-accent-strong" />
+      </label>
+      <div className="pb-0.5 text-[11px] text-muted">
+        averages {Math.max(1, w - Math.min(exNum, w - 1))} day{w - Math.min(exNum, w - 1) === 1 ? "" : "s"}
+      </div>
+      <button onClick={() => onSave(w, exNum > 0 ? exNum : null)} disabled={pending} className="inline-flex items-center gap-1 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-60">
+        <Check size={13} /> Save override
+      </button>
+      {hasOverride && (
+        <button onClick={onClear} disabled={pending} className="text-[12px] font-medium text-[#dc2626] hover:underline disabled:opacity-60">
+          Clear
+        </button>
+      )}
     </div>
   );
 }

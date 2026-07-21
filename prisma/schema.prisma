@@ -64,6 +64,8 @@ model Product {
   reorderToMonths    Float?  @default(12) // target: how much cover to bring back to
   batchSize          Int? // co-packer minimum / standard run size
   sortIndex          Int? // manual sort position on the inventory dashboard
+  windowDays         Int? // per-SKU velocity window override (10/30/90); null = use the global toggle
+  excludeDays        Int? // drop the most recent X (OOS) days from the velocity window
   lotLines           LotLine[]
   purchases          Purchase[]
   lotMaterials       LotMaterial[]
@@ -87,6 +89,8 @@ model SkuSnapshot {
   awdOnhand        Int      @default(0) // Amazon Warehousing & Distribution on-hand
   awdInbound       Int      @default(0) // inbound to AWD
   inStock          Boolean  @default(true) // was the SKU in stock at capture (for future exact velocity)
+  dailySales       Json? // { "YYYY-MM-DD": units } over the trailing 90 days, for custom/exclude windows
+  salesEnd         DateTime? // the window end anchor (sync time − 2d lag) the daily series is measured to
   units10d         Int      @default(0)
   units30d         Int      @default(0)
   units90d         Int      @default(0)
