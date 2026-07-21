@@ -101,6 +101,20 @@ model SkuSnapshot {
   @@index([productId, capturedAt])
 }
 
+/// One row per day: the total inventory value split by bucket, for the evolution chart.
+/// Captured going forward (upserted per calendar day) — the live total is already de-duplicated,
+/// so each daily point is internally consistent with no double-counting across buckets.
+model InventoryValueSnapshot {
+  id           String   @id @default(cuid())
+  day          String   @unique // "YYYY-MM-DD"
+  capturedAt   DateTime @default(now())
+  raw          Float
+  inProduction Float
+  fba          Float
+  awd          Float
+  total        Float
+}
+
 /// Singleton global restock defaults, editable in-app. Per-SKU values override these.
 model Settings {
   id                String @id @default("singleton")
@@ -187,6 +201,7 @@ model Lot {
   facility           Facility      @relation(fields: [facilityId], references: [id])
   facilityId         String
   status             LotStatus     @default(IN_PRODUCTION)
+  finishedAt         DateTime? // set each time status flips to FINISHED (latest wins; kept if later unmarked)
   notes              String?
   // Informational only (NOT part of COG): what was actually paid inbound.
   inboundPaidTotal   Float?

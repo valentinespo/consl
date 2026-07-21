@@ -159,21 +159,39 @@ export async function getRestock(): Promise<{
     };
   });
 
+  const totals: RestockTotals = {
+    raw: rawInv.totalValue,
+    inProduction: inProductionValue,
+    fba: fbaValue,
+    awd: awdValue,
+    amazon: fbaValue + awdValue,
+    total: rawInv.totalValue + inProductionValue + fbaValue + awdValue,
+    fbaUnits,
+    awdUnits,
+    inProductionUnits,
+  };
+
+  await recordDailyInventoryValue(totals);
+
   return {
     rows,
     lastSync,
     sortMode: settings.sortMode,
     defaults: { minMonths: settings.defaultMinMonths, leadMonths: settings.defaultLeadMonths },
-    totals: {
-      raw: rawInv.totalValue,
-      inProduction: inProductionValue,
-      fba: fbaValue,
-      awd: awdValue,
-      amazon: fbaValue + awdValue,
-      total: rawInv.totalValue + inProductionValue + fbaValue + awdValue,
-      fbaUnits,
-      awdUnits,
-      inProductionUnits,
-    },
+    totals,
   };
+}
+
+/** Upsert today's inventory-value point (one row per calendar day). Non-fatal — never breaks a render. */
+async function recordDailyInventoryValue(t: RestockTotals) {
+  const day = new Date().toISOString().slice(0, 10);
+  try {
+    await prisma.inventoryValueSnapshot.upsert({
+      where: { day },
+      create: { day, raw: t.raw, inProduction: t.inProduction, fba: t.fba, awd: t.awd, total: t.total },
+      update: { raw: t.raw, inProduction: t.inProduction, fba: t.fba, awd: t.awd, total: t.total, capturedAt: new Date() },
+    });
+  } catch {
+    // swallow: recording history must never break the dashboard
+  }
 }

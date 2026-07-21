@@ -54,6 +54,7 @@ export async function createLot(input: {
       poDate: input.poDateISO ? new Date(input.poDateISO) : new Date(),
       facilityId: input.facilityId,
       status: input.status,
+      finishedAt: input.status === "FINISHED" ? new Date() : null,
       lines: { create: lines.map((l, i) => ({ productId: l.productId, units: Math.round(l.units), seq: i })) },
     },
     include: { lines: true },
@@ -101,6 +102,10 @@ export async function updateLot(payload: LotEditPayload) {
   const keptIds = new Set(lines.filter((l) => l.id).map((l) => l.id!));
   const toRemove = existing.filter((e) => !keptIds.has(e.id));
 
+  // Stamp finishedAt only on the transition into FINISHED (latest wins; left intact if unmarked later).
+  const currentLot = await prisma.lot.findUnique({ where: { id: payload.lotId }, select: { status: true } });
+  const justFinished = payload.status === "FINISHED" && currentLot?.status !== "FINISHED";
+
   const [teabag, pouch] = await Promise.all([
     prisma.materialType.findUnique({ where: { code: "TEABAG" } }),
     prisma.materialType.findUnique({ where: { code: "POUCH" } }),
@@ -118,6 +123,7 @@ export async function updateLot(payload: LotEditPayload) {
         poDate: payload.poDateISO ? new Date(payload.poDateISO) : null,
         facilityId: payload.facilityId,
         status: payload.status,
+        ...(justFinished ? { finishedAt: new Date() } : {}),
         notes: payload.notes?.trim() || null,
       },
     });

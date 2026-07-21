@@ -14,6 +14,7 @@ export default async function LotsPage() {
     poDate: l.poDate ? l.poDate.toISOString() : null,
     facility: l.facility,
     status: l.status,
+    finishedAt: l.finishedAt ? l.finishedAt.toISOString() : null,
     skus: l.skus,
     lines: l.lines,
     units: l.units,
