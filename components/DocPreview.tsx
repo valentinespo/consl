@@ -24,7 +24,7 @@ export function DocPreview({
           e.stopPropagation();
           setOpen(true);
         }}
-        className={className ?? "inline-flex items-center gap-1 text-[12px] font-medium text-positive hover:underline"}
+        className={className ?? "inline-flex items-center gap-1 text-[12px] font-medium text-accent hover:underline"}
       >
         {children ?? (
           <>

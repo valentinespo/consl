@@ -1,26 +1,26 @@
 @import "tailwindcss";
 
-/* ---------------- Herbl brand theme ---------------- */
+/* ---------------- Dub-style theme (frosted rice-paper, hairline borders, one electric blue) ---------------- */
 @theme {
-  --color-bg: #f5f5ef; /* warm off-white background */
-  --color-surface: #ffffff; /* cards */
-  --color-surface-2: #fbfbf7; /* subtle raised */
-  --color-ink: #1a2f18; /* primary text / dark green */
-  --color-ink-soft: #35452f; /* secondary heading */
-  --color-muted: #74796b; /* muted text */
-  --color-accent: #d9e5ba; /* sage accent */
-  --color-accent-soft: #ecf1dc;
-  --color-accent-strong: #b9cd8e;
-  --color-border: #e6e6dd;
-  --color-line: #efefe7;
-  --color-positive: #2f6b3a;
-  --color-negative: #b4422f;
-  --color-warn: #9a7b1f;
+  --color-bg: #ffffff; /* canvas white — page background */
+  --color-surface: #ffffff; /* cards — white, separated by 1px borders not shadows */
+  --color-surface-2: #f5f5f5; /* paper mist — nested panels, hover fills */
+  --color-ink: #171717; /* charcoal — primary text, dark CTA fills */
+  --color-ink-soft: #404040; /* slate — secondary text/headings */
+  --color-muted: #737373; /* fog — muted/helper text, placeholders */
+  --color-accent: #2563eb; /* electric blue — links, active states, key metrics */
+  --color-accent-soft: #eff6ff; /* light blue wash — active nav, highlights */
+  --color-accent-strong: #1e40af; /* deep sapphire — committed CTA fill (used sparingly) */
+  --color-border: #e5e5e5; /* ash — the structural hairline */
+  --color-line: #ededed; /* slightly lighter divider */
+  --color-positive: #16a34a; /* vivid green — supporting accent */
+  --color-negative: #dc2626; /* red */
+  --color-warn: #ea580c; /* tangerine */
 
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 
-  --radius-card: 16px;
+  --radius-card: 12px;
 }
 
 html,
@@ -40,8 +40,8 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Thin, branded scrollbars */
+/* Thin, neutral scrollbars */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--color-accent-strong) transparent;
+  scrollbar-color: #d4d4d4 transparent;
 }

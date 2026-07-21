@@ -16,6 +16,7 @@ export type RecentLot = {
   units: number;
   cogTotal: number;
   status: string;
+  finishedAt: string | Date | null;
   lines: LotLineSummary[];
 };
 
@@ -71,12 +72,15 @@ export function RecentLots({ lots }: { lots: RecentLot[] }) {
                 <td className="px-2 py-2.5 text-right tabular">{money(l.cogTotal)}</td>
                 <td className="px-2 py-2.5">
                   <Pill kind={l.status}>{l.status === "IN_PRODUCTION" ? "In production" : "Finished"}</Pill>
+                  {l.status === "FINISHED" && l.finishedAt && (
+                    <div className="mt-1 text-[10.5px] text-muted">Finished {date(l.finishedAt)}</div>
+                  )}
                 </td>
                 <td className="px-5 py-2.5 text-right">
                   <Link
                     href={`/lots/${l.id}`}
                     onClick={(e) => e.stopPropagation()}
-                    className="text-[12.5px] font-medium text-positive hover:underline"
+                    className="text-[12.5px] font-medium text-accent hover:underline"
                   >
                     Open →
                   </Link>

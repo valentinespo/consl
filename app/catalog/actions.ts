@@ -97,8 +97,8 @@ export async function updateProduct(input: { id: string; code: string; name: str
   return { ok: true as const };
 }
 
-/** Edit a raw material's display name, unit label, and default per-unit rate (used for new lots). */
-export async function updateMaterial(input: { id: string; name: string; unitLabel: string; defaultPerUnit: number }) {
+/** Edit a raw material's name, unit label, per-unit rate, and low-stock alert threshold. */
+export async function updateMaterial(input: { id: string; name: string; unitLabel: string; defaultPerUnit: number; lowStockThreshold: number | null }) {
   const name = input.name.trim();
   if (!name) return { ok: false as const, error: "Name required" };
   await prisma.materialType.update({
@@ -107,6 +107,7 @@ export async function updateMaterial(input: { id: string; name: string; unitLabe
       name,
       unitLabel: input.unitLabel.trim() || "unit",
       defaultPerUnit: input.defaultPerUnit > 0 ? input.defaultPerUnit : 1,
+      lowStockThreshold: input.lowStockThreshold != null && input.lowStockThreshold > 0 ? input.lowStockThreshold : null,
     },
   });
   revalidatePath("/", "layout");

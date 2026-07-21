@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
@@ -13,8 +14,10 @@ import {
   Building2,
   Images,
   LogOut,
+  Settings,
 } from "lucide-react";
 import { logout } from "@/app/login/actions";
+import { SettingsModal } from "@/components/SettingsModal";
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
@@ -29,6 +32,7 @@ const NAV = [
 
 export function Sidebar({ authEnabled = false, onNavigate }: { authEnabled?: boolean; onNavigate?: () => void }) {
   const pathname = usePathname();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <aside className="flex h-full w-[230px] shrink-0 flex-col border-r border-border bg-surface">
       <div className="flex items-center gap-2 px-5 py-5">
@@ -71,10 +75,22 @@ export function Sidebar({ authEnabled = false, onNavigate }: { authEnabled?: boo
         </form>
       )}
 
-      <div className="border-t border-border px-5 py-4">
-        <div className="text-[12px] font-medium text-ink-soft">Herbl Inc.</div>
-        <div className="text-[11px] text-muted">Production & Inventory</div>
+      <div className="flex items-center justify-between border-t border-border px-5 py-4">
+        <div>
+          <div className="text-[12px] font-medium text-ink-soft">Herbl Inc.</div>
+          <div className="text-[11px] text-muted">Production & Inventory</div>
+        </div>
+        <button
+          onClick={() => setSettingsOpen(true)}
+          aria-label="Settings"
+          title="Settings"
+          className="rounded-lg p-1.5 text-muted transition-colors hover:bg-surface-2 hover:text-ink-soft"
+        >
+          <Settings size={17} strokeWidth={2} />
+        </button>
       </div>
+
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
     </aside>
   );
 }

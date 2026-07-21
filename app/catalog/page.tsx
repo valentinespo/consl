@@ -28,7 +28,7 @@ export default async function CatalogPage() {
           {materials.map((m) => (
             <EditableMaterialCard
               key={m.id}
-              material={{ id: m.id, code: m.code, name: m.name, unitLabel: m.unitLabel, defaultPerUnit: m.defaultPerUnit, imageUrl: m.imageUrl }}
+              material={{ id: m.id, code: m.code, name: m.name, unitLabel: m.unitLabel, defaultPerUnit: m.defaultPerUnit, lowStockThreshold: m.lowStockThreshold, imageUrl: m.imageUrl }}
             />
           ))}
         </div>

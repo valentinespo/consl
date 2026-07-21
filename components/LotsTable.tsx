@@ -14,6 +14,7 @@ export type LotRow = {
   poDate: string | null;
   facility: string;
   status: string;
+  finishedAt: string | null;
   skus: { code: string; imageUrl: string | null }[];
   lines: LotLineSummary[];
   units: number;
@@ -116,12 +117,15 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
                 <td className="px-3 py-3 text-center tabular text-muted">{l.txnCount}</td>
                 <td className="px-3 py-3">
                   <Pill kind={l.status}>{l.status === "IN_PRODUCTION" ? "In production" : "Finished"}</Pill>
+                  {l.status === "FINISHED" && l.finishedAt && (
+                    <div className="mt-1 text-[10.5px] text-muted">Finished {date(l.finishedAt)}</div>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-right">
                   <Link
                     href={`/lots/${l.id}`}
                     onClick={(e) => e.stopPropagation()}
-                    className="text-[12.5px] font-medium text-positive hover:underline"
+                    className="text-[12.5px] font-medium text-accent hover:underline"
                   >
                     Open →
                   </Link>

@@ -37,7 +37,7 @@ export function StatCard({
       }`}
     >
       <div className="text-[13px] font-medium text-muted">{label}</div>
-      <div className="mt-2 text-[26px] font-semibold tracking-tight text-ink tabular">{value}</div>
+      <div className="mt-2 text-[26px] font-medium tracking-tight text-ink tabular">{value}</div>
       {sub && <div className="mt-1 text-[12px] text-muted">{sub}</div>}
     </div>
   );
@@ -46,20 +46,20 @@ export function StatCard({
 export function SectionTitle({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
   return (
     <div className="mb-3 flex items-center justify-between">
-      <h2 className="text-[15px] font-semibold text-ink-soft">{children}</h2>
+      <h2 className="text-[15px] font-medium text-ink-soft">{children}</h2>
       {action}
     </div>
   );
 }
 
 const PILL: Record<string, string> = {
-  IN_PRODUCTION: "bg-[#e6eef7] text-[#3567a6] border-[#cdddf0]",
-  FINISHED: "bg-accent-soft text-positive border-accent-strong",
-  TEA: "bg-accent-soft text-ink-soft border-accent-strong",
-  OTHER: "bg-[#f0eee6] text-muted border-border",
-  NOT_APPLICABLE: "bg-[#fbeae6] text-negative border-[#f0d3cb]",
-  DRAFT: "bg-[#f0eee6] text-muted border-border",
-  SENT: "bg-accent-soft text-positive border-accent-strong",
+  IN_PRODUCTION: "bg-[#eff6ff] text-[#1d4ed8] border-[#dbeafe]",
+  FINISHED: "bg-[#dcfce7] text-[#166534] border-[#bbf7d0]",
+  TEA: "bg-[#f5f5f5] text-[#404040] border-[#e5e5e5]",
+  OTHER: "bg-[#f5f5f5] text-[#737373] border-[#e5e5e5]",
+  NOT_APPLICABLE: "bg-[#fef2f2] text-[#dc2626] border-[#fecaca]",
+  DRAFT: "bg-[#f5f5f5] text-[#737373] border-[#e5e5e5]",
+  SENT: "bg-[#dcfce7] text-[#166534] border-[#bbf7d0]",
 };
 
 export function Pill({ kind, children }: { kind?: keyof typeof PILL | string; children: React.ReactNode }) {
@@ -119,7 +119,7 @@ export function SupplierAvatar({
       ) : (
         <span
           style={{ width: size, height: size, fontSize: size * 0.4 }}
-          className="inline-flex shrink-0 items-center justify-center rounded-full bg-accent font-semibold text-ink"
+          className="inline-flex shrink-0 items-center justify-center rounded-full bg-[#eff6ff] font-medium text-[#2563eb]"
         >
           {init}
         </span>
@@ -149,7 +149,7 @@ export function PageHeader({
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 className="text-[22px] font-semibold tracking-tight text-ink">{title}</h1>
+        <h1 className="text-[24px] font-medium tracking-tight text-ink">{title}</h1>
         {subtitle && <p className="mt-0.5 text-[13px] text-muted">{subtitle}</p>}
       </div>
       {children}
