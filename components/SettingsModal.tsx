@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { X, Check, RefreshCw, Clock } from "lucide-react";
 import { getAppSettings, saveSettings, runSyncNow } from "@/app/settings/actions";
@@ -15,8 +16,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [saving, startSave] = useTransition();
   const [syncing, startSync] = useTransition();
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     getAppSettings().then(setS);
   }, []);
 
@@ -53,8 +56,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     ? new Date(s.lastSyncAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
     : "never";
 
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" role="dialog" aria-modal="true">
+  if (!mounted) return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} aria-hidden />
       <div className="relative z-10 w-full max-w-[440px] overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface shadow-xl">
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
@@ -133,7 +138,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
