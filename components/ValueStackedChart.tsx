@@ -37,19 +37,15 @@ export function ValueStackedChart({ data }: { data: ValueHistoryPoint[] }) {
   const last = pts[pts.length - 1];
 
   return (
-    <div className="mt-4">
-      <div className="mb-1.5 flex items-center justify-between text-[11px]">
-        <span className="font-medium uppercase tracking-wide text-accent/70">Value by bucket</span>
-        <span className="text-muted">{data.length >= 2 ? `${data.length}d` : "grows daily"}</span>
-      </div>
-      <div className="h-[70px] w-full">
+    <div className="flex h-full flex-col">
+      <div className="min-h-[64px] flex-1">
         <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-full w-full">
           {bands.map((b) => (
             <path key={b.key} d={b.d} fill={b.color} fillOpacity={0.82} />
           ))}
         </svg>
       </div>
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-[11px]">
         {SERIES.map((s) => (
           <span key={s.key} className="inline-flex items-center gap-1.5">
             <span className="h-2 w-2 rounded-sm" style={{ background: s.color }} />

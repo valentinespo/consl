@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Pencil, Check, Plus, X, Move, Scaling, Bell, AlertTriangle, Gauge } from "lucide-react";
+import { Pencil, Check, Plus, X, Move, Scaling, Bell, AlertTriangle, Gauge, PieChart, Layers, CheckCircle2, ShoppingCart, Zap, PackageSearch } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { Card, SectionTitle } from "@/components/ui";
 import { TotalValueCard } from "@/components/TotalValueCard";
 import { FacilityPie } from "@/components/FacilityPie";
@@ -296,9 +297,16 @@ function renderContent(id: string, d: DashboardData) {
       return <RecentLotsWidget lots={d.recentLots} />;
     case "valueByBucket":
       return (
-        <Card className="h-full">
-          <SectionTitle>Inventory value by bucket</SectionTitle>
-          <ValueStackedChart data={d.history} />
+        <Card className="flex h-full flex-col">
+          <WidgetHead
+            icon={Layers}
+            title="Value by bucket"
+            tint="accent"
+            right={<span className="text-[11px] text-muted">{d.history.length >= 2 ? `${d.history.length}d` : "grows daily"}</span>}
+          />
+          <div className="min-h-0 flex-1">
+            <ValueStackedChart data={d.history} />
+          </div>
         </Card>
       );
     case "notifications":
@@ -340,12 +348,31 @@ function CoverWidget({ months }: { months: number }) {
   );
 }
 
+const TINTS: Record<string, string> = {
+  accent: "bg-accent-soft text-accent",
+  amber: "bg-[#fff7ed] text-warn",
+  red: "bg-[#fef2f2] text-negative",
+  green: "bg-[#dcfce7] text-positive",
+};
+
+function WidgetHead({ icon: Icon, title, tint = "accent", right }: { icon: LucideIcon; title: string; tint?: string; right?: React.ReactNode }) {
+  return (
+    <div className="mb-3 flex items-center gap-2.5">
+      <span className={`flex h-7 w-7 items-center justify-center rounded-lg ${TINTS[tint]}`}>
+        <Icon size={15} strokeWidth={2.2} />
+      </span>
+      <span className="text-[14px] font-semibold text-ink">{title}</span>
+      {right && <span className="ml-auto flex items-center">{right}</span>}
+    </div>
+  );
+}
+
 function FacilityWidget({ data, counts }: { data: { code: string; value: number }[]; counts: { purchases: number; transactions: number; suppliers: number } }) {
   return (
     <Card className="flex h-full flex-col">
-      <SectionTitle>Production value by facility</SectionTitle>
+      <WidgetHead icon={PieChart} title="Value by facility" tint="accent" />
       <FacilityPie data={data} />
-      <div className="mt-auto grid grid-cols-3 gap-2 border-t border-line pt-4 text-center">
+      <div className="mt-auto grid grid-cols-3 gap-2 pt-4">
         <Mini label="Purchases" value={counts.purchases} />
         <Mini label="Transactions" value={counts.transactions} />
         <Mini label="Suppliers" value={counts.suppliers} />
@@ -368,10 +395,11 @@ function RecentLotsWidget({ lots }: { lots: RecentLot[] }) {
   );
 }
 
-const SEV: Record<Alert["severity"], { bg: string; border: string; dot: string }> = {
-  critical: { bg: "#fef2f2", border: "#fecaca", dot: "#dc2626" },
-  warn: { bg: "#fff7ed", border: "#fed7aa", dot: "#ea580c" },
+const SEV: Record<Alert["severity"], { bg: string; dot: string }> = {
+  critical: { bg: "#fef2f2", dot: "#dc2626" },
+  warn: { bg: "#fff7ed", dot: "#ea580c" },
 };
+const KIND_ICON: Record<Alert["kind"], LucideIcon> = { material: PackageSearch, reorder: ShoppingCart, expedite: Zap };
 
 function NotificationsWidget({ alerts }: { alerts: Alert[] }) {
   const router = useRouter();
@@ -383,25 +411,32 @@ function NotificationsWidget({ alerts }: { alerts: Alert[] }) {
   }
   return (
     <Card className="flex h-full flex-col">
-      <div className="mb-3 flex items-center gap-2">
-        <Bell size={15} className="text-ink-soft" />
-        <SectionTitle>Notifications</SectionTitle>
-        {alerts.length > 0 && <span className="ml-auto rounded-full bg-negative px-1.5 py-0.5 text-[10px] font-semibold text-white">{alerts.length}</span>}
-      </div>
+      <WidgetHead
+        icon={Bell}
+        title="Notifications"
+        tint={alerts.length ? "red" : "green"}
+        right={alerts.length > 0 ? <span className="rounded-full bg-negative px-2 py-0.5 text-[11px] font-semibold text-white">{alerts.length}</span> : null}
+      />
       {alerts.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center text-[12.5px] text-muted">All clear — nothing needs attention.</div>
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted">
+          <CheckCircle2 size={26} className="text-positive" />
+          <span className="text-[12.5px]">All clear — nothing needs attention</span>
+        </div>
       ) : (
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
           {alerts.map((a) => {
             const s = SEV[a.severity];
+            const Icon = KIND_ICON[a.kind];
             return (
-              <div key={a.key} className="flex items-start gap-2.5 rounded-lg border px-3 py-2" style={{ background: s.bg, borderColor: s.border }}>
-                <span className="mt-1 h-2 w-2 shrink-0 rounded-full" style={{ background: s.dot }} />
+              <div key={a.key} className="flex items-start gap-2.5 rounded-lg border-l-[3px] bg-surface-2/60 py-2 pl-2.5 pr-2" style={{ borderColor: s.dot }}>
+                <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md" style={{ background: s.bg, color: s.dot }}>
+                  <Icon size={13} />
+                </span>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[12.5px] font-medium text-ink">{a.title}</div>
                   <div className="text-[11px] text-muted">{a.detail}</div>
                 </div>
-                <button onClick={() => dismiss(a.key)} disabled={busy === a.key} title="Dismiss" className="shrink-0 rounded-md p-0.5 text-muted hover:bg-black/5 hover:text-ink-soft disabled:opacity-40">
+                <button onClick={() => dismiss(a.key)} disabled={busy === a.key} title="Dismiss" className="shrink-0 rounded-md p-1 text-muted hover:bg-black/5 hover:text-ink-soft disabled:opacity-40">
                   <X size={13} />
                 </button>
               </div>
@@ -413,34 +448,47 @@ function NotificationsWidget({ alerts }: { alerts: Alert[] }) {
   );
 }
 
+function MetricTile({ value, label, tint, icon: Icon }: { value: number; label: string; tint: "amber" | "red"; icon: LucideIcon }) {
+  const active = value > 0;
+  const color = tint === "red" ? "#dc2626" : "#ea580c";
+  const bg = tint === "red" ? "#fef2f2" : "#fff7ed";
+  const border = tint === "red" ? "#fecaca" : "#fed7aa";
+  return (
+    <div className="rounded-xl border p-3" style={active ? { background: bg, borderColor: border } : { borderColor: "var(--color-border)" }}>
+      <div className="flex items-center justify-between">
+        <span className="text-[24px] font-semibold leading-none tabular" style={active ? { color } : { color: "var(--color-muted)" }}>{value}</span>
+        <Icon size={15} style={{ color: active ? color : "var(--color-muted)" }} />
+      </div>
+      <div className="mt-1 text-[11px] text-muted">{label}</div>
+    </div>
+  );
+}
+
 function ReorderAlertsWidget({ alerts }: { alerts: Alert[] }) {
   const reorder = alerts.filter((a) => a.kind === "reorder");
   const expedite = alerts.filter((a) => a.kind === "expedite");
+  const list = [...reorder, ...expedite].slice(0, 8);
   return (
     <Card className="flex h-full flex-col">
-      <div className="mb-3 flex items-center gap-2">
-        <AlertTriangle size={15} className="text-warn" />
-        <SectionTitle>Reorder alerts</SectionTitle>
-      </div>
-      <div className="mb-3 grid grid-cols-2 gap-3">
-        <div className="rounded-lg border border-border bg-surface-2 px-3 py-2">
-          <div className="text-[22px] font-semibold tabular" style={{ color: reorder.length ? "#ea580c" : undefined }}>{reorder.length}</div>
-          <div className="text-[11px] text-muted">need a PO</div>
-        </div>
-        <div className="rounded-lg border border-border bg-surface-2 px-3 py-2">
-          <div className="text-[22px] font-semibold tabular" style={{ color: expedite.length ? "#dc2626" : undefined }}>{expedite.length}</div>
-          <div className="text-[11px] text-muted">to expedite</div>
-        </div>
+      <WidgetHead icon={AlertTriangle} title="Reorder alerts" tint="amber" />
+      <div className="mb-3 grid grid-cols-2 gap-2.5">
+        <MetricTile value={reorder.length} label="need a PO" tint="amber" icon={ShoppingCart} />
+        <MetricTile value={expedite.length} label="to expedite" tint="red" icon={Zap} />
       </div>
       <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto">
-        {[...reorder, ...expedite].slice(0, 8).map((a) => (
+        {list.map((a) => (
           <div key={a.key} className="flex items-center gap-2 text-[12px]">
             <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: a.kind === "reorder" ? "#ea580c" : "#dc2626" }} />
             <span className="truncate text-ink-soft">{a.title.replace(" needs a PO", "").replace(" — expedite incoming lot", "")}</span>
             <span className="ml-auto shrink-0 text-[11px] text-muted">{a.detail}</span>
           </div>
         ))}
-        {reorder.length + expedite.length === 0 && <div className="flex flex-1 items-center justify-center py-3 text-[12.5px] text-muted">Nothing to reorder 🎉</div>}
+        {list.length === 0 && (
+          <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted">
+            <CheckCircle2 size={24} className="text-positive" />
+            <span className="text-[12.5px]">Nothing to reorder</span>
+          </div>
+        )}
       </div>
     </Card>
   );
@@ -448,9 +496,9 @@ function ReorderAlertsWidget({ alerts }: { alerts: Alert[] }) {
 
 function Mini({ label, value }: { label: string; value: number }) {
   return (
-    <div>
-      <div className="text-[18px] font-semibold text-ink tabular">{value}</div>
-      <div className="text-[11px] text-muted">{label}</div>
+    <div className="rounded-lg bg-surface-2 px-2 py-2 text-center">
+      <div className="text-[17px] font-semibold text-ink tabular">{value}</div>
+      <div className="text-[10.5px] text-muted">{label}</div>
     </div>
   );
 }
