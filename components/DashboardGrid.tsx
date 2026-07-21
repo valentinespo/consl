@@ -5,9 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Pencil, Check, Plus, X, Move, Scaling, Bell, AlertTriangle, Gauge, PieChart, Layers, CheckCircle2, ShoppingCart, Zap, PackageSearch } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { money } from "@/lib/format";
 import { Card, SectionTitle } from "@/components/ui";
 import { TotalValueCard } from "@/components/TotalValueCard";
-import { FacilityPie } from "@/components/FacilityPie";
+import { FacilityPie, BLUES, VIOLETS } from "@/components/FacilityPie";
 import { ValueStackedChart } from "@/components/ValueStackedChart";
 import { RecentLots, type RecentLot } from "@/components/RecentLots";
 import type { RestockTotals, ValueHistoryPoint } from "@/lib/restock";
@@ -25,6 +26,9 @@ export type DashboardData = {
   totals: RestockTotals;
   history: ValueHistoryPoint[];
   facility: { code: string; value: number }[];
+  facilityPurchases: { code: string; value: number }[];
+  prodTotal: number;
+  purchTotal: number;
   counts: { purchases: number; transactions: number; suppliers: number };
   recentLots: RecentLot[];
   alerts: Alert[];
@@ -292,7 +296,7 @@ function renderContent(id: string, d: DashboardData) {
     case "totalValue":
       return <TotalValueCard totals={d.totals} history={d.history} className="h-full" />;
     case "facility":
-      return <FacilityWidget data={d.facility} counts={d.counts} />;
+      return <FacilityWidget production={d.facility} purchases={d.facilityPurchases} prodTotal={d.prodTotal} purchTotal={d.purchTotal} counts={d.counts} />;
     case "recentLots":
       return <RecentLotsWidget lots={d.recentLots} />;
     case "valueByBucket":
@@ -367,17 +371,50 @@ function WidgetHead({ icon: Icon, title, tint = "accent", right }: { icon: Lucid
   );
 }
 
-function FacilityWidget({ data, counts }: { data: { code: string; value: number }[]; counts: { purchases: number; transactions: number; suppliers: number } }) {
+function FacilityWidget({
+  production,
+  purchases,
+  prodTotal,
+  purchTotal,
+  counts,
+}: {
+  production: { code: string; value: number }[];
+  purchases: { code: string; value: number }[];
+  prodTotal: number;
+  purchTotal: number;
+  counts: { purchases: number; transactions: number; suppliers: number };
+}) {
   return (
     <Card className="flex h-full flex-col">
       <WidgetHead icon={PieChart} title="Value by facility" tint="accent" />
-      <FacilityPie data={data} />
-      <div className="mt-auto grid grid-cols-3 gap-2 pt-4">
-        <Mini label="Purchases" value={counts.purchases} />
-        <Mini label="Transactions" value={counts.transactions} />
-        <Mini label="Suppliers" value={counts.suppliers} />
+      <div className="grid grid-cols-2 gap-4">
+        <FacilityPie data={production} palette={BLUES} label="Production" />
+        <FacilityPie data={purchases} palette={VIOLETS} label="Purchases" />
+      </div>
+      <div className="mt-auto pt-4">
+        <div className="grid grid-cols-2 gap-2">
+          <MoneyChip label="Production value" value={prodTotal} dot={BLUES[1]} />
+          <MoneyChip label="Purchase spend" value={purchTotal} dot={VIOLETS[1]} />
+        </div>
+        <div className="mt-2 grid grid-cols-3 gap-2">
+          <Mini label="Purchases" value={counts.purchases} />
+          <Mini label="Transactions" value={counts.transactions} />
+          <Mini label="Suppliers" value={counts.suppliers} />
+        </div>
       </div>
     </Card>
+  );
+}
+
+function MoneyChip({ label, value, dot }: { label: string; value: number; dot: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-surface-2/60 px-3 py-2">
+      <div className="flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-sm" style={{ background: dot }} />
+        <span className="text-[10.5px] text-muted">{label}</span>
+      </div>
+      <div className="mt-0.5 text-[15px] font-semibold tabular text-ink">{money(value)}</div>
+    </div>
   );
 }
 

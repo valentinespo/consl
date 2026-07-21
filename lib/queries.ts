@@ -46,7 +46,10 @@ export async function getInventory() {
 
 export async function getDashboard() {
   const inv = await getInventory();
-  const lots = await prisma.lot.findMany({ include: { lines: true, facility: true } });
+  const [lots, purchaseRows] = await Promise.all([
+    prisma.lot.findMany({ include: { lines: true, facility: true } }),
+    prisma.purchase.findMany({ where: { isAdjustment: false }, select: { total: true, facility: { select: { code: true } } } }),
+  ]);
 
   let inProductionValue = 0;
   let finishedValue = 0;
@@ -61,6 +64,14 @@ export async function getDashboard() {
       else finishedValue += v;
       byFacility.set(lot.facility.code, (byFacility.get(lot.facility.code) ?? 0) + v);
     }
+  }
+
+  // Purchase spend by facility (real purchases only, adjustments excluded).
+  const purchByFacility = new Map<string, number>();
+  let purchasesTotal = 0;
+  for (const p of purchaseRows) {
+    purchByFacility.set(p.facility.code, (purchByFacility.get(p.facility.code) ?? 0) + p.total);
+    purchasesTotal += p.total;
   }
 
   const counts = {
@@ -79,6 +90,8 @@ export async function getDashboard() {
     productionCOGValue: inProductionValue + finishedValue,
     totalUnits,
     byFacility: [...byFacility.entries()].map(([code, value]) => ({ code, value })).sort((a, b) => b.value - a.value),
+    purchasesByFacility: [...purchByFacility.entries()].map(([code, value]) => ({ code, value })).sort((a, b) => b.value - a.value),
+    purchasesTotal,
     counts,
   };
 }
