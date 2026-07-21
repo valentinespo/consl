@@ -3,8 +3,8 @@
 import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { RefreshCw, Settings2, Check, GripVertical } from "lucide-react";
-import { money } from "@/lib/format";
 import { SkuAvatar } from "@/components/ui";
+import { TotalValueCard } from "@/components/TotalValueCard";
 import { syncAmazon, updateGlobalDefaults, updateSkuPolicy, setSortMode, saveManualOrder, setSkuWindow } from "@/app/inventory/actions";
 import type { RestockRow, RestockTotals } from "@/lib/restock";
 
@@ -209,16 +209,7 @@ export function RestockDashboard({
     <div>
       {/* Total value + sync */}
       <div className="mb-3 flex items-start justify-between gap-3">
-        <div className="flex-1 rounded-[var(--radius-card)] border border-accent-strong bg-accent-soft p-5">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-accent">Total inventory value</div>
-          <div className="mt-1 text-[38px] font-medium leading-none tracking-tight text-ink tabular">{money(totals.total)}</div>
-          <div className="mt-3.5 flex flex-wrap gap-2">
-            <ValuePill dot={SEG.available} label="FBA" value={money(totals.fba)} />
-            <ValuePill dot={SEG.awd} label="AWD" value={money(totals.awd)} />
-            <ValuePill dot={SEG.production} label="In production" value={money(totals.inProduction)} />
-            <ValuePill dot="#94a3b8" label="Raw materials" value={money(totals.raw)} />
-          </div>
-        </div>
+        <TotalValueCard totals={totals} className="flex-1" />
         <div className="flex flex-col items-end gap-1.5">
           <button onClick={sync} disabled={pending} className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60">
             <RefreshCw size={14} className={pending ? "animate-spin" : ""} /> {pending ? "Syncing…" : "Sync Amazon"}
@@ -488,15 +479,6 @@ function NumField({ label, value, onChange, placeholder }: { label: string; valu
       <div className="mb-1">{label}</div>
       <input type="number" step="0.5" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="h-8 w-32 rounded-lg border border-border bg-surface px-2 text-[13px] text-ink outline-none focus:border-accent-strong" />
     </label>
-  );
-}
-
-function ValuePill({ dot, label, value }: { dot: string; label: string; value: string }) {
-  return (
-    <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-[13px]">
-      <span className="h-1.5 w-1.5 rounded-full" style={{ background: dot }} />
-      {label} <span className="font-medium tabular text-ink">{value}</span>
-    </span>
   );
 }
 

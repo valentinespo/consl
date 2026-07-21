@@ -1,13 +1,15 @@
 import Link from "next/link";
 import { getDashboard, getLots } from "@/lib/queries";
-import { money, qty } from "@/lib/format";
-import { Card, StatCard, PageHeader, SectionTitle, FacilityTag } from "@/components/ui";
+import { getRestock } from "@/lib/restock";
+import { money } from "@/lib/format";
+import { Card, PageHeader, SectionTitle, FacilityTag } from "@/components/ui";
 import { RecentLots } from "@/components/RecentLots";
+import { TotalValueCard } from "@/components/TotalValueCard";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const [d, lots] = await Promise.all([getDashboard(), getLots()]);
+  const [d, lots, { totals }] = await Promise.all([getDashboard(), getLots(), getRestock()]);
   const recent = lots.slice(0, 6);
   const maxFac = Math.max(1, ...d.byFacility.map((f) => f.value));
 
@@ -15,12 +17,7 @@ export default async function DashboardPage() {
     <>
       <PageHeader title="Dashboard" subtitle="Production value, raw inventory and recent activity at a glance." />
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Total inventory value" value={money(d.rawInventoryValue + d.inProductionValue)} sub="Raw materials + in production" accent />
-        <StatCard label="Raw inventory value" value={money(d.rawInventoryValue)} sub="Tea bags + pouches on hand (FIFO)" />
-        <StatCard label="Value in production" value={money(d.inProductionValue)} sub={`${d.counts.inProduction} active lot(s)`} />
-        <StatCard label="Units produced" value={qty(d.totalUnits)} sub={`Across ${d.counts.lots} lots`} />
-      </div>
+      <TotalValueCard totals={totals} />
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-1">
