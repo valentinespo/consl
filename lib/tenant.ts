@@ -35,9 +35,19 @@ const orgIdFromAuth = cache(async (): Promise<string | null> => {
   return null;
 });
 
-/** The current org — an explicit background context if set, otherwise the logged-in user's org. */
+/**
+ * The current org — an explicit background context if set, otherwise the logged-in user's org.
+ * Local-dev-only fallback: when running in development mode AND a DEV_ORG_ID is present (a file
+ * that lives only on a developer's machine), unauthenticated requests resolve to that org so the
+ * app can be run/inspected locally without a login. This is impossible on the deployed app, which
+ * always runs in production mode — the branch is dead code there.
+ */
 export async function getCurrentOrgId(): Promise<string | null> {
-  return orgStore.getStore()?.orgId ?? (await orgIdFromAuth());
+  const explicit = orgStore.getStore()?.orgId;
+  if (explicit) return explicit;
+  // Local dev: skip Clerk entirely and use the dev org (mirrors the middleware bypass).
+  if (process.env.NODE_ENV === "development") return process.env.DEV_ORG_ID ?? null;
+  return await orgIdFromAuth();
 }
 
 /** Force the bootstrap to run (called from the layout on every authenticated load). */
