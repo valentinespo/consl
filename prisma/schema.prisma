@@ -10,16 +10,44 @@ datasource db {
   provider = "postgresql"
 }
 
+/// A customer account (tenant). Every piece of business data belongs to exactly one Organization.
+/// This is the backbone of multi-tenancy: one shared database, each row tagged with its owner.
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  facilities              Facility[]
+  suppliers               Supplier[]
+  products                Product[]
+  skuSnapshots            SkuSnapshot[]
+  dismissedNotifications  DismissedNotification[]
+  inventoryValueSnapshots InventoryValueSnapshot[]
+  settings                Settings[]
+  materialTypes           MaterialType[]
+  purchaseInvoices        PurchaseInvoice[]
+  purchases               Purchase[]
+  lots                    Lot[]
+  documents               Document[]
+  purchaseOrders          PurchaseOrder[]
+  transactionInvoices     TransactionInvoice[]
+  transactions            Transaction[]
+}
+
 /// Production facility / co-packer (also acts as a supplier).
 /// e.g. STC = SpecialTea Company, CCP = Custom Co-Pak, CRW = Caraway
 model Facility {
-  id             String          @id @default(cuid())
-  code           String          @unique
-  name           String
-  type           String          @default("co-packer") // co-packer | warehouse
-  legalName      String? // vendor name printed on POs (falls back to name)
-  address        String? // multiline vendor address for POs
-  notes          String?
+  id              String          @id @default(cuid())
+  orgId           String?
+  organization    Organization?   @relation(fields: [orgId], references: [id])
+  code            String          @unique
+  name            String
+  type            String          @default("co-packer") // co-packer | warehouse
+  legalName       String? // vendor name printed on POs (falls back to name)
+  address         String? // multiline vendor address for POs
+  notes           String?
   lots            Lot[]
   purchases       Purchase[]
   purchaseOrders  PurchaseOrder[]
@@ -30,26 +58,30 @@ model Facility {
 
 /// A vendor we pay (may also be a facility, matched loosely by name).
 model Supplier {
-  id           String        @id @default(cuid())
-  name         String        @unique
-  photoUrl     String?
-  email        String?
-  phone        String?
-  address      String?
-  notes        String?
-  facility     Facility?     @relation(fields: [facilityId], references: [id], onDelete: SetNull)
-  facilityId   String?       @unique // set when this supplier IS one of our facilities
-  purchases    Purchase[]
-  transactions Transaction[]
+  id                  String               @id @default(cuid())
+  orgId               String?
+  organization        Organization?        @relation(fields: [orgId], references: [id])
+  name                String               @unique
+  photoUrl            String?
+  email               String?
+  phone               String?
+  address             String?
+  notes               String?
+  facility            Facility?            @relation(fields: [facilityId], references: [id], onDelete: SetNull)
+  facilityId          String?              @unique // set when this supplier IS one of our facilities
+  purchases           Purchase[]
+  transactions        Transaction[]
   transactionInvoices TransactionInvoice[]
   purchaseInvoices    PurchaseInvoice[]
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 }
 
 /// Finished product (SKU). e.g. LKD = Liver and Kidney Detox Tea
 model Product {
   id                 String              @id @default(cuid())
+  orgId              String?
+  organization       Organization?       @relation(fields: [orgId], references: [id])
   code               String              @unique
   name               String
   imageUrl           String?
@@ -61,7 +93,7 @@ model Product {
   // --- Per-SKU restock policy (null = use the global default) ---
   minMonths          Float? // floor: months of stock to never fall below
   leadMonths         Float? // production lead time: PO date → stock landing at FBA
-  reorderToMonths    Float?  @default(12) // target: how much cover to bring back to
+  reorderToMonths    Float?              @default(12) // target: how much cover to bring back to
   batchSize          Int? // co-packer minimum / standard run size
   sortIndex          Int? // manual sort position on the inventory dashboard
   windowDays         Int? // per-SKU velocity window override (10/30/90); null = use the global toggle
@@ -77,26 +109,28 @@ model Product {
 
 /// A point-in-time capture of a SKU's Amazon FBA position + trailing sales, pulled from SP-API.
 model SkuSnapshot {
-  id               String   @id @default(cuid())
-  product          Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  id               String        @id @default(cuid())
+  orgId            String?
+  organization     Organization? @relation(fields: [orgId], references: [id])
+  product          Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
   productId        String
-  capturedAt       DateTime @default(now())
-  fbaAvailable     Int      @default(0) // fulfillable
-  fbaInbound       Int      @default(0) // working + shipped + receiving
-  fbaReserved      Int      @default(0) // reserved + in-transit-between-FCs + researching
-  fbaUnfulfillable Int      @default(0)
-  fbaTotal         Int      @default(0)
-  awdOnhand        Int      @default(0) // Amazon Warehousing & Distribution on-hand
-  awdInbound       Int      @default(0) // inbound to AWD
-  inStock          Boolean  @default(true) // was the SKU in stock at capture (for future exact velocity)
+  capturedAt       DateTime      @default(now())
+  fbaAvailable     Int           @default(0) // fulfillable
+  fbaInbound       Int           @default(0) // working + shipped + receiving
+  fbaReserved      Int           @default(0) // reserved + in-transit-between-FCs + researching
+  fbaUnfulfillable Int           @default(0)
+  fbaTotal         Int           @default(0)
+  awdOnhand        Int           @default(0) // Amazon Warehousing & Distribution on-hand
+  awdInbound       Int           @default(0) // inbound to AWD
+  inStock          Boolean       @default(true) // was the SKU in stock at capture (for future exact velocity)
   dailySales       Json? // { "YYYY-MM-DD": units } over the trailing 90 days, for custom/exclude windows
   salesEnd         DateTime? // the window end anchor (sync time − 2d lag) the daily series is measured to
-  units10d         Int      @default(0)
-  units30d         Int      @default(0)
-  units90d         Int      @default(0)
-  salesDays10      Int      @default(0) // days with ≥1 sale in the trailing 10/30/90 days
-  salesDays30      Int      @default(0)
-  salesDays90      Int      @default(0)
+  units10d         Int           @default(0)
+  units30d         Int           @default(0)
+  units90d         Int           @default(0)
+  salesDays10      Int           @default(0) // days with ≥1 sale in the trailing 10/30/90 days
+  salesDays30      Int           @default(0)
+  salesDays90      Int           @default(0)
 
   @@index([productId, capturedAt])
 }
@@ -104,17 +138,21 @@ model SkuSnapshot {
 /// Dashboard notifications the user manually dismissed. Pruned automatically once the
 /// underlying condition resolves, so a recurring alert reappears fresh.
 model DismissedNotification {
-  key         String   @id // stable alert key, e.g. "reorder:LDX" | "material:TEABAG"
-  dismissedAt DateTime @default(now())
+  key          String        @id // stable alert key, e.g. "reorder:LDX" | "material:TEABAG"
+  orgId        String?
+  organization Organization? @relation(fields: [orgId], references: [id])
+  dismissedAt  DateTime      @default(now())
 }
 
 /// One row per day: the total inventory value split by bucket, for the evolution chart.
 /// Captured going forward (upserted per calendar day) — the live total is already de-duplicated,
 /// so each daily point is internally consistent with no double-counting across buckets.
 model InventoryValueSnapshot {
-  id           String   @id @default(cuid())
-  day          String   @unique // "YYYY-MM-DD"
-  capturedAt   DateTime @default(now())
+  id           String        @id @default(cuid())
+  orgId        String?
+  organization Organization? @relation(fields: [orgId], references: [id])
+  day          String        @unique // "YYYY-MM-DD"
+  capturedAt   DateTime      @default(now())
   raw          Float
   inProduction Float
   fba          Float
@@ -124,82 +162,90 @@ model InventoryValueSnapshot {
 
 /// Singleton global restock defaults, editable in-app. Per-SKU values override these.
 model Settings {
-  id                String @id @default("singleton")
-  defaultMinMonths  Float  @default(5) // months of stock to never fall below
-  defaultLeadMonths Float  @default(4.5) // production lead time (PO → landing at FBA)
-  sortMode          String @default("sales") // inventory dashboard sort: sales | available | manual
+  id                String        @id @default("singleton")
+  orgId             String?
+  organization      Organization? @relation(fields: [orgId], references: [id])
+  defaultMinMonths  Float         @default(5) // months of stock to never fall below
+  defaultLeadMonths Float         @default(4.5) // production lead time (PO → landing at FBA)
+  sortMode          String        @default("sales") // inventory dashboard sort: sales | available | manual
   // --- Automatic daily Amazon sync + inventory-value snapshot ---
-  syncEnabled Boolean   @default(true)
-  syncHour    Int       @default(5) // hour-of-day to run (in syncTz)
-  syncMinute  Int       @default(0)
-  syncTz      String    @default("America/Argentina/Buenos_Aires")
-  lastSyncRun String? // last completed run, "YYYY-MM-DD" in syncTz (idempotency guard)
-  lastSyncAt  DateTime? // exact timestamp of the last completed run
+  syncEnabled       Boolean       @default(true)
+  syncHour          Int           @default(5) // hour-of-day to run (in syncTz)
+  syncMinute        Int           @default(0)
+  syncTz            String        @default("America/Argentina/Buenos_Aires")
+  lastSyncRun       String? // last completed run, "YYYY-MM-DD" in syncTz (idempotency guard)
+  lastSyncAt        DateTime? // exact timestamp of the last completed run
   // Editable dashboard: [{ id, x, y, w, h }] of placed widgets (12-col grid). null = default layout.
-  dashboardLayout Json?
+  dashboardLayout   Json?
 }
 
 /// Extensible raw-material catalog (Tea Bag, Pouch, ...).
 /// poolKey decides how FIFO stock is segmented.
 model MaterialType {
-  id             String        @id @default(cuid())
-  code           String        @unique // TEABAG | POUCH | ...
-  name           String
-  unitLabel      String        @default("unit") // "bag", "pouch"
-  defaultPerUnit Float         @default(1) // default consumed per finished unit
-  poolKey        String        @default("FACILITY") // FACILITY | FACILITY_SKU
-  skuSpecific    Boolean       @default(false) // purchases & pools are per-SKU
+  id                String            @id @default(cuid())
+  orgId             String?
+  organization      Organization?     @relation(fields: [orgId], references: [id])
+  code              String            @unique // TEABAG | POUCH | ...
+  name              String
+  unitLabel         String            @default("unit") // "bag", "pouch"
+  defaultPerUnit    Float             @default(1) // default consumed per finished unit
+  poolKey           String            @default("FACILITY") // FACILITY | FACILITY_SKU
+  skuSpecific       Boolean           @default(false) // purchases & pools are per-SKU
   lowStockThreshold Float? // dashboard notifies when available qty drops below this (null = off)
-  imageUrl       String?
-  purchases      Purchase[]
-  purchaseInvoices PurchaseInvoice[]
-  lotMaterials   LotMaterial[]
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  imageUrl          String?
+  purchases         Purchase[]
+  purchaseInvoices  PurchaseInvoice[]
+  lotMaterials      LotMaterial[]
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
 }
 
 /// One real purchase payment (a single material), fanning out into per-facility/SKU lines.
 model PurchaseInvoice {
-  id             String       @id @default(cuid())
-  supplier       Supplier?    @relation(fields: [supplierId], references: [id])
+  id             String        @id @default(cuid())
+  orgId          String?
+  organization   Organization? @relation(fields: [orgId], references: [id])
+  supplier       Supplier?     @relation(fields: [supplierId], references: [id])
   supplierId     String?
-  materialType   MaterialType @relation(fields: [materialTypeId], references: [id])
+  materialType   MaterialType  @relation(fields: [materialTypeId], references: [id])
   materialTypeId String
   date           DateTime
-  invoiceTotal   Float        @default(0)
-  isAdjustment   Boolean      @default(false) // lost-inventory invoice
+  invoiceTotal   Float         @default(0)
+  isAdjustment   Boolean       @default(false) // lost-inventory invoice
   notes          String?
   documentUrl    String? // legacy single-doc field (superseded by documents[])
   documents      Document[]
   lines          Purchase[]
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 }
 
 /// A raw-material purchase line. Feeds the FIFO pools.
 model Purchase {
   id             String           @id @default(cuid())
+  orgId          String?
+  organization   Organization?    @relation(fields: [orgId], references: [id])
   invoice        PurchaseInvoice? @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   invoiceId      String?
-  materialType   MaterialType @relation(fields: [materialTypeId], references: [id])
+  materialType   MaterialType     @relation(fields: [materialTypeId], references: [id])
   materialTypeId String
   date           DateTime
-  supplier       Supplier?    @relation(fields: [supplierId], references: [id])
+  supplier       Supplier?        @relation(fields: [supplierId], references: [id])
   supplierId     String?
-  facility       Facility     @relation(fields: [facilityId], references: [id])
+  facility       Facility         @relation(fields: [facilityId], references: [id])
   facilityId     String
   // Only set for SKU-specific materials (e.g. pouches): which SKU this stock is for.
-  product        Product?     @relation(fields: [productId], references: [id])
+  product        Product?         @relation(fields: [productId], references: [id])
   productId      String?
   quantity       Float
   unitCost       Float
   total          Float
-  seq            Int          @default(0) // stable FIFO tie-break within same date
+  seq            Int              @default(0) // stable FIFO tie-break within same date
   // "Lost inventory" / corrections: a supply adjustment, not consumed demand.
-  isAdjustment   Boolean      @default(false)
+  isAdjustment   Boolean          @default(false)
   notes          String?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
   @@index([materialTypeId, facilityId, productId, date])
 }
@@ -211,13 +257,15 @@ enum LotStatus {
 
 /// A production batch / PO.
 model Lot {
-  id                 String        @id @default(cuid())
+  id                 String         @id @default(cuid())
+  orgId              String?
+  organization       Organization?  @relation(fields: [orgId], references: [id])
   poNumber           String? // e.g. "#7-CCP"
   lotNr              Int // numeric LOT NR used by transactions
   poDate             DateTime?
-  facility           Facility      @relation(fields: [facilityId], references: [id])
+  facility           Facility       @relation(fields: [facilityId], references: [id])
   facilityId         String
-  status             LotStatus     @default(IN_PRODUCTION)
+  status             LotStatus      @default(IN_PRODUCTION)
   finishedAt         DateTime? // set each time status flips to FINISHED (latest wins; kept if later unmarked)
   notes              String?
   // Informational only (NOT part of COG): what was actually paid inbound.
@@ -227,8 +275,8 @@ model Lot {
   transactions       Transaction[]
   purchaseOrder      PurchaseOrder?
   documents          Document[]
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
 
   @@index([lotNr])
 }
@@ -239,6 +287,8 @@ model Lot {
 /// spans multiple transactions). Table kept as "LotDocument" for continuity.
 model Document {
   id                   String              @id @default(cuid())
+  orgId                String?
+  organization         Organization?       @relation(fields: [orgId], references: [id])
   label                String? // free text; e.g. "COA", "BOL", "Invoice"
   fileUrl              String
   fileName             String?
@@ -251,29 +301,31 @@ model Document {
   purchaseInvoiceId    String?
   createdAt            DateTime            @default(now())
 
-  @@map("LotDocument")
   @@index([lotId])
   @@index([transactionInvoiceId])
   @@index([purchaseInvoiceId])
+  @@map("LotDocument")
 }
 
 /// A purchase order sent to a co-packer. Creating one also creates its production lot.
 model PurchaseOrder {
-  id         String              @id @default(cuid())
-  number     String              @unique // e.g. "#21-CRW"
-  date       DateTime
-  status     String              @default("DRAFT") // DRAFT | SENT
-  facility   Facility            @relation(fields: [facilityId], references: [id])
-  facilityId String
-  lot        Lot?                @relation(fields: [lotId], references: [id], onDelete: SetNull)
-  lotId      String?             @unique
-  pdfUrl     String?
-  total      Float? // null when any line is TBD
-  notes      String?
-  imported   Boolean             @default(false) // historical PO from the Drive archive (lot predates it)
-  lines      PurchaseOrderLine[]
-  createdAt  DateTime            @default(now())
-  updatedAt  DateTime            @updatedAt
+  id           String              @id @default(cuid())
+  orgId        String?
+  organization Organization?       @relation(fields: [orgId], references: [id])
+  number       String              @unique // e.g. "#21-CRW"
+  date         DateTime
+  status       String              @default("DRAFT") // DRAFT | SENT
+  facility     Facility            @relation(fields: [facilityId], references: [id])
+  facilityId   String
+  lot          Lot?                @relation(fields: [lotId], references: [id], onDelete: SetNull)
+  lotId        String?             @unique
+  pdfUrl       String?
+  total        Float? // null when any line is TBD
+  notes        String?
+  imported     Boolean             @default(false) // historical PO from the Drive archive (lot predates it)
+  lines        PurchaseOrderLine[]
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
 }
 
 /// One line on a PO: a SKU being ordered, or a fee (COAs, testing, ...).
@@ -337,6 +389,8 @@ model LotMaterial {
 /// One real payment. Fans out into transaction lines that allocate it to lots/SKUs.
 model TransactionInvoice {
   id           String        @id @default(cuid())
+  orgId        String?
+  organization Organization? @relation(fields: [orgId], references: [id])
   supplier     Supplier?     @relation(fields: [supplierId], references: [id])
   supplierId   String?
   date         DateTime?
@@ -350,26 +404,28 @@ model TransactionInvoice {
 
 /// A single allocation line of an invoice. category drives whether it hits COG.
 model Transaction {
-  id        String              @id @default(cuid())
-  invoice   TransactionInvoice? @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  invoiceId String?
+  id                   String              @id @default(cuid())
+  orgId                String?
+  organization         Organization?       @relation(fields: [orgId], references: [id])
+  invoice              TransactionInvoice? @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoiceId            String?
   // Per-line lot (transactions survive lot deletion -> become unassigned).
-  lot              Lot?      @relation(fields: [lotId], references: [id], onDelete: SetNull)
-  lotId            String?
-  date             DateTime?
-  supplier         Supplier? @relation(fields: [supplierId], references: [id])
-  supplierId       String?
-  invoiceAmount    Float? // (legacy) — invoice total now lives on TransactionInvoice
-  applicableAmount Float     @default(0) // this line's amount
-  category         String    @default("TEA") // TEA | OTHER | NOT_APPLICABLE
-  appliesToCog     Boolean   @default(true) // derived: false when category = NOT_APPLICABLE
-  skus             String? // SKU code, or null = spread proportionally by units
-  concept          String?
-  invoiceFileUrl   String?
+  lot                  Lot?                @relation(fields: [lotId], references: [id], onDelete: SetNull)
+  lotId                String?
+  date                 DateTime?
+  supplier             Supplier?           @relation(fields: [supplierId], references: [id])
+  supplierId           String?
+  invoiceAmount        Float? // (legacy) — invoice total now lives on TransactionInvoice
+  applicableAmount     Float               @default(0) // this line's amount
+  category             String              @default("TEA") // TEA | OTHER | NOT_APPLICABLE
+  appliesToCog         Boolean             @default(true) // derived: false when category = NOT_APPLICABLE
+  skus                 String? // SKU code, or null = spread proportionally by units
+  concept              String?
+  invoiceFileUrl       String?
   notApplicableAmount  Float? // legacy (now modeled as a NOT_APPLICABLE line)
   notApplicableConcept String? // legacy
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
 
   @@index([lotId])
   @@index([invoiceId])
