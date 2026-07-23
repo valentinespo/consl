@@ -21,7 +21,7 @@ export function TotalValueCard({
   className?: string;
 }) {
   return (
-    <div className={`rounded-[var(--radius-card)] border border-accent-strong bg-accent-soft p-5 ${className}`}>
+    <div className={`flex flex-col overflow-hidden rounded-[var(--radius-card)] border border-accent-strong bg-accent-soft p-5 ${className}`}>
       <div className="text-[11px] font-medium uppercase tracking-wide text-accent">Total inventory value</div>
       <div className="mt-1 text-[38px] font-medium leading-none tracking-tight text-ink tabular">{money(totals.total)}</div>
       <div className="mt-3.5 flex flex-wrap gap-2">

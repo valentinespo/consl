@@ -44,7 +44,7 @@ export function ValueSparkline({ data }: { data: { day: string; total: number }[
   const gid = "spark-fill";
 
   return (
-    <div className="mt-4">
+    <div className="mt-4 flex min-h-0 flex-1 flex-col">
       <div className="mb-1.5 flex items-center justify-between text-[11px]">
         <span className="font-medium uppercase tracking-wide text-accent/70">Value over time</span>
         {many ? (
@@ -55,8 +55,8 @@ export function ValueSparkline({ data }: { data: { day: string; total: number }[
           <span className="text-muted">tracking started — grows daily</span>
         )}
       </div>
-      <div className="relative h-[70px] w-full">
-        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-full w-full overflow-visible">
+      <div className="relative min-h-[40px] w-full flex-1">
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-full w-full">
           <defs>
             <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#2563eb" stopOpacity="0.28" />

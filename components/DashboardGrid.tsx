@@ -236,7 +236,7 @@ export function DashboardGrid({ data, initialLayout }: { data: DashboardData; in
       {isMobile ? (
         <div className="space-y-4">
           {ordered.map((it) => (
-            <div key={it.id} style={{ minHeight: it.h * ROW_H }}>{renderContent(it.id, data)}</div>
+            <div key={it.id} className="overflow-hidden rounded-[var(--radius-card)]" style={{ minHeight: it.h * ROW_H }}>{renderContent(it.id, data)}</div>
           ))}
         </div>
       ) : (
@@ -253,7 +253,7 @@ export function DashboardGrid({ data, initialLayout }: { data: DashboardData; in
                   onPointerDown={(e) => onPointerDown(e, it.id, "move")}
                   className={`relative h-full ${editing ? "cursor-grab rounded-xl ring-1 ring-accent-strong/40 ring-offset-2 ring-offset-[var(--color-bg,#fff)] active:cursor-grabbing" : ""}`}
                 >
-                  <div className={`h-full ${editing ? "pointer-events-none select-none" : ""}`}>{renderContent(it.id, data)}</div>
+                  <div className={`h-full overflow-hidden rounded-[var(--radius-card)] ${editing ? "pointer-events-none select-none" : ""}`}>{renderContent(it.id, data)}</div>
 
                   {editing && (
                     <>
