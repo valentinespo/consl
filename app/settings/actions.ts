@@ -1,6 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
+import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
 import { syncAmazonCore } from "@/lib/sync";
 import { getRestock } from "@/lib/restock";
 import { revalidatePath } from "next/cache";
@@ -9,7 +10,7 @@ const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, M
 
 /** Current app settings for the settings panel. */
 export async function getAppSettings() {
-  const s = await prisma.settings.upsert({ where: { id: "singleton" }, create: { id: "singleton" }, update: {} });
+  const s = await getOrgSettings();
   return {
     syncEnabled: s.syncEnabled,
     syncHour: s.syncHour,
@@ -38,25 +39,22 @@ export async function saveSettings(input: {
     defaultMinMonths: Math.max(0, input.defaultMinMonths) || 5,
     defaultLeadMonths: Math.max(0, input.defaultLeadMonths) || 4.5,
   };
-  await prisma.settings.upsert({ where: { id: "singleton" }, create: { id: "singleton", ...data }, update: data });
+  await saveOrgSettings(data);
   revalidatePath("/", "layout");
   return { ok: true as const };
 }
 
 /** Dismiss a dashboard notification (re-appears if the condition recurs after resolving). */
 export async function dismissNotification(key: string) {
-  await prisma.dismissedNotification.upsert({ where: { key }, create: { key }, update: {} });
+  const existing = await prisma.dismissedNotification.findFirst({ where: { key } });
+  if (!existing) await prisma.dismissedNotification.create({ data: { key } });
   revalidatePath("/");
   return { ok: true as const };
 }
 
 /** Persist the dashboard widget layout (array of { id, x, y, w, h }). */
 export async function saveDashboardLayout(layout: { id: string; x: number; y: number; w: number; h: number }[]) {
-  await prisma.settings.upsert({
-    where: { id: "singleton" },
-    create: { id: "singleton", dashboardLayout: layout },
-    update: { dashboardLayout: layout },
-  });
+  await saveOrgSettings({ dashboardLayout: layout });
   return { ok: true as const };
 }
 
@@ -66,7 +64,7 @@ export async function runSyncNow() {
     const r = await syncAmazonCore();
     if (r.ok) {
       await getRestock();
-      await prisma.settings.update({ where: { id: "singleton" }, data: { lastSyncAt: new Date() } });
+      await saveOrgSettings({ lastSyncAt: new Date() });
     }
     revalidatePath("/");
     revalidatePath("/inventory");

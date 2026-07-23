@@ -40,7 +40,7 @@ export async function createProduct(input: { code: string; name?: string }) {
   const code = input.code.trim().toUpperCase().replace(/\s+/g, "");
   if (!code) return { ok: false as const, error: "SKU code required" };
   const name = (input.name ?? "").trim() || code;
-  const existing = await prisma.product.findUnique({ where: { code } });
+  const existing = await prisma.product.findFirst({ where: { code } });
   if (existing) return { ok: true as const, id: existing.id, code: existing.code, name: existing.name, existed: true };
   const p = await prisma.product.create({ data: { code, name } });
   revalidatePath("/", "layout");
@@ -58,7 +58,7 @@ export async function createMaterial(input: {
   if (!name) return { ok: false as const, error: "Material name required" };
   let code = slugCode(name);
   let n = 1;
-  while (await prisma.materialType.findUnique({ where: { code } })) code = `${slugCode(name)}${n++}`;
+  while (await prisma.materialType.findFirst({ where: { code } })) code = `${slugCode(name)}${n++}`;
   const skuSpecific = !!input.skuSpecific;
   const m = await prisma.materialType.create({
     data: {
@@ -83,7 +83,7 @@ export async function updateProduct(input: { id: string; code: string; name: str
   const current = await prisma.product.findUnique({ where: { id: input.id } });
   if (!current) return { ok: false as const, error: "SKU not found" };
   if (code !== current.code) {
-    const clash = await prisma.product.findUnique({ where: { code } });
+    const clash = await prisma.product.findFirst({ where: { code } });
     if (clash) return { ok: false as const, error: `SKU code ${code} already exists` };
   }
 

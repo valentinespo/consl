@@ -1,5 +1,7 @@
 import "server-only";
-import { prisma } from "@/lib/prisma";
+import { prismaBase } from "@/lib/prisma-base";
+import { runWithOrg } from "@/lib/tenant";
+import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
 import { syncAmazonCore } from "@/lib/sync";
 import { getRestock } from "@/lib/restock";
 
@@ -25,24 +27,35 @@ function nowInTz(tz: string): { day: string; minutes: number } {
 
 let running = false;
 
-/** One scheduler tick: run the daily Amazon sync + value snapshot if due and not yet done today. */
+/** Run the daily sync for one org if it's due and hasn't run today (in that org's own context). */
+async function runOrgDaily(orgId: string): Promise<void> {
+  await runWithOrg(orgId, async () => {
+    const s = await getOrgSettings();
+    if (!s.syncEnabled) return;
+    const { day, minutes } = nowInTz(s.syncTz);
+    const due = s.syncHour * 60 + s.syncMinute;
+    if (minutes < due) return; // not yet time today
+    if (s.lastSyncRun === day) return; // already ran today
+    try {
+      await syncAmazonCore(); // no-op for orgs with no Amazon-mapped SKUs
+      await getRestock(); // records today's inventory-value snapshot with fresh numbers
+      await saveOrgSettings({ lastSyncRun: day, lastSyncAt: new Date() });
+      console.log(`[scheduler] daily sync completed for org ${orgId} (${day})`);
+    } catch (e) {
+      console.error(`[scheduler] daily sync failed for org ${orgId}:`, (e as Error).message);
+    }
+  });
+}
+
+/** One scheduler tick: check every org and run its daily sync if due. */
 async function tick(): Promise<void> {
   if (running) return;
-  const s = await prisma.settings.upsert({ where: { id: "singleton" }, create: { id: "singleton" }, update: {} });
-  if (!s.syncEnabled) return;
-  const { day, minutes } = nowInTz(s.syncTz);
-  const due = s.syncHour * 60 + s.syncMinute;
-  if (minutes < due) return; // not yet time today
-  if (s.lastSyncRun === day) return; // already ran today
   running = true;
   try {
-    await syncAmazonCore(); // refresh Amazon FBA/AWD/sales
-    await getRestock(); // computes + records today's inventory-value snapshot with fresh numbers
-    await prisma.settings.update({ where: { id: "singleton" }, data: { lastSyncRun: day, lastSyncAt: new Date() } });
-    console.log(`[scheduler] daily sync completed for ${day}`);
+    const orgs = await prismaBase.organization.findMany({ select: { id: true } });
+    for (const o of orgs) await runOrgDaily(o.id);
   } catch (e) {
-    // Leave lastSyncRun unset so the next tick retries.
-    console.error("[scheduler] daily sync failed:", (e as Error).message);
+    console.error("[scheduler] tick failed:", (e as Error).message);
   } finally {
     running = false;
   }

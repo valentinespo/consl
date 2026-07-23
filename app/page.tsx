@@ -1,7 +1,7 @@
 import { getDashboard, getLots } from "@/lib/queries";
 import { getRestock, getInventoryValueHistory } from "@/lib/restock";
 import { getAlerts } from "@/lib/alerts";
-import { prisma } from "@/lib/prisma";
+import { getOrgSettings } from "@/lib/settings";
 import { PageHeader } from "@/components/ui";
 import { DashboardGrid, type DashboardData } from "@/components/DashboardGrid";
 
@@ -13,7 +13,7 @@ export default async function DashboardPage() {
     getLots(),
     getRestock(),
     getInventoryValueHistory(),
-    prisma.settings.upsert({ where: { id: "singleton" }, create: { id: "singleton" }, update: {} }),
+    getOrgSettings(),
   ]);
   const alerts = await getAlerts(restock.rows);
 

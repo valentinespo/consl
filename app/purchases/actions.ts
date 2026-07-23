@@ -7,7 +7,7 @@ import { cleanupSupplierIfOrphan } from "@/app/transactions/actions";
 
 async function resolveSupplierId(name: string | null): Promise<string | null> {
   if (!name) return null;
-  const existing = await prisma.supplier.findUnique({ where: { name } });
+  const existing = await prisma.supplier.findFirst({ where: { name } });
   return existing ? existing.id : (await prisma.supplier.create({ data: { name } })).id;
 }
 

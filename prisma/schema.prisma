@@ -35,6 +35,9 @@ model Organization {
   transactionInvoices     TransactionInvoice[]
   transactions            Transaction[]
   memberships             Membership[]
+  lotLines                LotLine[]
+  lotMaterials            LotMaterial[]
+  purchaseOrderLines      PurchaseOrderLine[]
 }
 
 /// Links a Clerk user account to an Organization (which company they belong to + their role).
@@ -57,7 +60,7 @@ model Facility {
   id              String          @id @default(cuid())
   orgId           String?
   organization    Organization?   @relation(fields: [orgId], references: [id])
-  code            String          @unique
+  code            String         
   name            String
   type            String          @default("co-packer") // co-packer | warehouse
   legalName       String? // vendor name printed on POs (falls back to name)
@@ -69,6 +72,8 @@ model Facility {
   supplierProfile Supplier?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
+
+  @@unique([orgId, code])
 }
 
 /// A vendor we pay (may also be a facility, matched loosely by name).
@@ -76,7 +81,7 @@ model Supplier {
   id                  String               @id @default(cuid())
   orgId               String?
   organization        Organization?        @relation(fields: [orgId], references: [id])
-  name                String               @unique
+  name                String              
   photoUrl            String?
   email               String?
   phone               String?
@@ -90,6 +95,8 @@ model Supplier {
   purchaseInvoices    PurchaseInvoice[]
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
+
+  @@unique([orgId, name])
 }
 
 /// Finished product (SKU). e.g. LKD = Liver and Kidney Detox Tea
@@ -97,7 +104,7 @@ model Product {
   id                 String              @id @default(cuid())
   orgId              String?
   organization       Organization?       @relation(fields: [orgId], references: [id])
-  code               String              @unique
+  code               String             
   name               String
   imageUrl           String?
   notes              String?
@@ -120,6 +127,8 @@ model Product {
   snapshots          SkuSnapshot[]
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
+
+  @@unique([orgId, code])
 }
 
 /// A point-in-time capture of a SKU's Amazon FBA position + trailing sales, pulled from SP-API.
@@ -153,10 +162,13 @@ model SkuSnapshot {
 /// Dashboard notifications the user manually dismissed. Pruned automatically once the
 /// underlying condition resolves, so a recurring alert reappears fresh.
 model DismissedNotification {
-  key          String        @id // stable alert key, e.g. "reorder:LDX" | "material:TEABAG"
+  id          String        @id @default(cuid())
+  key          String // stable alert key, e.g. "reorder:LDX" | "material:TEABAG"
   orgId        String?
   organization Organization? @relation(fields: [orgId], references: [id])
   dismissedAt  DateTime      @default(now())
+
+  @@unique([orgId, key])
 }
 
 /// One row per day: the total inventory value split by bucket, for the evolution chart.
@@ -166,18 +178,20 @@ model InventoryValueSnapshot {
   id           String        @id @default(cuid())
   orgId        String?
   organization Organization? @relation(fields: [orgId], references: [id])
-  day          String        @unique // "YYYY-MM-DD"
+  day          String        // "YYYY-MM-DD"
   capturedAt   DateTime      @default(now())
   raw          Float
   inProduction Float
   fba          Float
   awd          Float
   total        Float
+
+  @@unique([orgId, day])
 }
 
 /// Singleton global restock defaults, editable in-app. Per-SKU values override these.
 model Settings {
-  id                String        @id @default("singleton")
+  id                String        @id @default(cuid())
   orgId             String?
   organization      Organization? @relation(fields: [orgId], references: [id])
   defaultMinMonths  Float         @default(5) // months of stock to never fall below
@@ -192,6 +206,8 @@ model Settings {
   lastSyncAt        DateTime? // exact timestamp of the last completed run
   // Editable dashboard: [{ id, x, y, w, h }] of placed widgets (12-col grid). null = default layout.
   dashboardLayout   Json?
+
+  @@unique([orgId])
 }
 
 /// Extensible raw-material catalog (Tea Bag, Pouch, ...).
@@ -200,7 +216,7 @@ model MaterialType {
   id                String            @id @default(cuid())
   orgId             String?
   organization      Organization?     @relation(fields: [orgId], references: [id])
-  code              String            @unique // TEABAG | POUCH | ...
+  code              String            // TEABAG | POUCH | ...
   name              String
   unitLabel         String            @default("unit") // "bag", "pouch"
   defaultPerUnit    Float             @default(1) // default consumed per finished unit
@@ -213,6 +229,8 @@ model MaterialType {
   lotMaterials      LotMaterial[]
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
+
+  @@unique([orgId, code])
 }
 
 /// One real purchase payment (a single material), fanning out into per-facility/SKU lines.
@@ -327,7 +345,7 @@ model PurchaseOrder {
   id           String              @id @default(cuid())
   orgId        String?
   organization Organization?       @relation(fields: [orgId], references: [id])
-  number       String              @unique // e.g. "#21-CRW"
+  number       String              // e.g. "#21-CRW"
   date         DateTime
   status       String              @default("DRAFT") // DRAFT | SENT
   facility     Facility            @relation(fields: [facilityId], references: [id])
@@ -341,11 +359,15 @@ model PurchaseOrder {
   lines        PurchaseOrderLine[]
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
+
+  @@unique([orgId, number])
 }
 
 /// One line on a PO: a SKU being ordered, or a fee (COAs, testing, ...).
 model PurchaseOrderLine {
   id          String        @id @default(cuid())
+  orgId        String?
+  organization Organization? @relation(fields: [orgId], references: [id])
   po          PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
   poId        String
   seq         Int           @default(0)
@@ -363,6 +385,8 @@ model PurchaseOrderLine {
 /// One SKU produced within a lot (a lot can produce multiple SKUs).
 model LotLine {
   id        String        @id @default(cuid())
+  orgId        String?
+  organization Organization? @relation(fields: [orgId], references: [id])
   lot       Lot           @relation(fields: [lotId], references: [id], onDelete: Cascade)
   lotId     String
   product   Product       @relation(fields: [productId], references: [id])
@@ -389,6 +413,8 @@ model LotLine {
 /// Bill of materials: how much of a material a lot line consumes per unit.
 model LotMaterial {
   id             String       @id @default(cuid())
+  orgId        String?
+  organization Organization? @relation(fields: [orgId], references: [id])
   lotLine        LotLine      @relation(fields: [lotLineId], references: [id], onDelete: Cascade)
   lotLineId      String
   materialType   MaterialType @relation(fields: [materialTypeId], references: [id])

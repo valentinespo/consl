@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { getInventory } from "@/lib/queries";
+import { getOrgSettings } from "@/lib/settings";
 
 export type RestockRow = {
   id: string;
@@ -61,7 +62,7 @@ export async function getRestock(): Promise<{
     prisma.skuSnapshot.findMany({ distinct: ["productId"], orderBy: { capturedAt: "desc" } }),
     prisma.lot.findMany({ include: { lines: true }, orderBy: [{ poDate: "desc" }, { createdAt: "desc" }] }),
     getInventory(),
-    prisma.settings.upsert({ where: { id: "singleton" }, create: { id: "singleton" }, update: {} }),
+    getOrgSettings(),
   ]);
   const snapByProduct = new Map(snaps.map((s) => [s.productId, s]));
   const lastSync = snaps.reduce<Date | null>((m, s) => (!m || s.capturedAt > m ? s.capturedAt : m), null);
@@ -198,15 +199,17 @@ export async function getInventoryValueHistory(): Promise<ValueHistoryPoint[]> {
   });
 }
 
-/** Upsert today's inventory-value point (one row per calendar day). Non-fatal — never breaks a render. */
+/** Record today's inventory-value point (one row per calendar day, per org). Non-fatal. */
 async function recordDailyInventoryValue(t: RestockTotals) {
   const day = new Date().toISOString().slice(0, 10);
+  const values = { raw: t.raw, inProduction: t.inProduction, fba: t.fba, awd: t.awd, total: t.total };
   try {
-    await prisma.inventoryValueSnapshot.upsert({
-      where: { day },
-      create: { day, raw: t.raw, inProduction: t.inProduction, fba: t.fba, awd: t.awd, total: t.total },
-      update: { raw: t.raw, inProduction: t.inProduction, fba: t.fba, awd: t.awd, total: t.total, capturedAt: new Date() },
-    });
+    const existing = await prisma.inventoryValueSnapshot.findFirst({ where: { day } }); // auto-scoped to org
+    if (existing) {
+      await prisma.inventoryValueSnapshot.update({ where: { id: existing.id }, data: { ...values, capturedAt: new Date() } });
+    } else {
+      await prisma.inventoryValueSnapshot.create({ data: { day, ...values } });
+    }
   } catch {
     // swallow: recording history must never break the dashboard
   }

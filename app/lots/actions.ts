@@ -41,8 +41,8 @@ export async function createLot(input: {
   const lotNr = await nextFreeLotNr();
 
   const [teabag, pouch] = await Promise.all([
-    prisma.materialType.findUnique({ where: { code: "TEABAG" } }),
-    prisma.materialType.findUnique({ where: { code: "POUCH" } }),
+    prisma.materialType.findFirst({ where: { code: "TEABAG" } }),
+    prisma.materialType.findFirst({ where: { code: "POUCH" } }),
   ]);
   const facilityUsesTeabag =
     teabag != null && (await prisma.purchase.count({ where: { materialTypeId: teabag.id, facilityId: input.facilityId } })) > 0;
@@ -107,8 +107,8 @@ export async function updateLot(payload: LotEditPayload) {
   const justFinished = payload.status === "FINISHED" && currentLot?.status !== "FINISHED";
 
   const [teabag, pouch] = await Promise.all([
-    prisma.materialType.findUnique({ where: { code: "TEABAG" } }),
-    prisma.materialType.findUnique({ where: { code: "POUCH" } }),
+    prisma.materialType.findFirst({ where: { code: "TEABAG" } }),
+    prisma.materialType.findFirst({ where: { code: "POUCH" } }),
   ]);
   const facilityUsesTeabag =
     teabag != null && (await prisma.purchase.count({ where: { materialTypeId: teabag.id, facilityId: payload.facilityId } })) > 0;
