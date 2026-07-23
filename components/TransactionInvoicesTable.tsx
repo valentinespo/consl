@@ -11,7 +11,8 @@ import { Paperclip } from "lucide-react";
 
 type SortKey = "date" | "applicable";
 
-const CAT_LABEL: Record<string, string> = { TEA: "Tea", OTHER: "Other", NOT_APPLICABLE: "N/A" };
+// Stored keys are legacy (TEA/OTHER); the labels are business-neutral.
+const CAT_LABEL: Record<string, string> = { TEA: "Ingredient", OTHER: "Other cost", NOT_APPLICABLE: "N/A" };
 
 export function TransactionInvoicesTable({
   invoices,

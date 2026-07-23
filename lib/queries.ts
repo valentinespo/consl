@@ -284,6 +284,105 @@ export async function getMaterialTypes() {
   }));
 }
 
+/** Which first-run setup steps a company has completed. Drives the Getting Started checklist,
+ *  so a brand-new account always knows what to do next. */
+export async function getSetupProgress() {
+  const [products, facilities, suppliers, purchases, lots, mapped, dismissed] = await Promise.all([
+    prisma.product.count(),
+    prisma.facility.count(),
+    prisma.supplier.count(),
+    prisma.purchase.count(),
+    prisma.lot.count(),
+    prisma.product.count({
+      where: {
+        OR: [
+          { asin: { not: null } },
+          { barcode: { not: null } },
+          { shopifyProductId: { not: null } },
+          { tiktokProductId: { not: null } },
+        ],
+      },
+    }),
+    prisma.dismissedNotification.findFirst({ where: { key: SETUP_DISMISS_KEY } }),
+  ]);
+  return { products, facilities, suppliers, purchases, lots, mapped, dismissed: !!dismissed };
+}
+
+export const SETUP_DISMISS_KEY = "getting-started";
+
+/** A record's dependants, as `{ label → count }`. Non-zero entries block deletion. */
+export type UsedBy = Record<string, number>;
+
+/** Drop zero counts so callers can just check `Object.keys(usedBy).length`. */
+function used(entries: Record<string, number>): UsedBy {
+  return Object.fromEntries(Object.entries(entries).filter(([, n]) => n > 0));
+}
+
+/** One product + everything referencing it (drives the detail page's danger zone). */
+export async function getProductDetail(id: string) {
+  const product = await prisma.product.findFirst({ where: { id } });
+  if (!product) return null;
+  // Amazon snapshots are derived sync data and cascade away with the product, so they never block.
+  const [lotLines, purchases, poLines, transactions] = await Promise.all([
+    prisma.lotLine.count({ where: { productId: id } }),
+    prisma.purchase.count({ where: { productId: id } }),
+    prisma.purchaseOrderLine.count({ where: { productId: id } }),
+    prisma.transaction.count({ where: { skus: product.code } }),
+  ]);
+  return {
+    product,
+    usedBy: used({ "production lots": lotLines, purchases, "purchase-order lines": poLines, transactions }),
+  };
+}
+
+/** One raw material + everything referencing it. */
+export async function getMaterialDetail(id: string) {
+  const material = await prisma.materialType.findFirst({ where: { id } });
+  if (!material) return null;
+  const [purchases, invoices, lotMaterials] = await Promise.all([
+    prisma.purchase.count({ where: { materialTypeId: id } }),
+    prisma.purchaseInvoice.count({ where: { materialTypeId: id } }),
+    prisma.lotMaterial.count({ where: { materialTypeId: id } }),
+  ]);
+  return { material, usedBy: used({ purchases, "purchase invoices": invoices, "lot recipes": lotMaterials }) };
+}
+
+/** One facility + everything referencing it. */
+export async function getFacilityDetail(id: string) {
+  const facility = await prisma.facility.findFirst({ where: { id } });
+  if (!facility) return null;
+  const [lots, purchases, purchaseOrders] = await Promise.all([
+    prisma.lot.count({ where: { facilityId: id } }),
+    prisma.purchase.count({ where: { facilityId: id } }),
+    prisma.purchaseOrder.count({ where: { facilityId: id } }),
+  ]);
+  return { facility, usedBy: used({ "production lots": lots, purchases, "purchase orders": purchaseOrders }) };
+}
+
+/** Every facility with its dependant counts, for the Facilities list. */
+export async function getFacilitiesDetailed() {
+  return prisma.facility.findMany({
+    include: { _count: { select: { lots: true, purchases: true, purchaseOrders: true } } },
+    orderBy: { code: "asc" },
+  });
+}
+
+/** One supplier + everything referencing it. */
+export async function getSupplierDetail(id: string) {
+  const supplier = await prisma.supplier.findFirst({ where: { id }, include: { facility: true } });
+  if (!supplier) return null;
+  const [purchases, transactions, purchaseInvoices, transactionInvoices] = await Promise.all([
+    prisma.purchase.count({ where: { supplierId: id } }),
+    prisma.transaction.count({ where: { supplierId: id } }),
+    prisma.purchaseInvoice.count({ where: { supplierId: id } }),
+    prisma.transactionInvoice.count({ where: { supplierId: id } }),
+  ]);
+  return {
+    supplier,
+    usedBy: used({ purchases, transactions, "purchase invoices": purchaseInvoices, "transaction invoices": transactionInvoices }),
+  };
+}
+
 export async function getPurchasesByMaterial() {
   const [materials, purchases] = await Promise.all([
     prisma.materialType.findMany({ orderBy: { name: "asc" } }),

@@ -16,7 +16,7 @@ export default async function TransactionsPage() {
     <>
       <PageHeader
         title="Transactions"
-        subtitle={`${invoices.length} invoices. Each fans out into allocation lines — Tea & Other amounts flow into each lot's COG.`}
+        subtitle={`${invoices.length} invoices. Each fans out into allocation lines — ingredient & other costs flow into each lot's COG.`}
       />
       <TransactionInvoicesTable invoices={invoices} lots={lots} suppliers={suppliers} skuImages={skuImages} showLotColumn />
     </>

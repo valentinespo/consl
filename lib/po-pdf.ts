@@ -1,20 +1,22 @@
 /**
- * Renders a Purchase Order PDF matching the herbl brand template:
+ * Renders a Purchase Order PDF:
  * sage header band (logo + title) flowing straight into the dark date/number bar,
  * company/vendor columns, items table with TOTAL. Supports "TBD" pricing (unitCost = null).
- * Typography: Helvetica Neue (bundled); all dark greens use the brand ink #1A2F18.
+ * The sender block comes from the signed-in company's profile, not a hardcoded constant.
  */
 import path from "node:path";
 import PDFDocument from "pdfkit";
-import { COMPANY } from "./company";
 
 export type PoPdfLine = { sku: string | null; description: string; unitCost: number | null; quantity: number };
+/** The sending company, as stored on its Organization profile. */
+export type PoPdfCompany = { name: string; addressLines: string[]; email: string | null; phone: string | null; currencySymbol: string };
 export type PoPdfData = {
   number: string; // "#21-CRW"
   dateISO: string; // "2026-07-05"
   vendorName: string;
   vendorAddress: string; // multiline
   lines: PoPdfLine[];
+  company: PoPdfCompany;
 };
 
 const INK = "#1a2f18"; // brand ink — all dark greens
@@ -70,7 +72,7 @@ export async function generatePoPdf(data: PoPdfData): Promise<Buffer> {
   try {
     doc.image(path.join(process.cwd(), "public", "brand", "logo.png"), IX, 84, { height: 34 });
   } catch {
-    doc.font("Bold").fontSize(26).fillColor(INK).text("herbl", IX, 84);
+    doc.font("Bold").fontSize(26).fillColor(INK).text(data.company.name, IX, 84);
   }
   doc.font("Bold").fontSize(22).fillColor(INK).text("PURCHASE ORDER", IX, 92, { width: IR - IX, align: "right", characterSpacing: 0.5 });
 
@@ -81,11 +83,11 @@ export async function generatePoPdf(data: PoPdfData): Promise<Buffer> {
     doc.font("Body").fontSize(9.5).fillColor(MUTED).text(t, x, y, { width: w, lineGap: 3 });
 
   label("Address", IX, colY);
-  value(COMPANY.addressLines.join("\n"), IX, colY + 14, 175);
+  value(data.company.addressLines.join("\n"), IX, colY + 14, 175);
   label("Email", IX + 190, colY);
-  value(COMPANY.email, IX + 190, colY + 14, 140);
+  value(data.company.email ?? "", IX + 190, colY + 14, 140);
   label("Phone", IX + 190, colY + 31);
-  value(COMPANY.phone, IX + 190, colY + 45, 140);
+  value(data.company.phone ?? "", IX + 190, colY + 45, 140);
   label("Vendor", IX + 330, colY);
   value(`${data.vendorName}\n${data.vendorAddress}`, IX + 330, colY + 14, IR - (IX + 330));
 

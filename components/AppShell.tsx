@@ -7,7 +7,7 @@ import { Menu, X } from "lucide-react";
 import { Sidebar } from "@/components/Sidebar";
 
 /** App chrome: fixed sidebar on desktop, slide-in drawer + top bar on mobile. Auth screens render bare. */
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({ children, orgName }: { children: React.ReactNode; orgName?: string | null }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
@@ -22,7 +22,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="lg:flex">
       {/* Desktop sidebar */}
       <div className="hidden lg:sticky lg:top-0 lg:block lg:h-screen lg:shrink-0">
-        <Sidebar />
+        <Sidebar orgName={orgName} />
       </div>
 
       {/* Mobile drawer */}
@@ -30,7 +30,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-black/30" onClick={() => setOpen(false)} aria-hidden />
           <div className="absolute inset-y-0 left-0 h-full shadow-xl">
-            <Sidebar onNavigate={() => setOpen(false)} />
+            <Sidebar orgName={orgName} onNavigate={() => setOpen(false)} />
             <button
               onClick={() => setOpen(false)}
               aria-label="Close menu"
@@ -49,7 +49,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <button onClick={() => setOpen(true)} aria-label="Open menu" className="-ml-1 rounded-lg p-1.5 text-ink-soft hover:bg-surface-2">
             <Menu size={22} />
           </button>
-          <Image src="/brand/logo.png" alt="herbl" width={72} height={22} className="h-[20px] w-auto" priority />
+          <Image src="/brand/logo.png" alt={orgName ?? "Logo"} width={72} height={22} className="h-[20px] w-auto" priority />
           <span className="ml-auto rounded-md bg-accent-soft px-2 py-0.5 text-[10px] font-semibold tracking-wide text-ink-soft">OPS</span>
         </header>
 

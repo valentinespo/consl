@@ -19,6 +19,19 @@ export async function deleteLot(formData: FormData) {
   redirect("/lots");
 }
 
+/** The default recipe for a new lot line: every material this facility actually stocks, at its
+ *  default rate. Replaces the old hardcoded "always a pouch, plus tea bags if they buy them" —
+ *  a business that makes something other than tea gets its own materials seeded the same way. */
+async function defaultMaterialsFor(facilityId: string) {
+  const purchased = await prisma.purchase.findMany({
+    where: { facilityId },
+    select: { materialTypeId: true },
+    distinct: ["materialTypeId"],
+  });
+  if (purchased.length === 0) return [];
+  return prisma.materialType.findMany({ where: { id: { in: purchased.map((p) => p.materialTypeId) } } });
+}
+
 /** Smallest positive lot number not in use — deleted numbers get reused (e.g. a scrapped PO #21). */
 async function nextFreeLotNr(): Promise<number> {
   const used = new Set((await prisma.lot.findMany({ select: { lotNr: true } })).map((l) => l.lotNr));
@@ -40,12 +53,7 @@ export async function createLot(input: {
 
   const lotNr = await nextFreeLotNr();
 
-  const [teabag, pouch] = await Promise.all([
-    prisma.materialType.findFirst({ where: { code: "TEABAG" } }),
-    prisma.materialType.findFirst({ where: { code: "POUCH" } }),
-  ]);
-  const facilityUsesTeabag =
-    teabag != null && (await prisma.purchase.count({ where: { materialTypeId: teabag.id, facilityId: input.facilityId } })) > 0;
+  const defaults = await defaultMaterialsFor(input.facilityId);
 
   const lot = await prisma.lot.create({
     data: {
@@ -61,14 +69,15 @@ export async function createLot(input: {
   });
 
   for (const line of lot.lines) {
-    if (pouch) {
+    for (const m of defaults) {
       await prisma.lotMaterial.create({
-        data: { lotLineId: line.id, materialTypeId: pouch.id, perUnit: pouch.defaultPerUnit || 1, productId: line.productId },
-      });
-    }
-    if (facilityUsesTeabag && teabag) {
-      await prisma.lotMaterial.create({
-        data: { lotLineId: line.id, materialTypeId: teabag.id, perUnit: teabag.defaultPerUnit || 15 },
+        data: {
+          lotLineId: line.id,
+          materialTypeId: m.id,
+          perUnit: m.defaultPerUnit || 1,
+          // Materials pooled per product (e.g. printed packaging) must carry the SKU.
+          productId: m.skuSpecific ? line.productId : null,
+        },
       });
     }
   }
@@ -106,14 +115,10 @@ export async function updateLot(payload: LotEditPayload) {
   const currentLot = await prisma.lot.findUnique({ where: { id: payload.lotId }, select: { status: true } });
   const justFinished = payload.status === "FINISHED" && currentLot?.status !== "FINISHED";
 
-  const [teabag, pouch] = await Promise.all([
-    prisma.materialType.findFirst({ where: { code: "TEABAG" } }),
-    prisma.materialType.findFirst({ where: { code: "POUCH" } }),
-  ]);
-  const facilityUsesTeabag =
-    teabag != null && (await prisma.purchase.count({ where: { materialTypeId: teabag.id, facilityId: payload.facilityId } })) > 0;
-  // Pouch lines carry the SKU so they draw the right per-SKU FIFO pool.
-  const pouchId = pouch?.id;
+  const defaults = await defaultMaterialsFor(payload.facilityId);
+  // Per-product materials carry the SKU so they draw the right per-SKU FIFO pool.
+  const allMaterials = await prisma.materialType.findMany({ select: { id: true, skuSpecific: true } });
+  const skuSpecificIds = new Set(allMaterials.filter((m) => m.skuSpecific).map((m) => m.id));
 
   await prisma.$transaction(async (tx) => {
     await tx.lot.update({
@@ -142,7 +147,7 @@ export async function updateLot(payload: LotEditPayload) {
               lotLineId,
               materialTypeId: m.materialTypeId,
               perUnit: m.perUnit,
-              productId: m.materialTypeId === pouchId ? l.productId : null,
+              productId: skuSpecificIds.has(m.materialTypeId) ? l.productId : null,
             },
           });
         }
@@ -154,10 +159,7 @@ export async function updateLot(payload: LotEditPayload) {
         const created = await tx.lotLine.create({ data: { lotId: payload.lotId, productId: l.productId, units, seq } });
         const mats = l.materials.length
           ? l.materials
-          : [
-              ...(pouch ? [{ materialTypeId: pouch.id, perUnit: pouch.defaultPerUnit || 1 }] : []),
-              ...(facilityUsesTeabag && teabag ? [{ materialTypeId: teabag.id, perUnit: teabag.defaultPerUnit || 15 }] : []),
-            ];
+          : defaults.map((m) => ({ materialTypeId: m.id, perUnit: m.defaultPerUnit || 1 }));
         await writeMaterials(created.id, mats);
       }
       seq++;

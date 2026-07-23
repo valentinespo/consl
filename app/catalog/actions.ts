@@ -75,7 +75,7 @@ export async function createMaterial(input: {
 }
 
 /** Edit an existing SKU's code &/or name. A code rename cascades to transaction allocation tags. */
-export async function updateProduct(input: { id: string; code: string; name: string }) {
+export async function updateProduct(input: { id: string; code: string; name: string; notes?: string }) {
   const code = input.code.trim().toUpperCase().replace(/\s+/g, "");
   const name = input.name.trim();
   if (!code) return { ok: false as const, error: "SKU code required" };
@@ -88,7 +88,10 @@ export async function updateProduct(input: { id: string; code: string; name: str
   }
 
   await prisma.$transaction(async (tx) => {
-    await tx.product.update({ where: { id: input.id }, data: { code, name } });
+    await tx.product.update({
+      where: { id: input.id },
+      data: { code, name, ...(input.notes !== undefined ? { notes: input.notes.trim() || null } : {}) },
+    });
     // Transaction allocation lines tag their SKU by code string — keep them pointing at this SKU.
     if (code !== current.code) await tx.transaction.updateMany({ where: { skus: current.code }, data: { skus: code } });
   });
@@ -97,19 +100,114 @@ export async function updateProduct(input: { id: string; code: string; name: str
   return { ok: true as const };
 }
 
-/** Edit a raw material's name, unit label, per-unit rate, and low-stock alert threshold. */
-export async function updateMaterial(input: { id: string; name: string; unitLabel: string; defaultPerUnit: number; lowStockThreshold: number | null }) {
+/** Edit a raw material. The code is editable too — costs are keyed by material id, not code,
+ *  so a rename is safe once the engine recomputes. */
+export async function updateMaterial(input: {
+  id: string;
+  code?: string;
+  name: string;
+  unitLabel: string;
+  defaultPerUnit: number;
+  lowStockThreshold: number | null;
+}) {
   const name = input.name.trim();
   if (!name) return { ok: false as const, error: "Name required" };
+
+  const current = await prisma.materialType.findFirst({ where: { id: input.id } });
+  if (!current) return { ok: false as const, error: "Material not found" };
+
+  const code = (input.code ?? current.code).trim().toUpperCase().replace(/\s+/g, "");
+  if (!code) return { ok: false as const, error: "Code required" };
+  if (code !== current.code) {
+    const clash = await prisma.materialType.findFirst({ where: { code } });
+    if (clash) return { ok: false as const, error: `Code ${code} already exists` };
+  }
+
   await prisma.materialType.update({
     where: { id: input.id },
     data: {
+      code,
       name,
       unitLabel: input.unitLabel.trim() || "unit",
       defaultPerUnit: input.defaultPerUnit > 0 ? input.defaultPerUnit : 1,
       lowStockThreshold: input.lowStockThreshold != null && input.lowStockThreshold > 0 ? input.lowStockThreshold : null,
     },
   });
+  if (code !== current.code) await recomputeAll(); // cost snapshots are labelled by code
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/** Map a product to each sales channel. Identifiers only — nothing is synced yet. */
+export async function updateProductChannels(input: {
+  id: string;
+  barcode: string;
+  asin: string;
+  sellerSku: string;
+  fnsku: string;
+  shopifyProductId: string;
+  shopifyVariantId: string;
+  shopifySku: string;
+  tiktokProductId: string;
+  tiktokSku: string;
+}) {
+  const clean = (s: string) => {
+    const t = s.trim();
+    return t === "" ? null : t;
+  };
+  await prisma.product.update({
+    where: { id: input.id },
+    data: {
+      barcode: clean(input.barcode),
+      asin: clean(input.asin),
+      sellerSku: clean(input.sellerSku),
+      fnsku: clean(input.fnsku),
+      shopifyProductId: clean(input.shopifyProductId),
+      shopifyVariantId: clean(input.shopifyVariantId),
+      shopifySku: clean(input.shopifySku),
+      tiktokProductId: clean(input.tiktokProductId),
+      tiktokSku: clean(input.tiktokSku),
+    },
+  });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/** Delete a product — refused while anything still references it (checked here, not just in the UI). */
+export async function deleteProduct(id: string) {
+  const product = await prisma.product.findFirst({ where: { id } });
+  if (!product) return { ok: false as const, error: "Product not found" };
+
+  const [lotLines, purchases, poLines, transactions] = await Promise.all([
+    prisma.lotLine.count({ where: { productId: id } }),
+    prisma.purchase.count({ where: { productId: id } }),
+    prisma.purchaseOrderLine.count({ where: { productId: id } }),
+    prisma.transaction.count({ where: { skus: product.code } }),
+  ]);
+  if (lotLines + purchases + poLines + transactions > 0) {
+    return { ok: false as const, error: "This product is in use and can no longer be deleted." };
+  }
+
+  await prisma.product.delete({ where: { id } }); // Amazon snapshots cascade
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/** Delete a raw material — refused while any purchase, invoice or lot recipe still references it. */
+export async function deleteMaterial(id: string) {
+  const material = await prisma.materialType.findFirst({ where: { id } });
+  if (!material) return { ok: false as const, error: "Material not found" };
+
+  const [purchases, invoices, lotMaterials] = await Promise.all([
+    prisma.purchase.count({ where: { materialTypeId: id } }),
+    prisma.purchaseInvoice.count({ where: { materialTypeId: id } }),
+    prisma.lotMaterial.count({ where: { materialTypeId: id } }),
+  ]);
+  if (purchases + invoices + lotMaterials > 0) {
+    return { ok: false as const, error: "This raw material is in use and can no longer be deleted." };
+  }
+
+  await prisma.materialType.delete({ where: { id } });
   revalidatePath("/", "layout");
   return { ok: true as const };
 }

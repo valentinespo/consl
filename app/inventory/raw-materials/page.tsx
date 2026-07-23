@@ -1,9 +1,18 @@
-import { getInventory, type InventoryPool } from "@/lib/queries";
+import { Package } from "lucide-react";
+import { getInventory, getMaterialTypes, type InventoryPool } from "@/lib/queries";
 import { money, qty, perUnit, costFine } from "@/lib/format";
 import { Card, StatCard, PageHeader, SectionTitle, FacilityTag, SkuAvatar } from "@/components/ui";
 import { InventoryNav } from "@/components/InventoryNav";
+import { EmptyState } from "@/components/EmptyState";
 
 export const dynamic = "force-dynamic";
+
+/** Cheap per-unit items (a few cents) need more decimals than expensive ones. */
+function unitCost(value: number, quantity: number) {
+  if (!(quantity > 0)) return "—";
+  const c = value / quantity;
+  return (c < 0.1 ? costFine : perUnit)(c);
+}
 
 function FacilityRow({ pool, unitLabel }: { pool: InventoryPool; unitLabel: string }) {
   return (
@@ -11,36 +20,62 @@ function FacilityRow({ pool, unitLabel }: { pool: InventoryPool; unitLabel: stri
       <div className="flex items-center gap-2">
         <FacilityTag code={pool.facility} />
         <span className="text-[11.5px] text-muted">
-          {(unitLabel === "bag" ? costFine : perUnit)(pool.valueRemaining / pool.quantityRemaining)} / {unitLabel}
+          {unitCost(pool.valueRemaining, pool.quantityRemaining)} / {unitLabel}
         </span>
       </div>
       <div className="flex items-center gap-4 text-right">
-        <span className="font-medium text-ink tabular">{qty(pool.quantityRemaining)}</span>
-        <span className="w-20 text-[12px] tabular text-ink-soft">{money(pool.valueRemaining)}</span>
+        <span className="tabular font-medium text-ink">{qty(pool.quantityRemaining)}</span>
+        <span className="tabular w-20 text-[12px] text-ink-soft">{money(pool.valueRemaining)}</span>
       </div>
     </div>
   );
 }
 
-export default async function RawMaterialsPage() {
-  const { pools, totalValue, teabagUnits, pouchUnits } = await getInventory();
-  const teabags = pools.filter((p) => p.materialCode === "TEABAG" && p.quantityRemaining > 0.5);
+type Group = { key: string; sku: string | null; productName: string | null; imageUrl: string | null; pools: InventoryPool[]; totalQty: number; totalValue: number };
 
-  const pouchBySku = new Map<
-    string,
-    { sku: string; productName: string | null; imageUrl: string | null; facilities: InventoryPool[]; totalQty: number; totalValue: number }
-  >();
-  for (const p of pools) {
-    if (p.materialCode !== "POUCH" || p.quantityRemaining <= 0.5) continue;
-    const key = p.sku ?? "?";
-    const g = pouchBySku.get(key) ?? { sku: key, productName: p.productName, imageUrl: p.imageUrl, facilities: [], totalQty: 0, totalValue: 0 };
-    g.facilities.push(p);
-    g.totalQty += p.quantityRemaining;
-    g.totalValue += p.valueRemaining;
-    pouchBySku.set(key, g);
+export default async function RawMaterialsPage() {
+  const [{ pools, totalValue }, materials] = await Promise.all([getInventory(), getMaterialTypes()]);
+  const meta = new Map(materials.map((m) => [m.code, m]));
+  const live = pools.filter((p) => p.quantityRemaining > 0.5);
+
+  // One section per material that still has stock — no material is special-cased.
+  const byMaterial = new Map<string, InventoryPool[]>();
+  for (const p of live) {
+    const list = byMaterial.get(p.materialCode) ?? [];
+    list.push(p);
+    byMaterial.set(p.materialCode, list);
   }
-  const pouchGroups = [...pouchBySku.values()].sort((a, b) => b.totalValue - a.totalValue);
-  const teabagValue = teabags.reduce((s, p) => s + p.valueRemaining, 0);
+
+  const sections = [...byMaterial.entries()]
+    .map(([code, ps]) => {
+      // Materials stocked per product (e.g. printed packaging) group by SKU; the rest by facility.
+      const perSku = ps.some((p) => p.sku);
+      const groups = new Map<string, Group>();
+      for (const p of ps) {
+        const key = perSku ? (p.sku ?? "?") : "__all__";
+        const g =
+          groups.get(key) ??
+          ({ key, sku: perSku ? (p.sku ?? "?") : null, productName: p.productName, imageUrl: p.imageUrl, pools: [], totalQty: 0, totalValue: 0 } as Group);
+        g.pools.push(p);
+        g.totalQty += p.quantityRemaining;
+        g.totalValue += p.valueRemaining;
+        groups.set(key, g);
+      }
+      const value = ps.reduce((s, p) => s + p.valueRemaining, 0);
+      return {
+        code,
+        name: meta.get(code)?.name ?? ps[0]?.materialName ?? code,
+        unitLabel: meta.get(code)?.unitLabel ?? "unit",
+        imageUrl: meta.get(code)?.imageUrl ?? null,
+        perSku,
+        value,
+        totalQty: ps.reduce((s, p) => s + p.quantityRemaining, 0),
+        groups: [...groups.values()].sort((a, b) => b.totalValue - a.totalValue),
+      };
+    })
+    .sort((a, b) => b.value - a.value);
+
+  const poolCount = live.length;
 
   return (
     <>
@@ -49,78 +84,68 @@ export default async function RawMaterialsPage() {
 
       <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
         <StatCard label="Total raw value" value={money(totalValue)} sub="FIFO remaining valuation" accent />
-        <StatCard label="Tea bags on hand" value={qty(teabagUnits)} sub={`Across ${teabags.length} facilities`} />
-        <StatCard label="Pouches on hand" value={qty(pouchUnits)} sub={`${pouchGroups.length} products`} />
-        <StatCard label="Stock pools" value={String(teabags.length + pouchGroups.reduce((s, g) => s + g.facilities.length, 0))} sub="Material × location" />
+        <StatCard label="Materials in stock" value={String(sections.length)} sub={`of ${materials.length} tracked`} />
+        <StatCard label="Stock pools" value={String(poolCount)} sub="Material × location" />
+        <StatCard
+          label="Largest by value"
+          value={sections[0] ? sections[0].name : "—"}
+          sub={sections[0] ? money(sections[0].value) : "No stock yet"}
+        />
       </div>
 
-      <div className="mt-6">
-        <SectionTitle>Tea bags</SectionTitle>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {teabags.length > 0 ? (
-            <Card>
-              <div className="mb-1 flex items-center gap-3">
-                {teabags[0]?.imageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={teabags[0].imageUrl} alt="Tea bags" className="h-11 w-11 rounded-[12px] border border-border object-cover" />
-                ) : (
-                  <div className="flex h-11 w-11 items-center justify-center rounded-[12px] border border-border bg-surface-2 text-[11px] font-medium text-muted">TB</div>
-                )}
-                <div className="flex-1">
-                  <div className="font-medium text-ink">Tea bags</div>
-                  <div className="text-[12px] text-muted">One material, stocked across facilities</div>
-                </div>
-                <div className="text-right">
-                  <div className="font-medium text-ink tabular">{qty(teabagUnits)}</div>
-                  <div className="text-[12px] tabular text-ink-soft">{money(teabagValue)}</div>
-                </div>
-              </div>
-              <div className="mt-2">
-                {teabags.map((p) => (
-                  <FacilityRow key={p.facility} pool={p} unitLabel="bag" />
-                ))}
-              </div>
-            </Card>
-          ) : (
-            <Empty>No tea-bag stock remaining.</Empty>
-          )}
+      {sections.length === 0 ? (
+        <div className="mt-6">
+          <EmptyState
+            icon={Package}
+            title="No raw-material stock yet"
+            body="Once you log purchases of your raw materials, what's left of each one shows up here — valued oldest-cost-first, broken down by location."
+          />
         </div>
-      </div>
-
-      <div className="mt-8">
-        <SectionTitle>Pouches — by product</SectionTitle>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {pouchGroups.map((g) => (
-            <Card key={g.sku}>
-              <div className="mb-1 flex items-center gap-3">
-                <SkuAvatar code={g.sku} size={44} imageUrl={g.imageUrl} />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium text-ink">{g.productName}</div>
-                  <div className="text-[12px] text-muted">{g.facilities.length === 1 ? "1 facility" : `${g.facilities.length} facilities`}</div>
-                </div>
-                <div className="text-right">
-                  <div className="font-medium text-ink tabular">{qty(g.totalQty)}</div>
-                  <div className="text-[12px] tabular text-ink-soft">{money(g.totalValue)}</div>
-                </div>
-              </div>
-              <div className="mt-2">
-                {g.facilities.map((p) => (
-                  <FacilityRow key={`${g.sku}-${p.facility}`} pool={p} unitLabel="pouch" />
-                ))}
-              </div>
-            </Card>
-          ))}
-          {pouchGroups.length === 0 && <Empty>No pouch stock remaining.</Empty>}
-        </div>
-      </div>
+      ) : (
+        sections.map((s) => (
+          <div key={s.code} className="mt-8">
+            <SectionTitle>
+              {s.name}
+              <span className="ml-2 text-[12px] font-normal text-muted">
+                {qty(s.totalQty)} {s.unitLabel} · {money(s.value)}
+              </span>
+            </SectionTitle>
+            <div className={`grid grid-cols-1 gap-4 ${s.perSku ? "sm:grid-cols-2 lg:grid-cols-3" : "sm:grid-cols-2"}`}>
+              {s.groups.map((g) => (
+                <Card key={g.key}>
+                  <div className="mb-1 flex items-center gap-3">
+                    {g.sku ? (
+                      <SkuAvatar code={g.sku} size={44} imageUrl={g.imageUrl} />
+                    ) : s.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={s.imageUrl} alt={s.name} className="h-11 w-11 rounded-[12px] border border-border object-cover" />
+                    ) : (
+                      <div className="flex h-11 w-11 items-center justify-center rounded-[12px] border border-border bg-surface-2 text-muted">
+                        <Package size={18} />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-medium text-ink">{g.sku ? (g.productName ?? g.sku) : s.name}</div>
+                      <div className="text-[12px] text-muted">
+                        {g.pools.length === 1 ? "1 location" : `${g.pools.length} locations`}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="tabular font-medium text-ink">{qty(g.totalQty)}</div>
+                      <div className="tabular text-[12px] text-ink-soft">{money(g.totalValue)}</div>
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    {g.pools.map((p) => (
+                      <FacilityRow key={`${g.key}-${p.facility}`} pool={p} unitLabel={s.unitLabel} />
+                    ))}
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </div>
+        ))
+      )}
     </>
-  );
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="col-span-full rounded-[var(--radius-card)] border border-dashed border-border bg-surface-2 px-5 py-8 text-center text-[13px] text-muted">
-      {children}
-    </div>
   );
 }

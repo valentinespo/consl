@@ -12,6 +12,7 @@ import {
   ShoppingCart,
   FileText,
   Building2,
+  Warehouse,
   Images,
   Settings,
 } from "lucide-react";
@@ -26,10 +27,11 @@ const NAV = [
   { href: "/purchases", label: "Purchases", icon: ShoppingCart },
   { href: "/purchase-orders", label: "Purchase Orders", icon: FileText },
   { href: "/suppliers", label: "Suppliers", icon: Building2 },
+  { href: "/facilities", label: "Facilities", icon: Warehouse },
   { href: "/catalog", label: "Catalog", icon: Images },
 ];
 
-export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
+export function Sidebar({ orgName, onNavigate }: { orgName?: string | null; onNavigate?: () => void }) {
   const pathname = usePathname();
   const [settingsOpen, setSettingsOpen] = useState(false);
   return (
@@ -67,7 +69,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         <div className="flex min-w-0 items-center gap-2.5">
           <UserButton appearance={{ elements: { avatarBox: "h-8 w-8" } }} />
           <div className="min-w-0">
-            <div className="truncate text-[12px] font-medium text-ink-soft">Herbl Inc.</div>
+            <div className="truncate text-[12px] font-medium text-ink-soft">{orgName ?? "Your company"}</div>
             <div className="text-[11px] text-muted">Production &amp; Inventory</div>
           </div>
         </div>

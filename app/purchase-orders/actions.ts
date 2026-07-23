@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { generatePoPdf, poTotal, type PoPdfLine } from "@/lib/po-pdf";
+import { getCurrentOrg, orgAddressLines, orgDocumentName } from "@/lib/org";
 import { saveImage } from "@/lib/storage";
 import { createLot } from "@/app/lots/actions";
 import { recomputeAll } from "@/lib/recompute";
@@ -48,7 +49,15 @@ async function renderAndStorePdf(poId: string): Promise<string> {
     unitCost: l.unitCost,
     quantity: l.quantity,
   }));
+  const org = await getCurrentOrg();
   const buf = await generatePoPdf({
+    company: {
+      name: orgDocumentName(org) || "Your company",
+      addressLines: orgAddressLines(org),
+      email: org?.email ?? null,
+      phone: org?.phone ?? null,
+      currencySymbol: org?.currencySymbol ?? "$",
+    },
     number: po.number,
     dateISO: po.date.toISOString().slice(0, 10),
     vendorName: po.facility.legalName ?? po.facility.name,

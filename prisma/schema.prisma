@@ -16,6 +16,16 @@ model Organization {
   id        String   @id @default(cuid())
   name      String
   slug      String   @unique
+  // --- Company profile: printed on POs and shown in the app chrome (replaces the old hardcoded constant) ---
+  legalName String? // legal entity name for documents (falls back to name)
+  address   String? // multiline company address
+  email     String?
+  phone     String?
+  logoUrl   String? // brand logo (falls back to the bundled default)
+  // --- Money / locale formatting, so non-US customers aren't stuck with "$" ---
+  currencyCode   String @default("USD")
+  currencySymbol String @default("$")
+  locale         String @default("en-US")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -54,15 +64,15 @@ model Membership {
   @@index([clerkUserId])
 }
 
-/// Production facility / co-packer (also acts as a supplier).
-/// e.g. STC = SpecialTea Company, CCP = Custom Co-Pak, CRW = Caraway
+/// A place inventory lives or is produced: a co-packer, your own warehouse, or a 3PL you
+/// simply ship to. Customer-managed from the Facilities tab (may also double as a supplier).
 model Facility {
   id              String          @id @default(cuid())
   orgId           String?
   organization    Organization?   @relation(fields: [orgId], references: [id])
-  code            String         
+  code            String
   name            String
-  type            String          @default("co-packer") // co-packer | warehouse
+  type            String          @default("co-packer") // co-packer | warehouse | 3pl | other
   legalName       String? // vendor name printed on POs (falls back to name)
   address         String? // multiline vendor address for POs
   notes           String?
@@ -108,10 +118,18 @@ model Product {
   name               String
   imageUrl           String?
   notes              String?
-  // --- Amazon mapping (for the FBA/restock dashboard) ---
+  barcode            String? // UPC / EAN / GTIN — the identifier shared across every channel
+  // --- Amazon mapping (drives the FBA/restock dashboard sync) ---
   asin               String? // Amazon ASIN, e.g. B0DQ62R6Q3
   sellerSku          String? // Amazon Seller SKU, e.g. QC-6LN8-7BT8
   fnsku              String? // Amazon FNSKU
+  // --- Shopify mapping (identifiers only for now; live sync comes later) ---
+  shopifyProductId   String?
+  shopifyVariantId   String?
+  shopifySku         String?
+  // --- TikTok Shop mapping (identifiers only for now; live sync comes later) ---
+  tiktokProductId    String?
+  tiktokSku          String?
   // --- Per-SKU restock policy (null = use the global default) ---
   minMonths          Float? // floor: months of stock to never fall below
   leadMonths         Float? // production lead time: PO date → stock landing at FBA

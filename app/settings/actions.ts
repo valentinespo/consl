@@ -1,12 +1,45 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
+import { prismaBase } from "@/lib/prisma-base";
+import { getCurrentOrgId } from "@/lib/tenant";
 import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
 import { syncAmazonCore } from "@/lib/sync";
 import { getRestock } from "@/lib/restock";
 import { revalidatePath } from "next/cache";
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(n)));
+
+/** Save the company profile — the name shown in the app and the sender block printed on POs. */
+export async function updateCompanyProfile(input: {
+  name: string;
+  legalName: string;
+  address: string;
+  email: string;
+  phone: string;
+  currencySymbol: string;
+  currencyCode: string;
+}) {
+  const orgId = await getCurrentOrgId();
+  if (!orgId) return { ok: false as const, error: "No company in context" };
+  const name = input.name.trim();
+  if (!name) return { ok: false as const, error: "Company name required" };
+
+  await prismaBase.organization.update({
+    where: { id: orgId },
+    data: {
+      name,
+      legalName: input.legalName.trim() || null,
+      address: input.address.trim() || null,
+      email: input.email.trim() || null,
+      phone: input.phone.trim() || null,
+      currencySymbol: input.currencySymbol.trim() || "$",
+      currencyCode: input.currencyCode.trim().toUpperCase() || "USD",
+    },
+  });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
 
 /** Current app settings for the settings panel. */
 export async function getAppSettings() {

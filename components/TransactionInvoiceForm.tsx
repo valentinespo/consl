@@ -38,9 +38,11 @@ export type InvoiceRow = {
 };
 export type LotOption = { id: string; lotNr: number; label: string; skus: string[] };
 
+// The stored keys stay TEA/OTHER so no data migration is needed; only the wording is generic,
+// because "the main ingredient" is tea here but won't be for every business.
 const CATEGORIES = [
-  { value: "TEA", label: "Tea (herb)" },
-  { value: "OTHER", label: "Other" },
+  { value: "TEA", label: "Ingredient" },
+  { value: "OTHER", label: "Other cost" },
   { value: "NOT_APPLICABLE", label: "Not applicable" },
 ];
 
