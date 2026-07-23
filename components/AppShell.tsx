@@ -6,8 +6,8 @@ import Image from "next/image";
 import { Menu, X } from "lucide-react";
 import { Sidebar } from "@/components/Sidebar";
 
-/** App chrome: fixed sidebar on desktop, slide-in drawer + top bar on mobile. /login renders bare. */
-export function AppShell({ children, authEnabled = false }: { children: React.ReactNode; authEnabled?: boolean }) {
+/** App chrome: fixed sidebar on desktop, slide-in drawer + top bar on mobile. Auth screens render bare. */
+export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
@@ -16,13 +16,13 @@ export function AppShell({ children, authEnabled = false }: { children: React.Re
     setOpen(false);
   }, [pathname]);
 
-  if (pathname === "/login") return <>{children}</>;
+  if (pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up")) return <>{children}</>;
 
   return (
     <div className="lg:flex">
       {/* Desktop sidebar */}
       <div className="hidden lg:sticky lg:top-0 lg:block lg:h-screen lg:shrink-0">
-        <Sidebar authEnabled={authEnabled} />
+        <Sidebar />
       </div>
 
       {/* Mobile drawer */}
@@ -30,7 +30,7 @@ export function AppShell({ children, authEnabled = false }: { children: React.Re
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-black/30" onClick={() => setOpen(false)} aria-hidden />
           <div className="absolute inset-y-0 left-0 h-full shadow-xl">
-            <Sidebar authEnabled={authEnabled} onNavigate={() => setOpen(false)} />
+            <Sidebar onNavigate={() => setOpen(false)} />
             <button
               onClick={() => setOpen(false)}
               aria-label="Close menu"

@@ -1,20 +1,16 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, sha256hex } from "@/lib/auth";
+import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
-export async function middleware(req: NextRequest) {
-  const pw = process.env.APP_PASSWORD;
-  if (!pw) return NextResponse.next(); // gate disabled (no password configured, e.g. local dev)
+// Only the auth screens are public; everything else requires a signed-in user.
+const isPublic = createRouteMatcher(["/sign-in(.*)", "/sign-up(.*)"]);
 
-  const cookie = req.cookies.get(SESSION_COOKIE)?.value;
-  if (cookie && cookie === (await sha256hex(pw))) return NextResponse.next();
-
-  const url = req.nextUrl.clone();
-  url.pathname = "/login";
-  url.search = req.nextUrl.pathname === "/" ? "" : `?from=${encodeURIComponent(req.nextUrl.pathname)}`;
-  return NextResponse.redirect(url);
-}
+export default clerkMiddleware(async (auth, req) => {
+  if (!isPublic(req)) await auth.protect();
+});
 
 export const config = {
-  // Everything except the login page, Next internals, and uploaded/static images.
-  matcher: ["/((?!login|_next/static|_next/image|favicon.ico|uploads|media|.*\\.(?:png|jpg|jpeg|svg|webp|gif|ico|avif)).*)"],
+  matcher: [
+    // Run on every route except Next internals, static assets, and served media/uploads.
+    "/((?!_next|media|uploads|favicon.ico|[^?]*\\.(?:png|jpg|jpeg|svg|webp|gif|ico|avif|css|js|map|woff2?|ttf)).*)",
+    "/(api|trpc)(.*)",
+  ],
 };

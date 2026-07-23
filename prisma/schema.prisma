@@ -34,6 +34,21 @@ model Organization {
   purchaseOrders          PurchaseOrder[]
   transactionInvoices     TransactionInvoice[]
   transactions            Transaction[]
+  memberships             Membership[]
+}
+
+/// Links a Clerk user account to an Organization (which company they belong to + their role).
+/// Clerk owns identity ("who you are"); this table owns tenancy ("which company you're in").
+model Membership {
+  id           String       @id @default(cuid())
+  clerkUserId  String
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId        String
+  role         String       @default("owner") // owner | member
+  createdAt    DateTime     @default(now())
+
+  @@unique([clerkUserId, orgId])
+  @@index([clerkUserId])
 }
 
 /// Production facility / co-packer (also acts as a supplier).

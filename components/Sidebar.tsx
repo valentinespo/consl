@@ -13,10 +13,9 @@ import {
   FileText,
   Building2,
   Images,
-  LogOut,
   Settings,
 } from "lucide-react";
-import { logout } from "@/app/login/actions";
+import { UserButton } from "@clerk/nextjs";
 import { SettingsModal } from "@/components/SettingsModal";
 
 const NAV = [
@@ -30,7 +29,7 @@ const NAV = [
   { href: "/catalog", label: "Catalog", icon: Images },
 ];
 
-export function Sidebar({ authEnabled = false, onNavigate }: { authEnabled?: boolean; onNavigate?: () => void }) {
+export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const [settingsOpen, setSettingsOpen] = useState(false);
   return (
@@ -64,27 +63,19 @@ export function Sidebar({ authEnabled = false, onNavigate }: { authEnabled?: boo
         })}
       </nav>
 
-      {authEnabled && (
-        <form action={logout} className="px-3 pb-1">
-          <button
-            type="submit"
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink-soft"
-          >
-            <LogOut size={16} strokeWidth={2} /> Sign out
-          </button>
-        </form>
-      )}
-
-      <div className="flex items-center justify-between border-t border-border px-5 py-4">
-        <div>
-          <div className="text-[12px] font-medium text-ink-soft">Herbl Inc.</div>
-          <div className="text-[11px] text-muted">Production & Inventory</div>
+      <div className="flex items-center justify-between border-t border-border px-4 py-4">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <UserButton appearance={{ elements: { avatarBox: "h-8 w-8" } }} />
+          <div className="min-w-0">
+            <div className="truncate text-[12px] font-medium text-ink-soft">Herbl Inc.</div>
+            <div className="text-[11px] text-muted">Production &amp; Inventory</div>
+          </div>
         </div>
         <button
           onClick={() => setSettingsOpen(true)}
           aria-label="Settings"
           title="Settings"
-          className="rounded-lg p-1.5 text-muted transition-colors hover:bg-surface-2 hover:text-ink-soft"
+          className="shrink-0 rounded-lg p-1.5 text-muted transition-colors hover:bg-surface-2 hover:text-ink-soft"
         >
           <Settings size={17} strokeWidth={2} />
         </button>
