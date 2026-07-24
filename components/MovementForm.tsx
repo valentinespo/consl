@@ -1,55 +1,94 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { Field, inputCls } from "@/components/FormKit";
-import { DESTINATIONS } from "@/lib/destinations";
+import { DESTINATIONS, RAW_DESTINATIONS } from "@/lib/destinations";
 import { createMovement } from "@/app/facilities/actions";
 
 export type MoveProduct = { id: string; code: string; name: string };
+export type MoveMaterial = { id: string; code: string; name: string; skuSpecific: boolean };
 export type MoveFacility = { id: string; code: string; name: string };
-export type OnHandRow = { productId: string; facilityId: string; units: number };
+// On-hand keyed loosely: finished uses productId+facility; raw uses materialId(+poolSku)+facility.
+// poolSku is the product ID (matches what the action stores); poolSkuCode is for display.
+export type OnHandRow = {
+  kind: "FINISHED" | "RAW";
+  itemId: string;
+  poolSku: string | null;
+  poolSkuCode: string | null;
+  facilityId: string;
+  units: number;
+};
 
 export function MovementForm({
   products,
+  materials,
   facilities,
   onHand,
   todayISO,
   onDone,
 }: {
   products: MoveProduct[];
+  materials: MoveMaterial[];
   facilities: MoveFacility[];
   onHand: OnHandRow[];
   todayISO: string;
   onDone: () => void;
 }) {
   const router = useRouter();
-  const [productId, setProductId] = useState(products[0]?.id ?? "");
+  // The item is picked as "FINISHED:<productId>" or "RAW:<materialId>".
+  const firstItem = products[0] ? `FINISHED:${products[0].id}` : materials[0] ? `RAW:${materials[0].id}` : "";
+  const [item, setItem] = useState(firstItem);
+  const [poolSku, setPoolSku] = useState(""); // only for sku-specific raw materials
   const [fromFacilityId, setFromFacilityId] = useState(facilities[0]?.id ?? "");
-  // "" = pick one; "facility:<id>" = transfer; otherwise a destination key.
-  const [target, setTarget] = useState<string>("AMAZON");
+  const [target, setTarget] = useState<string>("AMAZON"); // "facility:<id>" = transfer, else a destination
   const [quantity, setQuantity] = useState("");
   const [dateISO, setDateISO] = useState(todayISO);
   const [notes, setNotes] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const available = onHand.find((r) => r.productId === productId && r.facilityId === fromFacilityId)?.units ?? 0;
-  const qty = Math.round(Number(quantity) || 0);
-  const short = qty > available;
+  const [kind, itemId] = item.split(":") as ["FINISHED" | "RAW", string];
+  const isRaw = kind === "RAW";
+  const material = isRaw ? materials.find((m) => m.id === itemId) ?? null : null;
+  const needsSku = isRaw && !!material?.skuSpecific;
+
+  // A raw material can only move to another facility or be written off — never to a channel/customer.
+  const destinations = isRaw ? RAW_DESTINATIONS : DESTINATIONS;
+  // Keep the target valid when the item kind flips.
+  const validTarget = target.startsWith("facility:") || destinations.some((d) => d.value === target);
+  const effectiveTarget = validTarget ? target : destinations[0]?.value ?? "";
+
+  const available =
+    onHand.find(
+      (r) => r.kind === kind && r.itemId === itemId && r.facilityId === fromFacilityId && (!needsSku || r.poolSku === (poolSku || null)),
+    )?.units ?? 0;
+  const q = Math.round(Number(quantity) || 0);
+  const short = q > available;
+
+  const skuOptions = useMemo(() => {
+    if (!needsSku) return [] as { id: string; code: string }[];
+    const seen = new Map<string, string>();
+    for (const r of onHand) {
+      if (r.kind === "RAW" && r.itemId === itemId && r.poolSku) seen.set(r.poolSku, r.poolSkuCode ?? r.poolSku);
+    }
+    return [...seen].map(([id, code]) => ({ id, code }));
+  }, [needsSku, onHand, itemId]);
 
   async function save() {
     setError(null);
     setPending(true);
-    const isTransfer = target.startsWith("facility:");
+    const isTransfer = effectiveTarget.startsWith("facility:");
     const res = await createMovement({
-      productId,
-      quantity: qty,
+      itemType: kind,
+      productId: isRaw ? (needsSku ? poolSku || null : null) : itemId,
+      materialTypeId: isRaw ? itemId : null,
+      quantity: q,
       dateISO,
       fromFacilityId,
-      toFacilityId: isTransfer ? target.slice("facility:".length) : null,
-      toDestination: isTransfer ? null : target,
+      toFacilityId: isTransfer ? effectiveTarget.slice("facility:".length) : null,
+      toDestination: isTransfer ? null : effectiveTarget,
       notes,
     });
     setPending(false);
@@ -61,19 +100,48 @@ export function MovementForm({
     router.refresh();
   }
 
+  const canSave = q > 0 && !!fromFacilityId && !!itemId && (!needsSku || !!poolSku);
+
   return (
     <div className="space-y-3">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Field label="Product">
-          <select value={productId} onChange={(e) => setProductId(e.target.value)} className={inputCls}>
-            {products.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.code} — {p.name}
-              </option>
-            ))}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <Field label="What's moving?">
+          <select value={item} onChange={(e) => { setItem(e.target.value); setPoolSku(""); }} className={inputCls}>
+            {products.length > 0 && (
+              <optgroup label="Finished products">
+                {products.map((p) => (
+                  <option key={p.id} value={`FINISHED:${p.id}`}>
+                    {p.code} — {p.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {materials.length > 0 && (
+              <optgroup label="Raw materials">
+                {materials.map((m) => (
+                  <option key={m.id} value={`RAW:${m.id}`}>
+                    {m.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </Field>
-        <Field label="Moving from" hint={`${Math.round(available).toLocaleString()} units on hand here`}>
+
+        {needsSku && (
+          <Field label="For which product?" hint="This material is stocked separately per product.">
+            <select value={poolSku} onChange={(e) => setPoolSku(e.target.value)} className={inputCls}>
+              <option value="">Select…</option>
+              {skuOptions.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.code}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+
+        <Field label="Moving from" hint={`${Math.round(available).toLocaleString()} on hand here`}>
           <select value={fromFacilityId} onChange={(e) => setFromFacilityId(e.target.value)} className={inputCls}>
             {facilities.map((f) => (
               <option key={f.id} value={f.id}>
@@ -82,10 +150,11 @@ export function MovementForm({
             ))}
           </select>
         </Field>
+
         <Field label="Moving to">
-          <select value={target} onChange={(e) => setTarget(e.target.value)} className={inputCls}>
-            <optgroup label="Out of your network">
-              {DESTINATIONS.map((d) => (
+          <select value={effectiveTarget} onChange={(e) => setTarget(e.target.value)} className={inputCls}>
+            <optgroup label={isRaw ? "Out of inventory" : "Out of your network"}>
+              {destinations.map((d) => (
                 <option key={d.value} value={d.value}>
                   {d.label}
                 </option>
@@ -102,32 +171,24 @@ export function MovementForm({
             </optgroup>
           </select>
         </Field>
-        <Field label="Units">
-          <input
-            type="number"
-            min="1"
-            step="1"
-            value={quantity}
-            onChange={(e) => setQuantity(e.target.value)}
-            placeholder="0"
-            className={`${inputCls} tabular text-right`}
-          />
-        </Field>
-      </div>
 
-      <div className="grid gap-3 sm:grid-cols-[180px_1fr]">
+        <Field label="Units">
+          <input type="number" min="1" step="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" className={`${inputCls} tabular text-right`} />
+        </Field>
+
         <Field label="Date">
           <input type="date" value={dateISO} onChange={(e) => setDateISO(e.target.value)} className={inputCls} />
         </Field>
-        <Field label="Note" hint="Optional — e.g. a shipment or reference number.">
-          <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inputCls} placeholder="Reference / note" />
-        </Field>
       </div>
 
-      {short && qty > 0 && (
+      <Field label="Note" hint="Optional — e.g. a shipment or reference number.">
+        <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inputCls} placeholder="Reference / note" />
+      </Field>
+
+      {short && q > 0 && (
         <div className="rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-[12.5px] text-negative">
-          ⚠ That location only shows {Math.round(available).toLocaleString()} units on hand. You can still record this —
-          it&apos;ll be flagged as short until an earlier movement or lot is corrected.
+          ⚠ That location only shows {Math.round(available).toLocaleString()} on hand. You can still record this — it&apos;ll be
+          flagged as short until an earlier movement, lot or purchase is corrected.
         </div>
       )}
       {error && <div className="rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-[12.5px] text-negative">{error}</div>}
@@ -138,7 +199,7 @@ export function MovementForm({
         </button>
         <button
           onClick={save}
-          disabled={pending || qty <= 0 || !productId || !fromFacilityId}
+          disabled={pending || !canSave}
           className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-40"
         >
           {pending ? "Saving…" : "Record movement"}
@@ -151,11 +212,13 @@ export function MovementForm({
 /** Wraps the form in a collapsible "Record movement" panel. */
 export function NewMovementPanel({
   products,
+  materials,
   facilities,
   onHand,
   todayISO,
 }: {
   products: MoveProduct[];
+  materials: MoveMaterial[];
   facilities: MoveFacility[];
   onHand: OnHandRow[];
   todayISO: string;
@@ -179,7 +242,7 @@ export function NewMovementPanel({
           <X size={18} />
         </button>
       </div>
-      <MovementForm products={products} facilities={facilities} onHand={onHand} todayISO={todayISO} onDone={() => setOpen(false)} />
+      <MovementForm products={products} materials={materials} facilities={facilities} onHand={onHand} todayISO={todayISO} onDone={() => setOpen(false)} />
     </div>
   );
 }

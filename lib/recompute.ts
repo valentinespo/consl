@@ -8,12 +8,13 @@ import {
   type EnginePurchase,
   type EngineLotLine,
   type EngineTransaction,
+  type EngineRawMovement,
   type PoolKey,
 } from "./fifo";
 
 /** Loads data + runs the engine WITHOUT persisting. Used by read-only queries. */
 export async function computeEngineResult() {
-  const [purchasesRaw, lotsRaw, txRaw] = await Promise.all([
+  const [purchasesRaw, lotsRaw, txRaw, rawMovesRaw] = await Promise.all([
     prisma.purchase.findMany({
       include: { materialType: true, facility: true, product: true },
     }),
@@ -24,6 +25,11 @@ export async function computeEngineResult() {
       },
     }),
     prisma.transaction.findMany(),
+    prisma.stockMovement.findMany({
+      where: { itemType: "RAW" },
+      include: { materialType: true, fromFacility: true, toFacility: true, product: true },
+      orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+    }),
   ]);
 
   const purchases: EnginePurchase[] = purchasesRaw.map((p) => ({
@@ -71,7 +77,17 @@ export async function computeEngineResult() {
     };
   });
 
-  const result = runEngine(purchases, lines, transactions);
+  const rawMovements: EngineRawMovement[] = rawMovesRaw.map((m, i) => ({
+    materialCode: m.materialType?.code ?? "",
+    fromFacility: m.fromFacility.code,
+    toFacility: m.toFacility?.code ?? null, // null = a loss (LOSS destination)
+    sku: m.product?.code ?? null, // set for sku-specific materials
+    quantity: m.quantity,
+    date: m.date.getTime(),
+    seq: i,
+  }));
+
+  const result = runEngine(purchases, lines, transactions, rawMovements);
   return { result, lines, lotsRaw, purchasesRaw };
 }
 

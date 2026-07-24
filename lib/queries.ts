@@ -257,7 +257,7 @@ export async function computeFinishedGoods() {
       include: { lines: true },
       orderBy: [{ poDate: "desc" }, { createdAt: "desc" }],
     }),
-    prisma.stockMovement.findMany({ orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
+    prisma.stockMovement.findMany({ where: { itemType: "FINISHED" }, orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
   ]);
   const supply: FinishedSupply[] = [];
   let seq = 0;
@@ -275,7 +275,7 @@ export async function computeFinishedGoods() {
   }
   const mv: FinishedMovement[] = movements.map((m, i) => ({
     id: m.id,
-    sku: m.productId,
+    sku: m.productId ?? "",
     fromFacilityId: m.fromFacilityId,
     toFacilityId: m.toFacilityId,
     toDestination: m.toDestination,
@@ -322,24 +322,44 @@ export async function getSupplierOptions() {
   return s.map((x) => ({ id: x.id, name: x.name, facilityId: x.facilityId, address: x.address }));
 }
 
-/** The movement ledger, newest first. */
+/** The movement ledger (raw + finished), newest first. */
 export async function getMovements() {
   const movements = await prisma.stockMovement.findMany({
-    include: { product: true, fromFacility: true, toFacility: true },
+    include: { product: true, materialType: true, fromFacility: true, toFacility: true },
     orderBy: [{ date: "desc" }, { createdAt: "desc" }],
   });
-  return movements.map((m) => ({
-    id: m.id,
-    date: m.date,
-    code: m.product.code,
-    productName: m.product.name,
-    imageUrl: m.product.imageUrl,
-    quantity: m.quantity,
-    fromCode: m.fromFacility.code,
-    toCode: m.toFacility?.code ?? null,
-    toDestination: m.toDestination,
-    notes: m.notes,
-  }));
+  return movements.map((m) => {
+    const raw = m.itemType === "RAW";
+    return {
+      id: m.id,
+      date: m.date,
+      itemType: m.itemType,
+      // Raw: the material (with the SKU pool it belongs to, if any). Finished: the product.
+      code: raw ? m.materialType?.code ?? "?" : m.product?.code ?? "?",
+      itemName: raw ? m.materialType?.name ?? "" : m.product?.name ?? "",
+      poolSku: raw ? m.product?.code ?? null : null,
+      imageUrl: raw ? m.materialType?.imageUrl ?? null : m.product?.imageUrl ?? null,
+      quantity: m.quantity,
+      fromCode: m.fromFacility.code,
+      toCode: m.toFacility?.code ?? null,
+      toDestination: m.toDestination,
+      notes: m.notes,
+    };
+  });
+}
+
+/** Raw materials on hand grouped by facility, for the facility cards / detail pages. */
+export async function getRawStockByFacility() {
+  const { pools } = await getInventory();
+  const byFacility = new Map<string, { code: string; name: string; imageUrl: string | null; sku: string | null; units: number; value: number }[]>();
+  for (const p of pools) {
+    if (p.quantityRemaining <= 0.5) continue;
+    const list = byFacility.get(p.facility) ?? [];
+    list.push({ code: p.materialCode, name: p.materialName, imageUrl: p.imageUrl, sku: p.sku, units: p.quantityRemaining, value: p.valueRemaining });
+    byFacility.set(p.facility, list);
+  }
+  for (const l of byFacility.values()) l.sort((a, b) => b.value - a.value);
+  return byFacility; // keyed by facility CODE
 }
 
 /** Every cost category currently used by a transaction, so the dropdown can offer them again.
@@ -382,6 +402,7 @@ export async function getMaterialTypes() {
     unitLabel: x.unitLabel,
     defaultPerUnit: x.defaultPerUnit,
     lowStockThreshold: x.lowStockThreshold,
+    skuSpecific: x.skuSpecific,
     imageUrl: x.imageUrl,
   }));
 }
@@ -497,7 +518,7 @@ export async function getPurchasesByMaterial() {
     const rows = purchases.filter((p) => p.materialTypeId === m.id);
     return {
       material: { id: m.id, code: m.code, name: m.name, unitLabel: m.unitLabel, skuSpecific: m.skuSpecific, imageUrl: m.imageUrl },
-      totalQty: rows.reduce((s, p) => s + (p.isAdjustment ? 0 : p.quantity), 0),
+      totalQty: rows.reduce((s, p) => s + p.quantity, 0),
       totalSpend: rows.reduce((s, p) => s + p.total, 0),
       rows: rows.map((p) => ({
         id: p.id,
@@ -512,7 +533,6 @@ export async function getPurchasesByMaterial() {
         quantity: p.quantity,
         unitCost: p.unitCost,
         total: p.total,
-        isAdjustment: p.isAdjustment,
         notes: p.notes,
       })),
     };
@@ -536,17 +556,16 @@ export async function getPurchaseInvoicesByMaterial() {
     const invs = invoices.filter((i) => i.materialTypeId === m.id);
     return {
       material: { id: m.id, code: m.code, name: m.name, unitLabel: m.unitLabel, skuSpecific: m.skuSpecific, imageUrl: m.imageUrl },
-      totalQty: invs.reduce((s, i) => s + i.lines.reduce((a, l) => a + (l.isAdjustment ? 0 : l.quantity), 0), 0),
+      totalQty: invs.reduce((s, i) => s + i.lines.reduce((a, l) => a + l.quantity, 0), 0),
       totalSpend: invs.reduce((s, i) => s + i.invoiceTotal, 0),
       invoices: invs.map((i) => ({
         id: i.id,
         dateISO: i.date.toISOString().slice(0, 10),
         supplier: i.supplier?.name ?? null,
         supplierPhotoUrl: i.supplier?.photoUrl ?? null,
-        isAdjustment: i.isAdjustment,
         invoiceTotal: i.invoiceTotal,
         documents: i.documents.map((d) => ({ id: d.id, label: d.label, fileUrl: d.fileUrl, fileName: d.fileName })),
-        totalQty: i.lines.reduce((a, l) => a + (l.isAdjustment ? 0 : l.quantity), 0),
+        totalQty: i.lines.reduce((a, l) => a + l.quantity, 0),
         facilities: [...new Set(i.lines.map((l) => l.facility.code))],
         skus: [
           ...new Map(

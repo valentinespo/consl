@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
+import { AddressInput, AddressDisplay } from "@/components/AddressField";
 import { FACILITY_TYPES } from "@/lib/facility-types";
 import { updateFacility } from "@/app/facilities/actions";
 
@@ -111,13 +112,7 @@ export function FacilityEditor({ facility, suppliers }: { facility: FacilityForE
         {/* One address, one place. Linked to a supplier → the supplier's address is used. */}
         {linkedSupplier ? (
           <Field label="Address">
-            <div className="rounded-lg border border-border bg-surface-2/60 px-3 py-2 text-[13px] text-ink-soft">
-              {linkedSupplier.address?.trim() ? (
-                <span className="whitespace-pre-line">{linkedSupplier.address}</span>
-              ) : (
-                <span className="text-muted">No address on {linkedSupplier.name} yet.</span>
-              )}
-            </div>
+            <AddressDisplay value={linkedSupplier.address} empty={`No address on ${linkedSupplier.name} yet.`} />
             <span className="mt-1 block text-[11px] text-muted">
               Comes from the supplier <span className="font-medium text-ink-soft">{linkedSupplier.name}</span> — edit it on
               that supplier&apos;s page so it stays in one place.
@@ -125,7 +120,7 @@ export function FacilityEditor({ facility, suppliers }: { facility: FacilityForE
           </Field>
         ) : (
           <Field label="Address" hint="Where this location is. Used as the vendor address if you send it a purchase order.">
-            <textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={3} className={`${inputCls} h-auto resize-y py-2`} />
+            <AddressInput value={address} onChange={setAddress} />
           </Field>
         )}
 

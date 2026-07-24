@@ -2,8 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { computeFinishedGoods } from "@/lib/queries";
-import { DESTINATIONS } from "@/lib/destinations";
+import { computeFinishedGoods, getInventory } from "@/lib/queries";
+import { allowedDestinations } from "@/lib/destinations";
 
 /** Create a facility — a co-packer, warehouse, 3PL or anywhere else stock lives. */
 export async function createFacility(input: { code: string; name: string; type: string }) {
@@ -93,7 +93,9 @@ export async function deleteFacility(id: string) {
 }
 
 export type MovementInput = {
-  productId: string;
+  itemType: "FINISHED" | "RAW";
+  productId: string | null; // FINISHED: the SKU. RAW sku-specific: the pool SKU. Else null.
+  materialTypeId: string | null; // RAW only.
   quantity: number;
   dateISO: string | null;
   fromFacilityId: string;
@@ -103,12 +105,14 @@ export type MovementInput = {
   notes: string | null;
 };
 
-/** Record finished stock leaving one of your locations. */
+/** Record stock leaving one of your locations — finished goods or raw materials. */
 export async function createMovement(input: MovementInput) {
+  const raw = input.itemType === "RAW";
   const quantity = Math.round(Number(input.quantity) || 0);
   if (quantity <= 0) return { ok: false as const, error: "Enter how many units moved" };
-  if (!input.productId) return { ok: false as const, error: "Pick a product" };
   if (!input.fromFacilityId) return { ok: false as const, error: "Pick where the stock is moving from" };
+  if (raw && !input.materialTypeId) return { ok: false as const, error: "Pick a raw material" };
+  if (!raw && !input.productId) return { ok: false as const, error: "Pick a product" };
 
   const toFacilityId = input.toFacilityId || null;
   const toDestination = input.toDestination || null;
@@ -117,17 +121,38 @@ export async function createMovement(input: MovementInput) {
   if (toFacilityId && toFacilityId === input.fromFacilityId) {
     return { ok: false as const, error: "Source and destination facility are the same" };
   }
-  if (toDestination && !DESTINATIONS.some((d) => d.value === toDestination)) {
-    return { ok: false as const, error: "Unknown destination" };
+  // A raw material can only be transferred or written off — never sold or fulfilled.
+  if (toDestination && !allowedDestinations(input.itemType).includes(toDestination)) {
+    return {
+      ok: false as const,
+      error: raw ? "Raw materials can only move to another facility or be written off." : "Unknown destination",
+    };
   }
 
   // Warn (don't block) when the ledger doesn't show enough stock — the count may just be behind.
-  const { pools } = await computeFinishedGoods();
-  const onHand = pools.find((p) => p.sku === input.productId && p.facilityId === input.fromFacilityId)?.units ?? 0;
+  let onHand = 0;
+  if (raw) {
+    const { pools } = await getInventory();
+    // materialCode is what pools key by; look it up from the material id.
+    const mat = await prisma.materialType.findFirst({ where: { id: input.materialTypeId! }, select: { code: true } });
+    const fromFac = await prisma.facility.findFirst({ where: { id: input.fromFacilityId }, select: { code: true } });
+    const poolSkuCode = input.productId
+      ? (await prisma.product.findFirst({ where: { id: input.productId }, select: { code: true } }))?.code ?? null
+      : null;
+    onHand =
+      pools.find(
+        (p) => p.materialCode === mat?.code && p.facility === fromFac?.code && (p.sku ?? null) === poolSkuCode,
+      )?.quantityRemaining ?? 0;
+  } else {
+    const { pools } = await computeFinishedGoods();
+    onHand = pools.find((p) => p.sku === input.productId && p.facilityId === input.fromFacilityId)?.units ?? 0;
+  }
 
   await prisma.stockMovement.create({
     data: {
-      productId: input.productId,
+      itemType: input.itemType,
+      productId: input.productId || null,
+      materialTypeId: raw ? input.materialTypeId : null,
       quantity,
       date: input.dateISO ? new Date(input.dateISO) : new Date(),
       fromFacilityId: input.fromFacilityId,
@@ -142,7 +167,7 @@ export async function createMovement(input: MovementInput) {
     ok: true as const,
     warning:
       quantity > onHand
-        ? `Recorded, but that location only shows ${Math.round(onHand).toLocaleString()} units on hand — it's now short by ${Math.round(quantity - onHand).toLocaleString()}.`
+        ? `Recorded, but that location only shows ${Math.round(onHand).toLocaleString()} on hand — it's now short by ${Math.round(quantity - onHand).toLocaleString()}.`
         : null,
   };
 }

@@ -10,6 +10,15 @@ export const DESTINATIONS = [
 
 export type Destination = (typeof DESTINATIONS)[number]["value"];
 
+/** Where RAW materials can go: only another facility (a transfer) or written off. Raw materials
+ *  are never sold or fulfilled through a channel — only finished product is. */
+export const RAW_DESTINATIONS = DESTINATIONS.filter((d) => d.value === "LOSS");
+
+/** Destinations a given item kind may leave inventory through (transfers are handled separately). */
+export function allowedDestinations(itemType: string): readonly string[] {
+  return (itemType === "RAW" ? RAW_DESTINATIONS : DESTINATIONS).map((d) => d.value);
+}
+
 export function destinationLabel(value: string | null): string {
   return DESTINATIONS.find((d) => d.value === value)?.label ?? value ?? "—";
 }

@@ -89,16 +89,22 @@ model Facility {
   @@unique([orgId, code])
 }
 
-/// A movement of FINISHED units out of one of your locations — either a transfer to another
-/// of your facilities, or out of your network (to a sales channel, a customer, or written off).
-/// Production is not a movement: a finished lot's units start at the facility that made them.
-/// Exactly one of `toFacilityId` / `toDestination` is set.
+/// A movement of stock out of one of your locations — either a transfer to another of your
+/// facilities, or out of your network. Covers BOTH finished goods and raw materials.
+/// Production (finished) and purchases (raw) are how stock enters; movements are how it leaves.
+/// Exactly one of `toFacilityId` / `toDestination` is set. Raw materials may only go to another
+/// facility or LOSS — never to a sales channel or customer.
 model StockMovement {
   id             String        @id @default(cuid())
   orgId          String?
   organization   Organization? @relation(fields: [orgId], references: [id])
-  product        Product       @relation(fields: [productId], references: [id])
-  productId      String
+  itemType       String        @default("FINISHED") // FINISHED | RAW
+  // FINISHED: the SKU moved. RAW sku-specific (e.g. printed pouches): the SKU whose pool this draws.
+  product        Product?      @relation(fields: [productId], references: [id])
+  productId      String?
+  // RAW: the material moved.
+  materialType   MaterialType? @relation(fields: [materialTypeId], references: [id])
+  materialTypeId String?
   quantity       Int // units moved (always positive)
   date           DateTime
   fromFacility   Facility      @relation("MovementFrom", fields: [fromFacilityId], references: [id])
@@ -111,6 +117,7 @@ model StockMovement {
   updatedAt      DateTime      @updatedAt
 
   @@index([productId, date])
+  @@index([materialTypeId, date])
   @@index([fromFacilityId])
 }
 
@@ -275,6 +282,7 @@ model MaterialType {
   purchases         Purchase[]
   purchaseInvoices  PurchaseInvoice[]
   lotMaterials      LotMaterial[]
+  movements         StockMovement[]
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 

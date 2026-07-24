@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui";
 import { ImageUpload } from "@/components/ImageUpload";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
+import { AddressInput } from "@/components/AddressField";
 import { initials } from "@/lib/initials";
 import { updateSupplier } from "@/app/suppliers/actions";
 
@@ -100,7 +101,7 @@ export function SupplierEditor({
             </Field>
           </div>
           <Field label="Address">
-            <textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={2} className={`${inputCls} h-auto resize-y py-2`} />
+            <AddressInput value={address} onChange={setAddress} />
           </Field>
           <Field label="This supplier is also one of my facilities" hint="Link it when you both pay this company and hold stock there.">
             <select value={facilityId} onChange={(e) => setFacilityId(e.target.value)} className={inputCls}>

@@ -54,6 +54,19 @@ export interface EngineTransaction {
   appliesToCog: boolean; // false = excluded from COG (fees, "Not applicable")
 }
 
+/** A raw-material stock movement out of a facility: a transfer to another facility, or a loss.
+ *  Applied after production, so it only adjusts what's left on hand — the same slot lost-inventory
+ *  adjustments used, keeping produced-lot costs untouched. */
+export interface EngineRawMovement {
+  materialCode: string;
+  fromFacility: string;
+  toFacility: string | null; // set for a transfer; null = it left inventory (a loss)
+  sku: string | null; // for FACILITY_SKU materials (e.g. printed pouches)
+  quantity: number; // positive
+  date: number;
+  seq: number;
+}
+
 export interface MaterialShortfall {
   materialCode: string;
   demand: number; // total units of material the lot needs
@@ -102,6 +115,12 @@ class FifoPool {
       .map((p) => ({ qty: p.quantity, unitCost: p.unitCost }));
   }
 
+  /** Append a layer of already-owned stock (a transfer arriving from another facility). Applied
+   *  after production, so it only affects what's left on hand — never re-costs a produced lot. */
+  addLayer(qty: number, unitCost: number) {
+    if (qty > 1e-9) this.layers.push({ qty, unitCost });
+  }
+
   /** Consume `demand` units; returns cost drawn and how much was actually available. */
   consume(demand: number): { cost: number; consumed: number } {
     let remaining = demand;
@@ -146,6 +165,7 @@ export function runEngine(
   purchases: EnginePurchase[],
   lines: EngineLotLine[],
   transactions: EngineTransaction[],
+  rawMovements: EngineRawMovement[] = [],
 ): EngineResult {
   // ---- Build FIFO pools, bucketing purchases by their pool id. ----
   // poolKey per material is inferred from how purchases carry sku: a material that ever
@@ -192,9 +212,27 @@ export function runEngine(
     });
   }
 
-  // ---- Inventory adjustments (e.g. lost inventory) reduce stock on hand. ----
-  // Applied AFTER all production has consumed, so they don't re-cost produced lots —
-  // they just draw down the remaining leftover (matching the spreadsheet's stock count).
+  // ---- Raw-material movements (transfers between facilities, and losses) adjust stock on hand. ----
+  // Applied AFTER all production has consumed, so they never re-cost produced lots — they just
+  // move / draw down the remaining leftover. A transfer carries its FIFO cost to the destination.
+  const ensurePool = (id: string, materialCode: string, facility: string, sku: string | null) => {
+    let p = pools.get(id);
+    if (!p) pools.set(id, (p = new FifoPool(id, materialCode, facility, sku, [])));
+    return p;
+  };
+  for (const mv of [...rawMovements].sort((a, b) => a.date - b.date || a.seq - b.seq)) {
+    if (!(mv.quantity > 0)) continue;
+    const pk = materialPoolKey.get(mv.materialCode) ?? (mv.sku ? "FACILITY_SKU" : "FACILITY");
+    const from = pools.get(poolId(mv.materialCode, pk, mv.fromFacility, mv.sku));
+    const { cost, consumed } = from ? from.consume(mv.quantity) : { cost: 0, consumed: 0 };
+    if (mv.toFacility && consumed > 0) {
+      const toId = poolId(mv.materialCode, pk, mv.toFacility, mv.sku);
+      ensurePool(toId, mv.materialCode, mv.toFacility, mv.sku).addLayer(consumed, cost / consumed);
+    }
+    // A loss (no destination) just leaves; nothing to add anywhere.
+  }
+
+  // Legacy: any lost-inventory purchases not yet migrated to movements (no-op once migrated).
   for (const p of purchases) {
     if (!p.isAdjustment || p.quantity >= 0) continue;
     const pk = materialPoolKey.get(p.materialCode) ?? (p.sku ? "FACILITY_SKU" : "FACILITY");

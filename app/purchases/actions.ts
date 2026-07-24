@@ -23,7 +23,6 @@ export type PurchaseInvoicePayload = {
   supplierName: string | null;
   dateISO: string | null;
   invoiceTotal: number;
-  isAdjustment: boolean;
   lines: PurchaseLineInput[];
 };
 
@@ -54,7 +53,6 @@ export async function upsertPurchaseInvoice(payload: PurchaseInvoicePayload) {
         quantity: q,
         unitCost: q !== 0 ? t / q : 0,
         total: t,
-        isAdjustment: payload.isAdjustment,
         seq: base + idx,
       };
     });
@@ -66,12 +64,12 @@ export async function upsertPurchaseInvoice(payload: PurchaseInvoicePayload) {
     await prisma.purchase.deleteMany({ where: { invoiceId: payload.id } });
     await prisma.purchaseInvoice.update({
       where: { id: payload.id },
-      data: { supplierId, date, invoiceTotal: payload.invoiceTotal, isAdjustment: payload.isAdjustment, materialTypeId: payload.materialTypeId },
+      data: { supplierId, date, invoiceTotal: payload.invoiceTotal, materialTypeId: payload.materialTypeId },
     });
     await prisma.purchase.createMany({ data: toRow(payload.id) });
   } else {
     const inv = await prisma.purchaseInvoice.create({
-      data: { supplierId, materialTypeId: payload.materialTypeId, date, invoiceTotal: payload.invoiceTotal, isAdjustment: payload.isAdjustment },
+      data: { supplierId, materialTypeId: payload.materialTypeId, date, invoiceTotal: payload.invoiceTotal },
     });
     await prisma.purchase.createMany({ data: toRow(inv.id) });
   }

@@ -15,7 +15,6 @@ export type PurchaseInvoiceRow = {
   dateISO: string;
   supplier: string | null;
   supplierPhotoUrl?: string | null;
-  isAdjustment: boolean;
   invoiceTotal: number;
   documents: { id: string; label: string | null; fileUrl: string; fileName: string | null }[];
   totalQty: number;
@@ -73,7 +72,6 @@ export function PurchaseInvoiceForm({
   const [supplier, setSupplier] = useState(invoice?.supplier ?? "");
   const [dateISO, setDateISO] = useState(invoice?.dateISO ?? "");
   const [total, setTotal] = useState(invoice ? String(invoice.invoiceTotal) : "");
-  const [isAdjustment, setIsAdjustment] = useState(invoice?.isAdjustment ?? false);
   const [lines, setLines] = useState<EditLine[]>(() => toEditLines(invoice ?? undefined, options));
   const [pending, setPending] = useState(false);
   const [delStep, setDelStep] = useState(0); // 0 = idle, 1 = first confirm, 2 = final confirm
@@ -93,7 +91,6 @@ export function PurchaseInvoiceForm({
     s: supplier.trim(),
     d: dateISO,
     t: totalNum,
-    a: isAdjustment,
     l: lines.map((l) => lineKey(l.facilityId, l.productId, Number(l.quantity) || 0, Number(l.total) || 0)),
   });
   const originalSnapshot = useMemo(
@@ -103,7 +100,6 @@ export function PurchaseInvoiceForm({
             s: (invoice.supplier ?? "").trim(),
             d: invoice.dateISO ?? "",
             t: invoice.invoiceTotal,
-            a: invoice.isAdjustment,
             l: invoice.lines.map((l) => lineKey(l.facilityId, l.productId ?? "", l.quantity, l.total)),
           })
         : null,
@@ -147,7 +143,6 @@ export function PurchaseInvoiceForm({
         supplierName: supplier.trim() || null,
         dateISO: dateISO || null,
         invoiceTotal: totalNum,
-        isAdjustment,
         lines: payloadLines,
       });
       onDone();
@@ -247,16 +242,6 @@ export function PurchaseInvoiceForm({
           <Plus size={14} /> Add line
         </button>
       </div>
-
-      <label className="flex items-start gap-2 text-[12.5px] text-ink-soft">
-        <input type="checkbox" checked={isAdjustment} onChange={(e) => setIsAdjustment(e.target.checked)} className="mt-0.5 accent-[#1a2f18]" />
-        <span>
-          This is a stock adjustment, not a purchase (e.g. lost or damaged inventory).
-          <span className="block text-[11.5px] text-muted">
-            Lowers what&apos;s on hand without adding stock for production to use or affecting any produced lot&apos;s cost.
-          </span>
-        </span>
-      </label>
 
       {error && <div className="rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-[12.5px] text-negative">{error}</div>}
 

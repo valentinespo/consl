@@ -77,7 +77,7 @@ export async function getRestock(): Promise<{
     // Finished-goods stock covers EVERY product, not just the Amazon-mapped ones — a customer
     // who doesn't sell on Amazon still holds inventory.
     prisma.product.findMany({ orderBy: { code: "asc" } }),
-    prisma.stockMovement.findMany({ orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
+    prisma.stockMovement.findMany({ where: { itemType: "FINISHED" }, orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
     prisma.facility.findMany({ select: { id: true, code: true } }),
   ]);
   const snapByProduct = new Map(snaps.map((s) => [s.productId, s]));
@@ -117,7 +117,7 @@ export async function getRestock(): Promise<{
   // Where finished stock physically sits, and what left the network (and at what cost).
   const finishedMovements: FinishedMovement[] = movements.map((m, i) => ({
     id: m.id,
-    sku: m.productId,
+    sku: m.productId ?? "",
     fromFacilityId: m.fromFacilityId,
     toFacilityId: m.toFacilityId,
     toDestination: m.toDestination,

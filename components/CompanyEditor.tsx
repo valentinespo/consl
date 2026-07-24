@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
+import { AddressInput } from "@/components/AddressField";
 import { updateCompanyProfile } from "@/app/settings/actions";
 
 export type CompanyForEdit = {
@@ -78,7 +79,7 @@ export function CompanyEditor({ company }: { company: CompanyForEdit }) {
           </Field>
         </div>
         <Field label="Address" hint="Appears in the sender block on purchase orders.">
-          <textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={3} className={`${inputCls} h-auto resize-y py-2`} />
+          <AddressInput value={address} onChange={setAddress} />
         </Field>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Email">
