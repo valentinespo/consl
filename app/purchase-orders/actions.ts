@@ -41,8 +41,16 @@ function validate(payload: PoPayload): string | null {
 async function renderAndStorePdf(poId: string): Promise<string> {
   const po = await prisma.purchaseOrder.findUniqueOrThrow({
     where: { id: poId },
-    include: { facility: true, lines: { include: { product: true }, orderBy: { seq: "asc" } } },
+    include: {
+      facility: { include: { supplierProfile: true } },
+      lines: { include: { product: true }, orderBy: { seq: "asc" } },
+    },
   });
+  // The vendor block: when the facility is linked to a supplier, that supplier owns the address
+  // (it's only entered in one place). Legal name still wins for the name when one was set.
+  const supplier = po.facility.supplierProfile;
+  const vendorName = po.facility.legalName ?? supplier?.name ?? po.facility.name;
+  const vendorAddress = supplier?.address ?? po.facility.address ?? "";
   const pdfLines: PoPdfLine[] = po.lines.map((l) => ({
     sku: l.product?.code ?? null,
     description: l.description,
@@ -60,8 +68,8 @@ async function renderAndStorePdf(poId: string): Promise<string> {
     },
     number: po.number,
     dateISO: po.date.toISOString().slice(0, 10),
-    vendorName: po.facility.legalName ?? po.facility.name,
-    vendorAddress: po.facility.address ?? "",
+    vendorName,
+    vendorAddress,
     lines: pdfLines,
   });
   // Key includes updatedAt so /media's immutable caching never serves a stale version.

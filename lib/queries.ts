@@ -315,8 +315,11 @@ export async function getFinishedStock() {
 
 /** Suppliers as light options for the facility ↔ supplier link picker. */
 export async function getSupplierOptions() {
-  const s = await prisma.supplier.findMany({ select: { id: true, name: true, facilityId: true }, orderBy: { name: "asc" } });
-  return s.map((x) => ({ id: x.id, name: x.name, facilityId: x.facilityId }));
+  const s = await prisma.supplier.findMany({
+    select: { id: true, name: true, facilityId: true, address: true },
+    orderBy: { name: "asc" },
+  });
+  return s.map((x) => ({ id: x.id, name: x.name, facilityId: x.facilityId, address: x.address }));
 }
 
 /** The movement ledger, newest first. */
@@ -621,7 +624,7 @@ export async function getPurchaseOrders() {
 /** Options for the PO creation form. */
 export async function getPoFormOptions() {
   const [facilities, products, lotNrs, pricedLines] = await Promise.all([
-    prisma.facility.findMany({ orderBy: { code: "asc" } }),
+    prisma.facility.findMany({ include: { supplierProfile: true }, orderBy: { code: "asc" } }),
     prisma.product.findMany({ orderBy: { code: "asc" } }),
     prisma.lot.findMany({ select: { lotNr: true } }),
     prisma.purchaseOrderLine.findMany({
@@ -643,12 +646,13 @@ export async function getPoFormOptions() {
     if (l.description.trim() && !(dk in descSeeds)) descSeeds[dk] = l.description;
   }
   return {
+    // Vendor block mirrors the PDF: a linked supplier owns the address, so it's entered once.
     facilities: facilities.map((f) => ({
       id: f.id,
       code: f.code,
       name: f.name,
-      legalName: f.legalName ?? f.name,
-      address: f.address ?? "",
+      legalName: f.legalName ?? f.supplierProfile?.name ?? f.name,
+      address: f.supplierProfile?.address ?? f.address ?? "",
     })),
     products: products.map((p) => ({
       id: p.id,

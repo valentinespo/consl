@@ -18,7 +18,7 @@ export type FacilityForEdit = {
   supplierId: string | null;
 };
 
-export type SupplierOption = { id: string; name: string; facilityId: string | null };
+export type SupplierOption = { id: string; name: string; facilityId: string | null; address: string | null };
 
 export function FacilityEditor({ facility, suppliers }: { facility: FacilityForEdit; suppliers: SupplierOption[] }) {
   const router = useRouter();
@@ -67,8 +67,8 @@ export function FacilityEditor({ facility, suppliers }: { facility: FacilityForE
   }
 
   const hint = FACILITY_TYPES.find((t) => t.value === type)?.hint;
-  // Only a facility you pay (or already have vendor details for) receives purchase orders.
-  const isVendor = !!supplierId || !!legalName.trim() || !!address.trim();
+  // When this facility IS a supplier, that supplier owns the address — don't ask for it twice.
+  const linkedSupplier = suppliers.find((s) => s.id === supplierId) ?? null;
 
   return (
     <Card>
@@ -108,25 +108,25 @@ export function FacilityEditor({ facility, suppliers }: { facility: FacilityForE
           </select>
         </Field>
 
-        {/* Vendor details only matter for a facility you actually send purchase orders to. */}
-        {isVendor ? (
-          <div className="rounded-xl border border-border bg-surface-2/40 p-4">
-            <div className="mb-1 text-[12px] font-medium text-ink-soft">Purchase-order details</div>
-            <p className="mb-3 text-[11.5px] text-muted">Printed at the top of any purchase order you send here.</p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Legal name" hint="Falls back to the facility name.">
-                <input value={legalName} onChange={(e) => setLegalName(e.target.value)} className={inputCls} placeholder={name} />
-              </Field>
-              <Field label="Address">
-                <textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={3} className={`${inputCls} h-auto resize-y py-2`} />
-              </Field>
+        {/* One address, one place. Linked to a supplier → the supplier's address is used. */}
+        {linkedSupplier ? (
+          <Field label="Address">
+            <div className="rounded-lg border border-border bg-surface-2/60 px-3 py-2 text-[13px] text-ink-soft">
+              {linkedSupplier.address?.trim() ? (
+                <span className="whitespace-pre-line">{linkedSupplier.address}</span>
+              ) : (
+                <span className="text-muted">No address on {linkedSupplier.name} yet.</span>
+              )}
             </div>
-          </div>
+            <span className="mt-1 block text-[11px] text-muted">
+              Comes from the supplier <span className="font-medium text-ink-soft">{linkedSupplier.name}</span> — edit it on
+              that supplier&apos;s page so it stays in one place.
+            </span>
+          </Field>
         ) : (
-          <p className="text-[11.5px] text-muted">
-            Purchase-order details (legal name, address) appear once this facility is linked to a supplier — they&apos;re only
-            used when you send it a PO.
-          </p>
+          <Field label="Address" hint="Where this location is. Used as the vendor address if you send it a purchase order.">
+            <textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={3} className={`${inputCls} h-auto resize-y py-2`} />
+          </Field>
         )}
 
         <Field label="Notes" hint="Internal only.">

@@ -2,7 +2,7 @@
 
 import { Fragment, useState } from "react";
 import Link from "next/link";
-import { ChevronRight, FileText, Plus } from "lucide-react";
+import { ChevronRight, FileText } from "lucide-react";
 import { Pill, SkuAvatar } from "@/components/ui";
 import { date } from "@/lib/format";
 import { useMoney } from "@/components/CurrencyProvider";
@@ -38,7 +38,6 @@ export function PurchaseOrdersView({
   todayISO: string;
 }) {
   const { money } = useMoney();
-  const [tab, setTab] = useState<"create" | "all">("create");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const router = useRouter();
   const toggle = (id: string) =>
@@ -50,21 +49,17 @@ export function PurchaseOrdersView({
 
   return (
     <div>
-      {/* Sub-tabs */}
-      <div className="mb-5 flex gap-1 rounded-xl border border-border bg-surface p-1 sm:w-fit">
-        <TabBtn active={tab === "create"} onClick={() => setTab("create")}>
-          <Plus size={14} /> Create PO
-        </TabBtn>
-        <TabBtn active={tab === "all"} onClick={() => setTab("all")}>
-          <FileText size={14} /> All POs ({pos.length})
-        </TabBtn>
+      {/* Create form, then every PO underneath it — no sub-tabs to hunt through. */}
+      <div className="rounded-[var(--radius-card)] border border-border bg-surface p-5">
+        <PoForm facilities={facilities} products={products} descSeeds={descSeeds} nextLotNr={nextLotNr} todayISO={todayISO} onDone={() => router.refresh()} />
       </div>
 
-      {tab === "create" ? (
-        <div className="rounded-[var(--radius-card)] border border-border bg-surface p-5">
-          <PoForm facilities={facilities} products={products} descSeeds={descSeeds} nextLotNr={nextLotNr} todayISO={todayISO} onDone={() => setTab("all")} />
+      <div className="mt-8">
+        <div className="mb-3 flex items-center gap-2">
+          <FileText size={15} className="text-muted" />
+          <h2 className="text-[15px] font-medium text-ink-soft">All purchase orders</h2>
+          <span className="tabular text-[12px] text-muted">({pos.length})</span>
         </div>
-      ) : (
         <div className="overflow-x-auto rounded-[var(--radius-card)] border border-border bg-surface">
           <table className="w-full min-w-[760px] text-[13px]">
             <thead>
@@ -143,7 +138,7 @@ export function PurchaseOrdersView({
             </tbody>
           </table>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -248,15 +243,3 @@ function SentPo({ po }: { po: PoListRow }) {
   );
 }
 
-function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[13px] font-medium transition-colors ${
-        active ? "bg-accent-soft text-ink" : "text-muted hover:text-ink-soft"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}

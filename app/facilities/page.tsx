@@ -3,12 +3,12 @@ import { ChevronRight, Warehouse, Truck } from "lucide-react";
 import { getFacilitiesDetailed, getFinishedStock, getMovements, getProducts, getFacilities } from "@/lib/queries";
 import { getFmt } from "@/lib/fmt-server";
 import { qty } from "@/lib/format";
-import { PageHeader, Card, SectionTitle } from "@/components/ui";
+import { PageHeader, Card, SectionTitle, SkuAvatar } from "@/components/ui";
 import { EmptyState } from "@/components/EmptyState";
 import { NewFacilityButton } from "@/components/NewFacilityButton";
 import { NewMovementPanel } from "@/components/MovementForm";
 import { MovementsLedger } from "@/components/MovementsLedger";
-import { facilityTypeLabel } from "@/lib/facility-types";
+import { facilityTypeLabel, isProductionSite } from "@/lib/facility-types";
 
 export const dynamic = "force-dynamic";
 
@@ -24,15 +24,16 @@ export default async function FacilitiesPage() {
   const todayISO = new Date().toISOString().slice(0, 10);
   const onHand = stock.rows.map((r) => ({ productId: r.productId, facilityId: r.facilityId, units: r.units }));
 
-  // Finished stock per facility, for the card footers.
-  const byFacility = new Map<string, { units: number; value: number; skus: number }>();
+  // Finished stock per facility, for the card footers — the actual SKUs held, not just a count.
+  type Held = { value: number; skus: { code: string; imageUrl: string | null; units: number }[] };
+  const byFacility = new Map<string, Held>();
   for (const r of stock.rows) {
-    const cur = byFacility.get(r.facilityId) ?? { units: 0, value: 0, skus: 0 };
-    cur.units += r.units;
+    const cur = byFacility.get(r.facilityId) ?? { value: 0, skus: [] };
     cur.value += r.value;
-    cur.skus += 1;
+    cur.skus.push({ code: r.code, imageUrl: r.imageUrl, units: r.units });
     byFacility.set(r.facilityId, cur);
   }
+  for (const h of byFacility.values()) h.skus.sort((a, b) => b.units - a.units);
 
   return (
     <>
@@ -80,14 +81,17 @@ export default async function FacilitiesPage() {
                         </span>
                       </div>
                       <div className="truncate text-[12.5px] text-muted">{f.name}</div>
-                      <div className="mt-0.5 text-[11px] text-muted">
-                        {f._count.lots} lots · {f._count.purchases} purchases · {f._count.purchaseOrders} POs
-                      </div>
+                      {/* Production counts only mean something where product is actually made. */}
+                      {isProductionSite(f.type) && (
+                        <div className="mt-0.5 text-[11px] text-muted">
+                          {f._count.lots} lots · {f._count.purchases} purchases · {f._count.purchaseOrders} POs
+                        </div>
+                      )}
                     </div>
                     <ChevronRight size={16} className="shrink-0 text-muted" />
                   </div>
 
-                  {/* Finished product currently sitting at this location. */}
+                  {/* Finished product currently sitting at this location, SKU by SKU. */}
                   <div className="mt-auto border-t border-line pt-2.5">
                     <div className="flex items-baseline justify-between">
                       <span className="text-[11px] uppercase tracking-wide text-muted">Finished stock here</span>
@@ -98,8 +102,14 @@ export default async function FacilitiesPage() {
                       )}
                     </div>
                     {held && (
-                      <div className="mt-0.5 text-[11px] text-muted">
-                        {qty(held.units)} units across {held.skus} {held.skus === 1 ? "product" : "products"}
+                      <div className="mt-1.5 space-y-1">
+                        {held.skus.map((s) => (
+                          <div key={s.code} className="flex items-center gap-2">
+                            <SkuAvatar code={s.code} size={22} imageUrl={s.imageUrl} />
+                            <span className="text-[12px] font-medium text-ink-soft">{s.code}</span>
+                            <span className="tabular ml-auto text-[12px] text-muted">{qty(s.units)} units</span>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>

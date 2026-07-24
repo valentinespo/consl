@@ -12,7 +12,7 @@ export default async function PurchaseOrdersPage() {
     <>
       <PageHeader
         title="Purchase Orders"
-        subtitle="Generate branded PO PDFs for your co-packers. Creating a PO also opens its production lot."
+        subtitle="Generate branded PO PDFs for the facilities that make your product. Creating a PO also opens its production lot."
       />
       <PurchaseOrdersView
         pos={pos}
