@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { computeFinishedGoods } from "@/lib/queries";
+import { DESTINATIONS } from "@/lib/destinations";
 
 /** Create a facility — a co-packer, warehouse, 3PL or anywhere else stock lives. */
 export async function createFacility(input: { code: string; name: string; type: string }) {
@@ -18,7 +20,9 @@ export async function createFacility(input: { code: string; name: string; type: 
   return { ok: true as const, id: f.id };
 }
 
-/** Edit a facility's details. `legalName`/`address` are what get printed on purchase orders. */
+/** Edit a facility's details. `legalName`/`address` are what get printed on purchase orders.
+ *  `supplierId` is the same link the supplier page offers, editable from this side too:
+ *  which supplier profile *is* this facility (null = it isn't a vendor you pay). */
 export async function updateFacility(input: {
   id: string;
   code: string;
@@ -27,6 +31,7 @@ export async function updateFacility(input: {
   legalName: string;
   address: string;
   notes: string;
+  supplierId?: string | null;
 }) {
   const code = input.code.trim().toUpperCase().replace(/\s+/g, "");
   const name = input.name.trim();
@@ -51,6 +56,18 @@ export async function updateFacility(input: {
       notes: input.notes.trim() || null,
     },
   });
+
+  // Supplier link — the mirror of the picker on the supplier page. A facility can be claimed by
+  // at most one supplier profile, so unlink the previous holder before linking the new one.
+  if (input.supplierId !== undefined) {
+    const current = await prisma.supplier.findFirst({ where: { facilityId: input.id } });
+    const next = input.supplierId || null;
+    if (current?.id !== next) {
+      if (current) await prisma.supplier.update({ where: { id: current.id }, data: { facilityId: null } });
+      if (next) await prisma.supplier.update({ where: { id: next }, data: { facilityId: input.id } });
+    }
+  }
+
   revalidatePath("/", "layout");
   return { ok: true as const };
 }
@@ -71,6 +88,68 @@ export async function deleteFacility(id: string) {
   }
 
   await prisma.facility.delete({ where: { id } });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+export type MovementInput = {
+  productId: string;
+  quantity: number;
+  dateISO: string | null;
+  fromFacilityId: string;
+  /** Either another of your facilities, or a destination outside your network — not both. */
+  toFacilityId: string | null;
+  toDestination: string | null;
+  notes: string | null;
+};
+
+/** Record finished stock leaving one of your locations. */
+export async function createMovement(input: MovementInput) {
+  const quantity = Math.round(Number(input.quantity) || 0);
+  if (quantity <= 0) return { ok: false as const, error: "Enter how many units moved" };
+  if (!input.productId) return { ok: false as const, error: "Pick a product" };
+  if (!input.fromFacilityId) return { ok: false as const, error: "Pick where the stock is moving from" };
+
+  const toFacilityId = input.toFacilityId || null;
+  const toDestination = input.toDestination || null;
+  if (!toFacilityId && !toDestination) return { ok: false as const, error: "Pick a destination" };
+  if (toFacilityId && toDestination) return { ok: false as const, error: "Pick either a facility or a destination, not both" };
+  if (toFacilityId && toFacilityId === input.fromFacilityId) {
+    return { ok: false as const, error: "Source and destination facility are the same" };
+  }
+  if (toDestination && !DESTINATIONS.some((d) => d.value === toDestination)) {
+    return { ok: false as const, error: "Unknown destination" };
+  }
+
+  // Warn (don't block) when the ledger doesn't show enough stock — the count may just be behind.
+  const { pools } = await computeFinishedGoods();
+  const onHand = pools.find((p) => p.sku === input.productId && p.facilityId === input.fromFacilityId)?.units ?? 0;
+
+  await prisma.stockMovement.create({
+    data: {
+      productId: input.productId,
+      quantity,
+      date: input.dateISO ? new Date(input.dateISO) : new Date(),
+      fromFacilityId: input.fromFacilityId,
+      toFacilityId,
+      toDestination,
+      notes: input.notes?.trim() || null,
+    },
+  });
+
+  revalidatePath("/", "layout");
+  return {
+    ok: true as const,
+    warning:
+      quantity > onHand
+        ? `Recorded, but that location only shows ${Math.round(onHand).toLocaleString()} units on hand — it's now short by ${Math.round(quantity - onHand).toLocaleString()}.`
+        : null,
+  };
+}
+
+/** Remove a movement (nothing depends on it — the engine just replays without it). */
+export async function deleteMovement(id: string) {
+  await prisma.stockMovement.delete({ where: { id } });
   revalidatePath("/", "layout");
   return { ok: true as const };
 }

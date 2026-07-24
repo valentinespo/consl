@@ -313,6 +313,12 @@ export async function getFinishedStock() {
   };
 }
 
+/** Suppliers as light options for the facility ↔ supplier link picker. */
+export async function getSupplierOptions() {
+  const s = await prisma.supplier.findMany({ select: { id: true, name: true, facilityId: true }, orderBy: { name: "asc" } });
+  return s.map((x) => ({ id: x.id, name: x.name, facilityId: x.facilityId }));
+}
+
 /** The movement ledger, newest first. */
 export async function getMovements() {
   const movements = await prisma.stockMovement.findMany({
@@ -440,9 +446,9 @@ export async function getMaterialDetail(id: string) {
   return { material, usedBy: used({ purchases, "purchase invoices": invoices, "lot recipes": lotMaterials }) };
 }
 
-/** One facility + everything referencing it. */
+/** One facility + everything referencing it, including the supplier profile it's linked to. */
 export async function getFacilityDetail(id: string) {
-  const facility = await prisma.facility.findFirst({ where: { id } });
+  const facility = await prisma.facility.findFirst({ where: { id }, include: { supplierProfile: true } });
   if (!facility) return null;
   const [lots, purchases, purchaseOrders] = await Promise.all([
     prisma.lot.count({ where: { facilityId: id } }),

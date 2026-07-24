@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getFacilityDetail, getFacilitiesDetailed, getFinishedStock } from "@/lib/queries";
+import { getFacilityDetail, getFacilitiesDetailed, getFinishedStock, getSupplierOptions } from "@/lib/queries";
 import { getFmt } from "@/lib/fmt-server";
 import { qty } from "@/lib/format";
 import { PageHeader, Card, SkuAvatar } from "@/components/ui";
@@ -14,10 +14,11 @@ export const dynamic = "force-dynamic";
 
 export default async function FacilityDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [detail, facilities, stock, { money }] = await Promise.all([
+  const [detail, facilities, stock, suppliers, { money }] = await Promise.all([
     getFacilityDetail(id),
     getFacilitiesDetailed(),
     getFinishedStock(),
+    getSupplierOptions(),
     getFmt(),
   ]);
   if (!detail) notFound();
@@ -44,7 +45,9 @@ export default async function FacilityDetailPage({ params }: { params: Promise<{
           legalName: facility.legalName,
           address: facility.address,
           notes: facility.notes,
+          supplierId: facility.supplierProfile?.id ?? null,
         }}
+        suppliers={suppliers}
       />
 
       <div className="mt-5">

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { Field, inputCls } from "@/components/FormKit";
 import { DESTINATIONS } from "@/lib/destinations";
-import { createMovement } from "@/app/movements/actions";
+import { createMovement } from "@/app/facilities/actions";
 
 export type MoveProduct = { id: string; code: string; name: string };
 export type MoveFacility = { id: string; code: string; name: string };

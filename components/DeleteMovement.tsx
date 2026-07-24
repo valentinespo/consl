@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
-import { deleteMovement } from "@/app/movements/actions";
+import { deleteMovement } from "@/app/facilities/actions";
 
 /** Two-click removal for a movement. Nothing depends on it — the engine just replays without it. */
 export function DeleteMovement({ id }: { id: string }) {
