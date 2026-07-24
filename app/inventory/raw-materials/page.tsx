@@ -1,6 +1,7 @@
 import { Package } from "lucide-react";
 import { getInventory, getMaterialTypes, type InventoryPool } from "@/lib/queries";
-import { money, qty, perUnit, costFine } from "@/lib/format";
+import { money, qty, perUnit, costFine, type Currency } from "@/lib/format";
+import { getCurrentOrg } from "@/lib/org";
 import { Card, StatCard, PageHeader, SectionTitle, FacilityTag, SkuAvatar } from "@/components/ui";
 import { InventoryNav } from "@/components/InventoryNav";
 import { EmptyState } from "@/components/EmptyState";
@@ -8,24 +9,24 @@ import { EmptyState } from "@/components/EmptyState";
 export const dynamic = "force-dynamic";
 
 /** Cheap per-unit items (a few cents) need more decimals than expensive ones. */
-function unitCost(value: number, quantity: number) {
+function unitCost(value: number, quantity: number, cur: Currency) {
   if (!(quantity > 0)) return "—";
   const c = value / quantity;
-  return (c < 0.1 ? costFine : perUnit)(c);
+  return (c < 0.1 ? costFine : perUnit)(c, cur);
 }
 
-function FacilityRow({ pool, unitLabel }: { pool: InventoryPool; unitLabel: string }) {
+function FacilityRow({ pool, unitLabel, cur }: { pool: InventoryPool; unitLabel: string; cur: Currency }) {
   return (
     <div className="flex items-center justify-between border-t border-line py-2 first:border-0">
       <div className="flex items-center gap-2">
         <FacilityTag code={pool.facility} />
         <span className="text-[11.5px] text-muted">
-          {unitCost(pool.valueRemaining, pool.quantityRemaining)} / {unitLabel}
+          {unitCost(pool.valueRemaining, pool.quantityRemaining, cur)} / {unitLabel}
         </span>
       </div>
       <div className="flex items-center gap-4 text-right">
         <span className="tabular font-medium text-ink">{qty(pool.quantityRemaining)}</span>
-        <span className="tabular w-20 text-[12px] text-ink-soft">{money(pool.valueRemaining)}</span>
+        <span className="tabular w-20 text-[12px] text-ink-soft">{money(pool.valueRemaining, 2, cur)}</span>
       </div>
     </div>
   );
@@ -76,6 +77,8 @@ export default async function RawMaterialsPage() {
     .sort((a, b) => b.value - a.value);
 
   const poolCount = live.length;
+  const org = await getCurrentOrg().catch(() => null);
+  const cur: Currency = { symbol: org?.currencySymbol ?? "$", locale: org?.locale ?? "en-US" };
 
   return (
     <>
@@ -83,13 +86,13 @@ export default async function RawMaterialsPage() {
       <InventoryNav />
 
       <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
-        <StatCard label="Total raw value" value={money(totalValue)} sub="FIFO remaining valuation" accent />
+        <StatCard label="Total raw value" value={money(totalValue, 2, cur)} sub="FIFO remaining valuation" accent />
         <StatCard label="Materials in stock" value={String(sections.length)} sub={`of ${materials.length} tracked`} />
         <StatCard label="Stock pools" value={String(poolCount)} sub="Material × location" />
         <StatCard
           label="Largest by value"
           value={sections[0] ? sections[0].name : "—"}
-          sub={sections[0] ? money(sections[0].value) : "No stock yet"}
+          sub={sections[0] ? money(sections[0].value, 2, cur) : "No stock yet"}
         />
       </div>
 
@@ -107,7 +110,7 @@ export default async function RawMaterialsPage() {
             <SectionTitle>
               {s.name}
               <span className="ml-2 text-[12px] font-normal text-muted">
-                {qty(s.totalQty)} {s.unitLabel} · {money(s.value)}
+                {qty(s.totalQty)} {s.unitLabel} · {money(s.value, 2, cur)}
               </span>
             </SectionTitle>
             <div className={`grid grid-cols-1 gap-4 ${s.perSku ? "sm:grid-cols-2 lg:grid-cols-3" : "sm:grid-cols-2"}`}>
@@ -132,12 +135,12 @@ export default async function RawMaterialsPage() {
                     </div>
                     <div className="text-right">
                       <div className="tabular font-medium text-ink">{qty(g.totalQty)}</div>
-                      <div className="tabular text-[12px] text-ink-soft">{money(g.totalValue)}</div>
+                      <div className="tabular text-[12px] text-ink-soft">{money(g.totalValue, 2, cur)}</div>
                     </div>
                   </div>
                   <div className="mt-2">
                     {g.pools.map((p) => (
-                      <FacilityRow key={`${g.key}-${p.facility}`} pool={p} unitLabel={s.unitLabel} />
+                      <FacilityRow key={`${g.key}-${p.facility}`} pool={p} unitLabel={s.unitLabel} cur={cur} />
                     ))}
                   </div>
                 </Card>

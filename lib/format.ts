@@ -1,10 +1,16 @@
-export const money = (n: number | null | undefined, dp = 2) =>
+/** Currency + locale for money formatting. Defaults to USD so existing calls are unchanged;
+ *  the app passes each org's own via the currency context (client) or getFmt (server). */
+export type Currency = { symbol: string; locale: string };
+export const USD: Currency = { symbol: "$", locale: "en-US" };
+
+export const money = (n: number | null | undefined, dp = 2, cur: Currency = USD) =>
   n == null
     ? "—"
-    : (n < 0 ? "-$" : "$") +
-      Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp });
+    : (n < 0 ? "-" : "") +
+      cur.symbol +
+      Math.abs(n).toLocaleString(cur.locale, { minimumFractionDigits: dp, maximumFractionDigits: dp });
 
-export const money0 = (n: number | null | undefined) => money(n, 0);
+export const money0 = (n: number | null | undefined, cur: Currency = USD) => money(n, 0, cur);
 
 export const qty = (n: number | null | undefined) =>
   n == null ? "—" : Math.round(n).toLocaleString("en-US");
@@ -12,12 +18,12 @@ export const qty = (n: number | null | undefined) =>
 /** Simple English pluralization for unit labels (bag→bags, pouch→pouches). */
 export const plural = (w: string) => w + (/(s|x|z|ch|sh)$/i.test(w) ? "es" : "s");
 
-export const perUnit = (n: number | null | undefined) =>
-  n == null ? "—" : "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+export const perUnit = (n: number | null | undefined, cur: Currency = USD) =>
+  n == null ? "—" : cur.symbol + n.toLocaleString(cur.locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** Finer precision for sub-cent unit costs (e.g. tea-bag per-bag cost). */
-export const costFine = (n: number | null | undefined) =>
-  n == null ? "—" : "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 5 });
+export const costFine = (n: number | null | undefined, cur: Currency = USD) =>
+  n == null ? "—" : cur.symbol + n.toLocaleString(cur.locale, { minimumFractionDigits: 2, maximumFractionDigits: 5 });
 
 export const date = (d: Date | string | null | undefined) => {
   if (!d) return "—";

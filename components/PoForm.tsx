@@ -6,7 +6,7 @@ import { Plus, X } from "lucide-react";
 import { createPurchaseOrder, updatePurchaseOrder, deletePurchaseOrder, type PoLineInput } from "@/app/purchase-orders/actions";
 import { TwoStepDelete } from "@/components/TwoStepDelete";
 import { SkuAvatar } from "@/components/ui";
-import { money } from "@/lib/format";
+import { useMoney } from "@/components/CurrencyProvider";
 
 export type PoFacility = { id: string; code: string; name: string; legalName: string; address: string };
 export type PoProduct = {
@@ -69,6 +69,7 @@ export function PoForm({
   todayISO: string;
   onDone: () => void;
 }) {
+  const { money } = useMoney();
   const editing = !!po;
   const router = useRouter();
   const [facilityId, setFacilityId] = useState(po?.facilityId ?? facilities[0]?.id ?? "");

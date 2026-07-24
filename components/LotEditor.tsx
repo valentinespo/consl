@@ -4,9 +4,11 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X } from "lucide-react";
 import { Card, SkuAvatar, SectionTitle } from "@/components/ui";
-import { money, qty, perUnit } from "@/lib/format";
+import { qty } from "@/lib/format";
+import { useMoney } from "@/components/CurrencyProvider";
 import { updateLot } from "@/app/lots/actions";
 import { LotBom, type MaterialType, type Mat } from "@/components/LotBom";
+import type { CostChip } from "@/lib/lot-costs";
 
 type Facility = { id: string; code: string; name: string };
 type Product = { id: string; code: string; name: string; imageUrl: string | null };
@@ -20,10 +22,7 @@ export type EditorLine = {
   imageUrl: string | null;
   units: number;
   materials: Mat[];
-  tea: number;
-  teabag: number;
-  pouch: number;
-  other: number;
+  costs: CostChip[];
   cogPerUnit: number;
   shortfalls: Shortfall[];
 };
@@ -36,7 +35,7 @@ type StateLine = {
   name: string;
   imageUrl: string | null;
   units: string;
-  cost: { tea: number; teabag: number; pouch: number; other: number; cogPerUnit: number; shortfalls: Shortfall[] } | null;
+  cost: { costs: CostChip[]; cogPerUnit: number; shortfalls: Shortfall[] } | null;
 };
 
 const matSig = (m: Mat[]) =>
@@ -76,6 +75,7 @@ export function LotEditor({
   materialTypes: MaterialType[];
   skuTxnCounts: Record<string, number>;
 }) {
+  const { perUnit } = useMoney();
   const router = useRouter();
   const seed = useMemo(() => {
     const lines: StateLine[] = initialLines.map((l) => ({
@@ -86,7 +86,7 @@ export function LotEditor({
       name: l.name,
       imageUrl: l.imageUrl,
       units: String(l.units),
-      cost: { tea: l.tea, teabag: l.teabag, pouch: l.pouch, other: l.other, cogPerUnit: l.cogPerUnit, shortfalls: l.shortfalls },
+      cost: { costs: l.costs, cogPerUnit: l.cogPerUnit, shortfalls: l.shortfalls },
     }));
     const bom = deriveBom(initialLines.map((l) => ({ key: l.id ?? `seed-${l.productId}`, materials: l.materials })));
     return { lines, shared: bom.shared, overrides: bom.overrides };
@@ -215,19 +215,13 @@ export function LotEditor({
               <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-muted">
                 <th className="px-4 py-2.5 font-medium">SKU</th>
                 <th className="px-3 py-2.5 text-right font-medium">Units</th>
-                <th className="px-3 py-2.5 text-right font-medium">Tea</th>
-                <th className="px-3 py-2.5 text-right font-medium">Tea bag</th>
-                <th className="px-3 py-2.5 text-right font-medium">Pouch</th>
-                <th className="px-3 py-2.5 text-right font-medium">Other</th>
+                <th className="px-3 py-2.5 font-medium">Cost breakdown / unit</th>
                 <th className="px-3 py-2.5 text-right font-medium">COG/unit</th>
                 <th className="px-4 py-2.5 text-right font-medium"></th>
               </tr>
             </thead>
             <tbody>
               {lines.map((l) => {
-                const shortSet = new Set((l.cost?.shortfalls ?? []).map((s) => s.materialCode));
-                const matCell = (code: string, value: string) =>
-                  shortSet.has(code) ? <span className="font-semibold text-negative" title="Not enough stock purchased">⚠</span> : <span className="text-muted">{value}</span>;
                 const txnCount = skuTxnCounts[l.code] ?? 0;
                 return (
                   <tr key={l.key} className="border-b border-line last:border-0">
@@ -247,10 +241,22 @@ export function LotEditor({
                         className="h-8 w-20 rounded-lg border border-border bg-surface-2 px-2 text-right text-[13px] tabular text-ink outline-none focus:border-accent-strong"
                       />
                     </td>
-                    <td className="px-3 py-3 text-right tabular text-muted">{l.cost ? perUnit(l.cost.tea) : "—"}</td>
-                    <td className="px-3 py-3 text-right tabular">{l.cost ? matCell("TEABAG", l.cost.teabag ? perUnit(l.cost.teabag) : "—") : "—"}</td>
-                    <td className="px-3 py-3 text-right tabular">{l.cost ? matCell("POUCH", perUnit(l.cost.pouch)) : "—"}</td>
-                    <td className="px-3 py-3 text-right tabular text-muted">{l.cost ? perUnit(l.cost.other) : "—"}</td>
+                    <td className="px-3 py-3">
+                      {l.cost && l.cost.costs.length > 0 ? (
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                          {l.cost.costs.map((c, i) => (
+                            <span key={`${c.label}-${i}`} className="whitespace-nowrap text-[11px] text-muted">
+                              {c.label}{" "}
+                              <span className={`tabular ${c.short ? "font-semibold text-negative" : "text-ink-soft"}`} title={c.short ? "Not enough stock purchased" : undefined}>
+                                {c.short ? "⚠" : perUnit(c.value)}
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-muted">—</span>
+                      )}
+                    </td>
                     <td className="px-3 py-3 text-right font-semibold tabular text-ink">{l.cost ? perUnit(l.cost.cogPerUnit) : <span className="text-[11px] font-normal text-muted">new</span>}</td>
                     <td className="px-4 py-3 text-right">
                       {confirmRemove === l.key ? (

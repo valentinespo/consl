@@ -1,4 +1,6 @@
-import { money } from "@/lib/format";
+"use client";
+
+import { useMoney } from "@/components/CurrencyProvider";
 import type { ValueHistoryPoint } from "@/lib/restock";
 
 const W = 1000;
@@ -14,6 +16,7 @@ const SERIES = [
 
 /** Stacked area of inventory value split by bucket over time. */
 export function ValueStackedChart({ data }: { data: ValueHistoryPoint[] }) {
+  const { money } = useMoney();
   // Need ≥2 points to form a band; duplicate a lone point so it renders as a flat stack.
   const pts = data.length === 1 ? [data[0], data[0]] : data;
   const n = pts.length;

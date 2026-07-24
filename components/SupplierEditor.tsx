@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui";
 import { ImageUpload } from "@/components/ImageUpload";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
-import { initials } from "@/components/SupplierCard";
+import { initials } from "@/lib/initials";
 import { updateSupplier } from "@/app/suppliers/actions";
 
 export type SupplierForEdit = {

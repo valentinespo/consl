@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { money } from "@/lib/format";
+import { useMoney } from "@/components/CurrencyProvider";
 
 // Two palettes so the two donuts read as different metrics. Darkest → lightest.
 export const BLUES = ["#1e3a8a", "#2563eb", "#3b82f6", "#60a5fa", "#93c5fd", "#bfdbfe"];
@@ -17,6 +17,7 @@ function arc(cx: number, cy: number, r: number, a0: number, a1: number) {
 
 /** Donut of value-by-facility in a graded palette; hover a slice (or legend row) to focus it. */
 export function FacilityPie({ data, palette = BLUES, label }: { data: { code: string; value: number }[]; palette?: string[]; label?: string }) {
+  const { money } = useMoney();
   const [hover, setHover] = useState<number | null>(null);
   const total = data.reduce((s, d) => s + d.value, 0) || 1;
   const R = 48;

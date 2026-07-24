@@ -9,8 +9,11 @@ import {
   getTransactionInvoices,
   getProductImageMap,
   getProducts,
+  getCategoriesInUse,
 } from "@/lib/queries";
-import { money, qty, date } from "@/lib/format";
+import { qty, date } from "@/lib/format";
+import { getFmt } from "@/lib/fmt-server";
+import { buildCostChips } from "@/lib/lot-costs";
 import { PageHeader, Pill, FacilityTag } from "@/components/ui";
 import { TransactionInvoicesTable } from "@/components/TransactionInvoicesTable";
 import { LotEditor, type EditorLine } from "@/components/LotEditor";
@@ -21,7 +24,7 @@ export const dynamic = "force-dynamic";
 
 export default async function LotDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [lot, lotOptions, suppliers, materialTypes, facilities, invoices, skuImages, products] = await Promise.all([
+  const [lot, lotOptions, suppliers, materialTypes, facilities, invoices, skuImages, products, categories] = await Promise.all([
     getLot(id),
     getLotOptions(),
     getSupplierNames(),
@@ -30,8 +33,10 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
     getTransactionInvoices(id),
     getProductImageMap(),
     getProducts(),
+    getCategoriesInUse(),
   ]);
   if (!lot) notFound();
+  const { money } = await getFmt();
 
   const totalUnits = lot.lines.reduce((s, l) => s + l.units, 0);
   const totalCog = lot.lines.reduce((s, l) => s + l.cogPerUnit * l.units, 0);
@@ -43,6 +48,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
       shortLineDetails.push({ sku: ln.product.code, shortBy: s.shortBy, materialCode: s.materialCode });
   const hasShortfall = shortLineDetails.length > 0;
 
+  const matName = (code: string) => materialTypes.find((m) => m.code === code)?.name ?? code;
   const initialLines: EditorLine[] = lot.lines.map((ln) => ({
     id: ln.id,
     productId: ln.productId,
@@ -51,10 +57,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
     imageUrl: ln.product.imageUrl,
     units: ln.units,
     materials: ln.materials.map((m) => ({ materialTypeId: m.materialTypeId, perUnit: m.perUnit })),
-    tea: ln.teaCostPerUnit,
-    teabag: ln.teabagCostPerUnit,
-    pouch: ln.pouchCostPerUnit,
-    other: ln.otherCostPerUnit,
+    costs: buildCostChips(ln.materialCostsJson, ln.transactionCostsJson, ln.shortfallsJson, matName),
     cogPerUnit: ln.cogPerUnit,
     shortfalls: JSON.parse(ln.shortfallsJson),
   }));
@@ -138,6 +141,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
           invoices={invoices}
           lots={lotOptions}
           suppliers={suppliers}
+          categories={categories}
           skuImages={skuImages}
           showLotColumn={false}
           defaultLotId={lot.id}

@@ -1,5 +1,9 @@
+"use client";
+
 import { SkuAvatar } from "@/components/ui";
-import { perUnit, qty } from "@/lib/format";
+import { qty } from "@/lib/format";
+import { useMoney } from "@/components/CurrencyProvider";
+import type { CostChip } from "@/lib/lot-costs";
 
 export type LotLineSummary = {
   sku: string;
@@ -7,23 +11,23 @@ export type LotLineSummary = {
   imageUrl: string | null;
   units: number;
   cogPerUnit: number;
-  teaCostPerUnit: number;
-  teabagCostPerUnit: number;
-  pouchCostPerUnit: number;
-  otherCostPerUnit: number;
-  short: string[];
+  costs: CostChip[];
 };
 
-function CostChip({ label, value, short }: { label: string; value: number; short?: boolean }) {
+function Chip({ chip }: { chip: CostChip }) {
+  const { perUnit } = useMoney();
   return (
     <span className="whitespace-nowrap text-[10.5px] text-muted">
-      {label}{" "}
-      <span className={`tabular ${short ? "font-semibold text-negative" : "text-ink-soft"}`}>{short ? "⚠" : perUnit(value)}</span>
+      {chip.label}{" "}
+      <span className={`tabular ${chip.short ? "font-semibold text-negative" : "text-ink-soft"}`}>
+        {chip.short ? "⚠" : perUnit(chip.value)}
+      </span>
     </span>
   );
 }
 
 export function LotLineCards({ lines }: { lines: LotLineSummary[] }) {
+  const { perUnit } = useMoney();
   return (
     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
       {lines.map((ln) => (
@@ -39,12 +43,13 @@ export function LotLineCards({ lines }: { lines: LotLineSummary[] }) {
               <div className="text-[10px] text-muted">COG / unit</div>
             </div>
           </div>
-          <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 border-t border-line pt-1.5">
-            <CostChip label="Tea" value={ln.teaCostPerUnit} />
-            {ln.teabagCostPerUnit > 0 && <CostChip label="Bag" value={ln.teabagCostPerUnit} short={ln.short.includes("TEABAG")} />}
-            <CostChip label="Pouch" value={ln.pouchCostPerUnit} short={ln.short.includes("POUCH")} />
-            {ln.otherCostPerUnit > 0 && <CostChip label="Other" value={ln.otherCostPerUnit} />}
-          </div>
+          {ln.costs.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 border-t border-line pt-1.5">
+              {ln.costs.map((c, i) => (
+                <Chip key={`${c.label}-${i}`} chip={c} />
+              ))}
+            </div>
+          )}
         </div>
       ))}
     </div>

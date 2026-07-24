@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Mail, Phone, MapPin, ChevronRight } from "lucide-react";
 import { Card, FacilityTag } from "@/components/ui";
-import { money } from "@/lib/format";
+import { getFmt } from "@/lib/fmt-server";
+import { initials } from "@/lib/initials";
 
 export type SupplierRow = {
   id: string;
@@ -17,16 +18,9 @@ export type SupplierRow = {
   totalSpend: number;
 };
 
-export function initials(name: string) {
-  return name
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase())
-    .join("");
-}
-
 /** Supplier tile — links into the supplier's own page, where editing lives. */
-export function SupplierCard({ supplier: s }: { supplier: SupplierRow }) {
+export async function SupplierCard({ supplier: s }: { supplier: SupplierRow }) {
+  const { money } = await getFmt();
   return (
     <Link href={`/suppliers/${s.id}`} className="block">
       <Card className="flex flex-col gap-3 transition-colors hover:border-accent-strong hover:bg-accent-soft/30">

@@ -4,7 +4,8 @@ import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
 import { Plus, ArrowUpDown, ChevronRight } from "lucide-react";
 import { Pill, SupplierAvatar, SkuAvatar } from "@/components/ui";
-import { money, date } from "@/lib/format";
+import { date } from "@/lib/format";
+import { useMoney } from "@/components/CurrencyProvider";
 import { TransactionInvoiceForm, type InvoiceRow, type LotOption } from "@/components/TransactionInvoiceForm";
 import { DocumentList } from "@/components/DocumentList";
 import { Paperclip } from "lucide-react";
@@ -12,12 +13,15 @@ import { Paperclip } from "lucide-react";
 type SortKey = "date" | "applicable";
 
 // Stored keys are legacy (TEA/OTHER); the labels are business-neutral.
-const CAT_LABEL: Record<string, string> = { TEA: "Ingredient", OTHER: "Other cost", NOT_APPLICABLE: "N/A" };
+// Legacy keys map to friendly labels for any un-migrated rows; new categories are shown verbatim.
+const CAT_LABEL: Record<string, string> = { TEA: "Ingredients", OTHER: "Production", NOT_APPLICABLE: "Not applicable" };
+const catLabel = (c: string) => CAT_LABEL[c] ?? c;
 
 export function TransactionInvoicesTable({
   invoices,
   lots,
   suppliers,
+  categories = [],
   skuImages,
   showLotColumn = true,
   defaultLotId,
@@ -25,12 +29,19 @@ export function TransactionInvoicesTable({
   invoices: InvoiceRow[];
   lots: LotOption[];
   suppliers: string[];
+  categories?: string[];
   skuImages?: Record<string, string | null>;
   showLotColumn?: boolean;
   defaultLotId?: string;
 }) {
+  const { money } = useMoney();
   const [q, setQ] = useState("");
   const [category, setCategory] = useState("ALL");
+  // Filter offers every category actually present in the data.
+  const presentCategories = useMemo(
+    () => [...new Set([...categories, ...invoices.flatMap((inv) => inv.lines.map((l) => l.category))])].filter(Boolean),
+    [categories, invoices],
+  );
   const [lot, setLot] = useState("ALL");
   const [supplier, setSupplier] = useState("ALL");
   const [from, setFrom] = useState("");
@@ -96,7 +107,7 @@ export function TransactionInvoicesTable({
           placeholder="Search supplier, SKU, lot, concept…"
           className="h-9 w-56 rounded-lg border border-border bg-surface px-3 text-[13px] text-ink outline-none placeholder:text-muted focus:border-accent-strong"
         />
-        <Select value={category} onChange={setCategory} options={["ALL", "TEA", "OTHER", "NOT_APPLICABLE"]} label={(v) => (v === "ALL" ? "All categories" : CAT_LABEL[v] ?? v)} />
+        <Select value={category} onChange={setCategory} options={["ALL", ...presentCategories]} label={(v) => (v === "ALL" ? "All categories" : catLabel(v))} />
         {showLotColumn && (
           <Select
             value={lot}
@@ -145,7 +156,7 @@ export function TransactionInvoicesTable({
       {adding && (
         <div className="mb-3 rounded-[var(--radius-card)] border border-accent-strong bg-surface p-4">
           <div className="mb-3 text-[13px] font-semibold text-ink-soft">New transaction</div>
-          <TransactionInvoiceForm lots={lots} suppliers={suppliers} skuImages={skuImages} defaultLotId={defaultLotId} onDone={() => setAdding(false)} />
+          <TransactionInvoiceForm lots={lots} suppliers={suppliers} categories={categories} skuImages={skuImages} defaultLotId={defaultLotId} onDone={() => setAdding(false)} />
         </div>
       )}
 
@@ -220,7 +231,7 @@ export function TransactionInvoicesTable({
                     <td className="px-3 py-3 align-middle">
                       <div className="flex flex-wrap items-center gap-1">
                         {inv.presentCats.map((c) => (
-                          <Pill key={c} kind={c}>{CAT_LABEL[c] ?? c}</Pill>
+                          <Pill key={c} kind={c}>{catLabel(c)}</Pill>
                         ))}
                       </div>
                     </td>
@@ -250,6 +261,7 @@ export function TransactionInvoicesTable({
                           invoice={inv}
                           lots={lots}
                           suppliers={suppliers}
+                          categories={categories}
                           skuImages={skuImages}
                           defaultLotId={defaultLotId}
                           onDone={() => toggle(inv.id)}

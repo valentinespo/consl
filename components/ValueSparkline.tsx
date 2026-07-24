@@ -1,4 +1,6 @@
-import { money } from "@/lib/format";
+"use client";
+
+import { useMoney } from "@/components/CurrencyProvider";
 
 const W = 1000;
 const H = 150;
@@ -33,6 +35,7 @@ function paths(vals: number[]) {
 
 /** Sleek fintech-style area sparkline of inventory value over time, fading to the bottom. */
 export function ValueSparkline({ data }: { data: { day: string; total: number }[] }) {
+  const { money } = useMoney();
   const vals = data.map((d) => d.total);
   const { line, area } = paths(vals);
   const first = vals[0] ?? 0;

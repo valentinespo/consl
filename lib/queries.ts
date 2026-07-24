@@ -1,6 +1,7 @@
 import "server-only";
 import { prisma } from "./prisma";
 import { computeEngineResult } from "./recompute";
+import { buildCostChips } from "./lot-costs";
 
 export type InventoryPool = {
   materialCode: string;
@@ -97,14 +98,18 @@ export async function getDashboard() {
 }
 
 export async function getLots() {
-  const lots = await prisma.lot.findMany({
-    include: {
-      facility: true,
-      lines: { include: { product: true } },
-      _count: { select: { transactions: true } },
-    },
-    orderBy: { lotNr: "desc" },
-  });
+  const [lots, materials] = await Promise.all([
+    prisma.lot.findMany({
+      include: {
+        facility: true,
+        lines: { include: { product: true } },
+        _count: { select: { transactions: true } },
+      },
+      orderBy: { lotNr: "desc" },
+    }),
+    prisma.materialType.findMany({ select: { code: true, name: true } }),
+  ]);
+  const matName = (code: string) => materials.find((m) => m.code === code)?.name ?? code;
   return lots.map((lot) => {
     const units = lot.lines.reduce((s, l) => s + l.units, 0);
     const cog = lot.lines.reduce((s, l) => s + l.cogPerUnit * l.units, 0);
@@ -124,11 +129,7 @@ export async function getLots() {
         imageUrl: l.product.imageUrl,
         units: l.units,
         cogPerUnit: l.cogPerUnit,
-        teaCostPerUnit: l.teaCostPerUnit,
-        teabagCostPerUnit: l.teabagCostPerUnit,
-        pouchCostPerUnit: l.pouchCostPerUnit,
-        otherCostPerUnit: l.otherCostPerUnit,
-        short: (JSON.parse(l.shortfallsJson) as { materialCode: string }[]).map((s) => s.materialCode),
+        costs: buildCostChips(l.materialCostsJson, l.transactionCostsJson, l.shortfallsJson, matName),
       })),
       units,
       cogTotal: cog,
@@ -245,6 +246,13 @@ export async function getTransactionInvoices(lotId?: string) {
     };
   });
   return lotId ? mapped.filter((inv) => inv.lines.some((l) => l.lotId === lotId)) : mapped;
+}
+
+/** Every cost category currently used by a transaction, so the dropdown can offer them again.
+ *  A category with no remaining transactions simply stops appearing (derived, like suppliers). */
+export async function getCategoriesInUse(): Promise<string[]> {
+  const rows = await prisma.transaction.findMany({ distinct: ["category"], select: { category: true } });
+  return rows.map((r) => r.category).filter(Boolean);
 }
 
 /** Lot options for transaction assignment dropdowns. */

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Pencil, Check, Plus, X, Move, Scaling, Bell, AlertTriangle, Gauge, PieChart, Layers, CheckCircle2, ShoppingCart, Zap, PackageSearch } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { money } from "@/lib/format";
+import { useMoney } from "@/components/CurrencyProvider";
 import { Card, SectionTitle } from "@/components/ui";
 import { TotalValueCard } from "@/components/TotalValueCard";
 import { FacilityPie, BLUES, VIOLETS } from "@/components/FacilityPie";
@@ -408,6 +408,7 @@ function FacilityWidget({
 }
 
 function MoneyChip({ label, value, dot, emphasize }: { label: string; value: number; dot: string; emphasize?: boolean }) {
+  const { money } = useMoney();
   return (
     <div className={`rounded-lg border px-3 py-2 ${emphasize ? "border-accent-strong bg-accent-soft" : "border-border bg-surface-2/60"}`}>
       <div className="flex items-center gap-1.5">

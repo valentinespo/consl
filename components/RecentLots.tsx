@@ -5,7 +5,8 @@ import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { Pill, FacilityTag, SkuAvatar } from "@/components/ui";
 import { LotLineCards, type LotLineSummary } from "@/components/LotLineCards";
-import { money, qty, date } from "@/lib/format";
+import { qty, date } from "@/lib/format";
+import { useMoney } from "@/components/CurrencyProvider";
 
 export type RecentLot = {
   id: string;
@@ -21,6 +22,7 @@ export type RecentLot = {
 };
 
 export function RecentLots({ lots }: { lots: RecentLot[] }) {
+  const { money } = useMoney();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggle = (id: string) =>
     setExpanded((prev) => {

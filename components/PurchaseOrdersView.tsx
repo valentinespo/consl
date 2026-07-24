@@ -4,7 +4,8 @@ import { Fragment, useState } from "react";
 import Link from "next/link";
 import { ChevronRight, FileText, Plus } from "lucide-react";
 import { Pill, SkuAvatar } from "@/components/ui";
-import { money, date } from "@/lib/format";
+import { date } from "@/lib/format";
+import { useMoney } from "@/components/CurrencyProvider";
 import { PoForm, type PoFacility, type PoProduct, type PoRow } from "@/components/PoForm";
 import { setPoStatus, deletePurchaseOrder } from "@/app/purchase-orders/actions";
 import { useRouter } from "next/navigation";
@@ -36,6 +37,7 @@ export function PurchaseOrdersView({
   nextLotNr: number;
   todayISO: string;
 }) {
+  const { money } = useMoney();
   const [tab, setTab] = useState<"create" | "all">("create");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const router = useRouter();
@@ -195,6 +197,7 @@ function ImportedPo({ po }: { po: PoListRow }) {
 
 /** Read-only list of a PO's lines. */
 function PoLinesList({ po }: { po: PoListRow }) {
+  const { money } = useMoney();
   return (
     <div className="space-y-1.5">
       {po.lines.map((l, i) => (

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X } from "lucide-react";
-import { money, costFine } from "@/lib/format";
+import { useMoney } from "@/components/CurrencyProvider";
 import { upsertPurchaseInvoice, deletePurchaseInvoice, type PurchaseLineInput } from "@/app/purchases/actions";
 import { SelectOrCreate, type Opt } from "@/components/SelectOrCreate";
 import { SearchSelect } from "@/components/SearchSelect";
@@ -68,6 +68,7 @@ export function PurchaseInvoiceForm({
   onDone: () => void;
   cancelLabel?: string;
 }) {
+  const { money, costFine } = useMoney();
   const editing = !!invoice;
   const [supplier, setSupplier] = useState(invoice?.supplier ?? "");
   const [dateISO, setDateISO] = useState(invoice?.dateISO ?? "");

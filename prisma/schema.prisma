@@ -414,13 +414,15 @@ model LotLine {
   materials LotMaterial[]
 
   // ---- Engine-computed cost snapshot (per unit). Recomputed on data change. ----
-  teaCostPerUnit    Float  @default(0) // herb, from TEA transactions
-  otherCostPerUnit  Float  @default(0) // shipping/misc, from OTHER transactions
-  teabagCostPerUnit Float  @default(0) // FIFO
-  pouchCostPerUnit  Float  @default(0) // FIFO
+  teaCostPerUnit    Float  @default(0) // legacy: primary transaction-cost category (kept for compat)
+  otherCostPerUnit  Float  @default(0) // legacy: remaining transaction-cost categories
+  teabagCostPerUnit Float  @default(0) // legacy: FIFO material (kept for compat)
+  pouchCostPerUnit  Float  @default(0) // legacy: FIFO material (kept for compat)
   cogPerUnit        Float  @default(0)
-  // JSON map of materialCode -> per-unit cost, for extensibility/display.
+  // JSON map of materialCode -> per-unit cost (the authoritative material breakdown).
   materialCostsJson String @default("{}")
+  // JSON map of transaction category -> per-unit cost (the authoritative cost breakdown by category).
+  transactionCostsJson String @default("{}")
   // JSON array of materials with insufficient stock for this lot (not yet purchased).
   shortfallsJson    String @default("[]")
 

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { recomputeAll } from "@/lib/recompute";
+import { isExcludedCategory } from "@/lib/categories";
 
 async function resolveSupplierId(name: string | null): Promise<string | null> {
   if (!name) return null;
@@ -38,7 +39,7 @@ export async function upsertTransactionInvoice(payload: InvoicePayload) {
   const date = payload.dateISO ? new Date(payload.dateISO) : null;
   const toRow = (invoiceId: string) =>
     lines.map((l) => {
-      const notApplicable = l.category === "NOT_APPLICABLE";
+      const notApplicable = isExcludedCategory(l.category);
       return {
         invoiceId,
         lotId: l.lotId || null,

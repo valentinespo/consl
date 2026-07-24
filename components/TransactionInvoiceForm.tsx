@@ -7,7 +7,8 @@ import { upsertTransactionInvoice, deleteTransactionInvoice, type InvoiceLineInp
 import { SearchSelect } from "@/components/SearchSelect";
 import { TwoStepDelete } from "@/components/TwoStepDelete";
 import { SkuAvatar } from "@/components/ui";
-import { money } from "@/lib/format";
+import { useMoney } from "@/components/CurrencyProvider";
+import { categoryOptions, isExcludedCategory, SEED_COG_CATEGORIES } from "@/lib/categories";
 
 export type InvLine = {
   id?: string;
@@ -38,13 +39,7 @@ export type InvoiceRow = {
 };
 export type LotOption = { id: string; lotNr: number; label: string; skus: string[] };
 
-// The stored keys stay TEA/OTHER so no data migration is needed; only the wording is generic,
-// because "the main ingredient" is tea here but won't be for every business.
-const CATEGORIES = [
-  { value: "TEA", label: "Ingredient" },
-  { value: "OTHER", label: "Other cost" },
-  { value: "NOT_APPLICABLE", label: "Not applicable" },
-];
+const DEFAULT_CATEGORY = SEED_COG_CATEGORIES[0]; // "Ingredients"
 
 type EditLine = { key: string; category: string; amount: string; lotId: string; sku: string; concept: string };
 
@@ -65,13 +60,14 @@ function toEditLines(lines: InvLine[] | undefined, defaultLotId?: string): EditL
       concept: l.concept ?? "",
     }));
   }
-  return [{ key: newKey(), category: "TEA", amount: "", lotId: defaultLotId ?? "", sku: "ALL", concept: "" }];
+  return [{ key: newKey(), category: DEFAULT_CATEGORY, amount: "", lotId: defaultLotId ?? "", sku: "ALL", concept: "" }];
 }
 
 export function TransactionInvoiceForm({
   invoice,
   lots,
   suppliers,
+  categories = [],
   skuImages,
   defaultLotId,
   onDone,
@@ -80,11 +76,13 @@ export function TransactionInvoiceForm({
   invoice?: InvoiceRow | null;
   lots: LotOption[];
   suppliers: string[];
+  categories?: string[]; // in-use categories, merged with the seeds for the dropdown
   skuImages?: Record<string, string | null>;
   defaultLotId?: string;
   onDone: () => void;
   cancelLabel?: string;
 }) {
+  const { money } = useMoney();
   const editing = !!invoice;
   const [supplier, setSupplier] = useState(invoice?.supplier ?? "");
   const [dateISO, setDateISO] = useState(invoice?.dateISO ?? "");
@@ -101,9 +99,15 @@ export function TransactionInvoiceForm({
   const remaining = totalNum - linesSum;
   const balanced = Math.abs(remaining) < 0.01;
 
+  // Dropdown = seed categories + any already in use + whatever's typed on this invoice.
+  const catOptions = useMemo(
+    () => categoryOptions([...categories, ...lines.map((l) => l.category)]),
+    [categories, lines],
+  );
+
   // Dirty tracking: compare the current form against the invoice as loaded.
   const lineKey = (c: string, amt: number, lot: string, sku: string, con: string) =>
-    `${c}|${amt}|${lot}|${c === "NOT_APPLICABLE" ? "" : sku || "ALL"}|${con.trim()}`;
+    `${c}|${amt}|${lot}|${isExcludedCategory(c) ? "" : sku || "ALL"}|${con.trim()}`;
   const currentSnapshot = JSON.stringify({
     s: supplier.trim(),
     d: dateISO,
@@ -128,7 +132,7 @@ export function TransactionInvoiceForm({
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...p } : l)));
   }
   function addLine() {
-    setLines((prev) => [...prev, { key: newKey(), category: "TEA", amount: "", lotId: defaultLotId ?? "", sku: "ALL", concept: "" }]);
+    setLines((prev) => [...prev, { key: newKey(), category: DEFAULT_CATEGORY, amount: "", lotId: defaultLotId ?? "", sku: "ALL", concept: "" }]);
   }
   function removeLine(key: string) {
     setLines((prev) => (prev.length === 1 ? prev : prev.filter((l) => l.key !== key)));
@@ -148,10 +152,10 @@ export function TransactionInvoiceForm({
     setPending(true);
     try {
       const payloadLines: InvoiceLineInput[] = lines.map((l) => ({
-        category: l.category,
+        category: l.category.trim(),
         amount: Number(l.amount) || 0,
-        lotId: l.category === "NOT_APPLICABLE" ? (l.lotId || null) : l.lotId || null,
-        sku: l.category === "NOT_APPLICABLE" ? null : l.sku || null,
+        lotId: l.lotId || null,
+        sku: isExcludedCategory(l.category) ? null : l.sku || null,
         concept: l.concept || null,
       }));
       await upsertTransactionInvoice({
@@ -208,7 +212,7 @@ export function TransactionInvoiceForm({
         </div>
 
         {lines.map((l) => {
-          const na = l.category === "NOT_APPLICABLE";
+          const na = isExcludedCategory(l.category);
           const lot = lots.find((x) => x.id === l.lotId);
           const lotSkus = lot?.skus ?? [];
           const lotUnassigned = !na && !l.lotId;
@@ -220,14 +224,14 @@ export function TransactionInvoiceForm({
               className={`rounded-lg border p-2.5 ${na || orphaned ? "border-[#f0d3cb] bg-[#fdf2ef]" : "border-border bg-surface"}`}
             >
               <div className="flex flex-wrap items-end gap-2">
-                <MiniField label="Category" className="w-[130px]">
-                  <select value={l.category} onChange={(e) => patch(l.key, { category: e.target.value })} className={inputCls}>
-                    {CATEGORIES.map((c) => (
-                      <option key={c.value} value={c.value}>
-                        {c.label}
-                      </option>
-                    ))}
-                  </select>
+                <MiniField label="Category" className="w-[150px]">
+                  <SearchSelect
+                    value={l.category}
+                    onChange={(v) => patch(l.key, { category: v })}
+                    options={catOptions}
+                    placeholder="Category…"
+                    createLabel={(t) => `+ New category “${t}”`}
+                  />
                 </MiniField>
 
                 {!na && (

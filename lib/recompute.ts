@@ -64,7 +64,7 @@ export async function computeEngineResult() {
     const lot = lotsRaw.find((l) => l.id === t.lotId);
     return {
       lotNr: lot?.lotNr ?? -1,
-      category: (t.category === "TEA" ? "TEA" : "OTHER") as "TEA" | "OTHER",
+      category: t.category, // free-form; the engine buckets by whatever string this is
       applicable: t.applicableAmount,
       sku: t.skus,
       appliesToCog: t.appliesToCog,
@@ -86,15 +86,21 @@ export async function recomputeAll() {
       for (const line of lines) {
         const lc = result.lines.get(line.key)!;
         const mat = lc.materialCostsPerUnit;
+        const txn = lc.transactionCostsPerUnit;
+        // Legacy columns kept in sync for any un-migrated reader: "tea" = the primary COG
+        // category, "other" = the remaining categories. Display now uses the JSON maps.
+        const txnSum = Object.values(txn).reduce((s, v) => s + v, 0);
+        const primary = txn["Ingredients"] ?? txn["TEA"] ?? 0;
         await tx.lotLine.update({
           where: { id: line.key },
           data: {
-            teaCostPerUnit: lc.teaCostPerUnit,
-            otherCostPerUnit: lc.otherCostPerUnit,
+            teaCostPerUnit: primary,
+            otherCostPerUnit: txnSum - primary,
             teabagCostPerUnit: mat["TEABAG"] ?? 0,
             pouchCostPerUnit: mat["POUCH"] ?? 0,
             cogPerUnit: lc.cogPerUnit,
             materialCostsJson: JSON.stringify(mat),
+            transactionCostsJson: JSON.stringify(txn),
             shortfallsJson: JSON.stringify(lc.shortfalls),
           },
         });

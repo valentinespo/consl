@@ -1,4 +1,6 @@
-import { money } from "@/lib/format";
+"use client";
+
+import { useMoney } from "@/components/CurrencyProvider";
 import type { RestockTotals } from "@/lib/restock";
 import { ValueSparkline } from "@/components/ValueSparkline";
 
@@ -20,6 +22,7 @@ export function TotalValueCard({
   history?: { day: string; total: number }[];
   className?: string;
 }) {
+  const { money } = useMoney();
   return (
     <div className={`flex flex-col overflow-hidden rounded-[var(--radius-card)] border border-accent-strong bg-accent-soft p-5 ${className}`}>
       <div className="text-[11px] font-medium uppercase tracking-wide text-accent">Total inventory value</div>

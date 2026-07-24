@@ -5,9 +5,20 @@ import { usePathname } from "next/navigation";
 import Image from "next/image";
 import { Menu, X } from "lucide-react";
 import { Sidebar } from "@/components/Sidebar";
+import { CurrencyProvider } from "@/components/CurrencyProvider";
 
 /** App chrome: fixed sidebar on desktop, slide-in drawer + top bar on mobile. Auth screens render bare. */
-export function AppShell({ children, orgName }: { children: React.ReactNode; orgName?: string | null }) {
+export function AppShell({
+  children,
+  orgName,
+  currencySymbol = "$",
+  locale = "en-US",
+}: {
+  children: React.ReactNode;
+  orgName?: string | null;
+  currencySymbol?: string;
+  locale?: string;
+}) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
@@ -19,6 +30,7 @@ export function AppShell({ children, orgName }: { children: React.ReactNode; org
   if (pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up")) return <>{children}</>;
 
   return (
+    <CurrencyProvider symbol={currencySymbol} locale={locale}>
     <div className="lg:flex">
       {/* Desktop sidebar */}
       <div className="hidden lg:sticky lg:top-0 lg:block lg:h-screen lg:shrink-0">
@@ -58,5 +70,6 @@ export function AppShell({ children, orgName }: { children: React.ReactNode; org
         </main>
       </div>
     </div>
+    </CurrencyProvider>
   );
 }

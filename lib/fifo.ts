@@ -2,9 +2,9 @@
  * Herbl FIFO costing engine — pure, deterministic, no DB/IO.
  *
  * Two cost sources per lot line:
- *  1. FIFO materials (stocked): tea bags, pouches. Cost = oldest-stock-first from purchases.
- *  2. Transaction costs (made-to-order): TEA (herb) + OTHER (shipping/misc) from the
- *     "applicable" amounts of transactions assigned to the lot.
+ *  1. FIFO materials (stocked): each material a lot consumes. Cost = oldest-stock-first from purchases.
+ *  2. Transaction costs (made-to-order): the "applicable" amounts of transactions assigned to the
+ *     lot, bucketed by their category (Ingredients, Production, or any custom category).
  *
  * Pool keys come from each material's poolKey:
  *   FACILITY      -> one pool per facility (tea bags)
@@ -48,10 +48,10 @@ export interface EngineLotLine {
 
 export interface EngineTransaction {
   lotNr: number;
-  category: "TEA" | "OTHER";
+  category: string; // free-form cost category
   applicable: number;
   sku: string | null;
-  appliesToCog: boolean; // false = fulfillment fee, excluded from COG
+  appliesToCog: boolean; // false = excluded from COG (fees, "Not applicable")
 }
 
 export interface MaterialShortfall {
@@ -64,9 +64,8 @@ export interface MaterialShortfall {
 export interface LineCost {
   key: string;
   materialCostsPerUnit: Record<string, number>; // e.g. { TEABAG: .03, POUCH: .81 }
+  transactionCostsPerUnit: Record<string, number>; // e.g. { Ingredients: 1.2, Production: 0.4 }
   shortfalls: MaterialShortfall[]; // materials with insufficient stock for this lot
-  teaCostPerUnit: number;
-  otherCostPerUnit: number;
   cogPerUnit: number;
 }
 
@@ -187,9 +186,8 @@ export function runEngine(
     result.set(line.key, {
       key: line.key,
       materialCostsPerUnit,
+      transactionCostsPerUnit: {},
       shortfalls,
-      teaCostPerUnit: 0,
-      otherCostPerUnit: 0,
       cogPerUnit: 0,
     });
   }
@@ -203,19 +201,19 @@ export function runEngine(
     pools.get(poolId(p.materialCode, pk, p.facility, p.sku))?.consume(Math.abs(p.quantity));
   }
 
-  // ---- Transaction-based costs (TEA / OTHER), allocated to lines within a lot. ----
+  // ---- Transaction-based costs, bucketed by category, allocated to lines within a lot. ----
   const linesByLot = new Map<number, EngineLotLine[]>();
   for (const l of lines) (linesByLot.get(l.lotNr) ?? linesByLot.set(l.lotNr, []).get(l.lotNr)!).push(l);
 
-  // accumulate $ per line per category
-  const teaByLine = new Map<string, number>();
-  const otherByLine = new Map<string, number>();
+  // accumulate $ per line, per category: category -> (lineKey -> $)
+  const byCategory = new Map<string, Map<string, number>>();
 
   for (const t of transactions) {
     if (!t.appliesToCog) continue;
     const lotLines = linesByLot.get(t.lotNr);
     if (!lotLines || lotLines.length === 0 || !t.applicable) continue;
-    const target = t.category === "TEA" ? teaByLine : otherByLine;
+    const cat = t.category?.trim() || "Other cost";
+    const target = byCategory.get(cat) ?? byCategory.set(cat, new Map()).get(cat)!;
     // SKU-scoped line -> attribute to the matching SKU; null sku -> spread across the lot.
     // A SKU tag that matches no current line (the SKU was removed from the lot) is treated as
     // unassigned: skipped entirely, so it drops out of COG until reassigned.
@@ -231,10 +229,15 @@ export function runEngine(
 
   for (const line of lines) {
     const lc = result.get(line.key)!;
-    lc.teaCostPerUnit = line.units > 0 ? (teaByLine.get(line.key) ?? 0) / line.units : 0;
-    lc.otherCostPerUnit = line.units > 0 ? (otherByLine.get(line.key) ?? 0) / line.units : 0;
+    const txn: Record<string, number> = {};
+    for (const [cat, byLine] of byCategory) {
+      const perUnit = line.units > 0 ? (byLine.get(line.key) ?? 0) / line.units : 0;
+      if (Math.abs(perUnit) > 1e-9) txn[cat] = perUnit;
+    }
+    lc.transactionCostsPerUnit = txn;
     const materialsSum = Object.values(lc.materialCostsPerUnit).reduce((s, v) => s + v, 0);
-    lc.cogPerUnit = materialsSum + lc.teaCostPerUnit + lc.otherCostPerUnit;
+    const txnSum = Object.values(txn).reduce((s, v) => s + v, 0);
+    lc.cogPerUnit = materialsSum + txnSum;
   }
 
   // ---- Remaining inventory per pool. ----
