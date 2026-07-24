@@ -2,6 +2,7 @@ import "server-only";
 import { prisma } from "./prisma";
 import { computeEngineResult } from "./recompute";
 import { buildCostChips } from "./lot-costs";
+import { runFinishedGoodsEngine, type FinishedSupply, type FinishedMovement } from "./finished-goods";
 
 export type InventoryPool = {
   materialCode: string;
@@ -246,6 +247,90 @@ export async function getTransactionInvoices(lotId?: string) {
     };
   });
   return lotId ? mapped.filter((inv) => inv.lines.some((l) => l.lotId === lotId)) : mapped;
+}
+
+/** Run the finished-goods engine: where finished units physically are and what they're worth. */
+export async function computeFinishedGoods() {
+  const [lots, movements] = await Promise.all([
+    prisma.lot.findMany({
+      where: { status: "FINISHED" },
+      include: { lines: true },
+      orderBy: [{ poDate: "desc" }, { createdAt: "desc" }],
+    }),
+    prisma.stockMovement.findMany({ orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
+  ]);
+  const supply: FinishedSupply[] = [];
+  let seq = 0;
+  for (const lot of lots) {
+    for (const ln of lot.lines) {
+      supply.push({
+        sku: ln.productId,
+        facilityId: lot.facilityId,
+        units: ln.units,
+        unitCost: ln.cogPerUnit,
+        date: (lot.poDate ?? lot.createdAt).getTime(),
+        seq: seq++,
+      });
+    }
+  }
+  const mv: FinishedMovement[] = movements.map((m, i) => ({
+    id: m.id,
+    sku: m.productId,
+    fromFacilityId: m.fromFacilityId,
+    toFacilityId: m.toFacilityId,
+    toDestination: m.toDestination,
+    quantity: m.quantity,
+    date: m.date.getTime(),
+    seq: i,
+  }));
+  return runFinishedGoodsEngine(supply, mv);
+}
+
+/** Finished stock on hand at your own facilities, with product + facility names attached. */
+export async function getFinishedStock() {
+  const [{ pools, shortfalls }, products, facilities] = await Promise.all([
+    computeFinishedGoods(),
+    prisma.product.findMany({ select: { id: true, code: true, name: true, imageUrl: true } }),
+    prisma.facility.findMany({ select: { id: true, code: true, name: true } }),
+  ]);
+  const p = new Map(products.map((x) => [x.id, x]));
+  const f = new Map(facilities.map((x) => [x.id, x]));
+  return {
+    rows: pools
+      .map((pool) => ({
+        productId: pool.sku,
+        code: p.get(pool.sku)?.code ?? "?",
+        name: p.get(pool.sku)?.name ?? "",
+        imageUrl: p.get(pool.sku)?.imageUrl ?? null,
+        facilityId: pool.facilityId,
+        facilityCode: f.get(pool.facilityId)?.code ?? "?",
+        facilityName: f.get(pool.facilityId)?.name ?? "",
+        units: pool.units,
+        value: pool.value,
+      }))
+      .sort((a, b) => b.value - a.value),
+    shortfalls,
+  };
+}
+
+/** The movement ledger, newest first. */
+export async function getMovements() {
+  const movements = await prisma.stockMovement.findMany({
+    include: { product: true, fromFacility: true, toFacility: true },
+    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+  });
+  return movements.map((m) => ({
+    id: m.id,
+    date: m.date,
+    code: m.product.code,
+    productName: m.product.name,
+    imageUrl: m.product.imageUrl,
+    quantity: m.quantity,
+    fromCode: m.fromFacility.code,
+    toCode: m.toFacility?.code ?? null,
+    toDestination: m.toDestination,
+    notes: m.notes,
+  }));
 }
 
 /** Every cost category currently used by a transaction, so the dropdown can offer them again.

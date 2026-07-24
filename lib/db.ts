@@ -26,6 +26,7 @@ export const TENANT_MODELS = new Set([
   "LotLine",
   "LotMaterial",
   "PurchaseOrderLine",
+  "StockMovement",
 ]);
 
 const WHERE_OPS = new Set([

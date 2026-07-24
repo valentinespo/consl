@@ -11,6 +11,7 @@ const SERIES = [
   { key: "fba", color: "#16a34a", label: "FBA" },
   { key: "awd", color: "#2563eb", label: "AWD" },
   { key: "inProduction", color: "#f59e0b", label: "In production" },
+  { key: "atLocations", color: "#8b5cf6", label: "At my locations" },
   { key: "raw", color: "#94a3b8", label: "Raw materials" },
 ] as const;
 

@@ -8,6 +8,7 @@ const PILLS = [
   { dot: "#16a34a", label: "FBA", key: "fba" },
   { dot: "#2563eb", label: "AWD", key: "awd" },
   { dot: "#f59e0b", label: "In production", key: "inProduction" },
+  { dot: "#8b5cf6", label: "At my locations", key: "atLocations" },
   { dot: "#94a3b8", label: "Raw materials", key: "raw" },
 ] as const;
 

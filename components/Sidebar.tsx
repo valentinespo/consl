@@ -13,6 +13,7 @@ import {
   FileText,
   Building2,
   Warehouse,
+  Truck,
   Images,
   Settings,
 } from "lucide-react";
@@ -28,6 +29,7 @@ const NAV = [
   { href: "/purchase-orders", label: "Purchase Orders", icon: FileText },
   { href: "/suppliers", label: "Suppliers", icon: Building2 },
   { href: "/facilities", label: "Facilities", icon: Warehouse },
+  { href: "/movements", label: "Stock Movements", icon: Truck },
   { href: "/catalog", label: "Catalog", icon: Images },
 ];
 

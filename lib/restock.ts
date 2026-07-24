@@ -1,6 +1,13 @@
 import { prisma } from "@/lib/prisma";
 import { getInventory } from "@/lib/queries";
 import { getOrgSettings } from "@/lib/settings";
+import {
+  runFinishedGoodsEngine,
+  valueChannelStock,
+  type FinishedSupply,
+  type FinishedMovement,
+  type ShippedLayer,
+} from "@/lib/finished-goods";
 
 export type RestockRow = {
   id: string;
@@ -42,10 +49,12 @@ export type RestockTotals = {
   fba: number;
   awd: number;
   amazon: number;
+  atLocations: number; // finished goods held at your own facilities / 3PLs
   total: number;
   fbaUnits: number;
   awdUnits: number;
   inProductionUnits: number;
+  atLocationsUnits: number;
   monthlyCOGS: number; // blended monthly sell-through valued at cost
   coverMonths: number; // total inventory value ÷ monthlyCOGS = months of cover
 };
@@ -57,21 +66,28 @@ export async function getRestock(): Promise<{
   defaults: { minMonths: number; leadMonths: number };
   sortMode: string;
 }> {
-  const [products, snaps, lots, rawInv, settings] = await Promise.all([
+  const [products, snaps, lots, rawInv, settings, allProducts, movements] = await Promise.all([
     prisma.product.findMany({ where: { asin: { not: null } }, orderBy: { code: "asc" } }),
     prisma.skuSnapshot.findMany({ distinct: ["productId"], orderBy: { capturedAt: "desc" } }),
     prisma.lot.findMany({ include: { lines: true }, orderBy: [{ poDate: "desc" }, { createdAt: "desc" }] }),
     getInventory(),
     getOrgSettings(),
+    // Finished-goods stock covers EVERY product, not just the Amazon-mapped ones — a customer
+    // who doesn't sell on Amazon still holds inventory.
+    prisma.product.findMany({ orderBy: { code: "asc" } }),
+    prisma.stockMovement.findMany({ orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
   ]);
   const snapByProduct = new Map(snaps.map((s) => [s.productId, s]));
   const lastSync = snaps.reduce<Date | null>((m, s) => (!m || s.capturedAt > m ? s.capturedAt : m), null);
 
-  // Per-SKU: in-production units/value, soonest open-lot PO date, and finished lots (reverse-FIFO).
+  // Per-SKU: in-production units/value, soonest open-lot PO date, and finished lots.
+  // Finished lot lines double as the finished-goods FIFO supply, at the facility that made them.
   const inProdUnits = new Map<string, number>();
   const soonestPo = new Map<string, Date>();
   let inProductionValue = 0;
   const finishedLots = new Map<string, { units: number; cog: number }[]>();
+  const supply: FinishedSupply[] = [];
+  let supplySeq = 0;
   for (const lot of lots) {
     const poDate = lot.poDate ?? lot.createdAt;
     for (const ln of lot.lines) {
@@ -83,9 +99,43 @@ export async function getRestock(): Promise<{
       } else {
         if (!finishedLots.has(ln.productId)) finishedLots.set(ln.productId, []);
         finishedLots.get(ln.productId)!.push({ units: ln.units, cog: ln.cogPerUnit });
+        supply.push({
+          sku: ln.productId,
+          facilityId: lot.facilityId,
+          units: ln.units,
+          unitCost: ln.cogPerUnit,
+          date: poDate.getTime(),
+          seq: supplySeq++,
+        });
       }
     }
   }
+
+  // Where finished stock physically sits, and what left the network (and at what cost).
+  const finishedMovements: FinishedMovement[] = movements.map((m, i) => ({
+    id: m.id,
+    sku: m.productId,
+    fromFacilityId: m.fromFacilityId,
+    toFacilityId: m.toFacilityId,
+    toDestination: m.toDestination,
+    quantity: m.quantity,
+    date: m.date.getTime(),
+    seq: i,
+  }));
+  const finished = runFinishedGoodsEngine(supply, finishedMovements);
+
+  // Amazon is valued from what was actually SHIPPED to Amazon — never from lots still sitting at
+  // your own locations or already sold direct, which would double-count the same units' cost.
+  const amazonLayers = new Map<string, ShippedLayer[]>();
+  for (const l of finished.shipped) {
+    if (l.destination !== "AMAZON") continue;
+    if (!amazonLayers.has(l.sku)) amazonLayers.set(l.sku, []);
+    amazonLayers.get(l.sku)!.push(l);
+  }
+
+  // Finished goods still held at your own facilities — the bucket that was previously invisible.
+  const atLocationsValue = finished.pools.reduce((s, p) => s + p.value, 0);
+  const atLocationsUnits = finished.pools.reduce((s, p) => s + p.units, 0);
 
   let fbaValue = 0;
   let awdValue = 0;
@@ -102,29 +152,11 @@ export async function getRestock(): Promise<{
     awdUnits += awdTotal;
     inProductionUnits += inProduction;
 
-    // Reverse-FIFO value: cost FBA first, then AWD, newest lot first.
-    let needFba = fbaTotal;
-    let needAwd = awdTotal;
-    let fbaVal = 0;
-    let awdVal = 0;
-    for (const l of finishedLots.get(p.id) ?? []) {
-      if (needFba <= 0 && needAwd <= 0) break;
-      let avail = l.units;
-      if (needFba > 0 && avail > 0) {
-        const t = Math.min(needFba, avail);
-        fbaVal += t * l.cog;
-        needFba -= t;
-        avail -= t;
-      }
-      if (needAwd > 0 && avail > 0) {
-        const t = Math.min(needAwd, avail);
-        awdVal += t * l.cog;
-        needAwd -= t;
-      }
-    }
+    // Value Amazon's reported units from what was actually shipped to Amazon, newest first —
+    // FBA is filled before AWD from one shared pass so they can't draw the same units twice.
+    // Anything beyond what we recorded shipping falls back to the newest lot cost.
     const fb = finishedLots.get(p.id)?.[0]?.cog ?? 0;
-    if (needFba > 0) fbaVal += needFba * fb;
-    if (needAwd > 0) awdVal += needAwd * fb;
+    const [fbaVal, awdVal] = valueChannelStock(amazonLayers.get(p.id) ?? [], [fbaTotal, awdTotal], fb);
     fbaValue += fbaVal;
     awdValue += awdVal;
     monthlyCOGS += ((s?.units90d ?? 0) / 90) * 30.44 * fb; // blended 90-day sell-through × unit cost
@@ -164,18 +196,21 @@ export async function getRestock(): Promise<{
     };
   });
 
+  const grandTotal = rawInv.totalValue + inProductionValue + fbaValue + awdValue + atLocationsValue;
   const totals: RestockTotals = {
     raw: rawInv.totalValue,
     inProduction: inProductionValue,
     fba: fbaValue,
     awd: awdValue,
     amazon: fbaValue + awdValue,
-    total: rawInv.totalValue + inProductionValue + fbaValue + awdValue,
+    atLocations: atLocationsValue,
+    total: grandTotal,
     fbaUnits,
     awdUnits,
     inProductionUnits,
+    atLocationsUnits,
     monthlyCOGS,
-    coverMonths: monthlyCOGS > 0 ? (rawInv.totalValue + inProductionValue + fbaValue + awdValue) / monthlyCOGS : 0,
+    coverMonths: monthlyCOGS > 0 ? grandTotal / monthlyCOGS : 0,
   };
 
   await recordDailyInventoryValue(totals);
@@ -189,20 +224,28 @@ export async function getRestock(): Promise<{
   };
 }
 
-export type ValueHistoryPoint = { day: string; total: number; raw: number; inProduction: number; fba: number; awd: number };
+export type ValueHistoryPoint = {
+  day: string;
+  total: number;
+  raw: number;
+  inProduction: number;
+  fba: number;
+  awd: number;
+  atLocations: number;
+};
 
 /** Daily inventory-value history (oldest → newest) for the dashboard charts, split by bucket. */
 export async function getInventoryValueHistory(): Promise<ValueHistoryPoint[]> {
   return prisma.inventoryValueSnapshot.findMany({
     orderBy: { day: "asc" },
-    select: { day: true, total: true, raw: true, inProduction: true, fba: true, awd: true },
+    select: { day: true, total: true, raw: true, inProduction: true, fba: true, awd: true, atLocations: true },
   });
 }
 
 /** Record today's inventory-value point (one row per calendar day, per org). Non-fatal. */
 async function recordDailyInventoryValue(t: RestockTotals) {
   const day = new Date().toISOString().slice(0, 10);
-  const values = { raw: t.raw, inProduction: t.inProduction, fba: t.fba, awd: t.awd, total: t.total };
+  const values = { raw: t.raw, inProduction: t.inProduction, fba: t.fba, awd: t.awd, atLocations: t.atLocations, total: t.total };
   try {
     const existing = await prisma.inventoryValueSnapshot.findFirst({ where: { day } }); // auto-scoped to org
     if (existing) {

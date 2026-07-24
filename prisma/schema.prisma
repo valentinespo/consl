@@ -48,6 +48,7 @@ model Organization {
   lotLines                LotLine[]
   lotMaterials            LotMaterial[]
   purchaseOrderLines      PurchaseOrderLine[]
+  stockMovements          StockMovement[]
 }
 
 /// Links a Clerk user account to an Organization (which company they belong to + their role).
@@ -80,10 +81,37 @@ model Facility {
   purchases       Purchase[]
   purchaseOrders  PurchaseOrder[]
   supplierProfile Supplier?
+  movementsOut    StockMovement[] @relation("MovementFrom")
+  movementsIn     StockMovement[] @relation("MovementTo")
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 
   @@unique([orgId, code])
+}
+
+/// A movement of FINISHED units out of one of your locations — either a transfer to another
+/// of your facilities, or out of your network (to a sales channel, a customer, or written off).
+/// Production is not a movement: a finished lot's units start at the facility that made them.
+/// Exactly one of `toFacilityId` / `toDestination` is set.
+model StockMovement {
+  id             String        @id @default(cuid())
+  orgId          String?
+  organization   Organization? @relation(fields: [orgId], references: [id])
+  product        Product       @relation(fields: [productId], references: [id])
+  productId      String
+  quantity       Int // units moved (always positive)
+  date           DateTime
+  fromFacility   Facility      @relation("MovementFrom", fields: [fromFacilityId], references: [id])
+  fromFacilityId String
+  toFacility     Facility?     @relation("MovementTo", fields: [toFacilityId], references: [id])
+  toFacilityId   String? // set for a transfer between your own facilities
+  toDestination  String? // set when stock leaves your network: AMAZON | SHOPIFY | TIKTOK | CUSTOMER | LOSS
+  notes          String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([productId, date])
+  @@index([fromFacilityId])
 }
 
 /// A vendor we pay (may also be a facility, matched loosely by name).
@@ -143,6 +171,7 @@ model Product {
   lotMaterials       LotMaterial[]
   purchaseOrderLines PurchaseOrderLine[]
   snapshots          SkuSnapshot[]
+  movements          StockMovement[]
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
 
@@ -202,6 +231,7 @@ model InventoryValueSnapshot {
   inProduction Float
   fba          Float
   awd          Float
+  atLocations  Float         @default(0) // finished goods held at your own facilities / 3PLs
   total        Float
 
   @@unique([orgId, day])
