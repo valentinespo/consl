@@ -248,9 +248,14 @@ export function PurchaseInvoiceForm({
         </button>
       </div>
 
-      <label className="flex items-center gap-2 text-[12.5px] text-ink-soft">
-        <input type="checkbox" checked={isAdjustment} onChange={(e) => setIsAdjustment(e.target.checked)} className="accent-[#1a2f18]" />
-        Inventory adjustment (e.g. lost inventory — excluded from FIFO supply)
+      <label className="flex items-start gap-2 text-[12.5px] text-ink-soft">
+        <input type="checkbox" checked={isAdjustment} onChange={(e) => setIsAdjustment(e.target.checked)} className="mt-0.5 accent-[#1a2f18]" />
+        <span>
+          This is a stock adjustment, not a purchase (e.g. lost or damaged inventory).
+          <span className="block text-[11.5px] text-muted">
+            Lowers what&apos;s on hand without adding stock for production to use or affecting any produced lot&apos;s cost.
+          </span>
+        </span>
       </label>
 
       {error && <div className="rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-[12.5px] text-negative">{error}</div>}
