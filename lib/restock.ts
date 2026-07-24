@@ -22,6 +22,8 @@ export type RestockRow = {
   awdInbound: number;
   awdTotal: number;
   inProduction: number;
+  atLocations: number; // finished units sitting at your own facilities — made, just not shipped
+  atLocationsBy: { code: string; units: number }[]; // where those units are, biggest first
   onHand: number; // fbaTotal + awdTotal (everything at Amazon, excluding production)
   soonestPoISO: string | null; // soonest open lot's PO date (fallback created date)
   units10d: number;
@@ -66,7 +68,7 @@ export async function getRestock(): Promise<{
   defaults: { minMonths: number; leadMonths: number };
   sortMode: string;
 }> {
-  const [products, snaps, lots, rawInv, settings, allProducts, movements] = await Promise.all([
+  const [products, snaps, lots, rawInv, settings, allProducts, movements, allFacilities] = await Promise.all([
     prisma.product.findMany({ where: { asin: { not: null } }, orderBy: { code: "asc" } }),
     prisma.skuSnapshot.findMany({ distinct: ["productId"], orderBy: { capturedAt: "desc" } }),
     prisma.lot.findMany({ include: { lines: true }, orderBy: [{ poDate: "desc" }, { createdAt: "desc" }] }),
@@ -76,6 +78,7 @@ export async function getRestock(): Promise<{
     // who doesn't sell on Amazon still holds inventory.
     prisma.product.findMany({ orderBy: { code: "asc" } }),
     prisma.stockMovement.findMany({ orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
+    prisma.facility.findMany({ select: { id: true, code: true } }),
   ]);
   const snapByProduct = new Map(snaps.map((s) => [s.productId, s]));
   const lastSync = snaps.reduce<Date | null>((m, s) => (!m || s.capturedAt > m ? s.capturedAt : m), null);
@@ -137,6 +140,17 @@ export async function getRestock(): Promise<{
   const atLocationsValue = finished.pools.reduce((s, p) => s + p.value, 0);
   const atLocationsUnits = finished.pools.reduce((s, p) => s + p.units, 0);
 
+  // Per-SKU: how many finished units are sitting at your own locations, and where.
+  const facilityCode = new Map(allFacilities.map((f) => [f.id, f.code]));
+  const heldBySku = new Map<string, { units: number; by: { code: string; units: number }[] }>();
+  for (const p of finished.pools) {
+    const cur = heldBySku.get(p.sku) ?? { units: 0, by: [] };
+    cur.units += p.units;
+    cur.by.push({ code: facilityCode.get(p.facilityId) ?? "?", units: p.units });
+    heldBySku.set(p.sku, cur);
+  }
+  for (const h of heldBySku.values()) h.by.sort((a, b) => b.units - a.units);
+
   let fbaValue = 0;
   let awdValue = 0;
   let fbaUnits = 0;
@@ -174,6 +188,8 @@ export async function getRestock(): Promise<{
       awdInbound: s?.awdInbound ?? 0,
       awdTotal,
       inProduction,
+      atLocations: heldBySku.get(p.id)?.units ?? 0,
+      atLocationsBy: heldBySku.get(p.id)?.by ?? [],
       onHand: fbaTotal + awdTotal,
       soonestPoISO: soonestPo.get(p.id)?.toISOString() ?? null,
       units10d: s?.units10d ?? 0,

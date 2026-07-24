@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Pencil, Check, Plus, X, Move, Scaling, Bell, AlertTriangle, Gauge, PieChart, Layers, CheckCircle2, ShoppingCart, Zap, PackageSearch } from "lucide-react";
+import { Pencil, Check, Plus, X, Move, Scaling, Bell, AlertTriangle, Gauge, PieChart, Layers, CheckCircle2, ShoppingCart, Zap, PackageSearch, Truck } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useMoney } from "@/components/CurrencyProvider";
 import { Card, SectionTitle } from "@/components/ui";
@@ -438,7 +438,7 @@ const SEV: Record<Alert["severity"], { bg: string; dot: string }> = {
   critical: { bg: "#fef2f2", dot: "#dc2626" },
   warn: { bg: "#fff7ed", dot: "#ea580c" },
 };
-const KIND_ICON: Record<Alert["kind"], LucideIcon> = { material: PackageSearch, reorder: ShoppingCart, expedite: Zap };
+const KIND_ICON: Record<Alert["kind"], LucideIcon> = { material: PackageSearch, reorder: ShoppingCart, expedite: Zap, ship: Truck };
 
 function NotificationsWidget({ alerts }: { alerts: Alert[] }) {
   const router = useRouter();

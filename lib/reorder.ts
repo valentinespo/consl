@@ -4,7 +4,7 @@ export const MONTH = 30.44;
 export const MONTH_MS = MONTH * 86_400_000;
 const DAY = 86_400_000;
 
-export type ReorderStatus = "ok" | "reordered" | "reorder" | "oos";
+export type ReorderStatus = "ok" | "reordered" | "reorder" | "oos" | "ship";
 export type Win = 10 | 30 | 90;
 
 export type ReorderResult = {
@@ -13,11 +13,13 @@ export type ReorderResult = {
   excl: number;
   override: boolean;
   onHandCover: number;
+  locCover: number; // months of cover sitting at your own locations
   prodCover: number;
   status: ReorderStatus;
   statusLabel: string;
   note?: string;
   recommendedQty: number;
+  shipQty: number; // units worth shipping from your locations to top the channel back up
   belowFloor: boolean;
 };
 
@@ -41,9 +43,11 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
   const denomDays = hasDaily ? win - excl : win;
   const monthly = denomDays > 0 ? (units / denomDays) * MONTH : 0;
   const A = monthly > 0 ? r.onHand / monthly : r.onHand > 0 ? Infinity : 0;
+  // Stock at your own locations is already made — it counts as cover, it just needs shipping.
+  const L = monthly > 0 ? r.atLocations / monthly : r.atLocations > 0 ? Infinity : 0;
   const P = monthly > 0 ? r.inProduction / monthly : r.inProduction > 0 ? Infinity : 0;
   const hasPO = r.inProduction > 0;
-  const total = A + P;
+  const total = A + L + P;
 
   let Tc = 0;
   let overdue = false;
@@ -57,10 +61,20 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
   let statusLabel = "Healthy";
   let note: string | undefined;
   let recommendedQty = 0;
+  let shipQty = 0;
+
+  // Units that would bring the sales channel back up to target.
+  const gapToTarget = Math.max(0, Math.ceil(r.reorderToMonths * monthly - r.onHand));
 
   if (monthly === 0) {
     status = "ok";
     statusLabel = "Healthy";
+  } else if (r.atLocations > 0 && A < r.minMonths) {
+    // Don't tell someone to make more of what they already have — ship it first.
+    status = "ship";
+    statusLabel = "Ship stock";
+    shipQty = Math.min(r.atLocations, gapToTarget);
+    if (A < r.leadMonths) note = `channel is ${Math.round((r.leadMonths - A) * MONTH)}d short`;
   } else if (hasPO) {
     if (A < Tc) {
       status = "oos";
@@ -87,8 +101,23 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
 
   const belowFloor = monthly > 0 && total < r.minMonths;
   if (belowFloor) {
-    const raw = Math.max(0, Math.ceil(r.reorderToMonths * monthly - r.onHand - r.inProduction));
+    // Net off stock you already own — producing more of it would be double-ordering.
+    const raw = Math.max(0, Math.ceil(r.reorderToMonths * monthly - r.onHand - r.inProduction - r.atLocations));
     recommendedQty = r.batchSize > 0 && raw > 0 ? Math.ceil(raw / r.batchSize) * r.batchSize : raw;
   }
-  return { monthly, win, excl, override, onHandCover: A, prodCover: P, status, statusLabel, note, recommendedQty, belowFloor };
+  return {
+    monthly,
+    win,
+    excl,
+    override,
+    onHandCover: A,
+    locCover: L,
+    prodCover: P,
+    status,
+    statusLabel,
+    note,
+    recommendedQty,
+    shipQty,
+    belowFloor,
+  };
 }

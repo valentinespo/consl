@@ -6,7 +6,7 @@ import type { RestockRow } from "@/lib/restock";
 
 export type Alert = {
   key: string; // stable identity, e.g. "reorder:LDX"
-  kind: "reorder" | "expedite" | "material";
+  kind: "reorder" | "expedite" | "material" | "ship";
   title: string;
   detail: string;
   severity: "critical" | "warn";
@@ -23,7 +23,16 @@ export async function getAlerts(rows: RestockRow[]): Promise<Alert[]> {
   for (const r of rows) {
     const win = r.windowDays === 10 || r.windowDays === 30 || r.windowDays === 90 ? r.windowDays : 90;
     const c = computeReorder(r, win, now);
-    if (c.belowFloor) {
+    if (c.status === "ship") {
+      // Already made and already yours — it just needs moving, so this beats a reorder alert.
+      alerts.push({
+        key: `ship:${r.code}`,
+        kind: "ship",
+        title: `${r.name} — ship stock you already have`,
+        detail: `${num(c.shipQty)} units at ${r.atLocationsBy.map((x) => x.code).join(" / ") || "your locations"}`,
+        severity: "warn",
+      });
+    } else if (c.belowFloor) {
       alerts.push({
         key: `reorder:${r.code}`,
         kind: "reorder",

@@ -20,15 +20,17 @@ const SEG = {
   inbound: "#4ade80",
   reserved: "#bbf7d0",
   awd: "#2563eb",
+  locations: "#8b5cf6", // finished stock at your own facilities — matches the dashboard bucket
   production: "#f59e0b",
 };
 
-type Status = "ok" | "reordered" | "reorder" | "oos";
+type Status = "ok" | "reordered" | "reorder" | "oos" | "ship";
 const STATUS: Record<Status, { bg: string; fg: string; dot: string; label: string }> = {
   ok: { bg: "#dcfce7", fg: "#166534", dot: "#16a34a", label: "Healthy" },
   reordered: { bg: "#dcfce7", fg: "#166534", dot: "#16a34a", label: "Reordered" },
   reorder: { bg: "#ffedd5", fg: "#9a3412", dot: "#ea580c", label: "Reorder" },
   oos: { bg: "#fee2e2", fg: "#b91c1c", dot: "#dc2626", label: "OOS" },
+  ship: { bg: "#ede9fe", fg: "#5b21b6", dot: "#8b5cf6", label: "Ship stock" },
 };
 
 const n = (x: number) => Math.round(x).toLocaleString("en-US");
@@ -77,6 +79,7 @@ export function RestockDashboard({
   }, [byId, sort]);
   const displayRows = arranging ? order.map((id) => byId.get(id)).filter((r): r is Computed => !!r) : computed;
   const needsPO = computed.filter((r) => r.belowFloor).length;
+  const toShip = computed.filter((r) => r.status === "ship").length;
   const expedite = computed.filter((r) => r.status === "oos" && !r.belowFloor).length;
   const healthy = computed.filter((r) => r.status === "ok" || r.status === "reordered").length;
   const unitsToOrder = computed.reduce((s, r) => s + (r.belowFloor ? r.recommendedQty : 0), 0);
@@ -133,8 +136,9 @@ export function RestockDashboard({
       {msg && <div className="mb-3 text-[12px] text-muted">{msg}</div>}
 
       {/* KPIs */}
-      <div className="mb-5 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+      <div className="mb-5 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
         <Kpi label="Needs a PO" value={String(needsPO)} tone={needsPO > 0 ? "#ea580c" : undefined} />
+        <Kpi label="To ship" value={String(toShip)} tone={toShip > 0 ? SEG.locations : undefined} />
         <Kpi label="Expedite" value={String(expedite)} tone={expedite > 0 ? "#dc2626" : undefined} />
         <Kpi label="Healthy" value={`${healthy} / ${computed.length}`} tone={computed.length > 0 && healthy === computed.length ? "#16a34a" : undefined} />
         <Kpi label="Units to order" value={n(unitsToOrder)} />
@@ -175,6 +179,7 @@ export function RestockDashboard({
           <Legend color={SEG.inbound} label="inbound" />
           <Legend color={SEG.reserved} label="reserved" />
           <Legend color={SEG.awd} label="AWD" />
+          <Legend color={SEG.locations} label="at my locations" />
           <Legend color={SEG.production} label="production" />
         </div>
       </div>
@@ -192,13 +197,14 @@ export function RestockDashboard({
         {displayRows.length === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">No Amazon-mapped SKUs yet — hit Sync.</div>}
         {displayRows.map((r, i) => {
           const st = STATUS[r.status];
-          const totalUnits = r.onHand + r.inProduction;
+          const totalUnits = r.onHand + r.atLocations + r.inProduction;
           const seg = (v: number, c: string) => (v > 0 ? <div key={c} style={{ width: `${(v / (totalUnits || 1)) * 100}%`, background: c }} /> : null);
           const parts = [
             r.fbaAvailable && `${n(r.fbaAvailable)} avail`,
             r.fbaInbound && `${n(r.fbaInbound)} inbound`,
             r.fbaReserved && `${n(r.fbaReserved)} reserved`,
             r.awdTotal && `${n(r.awdTotal)} AWD`,
+            r.atLocations && `${n(r.atLocations)} at ${r.atLocationsBy.map((x) => x.code).join("/")}`,
             r.inProduction && `${n(r.inProduction)} prod`,
           ].filter(Boolean);
           return (
@@ -235,18 +241,24 @@ export function RestockDashboard({
                     {seg(r.fbaInbound, SEG.inbound)}
                     {seg(r.fbaReserved, SEG.reserved)}
                     {seg(r.awdTotal, SEG.awd)}
+                    {seg(r.atLocations, SEG.locations)}
                     {seg(r.inProduction, SEG.production)}
                   </div>
                   <div className="mt-1.5 truncate text-[11px] tabular text-muted">{parts.join(" · ")}</div>
                 </div>
-                {/* Coverage: on-hand months + production months */}
+                {/* Coverage: months on hand, then what's waiting at your locations and in production */}
                 <div>
                   <div className="tabular text-[15px] font-medium leading-none text-ink">{mo(r.onHandCover)}<span className="text-[10.5px] font-normal text-muted"> mo</span></div>
                   <div className="mt-0.5 text-[10px] uppercase tracking-wide text-muted">on hand</div>
+                  {r.atLocations > 0 && (
+                    <div className="mt-1.5 tabular text-[13px] font-medium leading-none" style={{ color: SEG.locations }}>
+                      +{mo(r.locCover)}<span className="text-[10.5px] font-normal text-muted"> mo at my locations</span>
+                    </div>
+                  )}
                   {r.inProduction > 0 ? (
                     <div className="mt-1.5 tabular text-[13px] font-medium leading-none" style={{ color: SEG.production }}>+{mo(r.prodCover)}<span className="text-[10.5px] font-normal text-muted"> mo prod</span></div>
                   ) : (
-                    <div className="mt-1.5 text-[11px] text-muted">no prod</div>
+                    r.atLocations === 0 && <div className="mt-1.5 text-[11px] text-muted">no prod</div>
                   )}
                 </div>
                 {/* Status */}
@@ -259,7 +271,17 @@ export function RestockDashboard({
                 {/* Action + gear */}
                 <div className="flex items-center justify-end gap-2">
                   <div className="text-right">
-                    {r.belowFloor ? (
+                    {r.status === "ship" ? (
+                      <>
+                        <div className="text-[12.5px] font-medium tabular" style={{ color: SEG.locations }}>
+                          Ship {n(r.shipQty)} units
+                        </div>
+                        <div className="text-[10.5px] text-muted">
+                          from {r.atLocationsBy.map((x) => x.code).join(" / ") || "your locations"}
+                          {r.recommendedQty > 0 && ` · then order ${n(r.recommendedQty)}`}
+                        </div>
+                      </>
+                    ) : r.belowFloor ? (
                       <>
                         <div className="text-[12.5px] font-medium tabular text-ink">{r.recommendedQty > 0 ? `${n(r.recommendedQty)} units` : "Order"}</div>
                         <div className="text-[10.5px] text-muted">recommended</div>

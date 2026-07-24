@@ -25,12 +25,12 @@ export default async function FacilitiesPage() {
   const onHand = stock.rows.map((r) => ({ productId: r.productId, facilityId: r.facilityId, units: r.units }));
 
   // Finished stock per facility, for the card footers — the actual SKUs held, not just a count.
-  type Held = { value: number; skus: { code: string; imageUrl: string | null; units: number }[] };
+  type Held = { value: number; skus: { code: string; imageUrl: string | null; units: number; value: number }[] };
   const byFacility = new Map<string, Held>();
   for (const r of stock.rows) {
     const cur = byFacility.get(r.facilityId) ?? { value: 0, skus: [] };
     cur.value += r.value;
-    cur.skus.push({ code: r.code, imageUrl: r.imageUrl, units: r.units });
+    cur.skus.push({ code: r.code, imageUrl: r.imageUrl, units: r.units, value: r.value });
     byFacility.set(r.facilityId, cur);
   }
   for (const h of byFacility.values()) h.skus.sort((a, b) => b.units - a.units);
@@ -107,7 +107,9 @@ export default async function FacilitiesPage() {
                           <div key={s.code} className="flex items-center gap-2">
                             <SkuAvatar code={s.code} size={22} imageUrl={s.imageUrl} />
                             <span className="text-[12px] font-medium text-ink-soft">{s.code}</span>
-                            <span className="tabular ml-auto text-[12px] text-muted">{qty(s.units)} units</span>
+                            <span className="tabular ml-auto text-[12px] text-muted">
+                              {qty(s.units)} units · {money(s.value)}
+                            </span>
                           </div>
                         ))}
                       </div>
