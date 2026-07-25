@@ -55,8 +55,8 @@ export interface EngineTransaction {
 }
 
 /** A raw-material stock movement out of a facility: a transfer to another facility, or a loss.
- *  Applied after production, so it only adjusts what's left on hand — the same slot lost-inventory
- *  adjustments used, keeping produced-lot costs untouched. */
+ *  Interleaved with production by date, so material transferred in before a lot is available to
+ *  that lot, and material lost before a lot can no longer be used by it. */
 export interface EngineRawMovement {
   materialCode: string;
   fromFacility: string;
@@ -115,8 +115,8 @@ class FifoPool {
       .map((p) => ({ qty: p.quantity, unitCost: p.unitCost }));
   }
 
-  /** Append a layer of already-owned stock (a transfer arriving from another facility). Applied
-   *  after production, so it only affects what's left on hand — never re-costs a produced lot. */
+  /** Append a layer of already-owned stock (a transfer arriving from another facility). It lands
+   *  at the end of the FIFO stack, so it's consumed after everything bought here before it. */
   addLayer(qty: number, unitCost: number) {
     if (qty > 1e-9) this.layers.push({ qty, unitCost });
   }
@@ -185,42 +185,64 @@ export function runEngine(
     pools.set(id, new FifoPool(id, sample.materialCode, sample.facility, sample.sku, ps));
   }
 
-  // ---- Consume materials in lot order. ----
-  const ordered = [...lines].sort((a, b) => a.poDate - b.poDate || a.lotNr - b.lotNr || a.seq - b.seq);
-  const result = new Map<string, LineCost>();
-
-  for (const line of ordered) {
-    const materialCostsPerUnit: Record<string, number> = {};
-    const shortfalls: MaterialShortfall[] = [];
-    for (const m of line.materials) {
-      const sku = m.poolKey === "FACILITY_SKU" ? (m.poolSku ?? line.sku) : null;
-      const id = poolId(m.materialCode, m.poolKey, line.facility, sku);
-      const pool = pools.get(id);
-      const demand = line.units * m.perUnit;
-      const { cost, consumed } = pool ? pool.consume(demand) : { cost: 0, consumed: 0 };
-      materialCostsPerUnit[m.materialCode] = line.units > 0 ? cost / line.units : 0;
-      if (demand - consumed > 1e-6) {
-        shortfalls.push({ materialCode: m.materialCode, demand, consumed, shortBy: demand - consumed });
-      }
-    }
-    result.set(line.key, {
-      key: line.key,
-      materialCostsPerUnit,
-      transactionCostsPerUnit: {},
-      shortfalls,
-      cogPerUnit: 0,
-    });
-  }
-
-  // ---- Raw-material movements (transfers between facilities, and losses) adjust stock on hand. ----
-  // Applied AFTER all production has consumed, so they never re-cost produced lots — they just
-  // move / draw down the remaining leftover. A transfer carries its FIFO cost to the destination.
+  // ---- Replay production and raw movements on one timeline, in date order. ----
+  // Purchases are already pooled above (supply is available regardless of its purchase date), but
+  // production and movements must interleave chronologically: material transferred into a facility
+  // before a lot is available to that lot, and material lost before a lot can no longer be used by
+  // it. Same-day movements settle before production, so a delivery can be built from that day.
   const ensurePool = (id: string, materialCode: string, facility: string, sku: string | null) => {
     let p = pools.get(id);
     if (!p) pools.set(id, (p = new FifoPool(id, materialCode, facility, sku, [])));
     return p;
   };
-  for (const mv of [...rawMovements].sort((a, b) => a.date - b.date || a.seq - b.seq)) {
+
+  type TimelineEvent =
+    | { at: number; rank: 0; mv: EngineRawMovement }
+    | { at: number; rank: 1; line: EngineLotLine };
+
+  const timeline: TimelineEvent[] = [
+    ...rawMovements.map((mv) => ({ at: mv.date, rank: 0 as const, mv })),
+    ...lines.map((line) => ({ at: line.poDate, rank: 1 as const, line })),
+  ];
+  timeline.sort((a, b) => {
+    if (a.at !== b.at) return a.at - b.at;
+    if (a.rank !== b.rank) return a.rank - b.rank; // movements settle first that day
+    if (a.rank === 0 && b.rank === 0) return a.mv.seq - b.mv.seq;
+    if (a.rank === 1 && b.rank === 1) return a.line.lotNr - b.line.lotNr || a.line.seq - b.line.seq;
+    return 0;
+  });
+
+  const result = new Map<string, LineCost>();
+
+  for (const ev of timeline) {
+    if (ev.rank === 1) {
+      const line = ev.line;
+      const materialCostsPerUnit: Record<string, number> = {};
+      const shortfalls: MaterialShortfall[] = [];
+      for (const m of line.materials) {
+        const sku = m.poolKey === "FACILITY_SKU" ? (m.poolSku ?? line.sku) : null;
+        const id = poolId(m.materialCode, m.poolKey, line.facility, sku);
+        const pool = pools.get(id);
+        const demand = line.units * m.perUnit;
+        const { cost, consumed } = pool ? pool.consume(demand) : { cost: 0, consumed: 0 };
+        materialCostsPerUnit[m.materialCode] = line.units > 0 ? cost / line.units : 0;
+        if (demand - consumed > 1e-6) {
+          shortfalls.push({ materialCode: m.materialCode, demand, consumed, shortBy: demand - consumed });
+        }
+      }
+      result.set(line.key, {
+        key: line.key,
+        materialCostsPerUnit,
+        transactionCostsPerUnit: {},
+        shortfalls,
+        cogPerUnit: 0,
+      });
+      continue;
+    }
+
+    // A transfer consumes the source pool and re-lands those units at the destination carrying
+    // their FIFO cost. A loss (no destination) just leaves — nothing is added anywhere.
+    const mv = ev.mv;
     if (!(mv.quantity > 0)) continue;
     const pk = materialPoolKey.get(mv.materialCode) ?? (mv.sku ? "FACILITY_SKU" : "FACILITY");
     const from = pools.get(poolId(mv.materialCode, pk, mv.fromFacility, mv.sku));
@@ -229,7 +251,6 @@ export function runEngine(
       const toId = poolId(mv.materialCode, pk, mv.toFacility, mv.sku);
       ensurePool(toId, mv.materialCode, mv.toFacility, mv.sku).addLayer(consumed, cost / consumed);
     }
-    // A loss (no destination) just leaves; nothing to add anywhere.
   }
 
   // Legacy: any lost-inventory purchases not yet migrated to movements (no-op once migrated).
