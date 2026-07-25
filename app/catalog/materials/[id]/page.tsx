@@ -33,8 +33,10 @@ export default async function MaterialDetailPage({ params }: { params: Promise<{
           unitLabel: material.unitLabel,
           defaultPerUnit: material.defaultPerUnit,
           lowStockThreshold: material.lowStockThreshold,
+          skuSpecific: material.skuSpecific,
           imageUrl: material.imageUrl,
         }}
+        locked={Object.keys(usedBy).length > 0}
       />
 
       <DeleteEntity

@@ -15,16 +15,19 @@ export type MaterialForEdit = {
   unitLabel: string;
   defaultPerUnit: number;
   lowStockThreshold: number | null;
+  skuSpecific: boolean;
   imageUrl: string | null;
 };
 
-export function MaterialEditor({ material }: { material: MaterialForEdit }) {
+/** `locked` = the material already has purchases/lots/movements, so per-SKU stocking can't change. */
+export function MaterialEditor({ material, locked }: { material: MaterialForEdit; locked: boolean }) {
   const router = useRouter();
   const [code, setCode] = useState(material.code);
   const [name, setName] = useState(material.name);
   const [unitLabel, setUnitLabel] = useState(material.unitLabel);
   const [perUnit, setPerUnit] = useState(String(material.defaultPerUnit));
   const [threshold, setThreshold] = useState(material.lowStockThreshold != null ? String(material.lowStockThreshold) : "");
+  const [skuSpecific, setSkuSpecific] = useState(material.skuSpecific);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -35,7 +38,8 @@ export function MaterialEditor({ material }: { material: MaterialForEdit }) {
     name.trim() !== material.name ||
     unitLabel.trim() !== material.unitLabel ||
     (Number(perUnit) || 0) !== material.defaultPerUnit ||
-    thresholdValue !== material.lowStockThreshold;
+    thresholdValue !== material.lowStockThreshold ||
+    skuSpecific !== material.skuSpecific;
 
   function reset() {
     setCode(material.code);
@@ -43,6 +47,7 @@ export function MaterialEditor({ material }: { material: MaterialForEdit }) {
     setUnitLabel(material.unitLabel);
     setPerUnit(String(material.defaultPerUnit));
     setThreshold(material.lowStockThreshold != null ? String(material.lowStockThreshold) : "");
+    setSkuSpecific(material.skuSpecific);
     setError(null);
   }
 
@@ -56,6 +61,7 @@ export function MaterialEditor({ material }: { material: MaterialForEdit }) {
       unitLabel,
       defaultPerUnit: Number(perUnit) || 1,
       lowStockThreshold: thresholdValue,
+      skuSpecific,
     });
     setPending(false);
     if (!res.ok) {
@@ -100,6 +106,33 @@ export function MaterialEditor({ material }: { material: MaterialForEdit }) {
             <Field label="Low-stock alert" hint="Blank turns the alert off.">
               <input value={threshold} onChange={(e) => setThreshold(e.target.value)} type="number" step="any" min="0" placeholder="off" className={`${inputCls} tabular`} />
             </Field>
+          </div>
+
+          {/* Per-SKU stocking — the key difference between e.g. universal tea bags and printed pouches. */}
+          <div className="rounded-xl border border-border bg-surface-2/40 p-3">
+            <label className={`flex items-start gap-2.5 ${locked ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}>
+              <input
+                type="checkbox"
+                checked={skuSpecific}
+                disabled={locked}
+                onChange={(e) => setSkuSpecific(e.target.checked)}
+                className="mt-0.5 accent-[#1a2f18]"
+              />
+              <span>
+                <span className="text-[13px] font-medium text-ink">Stocked separately for each product (SKU-specific)</span>
+                <span className="mt-0.5 block text-[11.5px] text-muted">
+                  On: each product has its own stock of this material — like printed pouches, where every SKU has a different
+                  design. You&apos;ll pick the product when buying it. Off: one shared pool used across all products — like plain
+                  tea bags.
+                </span>
+              </span>
+            </label>
+            {locked && (
+              <div className="mt-2 text-[11.5px] text-muted">
+                🔒 This can&apos;t be changed now that the material has purchases or is used in production — switching it would
+                scramble its stock pools. To change it, create a new material.
+              </div>
+            )}
           </div>
         </div>
       </div>

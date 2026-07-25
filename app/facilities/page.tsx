@@ -16,6 +16,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { NewFacilityButton } from "@/components/NewFacilityButton";
 import { NewMovementPanel, type OnHandRow } from "@/components/MovementForm";
 import { MovementsLedger } from "@/components/MovementsLedger";
+import { StockSection } from "@/components/StockSection";
 import { facilityTypeLabel, isProductionSite } from "@/lib/facility-types";
 
 export const dynamic = "force-dynamic";
@@ -121,56 +122,41 @@ export default async function FacilitiesPage() {
                     <ChevronRight size={16} className="shrink-0 text-muted" />
                   </div>
 
-                  {/* Finished product sitting here, SKU by SKU. */}
-                  <div className="mt-auto border-t border-line pt-2.5">
-                    <div className="flex items-baseline justify-between">
-                      <span className="text-[11px] uppercase tracking-wide text-muted">Finished stock here</span>
-                      {fin ? <span className="tabular text-[13px] font-semibold text-ink">{money(fin.value)}</span> : <span className="text-[12px] text-muted">None</span>}
-                    </div>
-                    {fin && (
-                      <div className="mt-1.5 space-y-1">
-                        {fin.skus.map((s) => (
-                          <div key={s.code} className="flex items-center gap-2">
-                            <SkuAvatar code={s.code} size={22} imageUrl={s.imageUrl} />
-                            <span className="text-[12px] font-medium text-ink-soft">{s.code}</span>
-                            <span className="tabular ml-auto text-[12px] text-muted">
-                              {qty(s.units)} units · {money(s.value)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  {/* Finished + raw stock collapse to a hover popover so the cards stay compact. */}
+                  <div className="mt-auto">
+                    <StockSection label="Finished stock here" total={fin ? money(fin.value) : null}>
+                      {fin?.skus.map((s) => (
+                        <div key={s.code} className="flex items-center gap-2">
+                          <SkuAvatar code={s.code} size={22} imageUrl={s.imageUrl} />
+                          <span className="text-[12px] font-medium text-ink-soft">{s.code}</span>
+                          <span className="tabular ml-auto whitespace-nowrap text-[12px] text-muted">
+                            {qty(s.units)} units · {money(s.value)}
+                          </span>
+                        </div>
+                      ))}
+                    </StockSection>
 
-                  {/* Raw materials sitting here. */}
-                  <div className="border-t border-line pt-2.5">
-                    <div className="flex items-baseline justify-between">
-                      <span className="text-[11px] uppercase tracking-wide text-muted">Raw materials here</span>
-                      {raw.length > 0 ? <span className="tabular text-[13px] font-semibold text-ink">{money(rawValue)}</span> : <span className="text-[12px] text-muted">None</span>}
-                    </div>
-                    {raw.length > 0 && (
-                      <div className="mt-1.5 space-y-1">
-                        {raw.map((r, i) => (
-                          <div key={`${r.code}-${r.sku ?? ""}-${i}`} className="flex items-center gap-2">
-                            {r.imageUrl ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={r.imageUrl} alt={r.name} className="h-[22px] w-[22px] rounded-md border border-border object-cover" />
-                            ) : (
-                              <span className="flex h-[22px] w-[22px] items-center justify-center rounded-md border border-border bg-surface-2 text-muted">
-                                <Package size={12} />
-                              </span>
-                            )}
-                            <span className="text-[12px] font-medium text-ink-soft">
-                              {r.name}
-                              {r.sku && <span className="text-muted"> · {r.sku}</span>}
+                    <StockSection label="Raw materials here" total={raw.length > 0 ? money(rawValue) : null}>
+                      {raw.map((r, i) => (
+                        <div key={`${r.code}-${r.sku ?? ""}-${i}`} className="flex items-center gap-2">
+                          {r.imageUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={r.imageUrl} alt={r.name} className="h-[22px] w-[22px] shrink-0 rounded-md border border-border object-cover" />
+                          ) : (
+                            <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md border border-border bg-surface-2 text-muted">
+                              <Package size={12} />
                             </span>
-                            <span className="tabular ml-auto text-[12px] text-muted">
-                              {qty(r.units)} {materials.find((m) => m.code === r.code)?.unitLabel ?? "unit"} · {money(r.value)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                          )}
+                          <span className="truncate text-[12px] font-medium text-ink-soft">
+                            {r.name}
+                            {r.sku && <span className="text-muted"> · {r.sku}</span>}
+                          </span>
+                          <span className="tabular ml-auto whitespace-nowrap text-[12px] text-muted">
+                            {qty(r.units)} {materials.find((m) => m.code === r.code)?.unitLabel ?? "unit"} · {money(r.value)}
+                          </span>
+                        </div>
+                      ))}
+                    </StockSection>
                   </div>
                 </Card>
               </Link>

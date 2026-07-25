@@ -109,6 +109,7 @@ export async function updateMaterial(input: {
   unitLabel: string;
   defaultPerUnit: number;
   lowStockThreshold: number | null;
+  skuSpecific?: boolean;
 }) {
   const name = input.name.trim();
   if (!name) return { ok: false as const, error: "Name required" };
@@ -123,6 +124,21 @@ export async function updateMaterial(input: {
     if (clash) return { ok: false as const, error: `Code ${code} already exists` };
   }
 
+  // Whether it's stocked per-SKU is structural — it decides how FIFO pools are keyed. Once the
+  // material has any history, switching it would scramble those pools, so it locks.
+  let skuSpecific = current.skuSpecific;
+  if (input.skuSpecific !== undefined && input.skuSpecific !== current.skuSpecific) {
+    const [purchases, lotMaterials, movements] = await Promise.all([
+      prisma.purchase.count({ where: { materialTypeId: input.id } }),
+      prisma.lotMaterial.count({ where: { materialTypeId: input.id } }),
+      prisma.stockMovement.count({ where: { materialTypeId: input.id } }),
+    ]);
+    if (purchases + lotMaterials + movements > 0) {
+      return { ok: false as const, error: "This material is already in use, so per-SKU stocking can no longer be changed." };
+    }
+    skuSpecific = input.skuSpecific;
+  }
+
   await prisma.materialType.update({
     where: { id: input.id },
     data: {
@@ -131,6 +147,8 @@ export async function updateMaterial(input: {
       unitLabel: input.unitLabel.trim() || "unit",
       defaultPerUnit: input.defaultPerUnit > 0 ? input.defaultPerUnit : 1,
       lowStockThreshold: input.lowStockThreshold != null && input.lowStockThreshold > 0 ? input.lowStockThreshold : null,
+      skuSpecific,
+      poolKey: skuSpecific ? "FACILITY_SKU" : "FACILITY",
     },
   });
   if (code !== current.code) await recomputeAll(); // cost snapshots are labelled by code
