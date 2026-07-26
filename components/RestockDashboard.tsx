@@ -216,7 +216,21 @@ export function RestockDashboard({
                   <SkuAvatar code={r.code} imageUrl={r.imageUrl} size={32} />
                   <div className="min-w-0">
                     <div className="truncate text-[13px] font-medium text-ink">{r.name}</div>
-                    <div className="text-[11px] tabular text-muted">{n(r.monthly)}/mo · {r.win}-day{r.excl > 0 ? ` · −${r.excl}d OOS` : ""}</div>
+                    {/* Highlight the settings that are actually overriding the defaults, not just
+                        the label below. The window is only its own override when the SKU pins one —
+                        otherwise it's just the global toggle and colouring it would imply a custom
+                        setting that isn't there. */}
+                    <div className="text-[11px] tabular text-muted">
+                      {n(r.monthly)}/mo
+                      {" · "}
+                      <span className={r.windowDays != null ? "font-medium text-accent" : ""}>{r.win}-day</span>
+                      {r.excl > 0 && (
+                        <>
+                          {" · "}
+                          <span className="font-medium text-accent">−{r.excl}d OOS</span>
+                        </>
+                      )}
+                    </div>
                     <button onClick={() => setWinSku(winSku === r.id ? null : r.id)} className={`mt-0.5 text-[10px] hover:underline ${r.override ? "text-accent" : "text-muted"}`}>
                       {r.override ? "Custom window" : "Override window"}
                     </button>
