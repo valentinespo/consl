@@ -2,12 +2,17 @@
 
 import { useMemo, useState } from "react";
 import { useMoney } from "@/components/CurrencyProvider";
-import { RANGES, compactMoney, niceTicks, sliceRange, type RangeKey } from "@/lib/chart";
+import { DateRangePicker, type Range } from "@/components/DateRangePicker";
+import { compactMoney, niceTicks, sliceRange } from "@/lib/chart";
 
 const W = 1000;
 const H = 150;
 const TIP_W = 236; // wide enough to keep the label and the amount on one line
 const LINE = "#2563eb";
+// Gridlines and tick labels are the line colour heavily faded, so the chart reads as one object
+// rather than a blue line dropped onto grey furniture.
+const GRID = "rgba(37, 99, 235, 0.14)";
+const TICK = "rgba(37, 99, 235, 0.55)";
 
 /** Smooth (cardinal-spline) line + area path through points already in 0..W / 0..H space. */
 function spline(pts: [number, number][]) {
@@ -35,17 +40,15 @@ function spline(pts: [number, number][]) {
 /** Inventory value over time: labelled axes, a hover readout per day, and a selectable window. */
 export function ValueSparkline({ data }: { data: { day: string; total: number }[] }) {
   const { money, locale, symbol } = useMoney();
-  const [range, setRange] = useState<RangeKey>("30");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const [range, setRange] = useState<Range>({ key: "30", from: "", to: "" });
   const [hover, setHover] = useState<number | null>(null);
   // Measured on hover so the marker and tooltip can be placed in real pixels: the SVG is stretched
   // with preserveAspectRatio="none", so its own coordinates don't map onto the box one-to-one.
   const [plot, setPlot] = useState({ w: 0, h: 0 });
 
   const pts = useMemo(
-    () => sliceRange(data, range, from || undefined, to || undefined),
-    [data, range, from, to],
+    () => sliceRange(data, range.key, range.from || undefined, range.to || undefined),
+    [data, range],
   );
 
   const n = pts.length;
@@ -108,41 +111,16 @@ export function ValueSparkline({ data }: { data: { day: string; total: number }[
             </span>
           )}
         </span>
-        <select
-          value={range}
-          onChange={(e) => setRange(e.target.value as RangeKey)}
-          aria-label="Date range"
-          className="rounded-lg border border-border bg-surface px-2 py-1 text-[11px] text-ink-soft outline-none hover:border-accent-strong focus:border-accent-strong"
-        >
-          {RANGES.map((r) => (
-            <option key={r.key} value={r.key}>
-              {r.label}
-            </option>
-          ))}
-        </select>
+        {data.length > 0 && (
+          <DateRangePicker
+            value={range}
+            onChange={setRange}
+            oldest={data[0].day}
+            newest={data[data.length - 1].day}
+            locale={locale}
+          />
+        )}
       </div>
-
-      {range === "custom" && (
-        <div className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted">
-          <input
-            type="date"
-            value={from}
-            max={to || undefined}
-            onChange={(e) => setFrom(e.target.value)}
-            aria-label="From date"
-            className="rounded-lg border border-border bg-surface px-2 py-1 text-ink outline-none focus:border-accent-strong"
-          />
-          <span>to</span>
-          <input
-            type="date"
-            value={to}
-            min={from || undefined}
-            onChange={(e) => setTo(e.target.value)}
-            aria-label="To date"
-            className="rounded-lg border border-border bg-surface px-2 py-1 text-ink outline-none focus:border-accent-strong"
-          />
-        </div>
-      )}
 
       {n === 0 ? (
         <div className="flex min-h-[40px] flex-1 items-center justify-center text-[11px] text-muted">
@@ -152,7 +130,10 @@ export function ValueSparkline({ data }: { data: { day: string; total: number }[
         <>
           <div className="flex min-h-0 flex-1">
             {/* Y axis as its own column, so a long label can never sit on top of the plot. */}
-            <div className="flex w-[52px] shrink-0 flex-col justify-between pr-2 text-right text-[10px] leading-none text-muted tabular">
+            <div
+              className="flex w-[52px] shrink-0 flex-col justify-between pr-2 text-right text-[10px] leading-none tabular"
+              style={{ color: TICK }}
+            >
               {[...axis.ticks].reverse().map((t) => (
                 <span key={t}>{compactMoney(t, symbol, locale)}</span>
               ))}
@@ -178,8 +159,7 @@ export function ValueSparkline({ data }: { data: { day: string; total: number }[
                     x2={W}
                     y1={py(t)}
                     y2={py(t)}
-                    stroke="currentColor"
-                    className="text-border"
+                    stroke={GRID}
                     strokeWidth={1}
                     vectorEffect="non-scaling-stroke"
                   />
@@ -201,8 +181,8 @@ export function ValueSparkline({ data }: { data: { day: string; total: number }[
               {hp && plot.w > 0 && (
                 <>
                   <div
-                    className="pointer-events-none absolute top-0 bottom-0 w-px bg-border"
-                    style={{ left: hx }}
+                    className="pointer-events-none absolute top-0 bottom-0 w-px"
+                    style={{ left: hx, background: TICK }}
                   />
                   <div
                     className="pointer-events-none absolute h-[9px] w-[9px] rounded-full border-2 border-white"
@@ -234,7 +214,10 @@ export function ValueSparkline({ data }: { data: { day: string; total: number }[
           </div>
 
           {/* X axis, offset to start where the plot starts so ticks sit under the points they name. */}
-          <div className="relative mt-1.5 ml-[52px] h-[12px] text-[10px] leading-none text-muted">
+          <div
+            className="relative mt-1.5 ml-[52px] h-[12px] text-[10px] leading-none"
+            style={{ color: TICK }}
+          >
             {xLabelIdx.map((i) => (
               <span
                 key={i}

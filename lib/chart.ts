@@ -40,15 +40,19 @@ export function compactMoney(v: number, symbol: string, locale: string): string 
   return `${symbol}${s}`;
 }
 
-export type RangeKey = "7" | "30" | "90" | "365" | "all" | "custom";
+export type RangeKey = "7" | "30" | "90" | "365" | "mtd" | "qtd" | "ytd" | "all" | "custom";
 
-export const RANGES: { key: RangeKey; label: string; days?: number }[] = [
-  { key: "7", label: "Last 7 days", days: 7 },
-  { key: "30", label: "Last 30 days", days: 30 },
-  { key: "90", label: "Last 90 days", days: 90 },
-  { key: "365", label: "Last 12 months", days: 365 },
-  { key: "all", label: "All time" },
-  { key: "custom", label: "Custom range…" },
+/** Rail of the date picker. `group` inserts the dividers between families of presets. */
+export const RANGES: { key: RangeKey; label: string; days?: number; group: number }[] = [
+  { key: "7", label: "Last 7 days", days: 7, group: 0 },
+  { key: "30", label: "Last 30 days", days: 30, group: 0 },
+  { key: "90", label: "Last 90 days", days: 90, group: 0 },
+  { key: "365", label: "Last 12 months", days: 365, group: 0 },
+  { key: "mtd", label: "Month to date", group: 1 },
+  { key: "qtd", label: "Quarter to date", group: 1 },
+  { key: "ytd", label: "Year to date", group: 1 },
+  { key: "all", label: "All time", group: 2 },
+  { key: "custom", label: "Custom range", group: 3 },
 ];
 
 /** Shift an ISO day string (YYYY-MM-DD) back by n days, staying in UTC so it can't drift. */
@@ -59,12 +63,30 @@ export function shiftDay(day: string, back: number): string {
 }
 
 /**
- * Narrow a day-keyed series to the selected window.
+ * Resolve a preset to concrete from/to days, so the calendar can show the same span the chart
+ * draws instead of the two disagreeing.
  *
- * "Last N days" counts back from the newest recorded day rather than from today on purpose: it
+ * Everything is anchored to `newest` — the last day actually recorded — rather than to today. It
  * keeps the result identical on the server and in the browser (no hydration mismatch), and if
- * snapshots ever stall it shows the last N days that actually exist instead of an empty chart.
+ * snapshots ever stall it shows the last N days that exist instead of an empty chart.
  */
+export function rangeBounds(
+  key: RangeKey,
+  newest: string,
+  from?: string,
+  to?: string,
+): { from?: string; to?: string } {
+  if (key === "custom") return { from, to };
+  if (key === "all") return {};
+  const preset = RANGES.find((r) => r.key === key);
+  if (preset?.days) return { from: shiftDay(newest, preset.days - 1), to: newest };
+
+  const [y, m] = newest.split("-").map(Number);
+  const startMonth = key === "mtd" ? m : key === "qtd" ? Math.floor((m - 1) / 3) * 3 + 1 : 1;
+  return { from: `${y}-${String(startMonth).padStart(2, "0")}-01`, to: newest };
+}
+
+/** Narrow a day-keyed series to the selected window. */
 export function sliceRange<T extends { day: string }>(
   data: T[],
   range: RangeKey,
@@ -72,12 +94,7 @@ export function sliceRange<T extends { day: string }>(
   to?: string,
 ): T[] {
   if (data.length === 0) return data;
-  if (range === "custom") {
-    if (!from && !to) return data;
-    return data.filter((p) => (!from || p.day >= from) && (!to || p.day <= to));
-  }
-  const days = RANGES.find((r) => r.key === range)?.days;
-  if (!days) return data;
-  const cutoff = shiftDay(data[data.length - 1].day, days - 1);
-  return data.filter((p) => p.day >= cutoff);
+  const b = rangeBounds(range, data[data.length - 1].day, from, to);
+  if (!b.from && !b.to) return data;
+  return data.filter((p) => (!b.from || p.day >= b.from) && (!b.to || p.day <= b.to));
 }
