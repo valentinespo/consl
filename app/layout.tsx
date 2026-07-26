@@ -16,16 +16,12 @@ const NO_ORG_OK = ["/sign-in", "/sign-up", "/welcome", "/join"];
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
-/** Tab title follows the signed-in company, falling back before anyone has signed in. */
-export async function generateMetadata(): Promise<Metadata> {
-  const org = await getCurrentOrg().catch(() => null);
-  const orgs = await listMyOrgs().catch(() => []);
-  const name = org?.name?.trim();
-  return {
-    title: name ? `${name} — Production & Inventory` : "Production & Inventory",
-    description: "FIFO production lots, inventory and purchasing.",
-  };
-}
+/** The tab shows the product, not the customer — one person can have several companies open in
+ *  different tabs, and the app they're all in is SellerOps. */
+export const metadata: Metadata = {
+  title: "SellerOps",
+  description: "Inventory, production and purchasing for ecommerce operators.",
+};
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   // A signed-in user who doesn't belong to a company yet gets sent to set one up. Without this

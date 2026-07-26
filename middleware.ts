@@ -22,10 +22,15 @@ export default devBypass ? () => NextResponse.next() : enforced;
 
 export const config = {
   matcher: [
-    // Run on every route except Next internals and static assets. `/media` is deliberately NOT
-    // excluded: it serves user-uploaded documents (invoices, BOLs, COAs) and must require a
-    // signed-in user, with the route handler additionally checking org ownership.
+    // Run on every route except Next internals and static assets.
     "/((?!_next|uploads|favicon.ico|[^?]*\\.(?:png|jpg|jpeg|svg|webp|gif|ico|avif|css|js|map|woff2?|ttf)).*)",
     "/(api|trpc)(.*)",
+    // /media serves user-uploaded files — invoices, BOLs, product photos, company marks — and
+    // must require a signed-in user so the route can check the file belongs to their company.
+    // It needs its own entry: the pattern above skips anything ending in an image extension, so
+    // an uploaded .jpg or .png would otherwise reach the route with no session attached, be
+    // judged "not yours", and 404 as a broken image. PDFs were unaffected, which is why only
+    // pictures broke.
+    "/media/:path*",
   ],
 };

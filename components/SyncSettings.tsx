@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { RefreshCw, Clock } from "lucide-react";
 import { Card } from "@/components/ui";
@@ -19,6 +19,43 @@ export type AppSettings = {
 };
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
+
+/** "GMT-03:00" for a zone, as of right now — offsets shift with daylight saving, so this is
+ *  computed rather than stored. */
+function gmtLabel(tz: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "longOffset" }).formatToParts(new Date());
+    return parts.find((p) => p.type === "timeZoneName")?.value ?? "GMT";
+  } catch {
+    return "GMT";
+  }
+}
+
+/** Minutes east of GMT, for sorting the list the way people read it. */
+function gmtMinutes(tz: string): number {
+  const m = /GMT([+-])(\d{2}):(\d{2})/.exec(gmtLabel(tz));
+  if (!m) return 0;
+  return (m[1] === "-" ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3]));
+}
+
+/** Every zone the browser knows, labelled with its current offset and ordered west to east.
+ *  Computed once per mount — there are a few hundred and the offsets only change twice a year. */
+function useZones(current: string) {
+  return useMemo(() => {
+    let names: string[] = [];
+    try {
+      names = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.("timeZone") ?? [];
+    } catch {
+      names = [];
+    }
+    if (!names.includes(current)) names = [current, ...names];
+    return names
+      .map((tz) => ({ tz, label: `(${gmtLabel(tz)}) ${tz.replace(/_/g, " ")}`, mins: gmtMinutes(tz) }))
+      .sort((a, b) => a.mins - b.mins || a.tz.localeCompare(b.tz));
+  }, [current]);
+}
+
+
 
 function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -42,6 +79,7 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [saving, startSave] = useTransition();
   const [syncing, startSync] = useTransition();
+  const zones = useZones(s.syncTz);
 
   const set = <K extends keyof AppSettings>(k: K, v: AppSettings[K]) => {
     setS((p) => ({ ...p, [k]: v }));
@@ -99,29 +137,29 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
           <Toggle on={s.syncEnabled} onChange={(v) => set("syncEnabled", v)} />
         </div>
 
-        <div className={`grid gap-3 sm:grid-cols-3 ${s.syncEnabled ? "" : "pointer-events-none opacity-50"}`}>
-          <Field label="Hour" hint="24-hour clock.">
+        <div className={`grid gap-3 sm:grid-cols-[160px_1fr] ${s.syncEnabled ? "" : "pointer-events-none opacity-50"}`}>
+          <Field label="Run at" hint="Your local clock, below.">
             <input
-              type="number"
-              min={0}
-              max={23}
-              value={s.syncHour}
-              onChange={(e) => set("syncHour", Number(e.target.value))}
+              type="time"
+              value={`${pad2(s.syncHour)}:${pad2(s.syncMinute)}`}
+              onChange={(e) => {
+                const [h, m] = e.target.value.split(":");
+                // An empty time input yields "", which would otherwise store NaN.
+                if (h === undefined || m === undefined || e.target.value === "") return;
+                setS((p) => ({ ...p, syncHour: Number(h), syncMinute: Number(m) }));
+                setSaved(false);
+              }}
               className={`${inputCls} tabular`}
             />
           </Field>
-          <Field label="Minute">
-            <input
-              type="number"
-              min={0}
-              max={59}
-              value={s.syncMinute}
-              onChange={(e) => set("syncMinute", Number(e.target.value))}
-              className={`${inputCls} tabular`}
-            />
-          </Field>
-          <Field label="Timezone" hint="Which clock the time above follows.">
-            <input value={s.syncTz} onChange={(e) => set("syncTz", e.target.value)} className={inputCls} />
+          <Field label="Timezone" hint={`Which clock that time follows — currently ${gmtLabel(s.syncTz)}.`}>
+            <select value={s.syncTz} onChange={(e) => set("syncTz", e.target.value)} className={inputCls}>
+              {zones.map((z) => (
+                <option key={z.tz} value={z.tz}>
+                  {z.label}
+                </option>
+              ))}
+            </select>
           </Field>
         </div>
 
