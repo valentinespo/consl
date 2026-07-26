@@ -1,5 +1,7 @@
 "use client";
 
+import { HoverHint } from "@/components/HoverHint";
+
 /** Shared form primitives for the detail-page editors, so product / material / facility /
  *  supplier all look and behave identically. */
 
@@ -9,15 +11,21 @@ export const inputCls =
 export function Field({
   label,
   hint,
+  help,
   children,
 }: {
   label: string;
   hint?: string;
+  /** Optional "what is this?" bubble, shown as an icon before the label in the label's own colour. */
+  help?: { title: string; body: string };
   children: React.ReactNode;
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[12px] font-medium text-ink-soft">{label}</span>
+      <span className="mb-1 flex items-center gap-1 text-[12px] font-medium text-ink-soft">
+        {help && <HoverHint {...help} size={12} />}
+        {label}
+      </span>
       {children}
       {hint && <span className="mt-1 block text-[11px] text-muted">{hint}</span>}
     </label>

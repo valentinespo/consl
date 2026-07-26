@@ -3,6 +3,8 @@
 import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Settings, Check, GripVertical } from "lucide-react";
+import { HoverHint } from "@/components/HoverHint";
+import { FLOOR_HELP, LEAD_HELP } from "@/lib/restock-help";
 import { SkuAvatar } from "@/components/ui";
 import { TotalValueCard } from "@/components/TotalValueCard";
 import { updateGlobalDefaults, updateSkuPolicy, setSortMode, saveManualOrder, setSkuWindow } from "@/app/inventory/actions";
@@ -31,6 +33,36 @@ const STATUS: Record<Status, { bg: string; fg: string; dot: string; label: strin
   reorder: { bg: "#ffedd5", fg: "#9a3412", dot: "#ea580c", label: "Reorder" },
   oos: { bg: "#fee2e2", fg: "#b91c1c", dot: "#dc2626", label: "OOS" },
   ship: { bg: "#ede9fe", fg: "#5b21b6", dot: "#8b5cf6", label: "Ship stock" },
+};
+
+/** What each status actually means, in the terms the person reading it thinks in. Kept next to
+ *  the colours so the two can't drift apart. */
+const STATUS_HELP: Record<Status, { title: string; body: string }> = {
+  ok: {
+    title: "Healthy",
+    body:
+      "The sales channel holds at least your floor — enough cover to get through a production run without running dry. Nothing to do.",
+  },
+  reordered: {
+    title: "Reordered",
+    body:
+      "Channel stock is below your floor, but a production lot is already on its way and it lands in time. Covered — no new order needed.",
+  },
+  reorder: {
+    title: "Reorder",
+    body:
+      "Cover is below your floor and nothing incoming closes the gap. Place a purchase order now — waiting eats into the lead time.",
+  },
+  oos: {
+    title: "Out of stock",
+    body:
+      "A lot is coming, but at the current sales rate the channel runs out before it arrives. The number of days is how long you'll be unable to sell. Expedite it or ship stock you already hold.",
+  },
+  ship: {
+    title: "Ship stock",
+    body:
+      "You already have finished units at your own locations while the channel is below its floor. Send those first — producing more would leave stock sitting in two places.",
+  },
 };
 
 const n = (x: number) => Math.round(x).toLocaleString("en-US");
@@ -271,7 +303,9 @@ export function RestockDashboard({
                 {/* Status */}
                 <div>
                   <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium" style={{ background: st.bg, color: st.fg }}>
-                    <span className="h-1.5 w-1.5 rounded-full" style={{ background: st.dot }} /> {r.statusLabel}
+                    <span className="h-1.5 w-1.5 rounded-full" style={{ background: st.dot }} />
+                    {r.statusLabel}
+                    <HoverHint {...STATUS_HELP[r.status]} size={11} />
                   </span>
                   {r.note && <div className="mt-1 text-[10px] text-muted">{r.note}</div>}
                 </div>
@@ -348,8 +382,8 @@ function GlobalDefaultsEditor({ defaults, pending, onSave, onClose }: { defaults
   const [l, setL] = useState(String(defaults.leadMonths));
   return (
     <div className="mb-2 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface-2 px-3 py-2.5">
-      <NumField label="Default floor (months)" value={f} onChange={setF} />
-      <NumField label="Default lead time (months)" value={l} onChange={setL} />
+      <NumField label="Default floor (months)" value={f} onChange={setF} help={FLOOR_HELP} />
+      <NumField label="Default lead time (months)" value={l} onChange={setL} help={LEAD_HELP} />
       <button onClick={() => onSave(parseFloat(f) || 5, parseFloat(l) || 4.5)} disabled={pending} className="inline-flex items-center gap-1 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-60">
         <Check size={13} /> Save defaults
       </button>
@@ -363,8 +397,8 @@ function SkuPolicyEditor({ row, defaults, pending, onSave, bordered }: { row: Re
   const [l, setL] = useState(row.rawLeadMonths != null ? String(row.rawLeadMonths) : "");
   return (
     <div className={`flex flex-wrap items-end gap-3 bg-surface-2 px-4 py-3 ${bordered ? "border-b border-line" : ""}`}>
-      <NumField label={`Floor (months) · default ${defaults.minMonths}`} value={f} onChange={setF} placeholder={String(defaults.minMonths)} />
-      <NumField label={`Lead time (months) · default ${defaults.leadMonths}`} value={l} onChange={setL} placeholder={String(defaults.leadMonths)} />
+      <NumField label={`Floor (months) · default ${defaults.minMonths}`} value={f} onChange={setF} placeholder={String(defaults.minMonths)} help={FLOOR_HELP} />
+      <NumField label={`Lead time (months) · default ${defaults.leadMonths}`} value={l} onChange={setL} placeholder={String(defaults.leadMonths)} help={LEAD_HELP} />
       <button onClick={() => onSave(f.trim() === "" ? null : parseFloat(f), l.trim() === "" ? null : parseFloat(l))} disabled={pending} className="inline-flex items-center gap-1 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-60">
         <Check size={13} /> Save
       </button>
@@ -424,10 +458,13 @@ function WindowOverrideEditor({
   );
 }
 
-function NumField({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+function NumField({ label, value, onChange, placeholder, help }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; help?: { title: string; body: string } }) {
   return (
     <label className="text-[11px] text-muted">
-      <div className="mb-1">{label}</div>
+      <div className="mb-1 flex items-center gap-1">
+        {help && <HoverHint {...help} size={11} />}
+        {label}
+      </div>
       <input type="number" step="0.5" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="h-8 w-32 rounded-lg border border-border bg-surface px-2 text-[13px] text-ink outline-none focus:border-accent-strong" />
     </label>
   );

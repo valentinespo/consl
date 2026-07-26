@@ -7,6 +7,7 @@ import { Card } from "@/components/ui";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
 import { useMoney } from "@/components/CurrencyProvider";
 import { saveSettings, runSyncNow } from "@/app/settings/actions";
+import { FLOOR_HELP, LEAD_HELP } from "@/lib/restock-help";
 
 export type AppSettings = {
   syncEnabled: boolean;
@@ -189,7 +190,7 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
           </p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Floor (months)" hint="Reorder once cover drops below this.">
+          <Field label="Floor (months)" hint="Reorder once cover drops below this." help={FLOOR_HELP}>
             <input
               type="number"
               step={0.5}
@@ -199,7 +200,7 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
               className={`${inputCls} tabular`}
             />
           </Field>
-          <Field label="Lead time (months)" hint="Order to sellable stock.">
+          <Field label="Lead time (months)" hint="Order to sellable stock." help={LEAD_HELP}>
             <input
               type="number"
               step={0.5}

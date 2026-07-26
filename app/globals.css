@@ -45,3 +45,27 @@ body {
   scrollbar-width: thin;
   scrollbar-color: #d4d4d4 transparent;
 }
+
+/* Hover explanations (HoverHint): fade in on mount, since they're portalled and can't use
+   a CSS group-hover the way the in-place popovers do. */
+@keyframes hint-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Deliberately no fill mode: the bubble's resting state is visible and the animation only
+   decorates the entrance. With `both` it holds the 0% frame whenever animations don't advance
+   (a backgrounded tab, say) and the explanation never appears at all. */
+.hint-in {
+  animation: hint-in 140ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hint-in {
+    animation: none;
+  }
+}
