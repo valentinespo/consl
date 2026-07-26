@@ -31,3 +31,8 @@ export async function setActiveOrgCookie(orgId: string): Promise<void> {
     secure: process.env.NODE_ENV === "production",
   });
 }
+
+/** Forget the selected company — used after deleting it, so the next request picks a live one. */
+export async function clearActiveOrgCookie(): Promise<void> {
+  (await cookies()).delete(ACTIVE_ORG_COOKIE);
+}

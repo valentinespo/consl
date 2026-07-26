@@ -6,7 +6,7 @@ import { currentUserId } from "@/lib/current-user";
 import { prisma } from "@/lib/prisma";
 import { prismaBase } from "@/lib/prisma-base";
 import { requireOwner } from "@/lib/membership";
-import { setActiveOrgCookie } from "@/lib/active-org";
+import { setActiveOrgCookie, clearActiveOrgCookie } from "@/lib/active-org";
 
 const INVITE_DAYS = 14;
 
@@ -111,4 +111,37 @@ export async function acceptInvite(token: string) {
   await setActiveOrgCookie(orgId);
   revalidatePath("/", "layout");
   return { ok: true as const, orgId };
+}
+
+/**
+ * Permanently delete the whole company and everything in it. Owners only.
+ *
+ * Every tenant table cascades from Organization, so one delete removes the products, lots,
+ * purchases, invoices, movements, documents and memberships along with it. There is no undo and
+ * no soft-delete, which is why the UI makes you type the name and confirm twice — and why the
+ * name is re-checked here rather than trusted from the client.
+ */
+export async function deleteOrganization(confirmName: string) {
+  const gate = await requireOwner();
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+
+  const org = await prismaBase.organization.findUnique({
+    where: { id: gate.orgId },
+    select: { id: true, name: true },
+  });
+  if (!org) return { ok: false as const, error: "Company not found." };
+
+  if (confirmName.trim() !== org.name.trim()) {
+    return { ok: false as const, error: "That doesn't match the company name." };
+  }
+
+  // Cascades across every tenant table via the Organization relations.
+  await prismaBase.organization.delete({ where: { id: org.id } });
+
+  // Drop the active-company cookie so the next request resolves a company they still belong to,
+  // rather than pointing at one that no longer exists.
+  await clearActiveOrgCookie();
+
+  revalidatePath("/", "layout");
+  return { ok: true as const };
 }

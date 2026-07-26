@@ -392,11 +392,8 @@ function FacilityWidget({
         <FacilityPie data={purchases} palette={VIOLETS} label="Purchases" />
       </div>
       <div className="mt-auto pt-4">
-        <div className="grid grid-cols-3 gap-2">
-          <MoneyChip label="Production value" value={prodTotal} dot={BLUES[1]} />
-          <MoneyChip label="Purchase spend" value={purchTotal} dot={VIOLETS[1]} />
-          <MoneyChip label="Grand total" value={prodTotal + purchTotal} dot="#171717" emphasize />
-        </div>
+        {/* Only the combined figure: the two halves are already the pies directly above. */}
+        <MoneyChip label="Grand total" value={prodTotal + purchTotal} dot="#171717" />
         <div className="mt-2 grid grid-cols-3 gap-2">
           <Mini label="Purchases" value={counts.purchases} />
           <Mini label="Transactions" value={counts.transactions} />
@@ -407,15 +404,15 @@ function FacilityWidget({
   );
 }
 
-function MoneyChip({ label, value, dot, emphasize }: { label: string; value: number; dot: string; emphasize?: boolean }) {
+function MoneyChip({ label, value, dot }: { label: string; value: number; dot: string }) {
   const { money } = useMoney();
   return (
-    <div className={`rounded-lg border px-3 py-2 ${emphasize ? "border-accent-strong bg-accent-soft" : "border-border bg-surface-2/60"}`}>
+    <div className="rounded-lg border border-border bg-surface-2/60 px-3 py-2">
       <div className="flex items-center gap-1.5">
         <span className="h-2 w-2 rounded-sm" style={{ background: dot }} />
         <span className="text-[10.5px] text-muted">{label}</span>
       </div>
-      <div className={`mt-0.5 text-[15px] font-semibold tabular ${emphasize ? "text-accent" : "text-ink"}`}>{money(value)}</div>
+      <div className="mt-0.5 text-[15px] font-semibold tabular text-ink">{money(value)}</div>
     </div>
   );
 }

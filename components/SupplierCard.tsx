@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Mail, Phone, MapPin, ChevronRight } from "lucide-react";
+import { Mail, Phone, MapPin, ChevronRight, Info, type LucideIcon } from "lucide-react";
 import { Card, FacilityTag } from "@/components/ui";
 import { getFmt } from "@/lib/fmt-server";
 import { initials } from "@/lib/initials";
@@ -38,23 +38,17 @@ export async function SupplierCard({ supplier: s }: { supplier: SupplierRow }) {
               <span className="truncate font-semibold text-ink">{s.name}</span>
               {s.facilityCode && <FacilityTag code={s.facilityCode} />}
             </div>
+            {/* Each line keeps its icon: `shrink-0` on the icon and `truncate` on the text, not on
+                the row. With truncate on the flex row the icon had no minimum width, so flexbox
+                collapsed it to 0px whenever the text was long — which is why a short email kept
+                its icon and a long address silently lost its pin. */}
             <div className="mt-0.5 space-y-0.5 text-[12px] text-muted">
-              {s.email && (
-                <div className="flex items-center gap-1.5 truncate">
-                  <Mail size={11} /> {s.email}
-                </div>
+              {s.email && <ContactLine icon={Mail} text={s.email} />}
+              {s.phone && <ContactLine icon={Phone} text={s.phone} />}
+              {s.address && <ContactLine icon={MapPin} text={s.address.replace(/\n/g, ", ")} />}
+              {!s.email && !s.phone && !s.address && (
+                <ContactLine icon={Info} text="No contact info yet" faded />
               )}
-              {s.phone && (
-                <div className="flex items-center gap-1.5">
-                  <Phone size={11} /> {s.phone}
-                </div>
-              )}
-              {s.address && (
-                <div className="flex items-center gap-1.5 truncate">
-                  <MapPin size={11} /> {s.address.replace(/\n/g, ", ")}
-                </div>
-              )}
-              {!s.email && !s.phone && !s.address && <div className="text-muted/70">No contact info yet</div>}
             </div>
           </div>
           <ChevronRight size={16} className="shrink-0 text-muted" />
@@ -75,6 +69,24 @@ function Stat({ label, value }: { label: string; value: string }) {
     <div>
       <div className="tabular text-[15px] font-semibold text-ink">{value}</div>
       <div className="text-[11px] text-muted">{label}</div>
+    </div>
+  );
+}
+
+/** One contact line. The icon never shrinks; only the text truncates. */
+function ContactLine({
+  icon: Icon,
+  text,
+  faded,
+}: {
+  icon: LucideIcon;
+  text: string;
+  faded?: boolean;
+}) {
+  return (
+    <div className={`flex items-center gap-1.5 ${faded ? "text-muted/70" : ""}`}>
+      <Icon size={11} className="shrink-0" />
+      <span className="truncate">{text}</span>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { prismaBase } from "@/lib/prisma-base";
 import { CompanyEditor } from "@/components/CompanyEditor";
 import { TeamCard } from "@/components/TeamCard";
+import { DeleteOrganization } from "@/components/DeleteOrganization";
 import { date as fmtDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -59,6 +60,7 @@ export default async function CompanySettingsPage() {
           expiresAt: fmtDate(iv.expiresAt, cur),
         }))}
       />
+      <DeleteOrganization orgName={org.name} isOwner={role === "owner"} />
     </>
   );
 }
