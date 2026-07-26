@@ -11,6 +11,17 @@ import { revalidatePath } from "next/cache";
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(n)));
 
 /** Save the company profile — the name shown in the app and the sender block printed on POs. */
+/** True when Intl recognises the tag — guards against a typo breaking every formatted value. */
+function isValidLocale(tag: string): boolean {
+  const t = tag.trim();
+  if (!t) return false;
+  try {
+    return Intl.NumberFormat.supportedLocalesOf([t]).length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export async function updateCompanyProfile(input: {
   name: string;
   legalName: string;
@@ -19,6 +30,7 @@ export async function updateCompanyProfile(input: {
   phone: string;
   currencySymbol: string;
   currencyCode: string;
+  locale: string;
 }) {
   const orgId = await getCurrentOrgId();
   if (!orgId) return { ok: false as const, error: "No company in context" };
@@ -35,6 +47,9 @@ export async function updateCompanyProfile(input: {
       phone: input.phone.trim() || null,
       currencySymbol: input.currencySymbol.trim() || "$",
       currencyCode: input.currencyCode.trim().toUpperCase() || "USD",
+      // Drives how money, quantities and dates are written. Rejected if it isn't a real locale,
+      // so a typo can't leave every number in the app unformatted.
+      locale: isValidLocale(input.locale) ? input.locale.trim() : "en-US",
     },
   });
   revalidatePath("/", "layout");

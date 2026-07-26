@@ -3,7 +3,8 @@
 import { useEffect, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { X, Check, RefreshCw, Clock } from "lucide-react";
+import Link from "next/link";
+import { X, Check, RefreshCw, Clock, Building2, ChevronRight } from "lucide-react";
 import { getAppSettings, saveSettings, runSyncNow } from "@/app/settings/actions";
 
 type Settings = Awaited<ReturnType<typeof getAppSettings>>;
@@ -73,6 +74,26 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           <div className="px-5 py-10 text-center text-[13px] text-muted">Loading…</div>
         ) : (
           <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
+            {/* Company, team and currency live on their own page — this is the way in. */}
+            <Link
+              href="/settings/company"
+              onClick={onClose}
+              className="mb-4 flex items-center gap-3 rounded-xl border border-border bg-surface-2/50 px-3 py-2.5 transition-colors hover:border-accent-strong hover:bg-accent-soft/30"
+            >
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
+                <Building2 size={16} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13px] font-medium text-ink">Company &amp; team</span>
+                <span className="block text-[11.5px] text-muted">
+                  Business details, currency &amp; number format, and who has access
+                </span>
+              </span>
+              <ChevronRight size={16} className="shrink-0 text-muted" />
+            </Link>
+
+            <div className="mb-4 border-t border-line" />
+
             {/* Automatic daily sync */}
             <div className="mb-1 flex items-center justify-between">
               <div className="text-[13px] font-semibold text-ink">Automatic daily sync</div>

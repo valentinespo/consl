@@ -41,6 +41,7 @@ export default async function CompanySettingsPage() {
           phone: org.phone,
           currencySymbol: org.currencySymbol,
           currencyCode: org.currencyCode,
+          locale: org.locale,
         }}
       />
       <TeamCard
