@@ -17,7 +17,6 @@ import {
   Settings,
 } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
-import { SettingsModal } from "@/components/SettingsModal";
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
@@ -41,7 +40,6 @@ export function Sidebar({
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
-  const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <aside className="flex h-full w-[230px] shrink-0 flex-col border-r border-border bg-surface">
       <div className="flex items-center gap-2 px-5 py-5">
@@ -84,17 +82,17 @@ export function Sidebar({
             <div className="text-[11px] text-muted">Production &amp; Inventory</div>
           </div>
         </div>
-        <button
-          onClick={() => setSettingsOpen(true)}
+        <Link
+          href="/settings"
+          onClick={onNavigate}
           aria-label="Settings"
           title="Settings"
           className="shrink-0 rounded-lg p-1.5 text-muted transition-colors hover:bg-surface-2 hover:text-ink-soft"
         >
           <Settings size={17} strokeWidth={2} />
-        </button>
+        </Link>
       </div>
 
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
     </aside>
   );
 }

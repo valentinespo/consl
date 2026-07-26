@@ -1,11 +1,9 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { currentUserId } from "@/lib/current-user";
 import { getCurrentOrg } from "@/lib/org";
 import { currentRole } from "@/lib/membership";
 import { prisma } from "@/lib/prisma";
 import { prismaBase } from "@/lib/prisma-base";
-import { PageHeader } from "@/components/ui";
 import { CompanyEditor } from "@/components/CompanyEditor";
 import { TeamCard } from "@/components/TeamCard";
 import { date as fmtDate } from "@/lib/format";
@@ -28,10 +26,6 @@ export default async function CompanySettingsPage() {
 
   return (
     <>
-      <Link href="/" className="mb-3 inline-block text-[12.5px] font-medium text-muted hover:text-ink-soft">
-        ← Dashboard
-      </Link>
-      <PageHeader title="Company" subtitle="Your business details, used across the app and on generated documents." />
       <CompanyEditor
         company={{
           name: org.name,
