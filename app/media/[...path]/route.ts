@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "@/lib/prisma";
+import { getCurrentOrg } from "@/lib/org";
 
 // Serves user-uploaded files from the persistent volume (UPLOAD_DIR). These are invoices, BOLs,
 // COAs and product photos — tenant data, so a signed-in session (enforced by middleware) is not
@@ -18,17 +19,28 @@ const TYPES: Record<string, string> = {
   pdf: "application/pdf",
 };
 
-/** True when some row in the caller's organization references this exact URL. Each query runs
- *  through the tenant-scoped client, so another org's document simply isn't found. */
+/**
+ * True when something in the caller's organization references this exact URL.
+ *
+ * Every column that can hold a stored-file URL has to be listed here — a file that nothing claims
+ * is treated as not yours and 404s. Keep this in step with the `saveImage` callers:
+ * app/documents, app/catalog, app/purchase-orders and app/settings (the company's own branding).
+ *
+ * The per-row lookups go through the tenant-scoped client, so another org's file simply isn't
+ * found. The organization itself is cross-tenant, so its branding is compared against the caller's
+ * current company instead.
+ */
 async function callerOwns(url: string): Promise<boolean> {
-  const [doc, product, material, supplier, po] = await Promise.all([
+  const [org, doc, product, material, supplier, po] = await Promise.all([
+    getCurrentOrg().catch(() => null),
     prisma.document.findFirst({ where: { fileUrl: url }, select: { id: true } }),
     prisma.product.findFirst({ where: { imageUrl: url }, select: { id: true } }),
     prisma.materialType.findFirst({ where: { imageUrl: url }, select: { id: true } }),
     prisma.supplier.findFirst({ where: { photoUrl: url }, select: { id: true } }),
     prisma.purchaseOrder.findFirst({ where: { pdfUrl: url }, select: { id: true } }),
   ]);
-  return Boolean(doc || product || material || supplier || po);
+  const isOwnBranding = !!org && (org.logoUrl === url || org.iconUrl === url);
+  return isOwnBranding || Boolean(doc || product || material || supplier || po);
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ path: string[] }> }) {
