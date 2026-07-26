@@ -20,7 +20,7 @@ const PRESETS: { label: string; code: string; symbol: string; locale: string }[]
 const inputCls =
   "h-10 w-full rounded-lg border border-border bg-surface px-3 text-[14px] text-ink outline-none focus:border-accent-strong";
 
-export function WelcomeForm() {
+export function WelcomeForm({ additional = false }: { additional?: boolean }) {
   const [name, setName] = useState("");
   const [presetIdx, setPresetIdx] = useState(0);
   const [custom, setCustom] = useState(false);
@@ -56,10 +56,13 @@ export function WelcomeForm() {
         <span className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-accent-soft text-accent">
           <Building2 size={20} />
         </span>
-        <h1 className="text-[21px] font-semibold tracking-tight text-ink">Set up your company</h1>
+        <h1 className="text-[21px] font-semibold tracking-tight text-ink">
+          {additional ? "Add another company" : "Set up your company"}
+        </h1>
         <p className="mt-1.5 text-[13.5px] leading-relaxed text-muted">
-          This is the workspace your products, purchases and production live in. You can change any
-          of it later in Settings.
+          {additional
+            ? "A separate workspace with its own products, stock and books. You can switch between your companies at any time from the sidebar."
+            : "This is the workspace your products, purchases and production live in. You can change any of it later in Settings."}
         </p>
 
         <div className="mt-6 space-y-4">
@@ -124,7 +127,7 @@ export function WelcomeForm() {
             disabled={pending || !name.trim()}
             className="h-10 w-full rounded-lg bg-ink text-[14px] font-medium text-white hover:opacity-90 disabled:opacity-40"
           >
-            {pending ? "Creating…" : "Create company"}
+            {pending ? "Creating…" : additional ? "Create company" : "Create company"}
           </button>
         </div>
       </div>

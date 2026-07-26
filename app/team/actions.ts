@@ -6,6 +6,7 @@ import { currentUserId } from "@/lib/current-user";
 import { prisma } from "@/lib/prisma";
 import { prismaBase } from "@/lib/prisma-base";
 import { requireOwner } from "@/lib/membership";
+import { setActiveOrgCookie } from "@/lib/active-org";
 
 const INVITE_DAYS = 14;
 
@@ -78,7 +79,8 @@ export async function removeMember(clerkUserId: string) {
  * Deliberately unscoped: the caller has no organization yet, so the tenant client would refuse
  * every query. The random token in the link is the credential. The invite's email is shown to the
  * owner for their own reference but is not enforced here — Clerk owns identity, and requiring the
- * addresses to match would lock out anyone who signs up with an alias.
+ * addresses to match would lock out anyone who signs up with an alias. Joining adds a company; it
+ * never replaces one they already belong to.
  */
 export async function acceptInvite(token: string) {
   const userId = await currentUserId();
@@ -90,11 +92,14 @@ export async function acceptInvite(token: string) {
   if (invite.acceptedAt) return { ok: false as const, error: "This invite has already been used." };
   if (invite.expiresAt < new Date()) return { ok: false as const, error: "This invite has expired. Ask for a new one." };
 
-  const already = await prismaBase.membership.findFirst({ where: { clerkUserId: userId }, select: { orgId: true } });
+  // Belonging to several companies is normal — only re-joining the same one is a no-op.
+  const already = await prismaBase.membership.findFirst({
+    where: { clerkUserId: userId, orgId },
+    select: { id: true },
+  });
   if (already) {
-    return already.orgId === orgId
-      ? { ok: true as const, orgId }
-      : { ok: false as const, error: "You already belong to another company." };
+    await setActiveOrgCookie(orgId);
+    return { ok: true as const, orgId };
   }
 
   await prismaBase.$transaction(async (tx) => {
@@ -102,6 +107,8 @@ export async function acceptInvite(token: string) {
     await tx.invite.update({ where: { id: invite.id }, data: { acceptedAt: new Date(), acceptedBy: userId } });
   });
 
+  // Land in the company they just joined.
+  await setActiveOrgCookie(orgId);
   revalidatePath("/", "layout");
   return { ok: true as const, orgId };
 }

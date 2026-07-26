@@ -3,6 +3,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { cache } from "react";
 import { auth } from "@clerk/nextjs/server";
 import { prismaBase } from "@/lib/prisma-base";
+import { readActiveOrgCookie } from "@/lib/active-org";
+import { devAuthBypass } from "@/lib/current-user";
 
 // Explicit org context for background jobs / scripts (no logged-in user).
 const orgStore = new AsyncLocalStorage<{ orgId: string }>();
@@ -13,22 +15,31 @@ export function runWithOrg<T>(orgId: string, fn: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Resolve the logged-in user's org from their membership (cached per request).
+ * Resolve which company the logged-in user is currently working in (cached per request).
  *
- * A user with no membership gets no org, and every tenant query then fails closed. There is
+ * A user can belong to several. The active-org cookie says which one is open; it is honoured only
+ * when a matching membership still exists, so a stale or forged cookie can't reach a company they
+ * were removed from. With no usable cookie, fall back to their oldest membership.
+ *
+ * A user with no membership at all gets no org, and every tenant query then fails closed. There is
  * deliberately no auto-join: a "first user claims the seed org" bootstrap would hand the whole
  * dataset to whoever signs up next any time an org is left with zero members — which is exactly
  * the state after a database restore, a staging clone, or a deleted membership row.
- * Memberships are created explicitly (org creation / invite), never inferred from signing in.
  */
 const orgIdFromAuth = cache(async (): Promise<string | null> => {
   const { userId } = await auth();
   if (!userId) return null;
-  const existing = await prismaBase.membership.findFirst({
+
+  const memberships = await prismaBase.membership.findMany({
     where: { clerkUserId: userId },
-    orderBy: { createdAt: "asc" }, // stable pick until there's an org switcher
+    select: { orgId: true },
+    orderBy: { createdAt: "asc" },
   });
-  return existing?.orgId ?? null;
+  if (memberships.length === 0) return null;
+
+  const selected = await readActiveOrgCookie();
+  if (selected && memberships.some((m) => m.orgId === selected)) return selected;
+  return memberships[0].orgId;
 });
 
 /**
@@ -41,7 +52,14 @@ const orgIdFromAuth = cache(async (): Promise<string | null> => {
 export async function getCurrentOrgId(): Promise<string | null> {
   const explicit = orgStore.getStore()?.orgId;
   if (explicit) return explicit;
-  if (process.env.NODE_ENV === "development" && process.env.ALLOW_DEV_AUTH_BYPASS === "1") {
+  if (devAuthBypass) {
+    // There's no Clerk session to own a selection, so the cookie is taken at face value — but only
+    // for organizations that actually exist, so a stale cookie can't wedge the app.
+    const selected = await readActiveOrgCookie();
+    if (selected) {
+      const exists = await prismaBase.organization.findUnique({ where: { id: selected }, select: { id: true } });
+      if (exists) return selected;
+    }
     return process.env.DEV_ORG_ID ?? null;
   }
   return await orgIdFromAuth();

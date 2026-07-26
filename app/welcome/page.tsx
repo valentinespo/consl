@@ -5,10 +5,16 @@ import { WelcomeForm } from "@/components/WelcomeForm";
 
 export const dynamic = "force-dynamic";
 
-/** Where a signed-in user lands when they don't belong to a company yet. */
-export default async function WelcomePage() {
+/**
+ * Setting up a company. Reached automatically when you belong to none, or deliberately via
+ * "Create new company" in the switcher — hence `?new=1`, which keeps the form available to
+ * someone who already has one.
+ */
+export default async function WelcomePage({ searchParams }: { searchParams: Promise<{ new?: string }> }) {
   if (!(await currentUserId())) redirect("/sign-in");
-  // Already in a company (including anyone arriving here by typing the URL) — nothing to set up.
-  if (await getCurrentOrgId()) redirect("/");
-  return <WelcomeForm />;
+  const { new: isAdditional } = await searchParams;
+  // Only bounce people who landed here with nothing to do: they already have a company and
+  // didn't ask to add another.
+  if (!isAdditional && (await getCurrentOrgId())) redirect("/");
+  return <WelcomeForm additional={isAdditional === "1"} />;
 }

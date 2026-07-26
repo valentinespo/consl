@@ -17,6 +17,9 @@ import {
   Settings,
 } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
+import { AppLogo } from "@/components/AppLogo";
+import { OrgSwitcher } from "@/components/OrgSwitcher";
+import type { MyOrg } from "@/lib/orgs";
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
@@ -32,27 +35,22 @@ const NAV = [
 
 export function Sidebar({
   orgName,
-  logoUrl,
+  orgs = [],
   onNavigate,
 }: {
   orgName?: string | null;
-  logoUrl?: string | null;
+  orgs?: MyOrg[];
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
   return (
     <aside className="flex h-full w-[230px] shrink-0 flex-col border-r border-border bg-surface">
-      <div className="flex items-center gap-2 px-5 py-5">
-        {/* Each workspace shows its own logo, or its name — never a hardcoded brand mark. */}
-        {logoUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={logoUrl} alt={orgName ?? "Logo"} className="h-[22px] w-auto object-contain" />
-        ) : (
-          <span className="truncate text-[15px] font-semibold tracking-tight text-ink">
-            {orgName ?? "Inventory"}
-          </span>
-        )}
+      {/* The product's mark, then which company you're in — two different things, stacked. */}
+      <div className="px-5 pb-3 pt-5">
+        <AppLogo />
       </div>
+      <OrgSwitcher orgs={orgs} onNavigate={onNavigate} />
+      <div className="mt-3 border-t border-border" />
 
       <nav className="flex-1 px-3 py-2">
         {NAV.map((item) => {

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { currentUserId } from "@/lib/current-user";
 import { prismaBase } from "@/lib/prisma-base";
+import { setActiveOrgCookie } from "@/lib/active-org";
 
 /** A URL-safe slug from the company name, with a numeric suffix if it's taken. */
 async function uniqueSlug(name: string): Promise<string> {
@@ -29,7 +30,9 @@ export type NewCompany = {
 };
 
 /**
- * Create a company for the signed-in user and make them its owner.
+ * Create a company for the signed-in user and make them its owner. A person can belong to several
+ * — running more than one business, or being invited into a client's — so this is not limited to
+ * their first.
  *
  * Uses the unscoped client throughout: the caller has no organization yet, so the tenant-scoped
  * client would refuse every query. Both rows are written in one transaction — an Organization
@@ -41,10 +44,6 @@ export async function createCompany(input: NewCompany) {
 
   const name = input.name.trim().slice(0, 120);
   if (!name) return { ok: false as const, error: "Give your company a name." };
-
-  // One company per person for now: if they already belong to one, don't quietly make another.
-  const existing = await prismaBase.membership.findFirst({ where: { clerkUserId: userId }, select: { orgId: true } });
-  if (existing) return { ok: true as const, orgId: existing.orgId, existed: true };
 
   const currencyCode = /^[A-Za-z]{3}$/.test(input.currencyCode) ? input.currencyCode.toUpperCase() : "USD";
   const currencySymbol = input.currencySymbol.trim().slice(0, 4) || "$";
@@ -59,6 +58,8 @@ export async function createCompany(input: NewCompany) {
     return created;
   });
 
+  // Open the company that was just created, rather than leaving them in a previous one.
+  await setActiveOrgCookie(org.id);
   revalidatePath("/", "layout");
   return { ok: true as const, orgId: org.id };
 }

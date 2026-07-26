@@ -8,6 +8,7 @@ import { AppShell } from "@/components/AppShell";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { currentUserId } from "@/lib/current-user";
 import { getCurrentOrg } from "@/lib/org";
+import { listMyOrgs } from "@/lib/orgs";
 
 /** Pages that must stay reachable before you belong to a company. */
 const NO_ORG_OK = ["/sign-in", "/sign-up", "/welcome", "/join"];
@@ -18,6 +19,7 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 /** Tab title follows the signed-in company, falling back before anyone has signed in. */
 export async function generateMetadata(): Promise<Metadata> {
   const org = await getCurrentOrg().catch(() => null);
+  const orgs = await listMyOrgs().catch(() => []);
   const name = org?.name?.trim();
   return {
     title: name ? `${name} — Production & Inventory` : "Production & Inventory",
@@ -33,13 +35,14 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     if (await currentUserId()) redirect("/welcome");
   }
   const org = await getCurrentOrg().catch(() => null);
+  const orgs = await listMyOrgs().catch(() => []);
   return (
     <ClerkProvider signInUrl="/sign-in" signUpUrl="/sign-up" afterSignOutUrl="/sign-in">
       <html lang="en" className={`${inter.variable} ${geistMono.variable} h-full antialiased`}>
         <body className="min-h-full">
           <AppShell
             orgName={org?.name ?? null}
-            logoUrl={org?.logoUrl ?? null}
+            orgs={orgs}
             currencySymbol={org?.currencySymbol ?? "$"}
             locale={org?.locale ?? "en-US"}
             currencyCode={org?.currencyCode ?? "USD"}
