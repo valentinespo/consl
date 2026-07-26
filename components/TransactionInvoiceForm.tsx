@@ -190,7 +190,14 @@ export function TransactionInvoiceForm({
       {/* Invoice header */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Field label="Supplier">
-          <SearchSelect value={supplier} onChange={setSupplier} options={suppliers} placeholder="Select supplier…" />
+          <SearchSelect
+            value={supplier}
+            onChange={setSupplier}
+            options={suppliers}
+            placeholder="Select supplier…"
+            createLabel="Create new supplier"
+            createPlaceholder="Name the supplier, then press Enter"
+          />
         </Field>
         <Field label="Date">
           <input type="date" value={dateISO} onChange={(e) => setDateISO(e.target.value)} className={inputCls} />
@@ -235,7 +242,8 @@ export function TransactionInvoiceForm({
                     onChange={(v) => patch(l.key, { category: v })}
                     options={catOptions}
                     placeholder="Category…"
-                    createLabel={(t) => `+ New category “${t}”`}
+                    createLabel="Create new category"
+                    createPlaceholder="Name the category, then press Enter"
                   />
                 </MiniField>
 

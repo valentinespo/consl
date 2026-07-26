@@ -15,7 +15,7 @@ export type Branding = {
 };
 
 /** One upload slot. `square` frames an isologo; the wide one previews on its band colour. */
-function ImageSlot({
+export function ImageSlot({
   kind,
   url,
   title,
@@ -153,30 +153,19 @@ export function BrandingCard({
     <Card className="mt-4">
       <div className="mb-1 text-[12px] font-medium uppercase tracking-wide text-muted">Branding</div>
       <p className="mb-4 max-w-[62ch] text-[12.5px] text-muted">
-        Purchase orders go out to your suppliers under your name, so they use your logo and colours —
-        not ours. The square mark is what you&apos;ll see beside this company in the switcher.
+        Purchase orders go out to your suppliers under your name, so they carry your logo and
+        colours — not ours.
       </p>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <ImageSlot
-          kind="logo"
-          url={branding.logoUrl}
-          title="Purchase order logo"
-          hint="Wide mark printed across the top of every PO. PNG with a transparent background works best."
-          backdrop={band}
-          disabled={!isOwner}
-          onChanged={refresh}
-        />
-        <ImageSlot
-          kind="icon"
-          url={branding.iconUrl}
-          title="Company mark (isologo)"
-          hint="Square icon shown next to the company name in the switcher, under the SellerOps logo."
-          square
-          disabled={!isOwner}
-          onChanged={refresh}
-        />
-      </div>
+      <ImageSlot
+        kind="logo"
+        url={branding.logoUrl}
+        title="Purchase order logo"
+        hint="Wide mark printed across the top of every PO. PNG with a transparent background works best."
+        backdrop={band}
+        disabled={!isOwner}
+        onChanged={refresh}
+      />
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <ColorField label="Main colour" hint="Headings, the dark bar and totals." value={ink} onChange={onInk} disabled={!isOwner} />

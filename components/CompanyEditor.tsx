@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui";
-import { BrandingCard, type Branding } from "@/components/BrandingCard";
+import { BrandingCard, ImageSlot, type Branding } from "@/components/BrandingCard";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
 import { AddressInput } from "@/components/AddressField";
 import { updateCompanyProfile } from "@/app/settings/actions";
@@ -120,6 +120,18 @@ export function CompanyEditor({ company, isOwner }: { company: CompanyForEdit; i
         Shown across the app and printed as the sender on every purchase order you generate.
       </p>
       <div className="space-y-3">
+        {/* The company's own mark sits with its name — that's the pair you see in the switcher. */}
+        <div className="sm:max-w-[260px]">
+          <ImageSlot
+            kind="icon"
+            url={company.iconUrl}
+            title="Company mark (isologo)"
+            hint="Square icon shown beside the company name in the switcher."
+            square
+            disabled={!isOwner}
+            onChanged={() => router.refresh()}
+          />
+        </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Company name" hint="Shown in the sidebar and browser tab.">
             <input value={name} onChange={(e) => setName(e.target.value)} className={`${inputCls} font-semibold`} />

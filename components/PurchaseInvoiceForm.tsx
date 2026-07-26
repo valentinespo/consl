@@ -169,7 +169,14 @@ export function PurchaseInvoiceForm({
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Field label="Supplier">
-          <SearchSelect value={supplier} onChange={setSupplier} options={options.suppliers} placeholder="Select supplier…" />
+          <SearchSelect
+            value={supplier}
+            onChange={setSupplier}
+            options={options.suppliers}
+            placeholder="Select supplier…"
+            createLabel="Create new supplier"
+            createPlaceholder="Name the supplier, then press Enter"
+          />
         </Field>
         <Field label="Date">
           <input type="date" value={dateISO} onChange={(e) => setDateISO(e.target.value)} className={inputCls} />
