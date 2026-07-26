@@ -6,6 +6,11 @@ const isPublic = createRouteMatcher(["/sign-in(.*)", "/sign-up(.*)"]);
 
 const enforced = clerkMiddleware(async (auth, req) => {
   if (!isPublic(req)) await auth.protect();
+  // Pass the path through as a request header so the root layout can tell whether the user is
+  // already on the onboarding pages before deciding to redirect them there.
+  const headers = new Headers(req.headers);
+  headers.set("x-pathname", req.nextUrl.pathname);
+  return NextResponse.next({ request: { headers } });
 });
 
 // Local-dev escape hatch: skip Clerk so the app can be run without signing in. Gated on an

@@ -31,7 +31,9 @@ export function AppShell({
     setOpen(false);
   }, [pathname]);
 
-  if (pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up")) return <>{children}</>;
+  // Auth and onboarding screens render bare — there's no company yet to put in the chrome.
+  const BARE = ["/sign-in", "/sign-up", "/welcome", "/join"];
+  if (BARE.some((p) => pathname.startsWith(p))) return <>{children}</>;
 
   return (
     <CurrencyProvider symbol={currencySymbol} locale={locale} code={currencyCode}>

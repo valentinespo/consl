@@ -45,6 +45,7 @@ model Organization {
   transactionInvoices     TransactionInvoice[]
   transactions            Transaction[]
   memberships             Membership[]
+  invites                 Invite[]
   lotLines                LotLine[]
   lotMaterials            LotMaterial[]
   purchaseOrderLines      PurchaseOrderLine[]
@@ -63,6 +64,27 @@ model Membership {
 
   @@unique([clerkUserId, orgId])
   @@index([clerkUserId])
+}
+
+/// A pending invitation to join an Organization. The token in the link is the credential, so the
+/// accept path looks it up on the UNSCOPED client — the invitee has no organization yet, and the
+/// whole point is to give them one.
+model Invite {
+  id           String       @id @default(cuid())
+  // Optional to match every other tenant table: the scoping extension supplies orgId on write,
+  // so a required relation would force it into every call site's type and defeat the point.
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId        String?
+  email        String // who it was meant for; shown to the owner, not enforced on accept
+  token        String       @unique // random, unguessable — this is what authorises joining
+  role         String       @default("member") // owner | member
+  invitedBy    String? // clerkUserId of whoever sent it
+  createdAt    DateTime     @default(now())
+  expiresAt    DateTime
+  acceptedAt   DateTime?
+  acceptedBy   String? // clerkUserId that used it
+
+  @@index([orgId])
 }
 
 /// A place inventory lives or is produced: a co-packer, your own warehouse, or a 3PL you

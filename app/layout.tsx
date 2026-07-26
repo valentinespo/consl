@@ -1,10 +1,16 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { Inter, Geist_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 import { AppShell } from "@/components/AppShell";
-import { ensureMembership } from "@/lib/tenant";
+import { getCurrentOrgId } from "@/lib/tenant";
+import { currentUserId } from "@/lib/current-user";
 import { getCurrentOrg } from "@/lib/org";
+
+/** Pages that must stay reachable before you belong to a company. */
+const NO_ORG_OK = ["/sign-in", "/sign-up", "/welcome", "/join"];
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
@@ -20,8 +26,12 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  // First authenticated load links the user to their company.
-  await ensureMembership();
+  // A signed-in user who doesn't belong to a company yet gets sent to set one up. Without this
+  // they'd land on the dashboard and every query would fail — there's no tenant to read from.
+  const pathname = (await headers()).get("x-pathname") ?? "";
+  if (!NO_ORG_OK.some((p) => pathname.startsWith(p)) && !(await getCurrentOrgId())) {
+    if (await currentUserId()) redirect("/welcome");
+  }
   const org = await getCurrentOrg().catch(() => null);
   return (
     <ClerkProvider signInUrl="/sign-in" signUpUrl="/sign-up" afterSignOutUrl="/sign-in">
