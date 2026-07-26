@@ -43,6 +43,7 @@ export function useMoney() {
       qty: (n: number | null | undefined) => fmtQty(n, cur),
       date: (d: Date | string | null | undefined) => fmtDate(d, cur),
       locale: cur.locale,
+      symbol: cur.symbol, // for axis labels and other places that need their own number format
     }),
     [cur],
   );

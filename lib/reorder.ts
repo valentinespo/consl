@@ -74,7 +74,12 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
     status = "ship";
     statusLabel = "Ship stock";
     shipQty = Math.min(r.atLocations, gapToTarget);
-    if (A < r.leadMonths) note = `channel is ${Math.round((r.leadMonths - A) * MONTH)}d short`;
+    // Two different warnings. `total` counts everything you own or have coming, so if that still
+    // falls short of the lead time then shipping alone can't fix it and a run has to start too —
+    // same measure and wording the reorder branches use. Otherwise shipping does cover it, and the
+    // only thing worth saying is how far behind the channel has already fallen.
+    if (total < r.leadMonths) note = `off by ${Math.round((r.leadMonths - total) * MONTH)}d after shipping`;
+    else if (A < r.leadMonths) note = `channel is ${Math.round((r.leadMonths - A) * MONTH)}d short`;
   } else if (hasPO) {
     if (A < Tc) {
       status = "oos";

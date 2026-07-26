@@ -56,12 +56,12 @@ const STATUS_HELP: Record<Status, { title: string; body: string }> = {
   oos: {
     title: "Out of stock",
     body:
-      "A lot is coming, but at the current sales rate the channel runs out before it arrives. The number of days is how long you'll be unable to sell. Expedite it or ship stock you already hold.",
+      "A lot is coming, but at the current sales rate the channel runs out before it arrives. The number of days is how long you'll be unable to sell. Expediting the lot is the only thing that closes the gap — if you were holding units of your own, this would say Ship stock instead.",
   },
   ship: {
     title: "Ship stock",
     body:
-      "You already have finished units at your own locations while the channel is below its floor. Send those first — producing more would leave stock sitting in two places.",
+      "You already have finished units at your own locations while the channel is below its floor. Send those first — producing more would leave stock sitting in two places. If shipping everything still isn't enough, the row says how many days short you'd remain.",
   },
 };
 
