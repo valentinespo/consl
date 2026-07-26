@@ -36,7 +36,12 @@ export default async function CompanySettingsPage() {
           currencySymbol: org.currencySymbol,
           currencyCode: org.currencyCode,
           locale: org.locale,
+          brandInk: org.brandInk,
+          brandBand: org.brandBand,
+          logoUrl: org.logoUrl,
+          iconUrl: org.iconUrl,
         }}
+        isOwner={role === "owner"}
       />
       <TeamCard
         isOwner={role === "owner"}

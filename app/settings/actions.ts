@@ -7,10 +7,17 @@ import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
 import { syncAmazonCore } from "@/lib/sync";
 import { getRestock } from "@/lib/restock";
 import { revalidatePath } from "next/cache";
+import { requireOwner } from "@/lib/membership";
+import { saveImage, deleteStored, safeKeySegment } from "@/lib/storage";
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(n)));
 
-/** Save the company profile — the name shown in the app and the sender block printed on POs. */
+/** A #rrggbb colour, or the fallback. Anything else would silently print as black on a PO. */
+function hexOr(value: string, fallback: string): string {
+  const v = value.trim();
+  return /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : fallback;
+}
+
 /** True when Intl recognises the tag — guards against a typo breaking every formatted value. */
 function isValidLocale(tag: string): boolean {
   const t = tag.trim();
@@ -22,6 +29,8 @@ function isValidLocale(tag: string): boolean {
   }
 }
 
+/** Save the company profile — the name shown in the app, and the sender block, colours and logo
+ *  printed on every purchase order. */
 export async function updateCompanyProfile(input: {
   name: string;
   legalName: string;
@@ -31,6 +40,8 @@ export async function updateCompanyProfile(input: {
   currencySymbol: string;
   currencyCode: string;
   locale: string;
+  brandInk: string;
+  brandBand: string;
 }) {
   const orgId = await getCurrentOrgId();
   if (!orgId) return { ok: false as const, error: "No company in context" };
@@ -50,6 +61,9 @@ export async function updateCompanyProfile(input: {
       // Drives how money, quantities and dates are written. Rejected if it isn't a real locale,
       // so a typo can't leave every number in the app unformatted.
       locale: isValidLocale(input.locale) ? input.locale.trim() : "en-US",
+      // Printed on purchase orders. A malformed value would render as black, so fall back.
+      brandInk: hexOr(input.brandInk, "#1f2937"),
+      brandBand: hexOr(input.brandBand, "#eef2f7"),
     },
   });
   revalidatePath("/", "layout");
@@ -123,4 +137,71 @@ export async function runSyncNow() {
     console.error("[runSyncNow]", e);
     return { ok: false as const, error: "The sync couldn't complete. Please try again." };
   }
+}
+
+
+const BRAND_MAX_BYTES = 4 * 1024 * 1024; // 4 MB — these are logos, not photographs
+const BRAND_OK_EXT = new Set(["png", "jpg", "jpeg", "webp"]);
+
+export type BrandImageKind = "logo" | "icon";
+
+/**
+ * Upload one of the company's two marks. Owners only.
+ *  - "logo": the wide one printed across the top of every purchase order.
+ *  - "icon": the square one shown beside the company name in the switcher.
+ * SVG is deliberately NOT accepted: an SVG can carry script, and the rest of the app rejects it
+ * on uploads for that reason. A PNG with transparency does the same job for a logo.
+ */
+export async function uploadBrandImage(formData: FormData) {
+  const gate = await requireOwner();
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+
+  const kind = String(formData.get("kind")) as BrandImageKind;
+  if (kind !== "logo" && kind !== "icon") return { ok: false as const, error: "Unknown image" };
+
+  const file = formData.get("file") as File | null;
+  if (!file || file.size === 0) return { ok: false as const, error: "No file" };
+  if (file.size > BRAND_MAX_BYTES) return { ok: false as const, error: "File too large (max 4MB)" };
+
+  const ext = (file.name.split(".").pop() ?? "").toLowerCase();
+  if (!BRAND_OK_EXT.has(ext)) return { ok: false as const, error: "Use a PNG, JPG or WEBP" };
+
+  // Type comes from the validated extension, never the client-supplied one.
+  const type = `image/${ext === "jpg" ? "jpeg" : ext}`;
+  const key = `brand/${safeKeySegment(gate.orgId)}-${kind}-${Date.now()}.${ext}`;
+  const url = await saveImage(key, Buffer.from(await file.arrayBuffer()), type);
+
+  const previous = await prismaBase.organization.findUnique({
+    where: { id: gate.orgId },
+    select: { logoUrl: true, iconUrl: true },
+  });
+  await prismaBase.organization.update({
+    where: { id: gate.orgId },
+    data: kind === "logo" ? { logoUrl: url } : { iconUrl: url },
+  });
+  // Drop the file it replaced so old marks don't pile up in storage.
+  await deleteStored(kind === "logo" ? previous?.logoUrl : previous?.iconUrl);
+
+  revalidatePath("/", "layout");
+  return { ok: true as const, url };
+}
+
+/** Remove one of the marks and delete the stored file. Owners only. */
+export async function removeBrandImage(kind: BrandImageKind) {
+  const gate = await requireOwner();
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  if (kind !== "logo" && kind !== "icon") return { ok: false as const, error: "Unknown image" };
+
+  const org = await prismaBase.organization.findUnique({
+    where: { id: gate.orgId },
+    select: { logoUrl: true, iconUrl: true },
+  });
+  await prismaBase.organization.update({
+    where: { id: gate.orgId },
+    data: kind === "logo" ? { logoUrl: null } : { iconUrl: null },
+  });
+  await deleteStored(kind === "logo" ? org?.logoUrl : org?.iconUrl);
+
+  revalidatePath("/", "layout");
+  return { ok: true as const };
 }

@@ -67,6 +67,8 @@ async function renderAndStorePdf(poId: string): Promise<string> {
       currencySymbol: org?.currencySymbol ?? "$",
       currencyCode: org?.currencyCode ?? "USD",
       locale: org?.locale ?? "en-US",
+      brandInk: org?.brandInk,
+      brandBand: org?.brandBand,
       logo: await readStored(org?.logoUrl ?? null),
     },
     number: po.number,

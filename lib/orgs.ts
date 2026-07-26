@@ -4,7 +4,7 @@ import { prismaBase } from "@/lib/prisma-base";
 import { currentUserId, devAuthBypass } from "@/lib/current-user";
 import { getCurrentOrgId } from "@/lib/tenant";
 
-export type MyOrg = { id: string; name: string; role: string; active: boolean };
+export type MyOrg = { id: string; name: string; role: string; active: boolean; iconUrl: string | null };
 
 /**
  * Every company the signed-in user can open, for the switcher. Read on the unscoped client:
@@ -16,8 +16,11 @@ export const listMyOrgs = cache(async (): Promise<MyOrg[]> => {
   // Local dev has no Clerk session and therefore no memberships to filter by, so every company is
   // listed. That makes the switcher exercisable locally; it cannot happen on a deployment.
   if (devAuthBypass) {
-    const all = await prismaBase.organization.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } });
-    return all.map((o) => ({ id: o.id, name: o.name, role: "owner", active: o.id === activeId }));
+    const all = await prismaBase.organization.findMany({
+      select: { id: true, name: true, iconUrl: true },
+      orderBy: { name: "asc" },
+    });
+    return all.map((o) => ({ id: o.id, name: o.name, iconUrl: o.iconUrl, role: "owner", active: o.id === activeId }));
   }
 
   const userId = await currentUserId();
@@ -25,7 +28,7 @@ export const listMyOrgs = cache(async (): Promise<MyOrg[]> => {
 
   const memberships = await prismaBase.membership.findMany({
     where: { clerkUserId: userId },
-    select: { orgId: true, role: true, organization: { select: { id: true, name: true } } },
+    select: { orgId: true, role: true, organization: { select: { id: true, name: true, iconUrl: true } } },
     orderBy: { createdAt: "asc" },
   });
 
@@ -34,6 +37,7 @@ export const listMyOrgs = cache(async (): Promise<MyOrg[]> => {
     .map((m) => ({
       id: m.organization!.id,
       name: m.organization!.name,
+      iconUrl: m.organization!.iconUrl,
       role: m.role,
       active: m.organization!.id === activeId,
     }))

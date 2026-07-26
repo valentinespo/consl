@@ -11,6 +11,9 @@ export type OrgProfile = {
   email: string | null;
   phone: string | null;
   logoUrl: string | null;
+  iconUrl: string | null;
+  brandInk: string;
+  brandBand: string;
   currencyCode: string;
   currencySymbol: string;
   locale: string;
@@ -31,6 +34,9 @@ export const getCurrentOrg = cache(async (): Promise<OrgProfile | null> => {
     email: org.email,
     phone: org.phone,
     logoUrl: org.logoUrl,
+    iconUrl: org.iconUrl,
+    brandInk: org.brandInk,
+    brandBand: org.brandBand,
     currencyCode: org.currencyCode,
     currencySymbol: org.currencySymbol,
     locale: org.locale,

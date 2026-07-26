@@ -6,6 +6,29 @@ import { Check, ChevronsUpDown, Plus, Building2 } from "lucide-react";
 import type { MyOrg } from "@/lib/orgs";
 import { switchOrg } from "@/app/org/actions";
 
+/** A company's own square mark, falling back to a neutral icon when it hasn't uploaded one. */
+function OrgMark({ org, size }: { org: MyOrg | null; size: number }) {
+  if (org?.iconUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={org.iconUrl}
+        alt=""
+        style={{ width: size, height: size }}
+        className="shrink-0 rounded-md border border-border object-contain"
+      />
+    );
+  }
+  return (
+    <span
+      style={{ width: size, height: size }}
+      className="flex shrink-0 items-center justify-center rounded-md bg-accent-soft text-accent"
+    >
+      <Building2 size={Math.round(size * 0.55)} />
+    </span>
+  );
+}
+
 /** Which company you're working in. A person can belong to several — their own businesses, or a
  *  client's they were invited into — so this is a picker, not a label. */
 export function OrgSwitcher({ orgs, onNavigate }: { orgs: MyOrg[]; onNavigate?: () => void }) {
@@ -59,9 +82,7 @@ export function OrgSwitcher({ orgs, onNavigate }: { orgs: MyOrg[]; onNavigate?: 
         aria-expanded={open}
         className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface-2"
       >
-        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent-soft text-accent">
-          <Building2 size={13} />
-        </span>
+        <OrgMark org={current} size={24} />
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">
           {current?.name ?? "No company"}
         </span>
@@ -86,6 +107,7 @@ export function OrgSwitcher({ orgs, onNavigate }: { orgs: MyOrg[]; onNavigate?: 
               disabled={busy !== null}
               className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-surface-2 disabled:opacity-60"
             >
+              <OrgMark org={o} size={22} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13px] text-ink">{o.name}</span>
                 <span className="block text-[11px] text-muted">{o.role === "owner" ? "Owner" : "Member"}</span>

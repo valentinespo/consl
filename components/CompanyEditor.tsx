@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui";
+import { BrandingCard, type Branding } from "@/components/BrandingCard";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
 import { AddressInput } from "@/components/AddressField";
 import { updateCompanyProfile } from "@/app/settings/actions";
@@ -16,6 +17,10 @@ export type CompanyForEdit = {
   currencySymbol: string;
   currencyCode: string;
   locale: string;
+  brandInk: string;
+  brandBand: string;
+  logoUrl: string | null;
+  iconUrl: string | null;
 };
 
 /** How money and dates are written. The code itself means nothing to most people, so each option
@@ -52,7 +57,7 @@ function sample(locale: string): string {
   }
 }
 
-export function CompanyEditor({ company }: { company: CompanyForEdit }) {
+export function CompanyEditor({ company, isOwner }: { company: CompanyForEdit; isOwner: boolean }) {
   const router = useRouter();
   const [name, setName] = useState(company.name);
   const [legalName, setLegalName] = useState(company.legalName ?? "");
@@ -62,6 +67,8 @@ export function CompanyEditor({ company }: { company: CompanyForEdit }) {
   const [currencySymbol, setCurrencySymbol] = useState(company.currencySymbol);
   const [currencyCode, setCurrencyCode] = useState(company.currencyCode);
   const [locale, setLocale] = useState(company.locale);
+  const [brandInk, setBrandInk] = useState(company.brandInk);
+  const [brandBand, setBrandBand] = useState(company.brandBand);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -74,7 +81,9 @@ export function CompanyEditor({ company }: { company: CompanyForEdit }) {
     phone.trim() !== (company.phone ?? "") ||
     currencySymbol.trim() !== company.currencySymbol ||
     currencyCode.trim().toUpperCase() !== company.currencyCode ||
-    locale !== company.locale;
+    locale !== company.locale ||
+    brandInk !== company.brandInk ||
+    brandBand !== company.brandBand;
 
   function reset() {
     setName(company.name);
@@ -85,13 +94,15 @@ export function CompanyEditor({ company }: { company: CompanyForEdit }) {
     setCurrencySymbol(company.currencySymbol);
     setCurrencyCode(company.currencyCode);
     setLocale(company.locale);
+    setBrandInk(company.brandInk);
+    setBrandBand(company.brandBand);
     setError(null);
   }
 
   async function save() {
     setError(null);
     setPending(true);
-    const res = await updateCompanyProfile({ name, legalName, address, email, phone, currencySymbol, currencyCode, locale });
+    const res = await updateCompanyProfile({ name, legalName, address, email, phone, currencySymbol, currencyCode, locale, brandInk, brandBand });
     setPending(false);
     if (!res.ok) {
       setError(res.error);
@@ -102,7 +113,8 @@ export function CompanyEditor({ company }: { company: CompanyForEdit }) {
   }
 
   return (
-    <Card>
+    <>
+      <Card>
       <div className="mb-1 text-[12px] font-medium uppercase tracking-wide text-muted">Company profile</div>
       <p className="mb-4 text-[12.5px] text-muted">
         Shown across the app and printed as the sender on every purchase order you generate.
@@ -146,7 +158,24 @@ export function CompanyEditor({ company }: { company: CompanyForEdit }) {
           </Field>
         </div>
       </div>
+      </Card>
+
+      <BrandingCard
+        branding={{
+          name: company.name,
+          logoUrl: company.logoUrl,
+          iconUrl: company.iconUrl,
+          brandInk: company.brandInk,
+          brandBand: company.brandBand,
+        }}
+        ink={brandInk}
+        band={brandBand}
+        onInk={setBrandInk}
+        onBand={setBrandBand}
+        isOwner={isOwner}
+      />
+
       <SaveBar dirty={dirty} pending={pending} error={error} saved={saved} onSave={save} onReset={reset} />
-    </Card>
+    </>
   );
 }

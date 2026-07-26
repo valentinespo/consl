@@ -21,7 +21,11 @@ model Organization {
   address   String? // multiline company address
   email     String?
   phone     String?
-  logoUrl   String? // brand logo (falls back to the bundled default)
+  // --- Branding. Two different marks: a wide logo for documents, a square one for the app. ---
+  logoUrl   String? // wide logo printed at the top of purchase orders
+  iconUrl   String? // square mark shown beside the company name in the switcher
+  brandInk  String  @default("#1f2937") // headings, the dark bar, and totals on a PO
+  brandBand String  @default("#eef2f7") // the light header band behind the logo on a PO
   // --- Money / locale formatting, so non-US customers aren't stuck with "$" ---
   currencyCode   String @default("USD")
   currencySymbol String @default("$")

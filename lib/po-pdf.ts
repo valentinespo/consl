@@ -1,8 +1,9 @@
 /**
  * Renders a Purchase Order PDF:
- * sage header band (logo + title) flowing straight into the dark date/number bar,
- * company/vendor columns, items table with TOTAL. Supports "TBD" pricing (unitCost = null).
- * The sender block comes from the signed-in company's profile, not a hardcoded constant.
+ * a header band (logo + title) flowing straight into the dark date/number bar, company/vendor
+ * columns, items table with TOTAL. Supports "TBD" pricing (unitCost = null).
+ * The sender block, colours and logo all come from the sending company's own profile — this
+ * document goes to their suppliers, so nothing about it is hardcoded to one business.
  */
 import path from "node:path";
 import PDFDocument from "pdfkit";
@@ -17,6 +18,9 @@ export type PoPdfCompany = {
   currencySymbol: string;
   currencyCode?: string;
   locale?: string;
+  /** The company's own document colours. Defaults are neutral, not any one brand's. */
+  brandInk?: string;
+  brandBand?: string;
   /** The sender's own logo, as bytes. Absent = print the company name, never a bundled mark. */
   logo?: Buffer | null;
 };
@@ -29,10 +33,47 @@ export type PoPdfData = {
   company: PoPdfCompany;
 };
 
-const INK = "#1a2f18"; // brand ink — all dark greens
-const BAND = "#dfe9d0"; // light sage header
-const MUTED = "#42513c"; // body text on light backgrounds
-const ROW_RULE = "#d8e0cc";
+const DEFAULT_INK = "#1f2937";
+const DEFAULT_BAND = "#eef2f7";
+
+const hex = (v: string | undefined, fallback: string) =>
+  v && /^#[0-9a-f]{6}$/i.test(v.trim()) ? v.trim() : fallback;
+
+/** Blend two colours; `t` is how far to move from `a` towards `b`. */
+function mix(a: string, b: string, t: number): string {
+  const ch = (c: string, i: number) => parseInt(c.slice(1 + i * 2, 3 + i * 2), 16);
+  const out = [0, 1, 2].map((i) => Math.round(ch(a, i) + (ch(b, i) - ch(a, i)) * t));
+  return `#${out.map((n) => n.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** Pull a colour toward its own brightness, draining saturation without changing how dark it is. */
+function desaturate(c: string, t: number): string {
+  const ch = (i: number) => parseInt(c.slice(1 + i * 2, 3 + i * 2), 16);
+  const [r, g, b] = [ch(0), ch(1), ch(2)];
+  const lum = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+  const grey = `#${[lum, lum, lum].map((n) => n.toString(16).padStart(2, "0")).join("")}`;
+  return mix(c, grey, t);
+}
+
+/** The full palette derived from the two colours a company picks.
+ *
+ * Body text is the ink lightened toward grey AND drained of saturation. Lightening alone keeps
+ * the hue, which is fine for a muted brand but turns every line of an invoice vivid blue for a
+ * saturated one — body copy shouldn't carry the brand, only the headings and bars should. */
+function palette(c: PoPdfCompany) {
+  const ink = hex(c.brandInk, DEFAULT_INK);
+  const band = hex(c.brandBand, DEFAULT_BAND);
+  return {
+    ink,
+    band,
+    // Line items: keep the ink's darkness but almost all of its colour removed. A vivid brand
+    // would otherwise print every row of the order in saturated colour, which is hard to read
+    // and looks nothing like an invoice.
+    body: desaturate(ink, 0.85),
+    muted: desaturate(mix(ink, "#8a8f98", 0.45), 0.5),
+    rule: mix(band, "#000000", 0.12),
+  };
+}
 
 const L = 30; // band left
 const R = 582; // band right
@@ -98,7 +139,9 @@ export async function generatePoPdf(data: PoPdfData): Promise<Buffer> {
     doc.registerFont("Bold", "Helvetica-Bold");
   }
 
-  // ---- Header: sage band flowing straight into the dark bar (no gap) ----
+  const { ink: INK, band: BAND, body: BODY, muted: MUTED, rule: ROW_RULE } = palette(data.company);
+
+  // ---- Header: the company's band flowing straight into its dark bar (no gap) ----
   const bandTop = 55;
   const barY = 232; // band bottom == bar top
   const barH = 34;
@@ -161,7 +204,7 @@ export async function generatePoPdf(data: PoPdfData): Promise<Buffer> {
   y += 5;
 
   for (const line of data.lines) {
-    doc.font("Body").fontSize(9.5).fillColor(INK);
+    doc.font("Body").fontSize(9.5).fillColor(BODY);
     const descH = doc.heightOfString(line.description, { width: DESC_W, lineGap: 2 });
     const rowH = Math.max(32, descH + 18);
     const textY = y + (rowH - descH) / 2;
