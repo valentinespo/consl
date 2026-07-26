@@ -15,6 +15,7 @@ import { qty, date } from "@/lib/format";
 import { getFmt } from "@/lib/fmt-server";
 import { buildCostChips } from "@/lib/lot-costs";
 import { PageHeader, Pill, FacilityTag } from "@/components/ui";
+import { PrevNextNav, neighbours } from "@/components/PrevNextNav";
 import { TransactionInvoicesTable } from "@/components/TransactionInvoicesTable";
 import { LotEditor, type EditorLine } from "@/components/LotEditor";
 import { DocumentList } from "@/components/DocumentList";
@@ -75,9 +76,11 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
         ← Production Lots
       </Link>
       <PageHeader title={`Lot #${lot.lotNr}`} subtitle={lot.poNumber ? `PO ${lot.poNumber}` : undefined}>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <FacilityTag code={lot.facility.code} />
           <Pill kind={lot.status}>{lot.status === "IN_PRODUCTION" ? "In production" : "Finished"}</Pill>
+          {/* Same list order as the Production Lots page, so the arrows walk it the way it reads. */}
+          <PrevNextNav {...neighbours(lotOptions, id, "/lots")} />
         </div>
       </PageHeader>
 

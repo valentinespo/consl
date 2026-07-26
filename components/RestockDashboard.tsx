@@ -2,10 +2,10 @@
 
 import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { RefreshCw, Settings2, Check, GripVertical } from "lucide-react";
+import { Settings, Check, GripVertical } from "lucide-react";
 import { SkuAvatar } from "@/components/ui";
 import { TotalValueCard } from "@/components/TotalValueCard";
-import { syncAmazon, updateGlobalDefaults, updateSkuPolicy, setSortMode, saveManualOrder, setSkuWindow } from "@/app/inventory/actions";
+import { updateGlobalDefaults, updateSkuPolicy, setSortMode, saveManualOrder, setSkuWindow } from "@/app/inventory/actions";
 import type { RestockRow, RestockTotals } from "@/lib/restock";
 import { computeReorder, type ReorderResult } from "@/lib/reorder";
 
@@ -45,21 +45,18 @@ function compute(r: RestockRow, globalWin: Win, nowMs: number): Computed {
 export function RestockDashboard({
   rows,
   totals,
-  lastSync,
   defaults,
   sortMode: initialSort,
   nowMs,
 }: {
   rows: RestockRow[];
   totals: RestockTotals;
-  lastSync: string | null;
   defaults: { minMonths: number; leadMonths: number };
   sortMode: string;
   nowMs: number;
 }) {
   const [win, setWin] = useState<Win>(90);
   const [pending, start] = useTransition();
-  const [msg, setMsg] = useState<string | null>(null);
   const [editSku, setEditSku] = useState<string | null>(null);
   const [winSku, setWinSku] = useState<string | null>(null); // per-SKU window-override panel open
   const [editGlobal, setEditGlobal] = useState(false);
@@ -112,28 +109,12 @@ export function RestockDashboard({
     });
   }
 
-  function sync() {
-    setMsg(null);
-    start(async () => {
-      const r = await syncAmazon();
-      setMsg(r.ok ? (r.salesOk ? "Synced with Amazon." : "Inventory synced (sales lagging — kept last velocity).") : r.error);
-      router.refresh();
-    });
-  }
-
   return (
     <div>
-      {/* Total value + sync */}
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <TotalValueCard totals={totals} className="flex-1" />
-        <div className="flex flex-col items-end gap-1.5">
-          <button onClick={sync} disabled={pending} className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60">
-            <RefreshCw size={14} className={pending ? "animate-spin" : ""} /> {pending ? "Syncing…" : "Sync Amazon"}
-          </button>
-          <span className="text-[11px] text-muted">{lastSync ? `Updated ${lastSync}` : "Never synced"}</span>
-        </div>
+      {/* Full width — syncing moved up beside the tabs so this card isn't squeezed. */}
+      <div className="mb-3">
+        <TotalValueCard totals={totals} />
       </div>
-      {msg && <div className="mb-3 text-[12px] text-muted">{msg}</div>}
 
       {/* KPIs */}
       <div className="mb-5 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
@@ -170,8 +151,20 @@ export function RestockDashboard({
               </button>
             )}
           </div>
-          <button onClick={() => setEditGlobal((v) => !v)} className="inline-flex items-center gap-1 text-[11.5px] text-muted hover:text-ink-soft">
-            <Settings2 size={12} /> floor {defaults.minMonths}mo · lead {defaults.leadMonths}mo
+          {/* Reads as a control, not a caption: a gear, a filled chip, and a hover state, so it's
+              findable as the place to change the restock defaults. */}
+          <button
+            onClick={() => setEditGlobal((v) => !v)}
+            title="Change the default floor and lead time"
+            aria-expanded={editGlobal}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11.5px] font-medium transition-colors ${
+              editGlobal
+                ? "border-accent-strong bg-accent-soft text-accent"
+                : "border-border bg-surface-2 text-ink-soft hover:border-accent-strong hover:bg-accent-soft/40 hover:text-accent"
+            }`}
+          >
+            <Settings size={13} />
+            floor {defaults.minMonths}mo · lead {defaults.leadMonths}mo
           </button>
         </div>
         <div className="flex flex-wrap gap-2.5 text-[11px] text-muted">
@@ -295,8 +288,17 @@ export function RestockDashboard({
                       <span className="text-[12px] text-muted">Covered</span>
                     )}
                   </div>
-                  <button onClick={() => setEditSku(editSku === r.id ? null : r.id)} title="SKU settings" className="text-muted hover:text-ink-soft">
-                    <Settings2 size={14} />
+                  <button
+                    onClick={() => setEditSku(editSku === r.id ? null : r.id)}
+                    title="Floor and lead time for this product"
+                    aria-expanded={editSku === r.id}
+                    className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                      editSku === r.id
+                        ? "border-accent-strong bg-accent-soft text-accent"
+                        : "border-border bg-surface-2 text-muted hover:border-accent-strong hover:bg-accent-soft/40 hover:text-accent"
+                    }`}
+                  >
+                    <Settings size={13} />
                   </button>
                 </div>
               </div>
