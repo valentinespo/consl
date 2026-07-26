@@ -22,7 +22,10 @@ export interface EnginePurchase {
   facility: string;
   sku: string | null; // set for FACILITY_SKU materials
   date: number; // epoch ms (sort key)
-  seq: number; // tie-breaker preserving sheet row order
+  seq: number; // line index within its invoice
+  /** Total, stable ordering across all purchases, assigned by the loader's ORDER BY. Same-date
+   *  layers must consume in a reproducible order or COG changes between recomputes. */
+  order: number;
   quantity: number;
   unitCost: number;
   isAdjustment: boolean;
@@ -37,6 +40,7 @@ export interface EngineLotMaterial {
 
 export interface EngineLotLine {
   key: string; // unique line id
+  lotId: string; // the lot this line belongs to — how transactions find it
   lotNr: number;
   poDate: number; // epoch ms
   seq: number; // tie-breaker
@@ -47,7 +51,9 @@ export interface EngineLotLine {
 }
 
 export interface EngineTransaction {
-  lotNr: number;
+  /** The lot this cost belongs to, or null when unassigned. Keyed by id, never by lot number:
+   *  lot numbers are not unique, so one invoice could otherwise be charged to two lots. */
+  lotId: string | null;
   category: string; // free-form cost category
   applicable: number;
   sku: string | null;
@@ -111,7 +117,7 @@ class FifoPool {
   ) {
     this.layers = purchases
       .filter((p) => !p.isAdjustment && p.quantity > 0)
-      .sort((a, b) => a.date - b.date || a.seq - b.seq)
+      .sort((a, b) => a.date - b.date || a.order - b.order)
       .map((p) => ({ qty: p.quantity, unitCost: p.unitCost }));
   }
 
@@ -261,16 +267,16 @@ export function runEngine(
   }
 
   // ---- Transaction-based costs, bucketed by category, allocated to lines within a lot. ----
-  const linesByLot = new Map<number, EngineLotLine[]>();
-  for (const l of lines) (linesByLot.get(l.lotNr) ?? linesByLot.set(l.lotNr, []).get(l.lotNr)!).push(l);
+  const linesByLot = new Map<string, EngineLotLine[]>();
+  for (const l of lines) (linesByLot.get(l.lotId) ?? linesByLot.set(l.lotId, []).get(l.lotId)!).push(l);
 
   // accumulate $ per line, per category: category -> (lineKey -> $)
   const byCategory = new Map<string, Map<string, number>>();
 
   for (const t of transactions) {
-    if (!t.appliesToCog) continue;
-    const lotLines = linesByLot.get(t.lotNr);
-    if (!lotLines || lotLines.length === 0 || !t.applicable) continue;
+    if (!t.appliesToCog || !t.lotId || !t.applicable) continue;
+    const lotLines = linesByLot.get(t.lotId);
+    if (!lotLines || lotLines.length === 0) continue;
     const cat = t.category?.trim() || "Other cost";
     const target = byCategory.get(cat) ?? byCategory.set(cat, new Map()).get(cat)!;
     // SKU-scoped line -> attribute to the matching SKU; null sku -> spread across the lot.
@@ -278,10 +284,16 @@ export function runEngine(
     // unassigned: skipped entirely, so it drops out of COG until reassigned.
     const matched = t.sku ? lotLines.filter((l) => l.sku === t.sku) : null;
     if (matched && matched.length === 0) continue;
-    const recipients = matched ?? lotLines;
-    const totalUnits = recipients.reduce((s, l) => s + l.units, 0) || recipients.length;
+    // Only lines that actually produced units can carry cost. Cost allocated to a zero-unit line
+    // is divided by its units at the end and vanishes — so a lot whose lines are all zero would
+    // silently swallow the whole invoice while still counting as "assigned" on the transactions
+    // page. Skipping them here leaves such an invoice visibly unallocated instead.
+    const withUnits = (matched ?? lotLines).filter((l) => l.units > 0);
+    if (withUnits.length === 0) continue;
+    const recipients = withUnits;
+    const totalUnits = recipients.reduce((s, l) => s + l.units, 0);
     for (const l of recipients) {
-      const share = recipients.length === 1 ? 1 : (l.units || 1) / totalUnits;
+      const share = recipients.length === 1 ? 1 : l.units / totalUnits;
       target.set(l.key, (target.get(l.key) ?? 0) + t.applicable * share);
     }
   }

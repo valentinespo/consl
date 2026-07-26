@@ -5,9 +5,9 @@
  * Usage: npx tsx scripts/import.ts
  */
 import path from "node:path";
-import { prisma } from "../lib/prisma";
-import { parseWorkbook } from "../lib/xlsx-source";
-import { recomputeAll } from "../lib/recompute";
+import { prisma } from "../../lib/prisma";
+import { parseWorkbook } from "./xlsx-source";
+import { recomputeAll } from "../../lib/recompute";
 
 const XLSX = path.resolve(process.cwd(), "../Lots, Inventory & Purchases (App).xlsx");
 

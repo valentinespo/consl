@@ -27,24 +27,54 @@ function nowInTz(tz: string): { day: string; minutes: number } {
 
 let running = false;
 
+/**
+ * Claim today's run for an org, atomically. `running` above only guards one process, and reading
+ * `lastSyncRun` then writing it minutes later is a race: two replicas would both see "not run
+ * yet", both pull from Amazon, and both write a full set of snapshots — doubling the day's
+ * numbers and burning the report quota twice. A conditional update lets exactly one win.
+ */
+async function claimDay(orgId: string, day: string): Promise<boolean> {
+  const { count } = await prismaBase.settings.updateMany({
+    where: { orgId, NOT: { lastSyncRun: day } },
+    data: { lastSyncRun: day },
+  });
+  return count === 1;
+}
+
 /** Run the daily sync for one org if it's due and hasn't run today (in that org's own context). */
 async function runOrgDaily(orgId: string): Promise<void> {
-  await runWithOrg(orgId, async () => {
-    const s = await getOrgSettings();
-    if (!s.syncEnabled) return;
-    const { day, minutes } = nowInTz(s.syncTz);
-    const due = s.syncHour * 60 + s.syncMinute;
-    if (minutes < due) return; // not yet time today
-    if (s.lastSyncRun === day) return; // already ran today
-    try {
-      await syncAmazonCore(); // no-op for orgs with no Amazon-mapped SKUs
+  // The whole body is guarded: a failure reading settings used to escape and unwind the caller's
+  // loop, so every org after the failing one was silently skipped — on every tick, forever.
+  try {
+    await runWithOrg(orgId, async () => {
+      const s = await getOrgSettings();
+      if (!s.syncEnabled) return;
+      const { day, minutes } = nowInTz(s.syncTz);
+      const due = s.syncHour * 60 + s.syncMinute;
+      if (minutes < due) return; // not yet time today
+      if (s.lastSyncRun === day) return; // already ran today (cheap pre-check)
+      if (!(await claimDay(orgId, day))) return; // another replica got there first
+
+      const r = await syncAmazonCore(); // no-op for orgs with no Amazon-mapped SKUs
       await getRestock(); // records today's inventory-value snapshot with fresh numbers
-      await saveOrgSettings({ lastSyncRun: day, lastSyncAt: new Date() });
-      console.log(`[scheduler] daily sync completed for org ${orgId} (${day})`);
-    } catch (e) {
-      console.error(`[scheduler] daily sync failed for org ${orgId}:`, (e as Error).message);
-    }
-  });
+
+      if (r.ok) {
+        await saveOrgSettings({ lastSyncAt: new Date() });
+        console.log(`[scheduler] daily sync completed for org ${orgId} (${day})`);
+      } else if (r.nothingToSync) {
+        // No Amazon connection or no mapped SKUs — the day is genuinely done, not failed.
+        console.log(`[scheduler] nothing to sync for org ${orgId} (${day}): ${r.error}`);
+      } else {
+        // Release the claim so the next tick retries rather than waiting until tomorrow, and
+        // leave `lastSyncAt` alone — otherwise a failed pull reads as "synced just now".
+        await prismaBase.settings.updateMany({ where: { orgId }, data: { lastSyncRun: null } });
+        console.error(`[scheduler] daily sync failed for org ${orgId}: ${r.error}`);
+      }
+    });
+  } catch (e) {
+    console.error(`[scheduler] daily sync errored for org ${orgId}:`, (e as Error).message);
+    await prismaBase.settings.updateMany({ where: { orgId }, data: { lastSyncRun: null } }).catch(() => {});
+  }
 }
 
 /** One scheduler tick: check every org and run its daily sync if due. */
@@ -53,7 +83,8 @@ async function tick(): Promise<void> {
   running = true;
   try {
     const orgs = await prismaBase.organization.findMany({ select: { id: true } });
-    for (const o of orgs) await runOrgDaily(o.id);
+    // One org's failure must never stop the others; runOrgDaily already swallows its own errors.
+    await Promise.allSettled(orgs.map((o) => runOrgDaily(o.id)));
   } catch (e) {
     console.error("[scheduler] tick failed:", (e as Error).message);
   } finally {

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { generatePoPdf, poTotal, type PoPdfLine } from "@/lib/po-pdf";
 import { getCurrentOrg, orgAddressLines, orgDocumentName } from "@/lib/org";
-import { saveImage } from "@/lib/storage";
+import { saveImage, readStored } from "@/lib/storage";
 import { createLot } from "@/app/lots/actions";
 import { recomputeAll } from "@/lib/recompute";
 
@@ -65,6 +65,9 @@ async function renderAndStorePdf(poId: string): Promise<string> {
       email: org?.email ?? null,
       phone: org?.phone ?? null,
       currencySymbol: org?.currencySymbol ?? "$",
+      currencyCode: org?.currencyCode ?? "USD",
+      locale: org?.locale ?? "en-US",
+      logo: await readStored(org?.logoUrl ?? null),
     },
     number: po.number,
     dateISO: po.date.toISOString().slice(0, 10),
@@ -95,7 +98,7 @@ export async function createPurchaseOrder(payload: PoPayload) {
     poDateISO: payload.dateISO,
     facilityId: payload.facilityId,
     status: "IN_PRODUCTION",
-    lines: skuLines.map((l) => ({ productId: l.productId!, units: Math.round(l.lotUnits!) })),
+    lines: skuLines.map((l) => ({ productId: l.productId!, units: l.lotUnits! })),
   });
   if (!lotRes.ok) return { ok: false as const, error: lotRes.error ?? "Could not create the lot." };
 
@@ -120,7 +123,7 @@ export async function createPurchaseOrder(payload: PoPayload) {
           description: l.description.trim(),
           unitCost: l.unitCost,
           quantity: l.quantity,
-          lotUnits: l.kind === "SKU" ? Math.round(l.lotUnits!) : null,
+          lotUnits: l.kind === "SKU" ? l.lotUnits! : null,
         })),
       },
     },
@@ -156,7 +159,7 @@ export async function updatePurchaseOrder(payload: PoPayload) {
             description: l.description.trim(),
             unitCost: l.unitCost,
             quantity: l.quantity,
-            lotUnits: l.kind === "SKU" && l.lotUnits ? Math.round(l.lotUnits) : null,
+            lotUnits: l.kind === "SKU" && l.lotUnits ? l.lotUnits : null,
           })),
         },
       },

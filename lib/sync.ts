@@ -1,6 +1,21 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
+import { getCurrentOrgId } from "@/lib/tenant";
 import { getFbaInventory, getAwdInventory, getAllOrders } from "@/lib/spapi";
+
+/**
+ * Interim guard until Amazon credentials move onto the Organization (the Integrations tab).
+ *
+ * SP-API keys currently come from server-wide env vars, so every org's sync would pull from the
+ * SAME Amazon seller account. Since ASINs are public, another tenant could map one of ours and
+ * receive our FBA quantities and 90 days of sales in their own snapshots. While the credentials
+ * are global, only the org named by SPAPI_ORG_ID may sync. Unset = single-tenant, no restriction.
+ */
+async function orgMaySync(): Promise<boolean> {
+  const owner = process.env.SPAPI_ORG_ID;
+  if (!owner) return true;
+  return (await getCurrentOrgId()) === owner;
+}
 
 /** Units sold + days-with-sales over the last `n` days (kept for the stored rollups). */
 function windowStats(days: Record<string, number> | undefined, end: Date, n: number) {
@@ -21,9 +36,22 @@ function windowStats(days: Record<string, number> | undefined, end: Date, n: num
  * Pull FBA + AWD inventory + per-day sales (All Orders) and store a fresh snapshot per SKU.
  * Pure core with no request-scoped calls (revalidate) — safe to run from the background scheduler.
  */
-export async function syncAmazonCore(): Promise<{ ok: true; count: number; salesOk: boolean } | { ok: false; error: string }> {
+export async function syncAmazonCore(): Promise<
+  { ok: true; count: number; salesOk: boolean } | { ok: false; error: string; nothingToSync?: true }
+> {
+  if (!(await orgMaySync())) {
+    return {
+      ok: false,
+      error: "Amazon isn't connected for this workspace yet.",
+      nothingToSync: true,
+    };
+  }
   const products = await prisma.product.findMany({ where: { asin: { not: null } } });
-  if (products.length === 0) return { ok: false, error: "No SKUs are mapped to Amazon ASINs yet." };
+  if (products.length === 0) {
+    // Not a failure — there is simply nothing to pull. Flagged so the scheduler counts the day
+    // as done instead of retrying (and logging an error) every five minutes.
+    return { ok: false, error: "No SKUs are mapped to Amazon ASINs yet.", nothingToSync: true };
+  }
 
   let inv, awd;
   try {

@@ -1,36 +1,85 @@
 /** Currency + locale for money formatting. Defaults to USD so existing calls are unchanged;
- *  the app passes each org's own via the currency context (client) or getFmt (server). */
-export type Currency = { symbol: string; locale: string };
-export const USD: Currency = { symbol: "$", locale: "en-US" };
+ *  the app passes each org's own via the currency context (client) or getFmt (server).
+ *  `code` is the ISO currency (USD, EUR, JPY…) — it decides symbol placement and how many
+ *  decimal places the currency actually has. */
+export type Currency = { symbol: string; locale: string; code?: string };
+export const USD: Currency = { symbol: "$", locale: "en-US", code: "USD" };
 
-export const money = (n: number | null | undefined, dp = 2, cur: Currency = USD) =>
-  n == null
-    ? "—"
-    : (n < 0 ? "-" : "") +
-      cur.symbol +
-      Math.abs(n).toLocaleString(cur.locale, { minimumFractionDigits: dp, maximumFractionDigits: dp });
+/**
+ * Money, formatted the way the org's own locale writes it.
+ *
+ * Concatenating a symbol in front of the number only works for currencies that lead with it:
+ * a euro amount belongs after the number ("1.234,56 €"), and yen has no minor unit at all.
+ * Intl knows all of that; fall back to concatenation only when no ISO code is configured.
+ */
+const fmtCache = new Map<string, Intl.NumberFormat>();
+function currencyFormat(cur: Currency, dp: number | undefined): Intl.NumberFormat | null {
+  if (!cur.code) return null;
+  const key = `${cur.locale}|${cur.code}|${dp ?? "auto"}`;
+  let f = fmtCache.get(key);
+  if (!f) {
+    try {
+      f = new Intl.NumberFormat(cur.locale, {
+        style: "currency",
+        currency: cur.code,
+        ...(dp == null ? {} : { minimumFractionDigits: dp, maximumFractionDigits: dp }),
+      });
+    } catch {
+      return null; // unknown locale or currency code — fall back below
+    }
+    fmtCache.set(key, f);
+  }
+  return f;
+}
+
+export const money = (n: number | null | undefined, dp: number | undefined = 2, cur: Currency = USD) => {
+  if (n == null) return "—";
+  const f = currencyFormat(cur, dp);
+  if (f) return f.format(n);
+  return (
+    (n < 0 ? "-" : "") +
+    cur.symbol +
+    Math.abs(n).toLocaleString(cur.locale, { minimumFractionDigits: dp, maximumFractionDigits: dp })
+  );
+};
 
 export const money0 = (n: number | null | undefined, cur: Currency = USD) => money(n, 0, cur);
 
-export const qty = (n: number | null | undefined) =>
-  n == null ? "—" : Math.round(n).toLocaleString("en-US");
+/** Whole units, grouped for the org's locale (1,234 vs 1.234). */
+export const qty = (n: number | null | undefined, cur: Currency = USD) =>
+  n == null ? "—" : Math.round(n).toLocaleString(cur.locale);
 
 /** Simple English pluralization for unit labels (bag→bags, pouch→pouches). */
 export const plural = (w: string) => w + (/(s|x|z|ch|sh)$/i.test(w) ? "es" : "s");
 
-export const perUnit = (n: number | null | undefined, cur: Currency = USD) =>
-  n == null ? "—" : cur.symbol + n.toLocaleString(cur.locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+export const perUnit = (n: number | null | undefined, cur: Currency = USD) => money(n, 2, cur);
 
-/** Finer precision for sub-cent unit costs (e.g. tea-bag per-bag cost). */
-export const costFine = (n: number | null | undefined, cur: Currency = USD) =>
-  n == null ? "—" : cur.symbol + n.toLocaleString(cur.locale, { minimumFractionDigits: 2, maximumFractionDigits: 5 });
+/** Finer precision for sub-cent unit costs — a $0.004 label reads as $0.00 at two decimals. */
+export const costFine = (n: number | null | undefined, cur: Currency = USD) => {
+  if (n == null) return "—";
+  const f = currencyFormat({ ...cur, code: cur.code }, undefined);
+  if (f) {
+    // Re-run with a wider fraction range; Intl keeps the currency's placement and symbol.
+    try {
+      return new Intl.NumberFormat(cur.locale, {
+        style: "currency",
+        currency: cur.code!,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 5,
+      }).format(n);
+    } catch {
+      /* fall through */
+    }
+  }
+  return cur.symbol + n.toLocaleString(cur.locale, { minimumFractionDigits: 2, maximumFractionDigits: 5 });
+};
 
-export const date = (d: Date | string | null | undefined) => {
+export const date = (d: Date | string | null | undefined, cur: Currency = USD) => {
   if (!d) return "—";
   const dt = typeof d === "string" ? new Date(d) : d;
   // Dates are stored as UTC-midnight date-only values; format in UTC so they don't
   // shift a day in non-UTC timezones.
-  return dt.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+  return dt.toLocaleDateString(cur.locale, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
 };
 
 /**

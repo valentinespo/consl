@@ -1,8 +1,10 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { prisma } from "@/lib/prisma";
 
-// Serves user-uploaded images from the persistent volume (UPLOAD_DIR). Existing/committed
-// images are served statically from /uploads instead; new uploads come through here.
+// Serves user-uploaded files from the persistent volume (UPLOAD_DIR). These are invoices, BOLs,
+// COAs and product photos — tenant data, so a signed-in session (enforced by middleware) is not
+// enough on its own: the requested file must also belong to the caller's organization.
 const UPLOAD_DIR = process.env.UPLOAD_DIR;
 
 const TYPES: Record<string, string> = {
@@ -16,11 +18,35 @@ const TYPES: Record<string, string> = {
   pdf: "application/pdf",
 };
 
+/** True when some row in the caller's organization references this exact URL. Each query runs
+ *  through the tenant-scoped client, so another org's document simply isn't found. */
+async function callerOwns(url: string): Promise<boolean> {
+  const [doc, product, material, supplier, po] = await Promise.all([
+    prisma.document.findFirst({ where: { fileUrl: url }, select: { id: true } }),
+    prisma.product.findFirst({ where: { imageUrl: url }, select: { id: true } }),
+    prisma.materialType.findFirst({ where: { imageUrl: url }, select: { id: true } }),
+    prisma.supplier.findFirst({ where: { photoUrl: url }, select: { id: true } }),
+    prisma.purchaseOrder.findFirst({ where: { pdfUrl: url }, select: { id: true } }),
+  ]);
+  return Boolean(doc || product || material || supplier || po);
+}
+
 export async function GET(_req: Request, { params }: { params: Promise<{ path: string[] }> }) {
   if (!UPLOAD_DIR) return new Response("Not configured", { status: 404 });
   const { path: parts } = await params;
   const rel = parts.join("/");
-  if (rel.includes("..") || rel.startsWith("/")) return new Response("Bad request", { status: 400 });
+  if (rel.includes("..") || rel.startsWith("/") || path.normalize(rel) !== rel) {
+    return new Response("Bad request", { status: 400 });
+  }
+
+  // Same 404 for "doesn't exist" and "not yours" — never confirm another org's files exist.
+  let owned = false;
+  try {
+    owned = await callerOwns(`/media/${rel}`);
+  } catch {
+    return new Response("Not found", { status: 404 });
+  }
+  if (!owned) return new Response("Not found", { status: 404 });
 
   try {
     const buf = await readFile(path.join(UPLOAD_DIR, rel));
@@ -28,7 +54,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ path: s
     return new Response(new Uint8Array(buf), {
       headers: {
         "Content-Type": TYPES[ext] ?? "application/octet-stream",
-        "Cache-Control": "public, max-age=31536000, immutable",
+        "X-Content-Type-Options": "nosniff",
+        // Private: these are per-tenant documents, so no shared/CDN caching.
+        "Cache-Control": "private, max-age=31536000, immutable",
       },
     });
   } catch {

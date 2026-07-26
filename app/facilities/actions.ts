@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { computeFinishedGoods, getInventory } from "@/lib/queries";
 import { allowedDestinations } from "@/lib/destinations";
+import { checkOwned } from "@/lib/ownership";
 
 /** Create a facility — a co-packer, warehouse, 3PL or anywhere else stock lives. */
 export async function createFacility(input: { code: string; name: string; type: string }) {
@@ -72,18 +73,23 @@ export async function updateFacility(input: {
   return { ok: true as const };
 }
 
-/** Delete a facility — refused while any lot, purchase or PO still points at it.
+/** Delete a facility — refused while any lot, purchase, PO or stock movement still points at it.
  *  A supplier profile linked to it is simply unlinked (the FK is set-null). */
 export async function deleteFacility(id: string) {
   const facility = await prisma.facility.findFirst({ where: { id } });
   if (!facility) return { ok: false as const, error: "Facility not found" };
 
-  const [lots, purchases, purchaseOrders] = await Promise.all([
+  // Movements count on BOTH sides. A 3PL you only ever ship *to* has no lots, purchases or POs,
+  // so without this it looks freely deletable — and deleting it nulls `toFacilityId` on every
+  // inbound transfer, which drops that stock out of the ledger entirely.
+  const [lots, purchases, purchaseOrders, movementsFrom, movementsTo] = await Promise.all([
     prisma.lot.count({ where: { facilityId: id } }),
     prisma.purchase.count({ where: { facilityId: id } }),
     prisma.purchaseOrder.count({ where: { facilityId: id } }),
+    prisma.stockMovement.count({ where: { fromFacilityId: id } }),
+    prisma.stockMovement.count({ where: { toFacilityId: id } }),
   ]);
-  if (lots + purchases + purchaseOrders > 0) {
+  if (lots + purchases + purchaseOrders + movementsFrom + movementsTo > 0) {
     return { ok: false as const, error: "This facility is in use and can no longer be deleted." };
   }
 
@@ -107,12 +113,27 @@ export type MovementInput = {
 
 /** Record stock leaving one of your locations — finished goods or raw materials. */
 export async function createMovement(input: MovementInput) {
+  if (input.itemType !== "RAW" && input.itemType !== "FINISHED") {
+    return { ok: false as const, error: "Unknown item type" };
+  }
   const raw = input.itemType === "RAW";
-  const quantity = Math.round(Number(input.quantity) || 0);
-  if (quantity <= 0) return { ok: false as const, error: "Enter how many units moved" };
+  const quantity = Number(input.quantity);
+  // `> 0` alone lets Infinity through, and NaN would slip past a `<= 0` test.
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    return { ok: false as const, error: "Enter how many units moved" };
+  }
   if (!input.fromFacilityId) return { ok: false as const, error: "Pick where the stock is moving from" };
   if (raw && !input.materialTypeId) return { ok: false as const, error: "Pick a raw material" };
   if (!raw && !input.productId) return { ok: false as const, error: "Pick a product" };
+
+  // Ids arrive from the browser: confirm each one is this organization's before storing it.
+  const owned = await checkOwned([
+    ["facility", input.fromFacilityId],
+    ["facility", input.toFacilityId],
+    ["product", input.productId],
+    ["material", raw ? input.materialTypeId : null],
+  ]);
+  if (owned) return owned;
 
   const toFacilityId = input.toFacilityId || null;
   const toDestination = input.toDestination || null;
@@ -158,7 +179,7 @@ export async function createMovement(input: MovementInput) {
       fromFacilityId: input.fromFacilityId,
       toFacilityId,
       toDestination,
-      notes: input.notes?.trim() || null,
+      notes: input.notes?.trim().slice(0, 500) || null,
     },
   });
 

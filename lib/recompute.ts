@@ -16,7 +16,11 @@ import {
 export async function computeEngineResult() {
   const [purchasesRaw, lotsRaw, txRaw, rawMovesRaw] = await Promise.all([
     prisma.purchase.findMany({
-      include: { materialType: true, facility: true, product: true },
+      include: { materialType: true, facility: true, product: true, invoice: { select: { createdAt: true } } },
+      // FIFO consumes layers in this order, so it must be total and reproducible. Without an
+      // explicit ORDER BY, two same-date purchases of one material could come back either way
+      // round and produce a different COG on each recompute with no data change.
+      orderBy: [{ date: "asc" }, { seq: "asc" }, { id: "asc" }],
     }),
     prisma.lot.findMany({
       include: {
@@ -32,12 +36,15 @@ export async function computeEngineResult() {
     }),
   ]);
 
-  const purchases: EnginePurchase[] = purchasesRaw.map((p) => ({
+  const purchases: EnginePurchase[] = purchasesRaw.map((p, i) => ({
     materialCode: p.materialType.code,
     facility: p.facility.code,
     sku: p.materialType.skuSpecific ? (p.product?.code ?? null) : null,
     date: p.date.getTime(),
+    // `seq` is now an index within its invoice, so it no longer orders invoices against each
+    // other. `order` carries the total, stable ordering established by the query above.
     seq: p.seq,
+    order: i,
     quantity: p.quantity,
     unitCost: p.unitCost,
     isAdjustment: p.isAdjustment,
@@ -48,8 +55,11 @@ export async function computeEngineResult() {
     for (const ln of lot.lines) {
       lines.push({
         key: ln.id,
+        lotId: lot.id,
         lotNr: lot.lotNr,
-        poDate: lot.poDate ? lot.poDate.getTime() : 0,
+        // An undated lot must not sort to 1970 and consume the oldest, cheapest layers ahead of
+        // every dated lot. Fall back to when the lot was created, which is always set.
+        poDate: (lot.poDate ?? lot.createdAt).getTime(),
         seq: ln.seq,
         facility: lot.facility.code,
         sku: ln.product.code,
@@ -64,18 +74,16 @@ export async function computeEngineResult() {
     }
   }
 
-  // lotNr -> id lookup for transactions
-  const lotNrToId = new Map(lotsRaw.map((l) => [l.lotNr, l.id]));
-  const transactions: EngineTransaction[] = txRaw.map((t) => {
-    const lot = lotsRaw.find((l) => l.id === t.lotId);
-    return {
-      lotNr: lot?.lotNr ?? -1,
-      category: t.category, // free-form; the engine buckets by whatever string this is
-      applicable: t.applicableAmount,
-      sku: t.skus,
-      appliesToCog: t.appliesToCog,
-    };
-  });
+  // Transactions attach to a lot by id, not by lot number. `lotNr` has no unique constraint and
+  // is handed out by a read-then-write, so two lots can share one — which would spread a single
+  // invoice across both, giving each lot cost it never incurred.
+  const transactions: EngineTransaction[] = txRaw.map((t) => ({
+    lotId: t.lotId ?? null,
+    category: t.category, // free-form; the engine buckets by whatever string this is
+    applicable: t.applicableAmount,
+    sku: t.skus,
+    appliesToCog: t.appliesToCog,
+  }));
 
   const rawMovements: EngineRawMovement[] = rawMovesRaw.map((m, i) => ({
     materialCode: m.materialType?.code ?? "",
@@ -103,17 +111,12 @@ export async function recomputeAll() {
         const lc = result.lines.get(line.key)!;
         const mat = lc.materialCostsPerUnit;
         const txn = lc.transactionCostsPerUnit;
-        // Legacy columns kept in sync for any un-migrated reader: "tea" = the primary COG
-        // category, "other" = the remaining categories. Display now uses the JSON maps.
-        const txnSum = Object.values(txn).reduce((s, v) => s + v, 0);
-        const primary = txn["Ingredients"] ?? txn["TEA"] ?? 0;
+        // The JSON maps are the whole truth: every material and every cost category, whatever
+        // this business happens to call them. (The old fixed tea/pouch columns are gone — they
+        // had no readers and were permanently zero for anyone not selling tea.)
         await tx.lotLine.update({
           where: { id: line.key },
           data: {
-            teaCostPerUnit: primary,
-            otherCostPerUnit: txnSum - primary,
-            teabagCostPerUnit: mat["TEABAG"] ?? 0,
-            pouchCostPerUnit: mat["POUCH"] ?? 0,
             cogPerUnit: lc.cogPerUnit,
             materialCostsJson: JSON.stringify(mat),
             transactionCostsJson: JSON.stringify(txn),

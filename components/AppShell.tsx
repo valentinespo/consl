@@ -11,13 +11,17 @@ import { CurrencyProvider } from "@/components/CurrencyProvider";
 export function AppShell({
   children,
   orgName,
+  logoUrl,
   currencySymbol = "$",
   locale = "en-US",
+  currencyCode = "USD",
 }: {
   children: React.ReactNode;
   orgName?: string | null;
+  logoUrl?: string | null;
   currencySymbol?: string;
   locale?: string;
+  currencyCode?: string;
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -30,11 +34,11 @@ export function AppShell({
   if (pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up")) return <>{children}</>;
 
   return (
-    <CurrencyProvider symbol={currencySymbol} locale={locale}>
+    <CurrencyProvider symbol={currencySymbol} locale={locale} code={currencyCode}>
     <div className="lg:flex">
       {/* Desktop sidebar */}
       <div className="hidden lg:sticky lg:top-0 lg:block lg:h-screen lg:shrink-0">
-        <Sidebar orgName={orgName} />
+        <Sidebar orgName={orgName} logoUrl={logoUrl} />
       </div>
 
       {/* Mobile drawer */}
@@ -42,7 +46,7 @@ export function AppShell({
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-black/30" onClick={() => setOpen(false)} aria-hidden />
           <div className="absolute inset-y-0 left-0 h-full shadow-xl">
-            <Sidebar orgName={orgName} onNavigate={() => setOpen(false)} />
+            <Sidebar orgName={orgName} logoUrl={logoUrl} onNavigate={() => setOpen(false)} />
             <button
               onClick={() => setOpen(false)}
               aria-label="Close menu"
@@ -61,8 +65,13 @@ export function AppShell({
           <button onClick={() => setOpen(true)} aria-label="Open menu" className="-ml-1 rounded-lg p-1.5 text-ink-soft hover:bg-surface-2">
             <Menu size={22} />
           </button>
-          <Image src="/brand/logo.png" alt={orgName ?? "Logo"} width={72} height={22} className="h-[20px] w-auto" priority />
-          <span className="ml-auto rounded-md bg-accent-soft px-2 py-0.5 text-[10px] font-semibold tracking-wide text-ink-soft">OPS</span>
+          {/* The org's own logo when it has one; otherwise its name, never another company's mark. */}
+          {logoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={logoUrl} alt={orgName ?? "Logo"} className="h-[20px] w-auto object-contain" />
+          ) : (
+            <span className="truncate text-[14px] font-semibold text-ink">{orgName ?? "Inventory"}</span>
+          )}
         </header>
 
         <main className="flex-1 lg:h-screen lg:overflow-y-auto">

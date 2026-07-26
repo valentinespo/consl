@@ -103,6 +103,9 @@ export async function runSyncNow() {
     revalidatePath("/inventory");
     return r;
   } catch (e) {
-    return { ok: false as const, error: (e as Error).message };
+    // Returned values are NOT redacted the way thrown errors are, so the raw message would reach
+    // the browser — Amazon error bodies and Prisma messages name tables, columns and request ids.
+    console.error("[runSyncNow]", e);
+    return { ok: false as const, error: "The sync couldn't complete. Please try again." };
   }
 }

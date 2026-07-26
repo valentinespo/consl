@@ -9,7 +9,17 @@ import PDFDocument from "pdfkit";
 
 export type PoPdfLine = { sku: string | null; description: string; unitCost: number | null; quantity: number };
 /** The sending company, as stored on its Organization profile. */
-export type PoPdfCompany = { name: string; addressLines: string[]; email: string | null; phone: string | null; currencySymbol: string };
+export type PoPdfCompany = {
+  name: string;
+  addressLines: string[];
+  email: string | null;
+  phone: string | null;
+  currencySymbol: string;
+  currencyCode?: string;
+  locale?: string;
+  /** The sender's own logo, as bytes. Absent = print the company name, never a bundled mark. */
+  logo?: Buffer | null;
+};
 export type PoPdfData = {
   number: string; // "#21-CRW"
   dateISO: string; // "2026-07-05"
@@ -31,13 +41,39 @@ const IR = 550; // inner text right
 
 const FONT_TTC = path.join(process.cwd(), "lib", "fonts", "HelveticaNeue.ttc");
 
-const fmtQty = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
-const fmtUnit = (n: number) =>
-  n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: Math.abs(n) < 1 ? 4 : 2 });
-const fmtAmt = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtDate = (iso: string) => {
+// This document is sent to the sender's own suppliers, so it must read in their conventions —
+// their currency in the right position, their number grouping, their date order.
+const loc = (c: PoPdfCompany) => c.locale || "en-US";
+
+const fmtQty = (n: number, c: PoPdfCompany) => n.toLocaleString(loc(c), { maximumFractionDigits: 2 });
+
+function fmtMoney(n: number, c: PoPdfCompany, maxFrac = 2): string {
+  if (c.currencyCode) {
+    try {
+      return new Intl.NumberFormat(loc(c), {
+        style: "currency",
+        currency: c.currencyCode,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: maxFrac,
+      }).format(n);
+    } catch {
+      /* unknown code — fall through to the symbol form */
+    }
+  }
+  return `${c.currencySymbol}  ${n.toLocaleString(loc(c), { minimumFractionDigits: 2, maximumFractionDigits: maxFrac })}`;
+}
+
+const fmtUnit = (n: number, c: PoPdfCompany) => fmtMoney(n, c, Math.abs(n) < 1 ? 4 : 2);
+const fmtAmt = (n: number, c: PoPdfCompany) => fmtMoney(n, c, 2);
+
+const fmtDate = (iso: string, c: PoPdfCompany) => {
   const [y, m, d] = iso.split("-");
-  return `${m}/${d}/${y}`;
+  return new Date(Date.UTC(Number(y), Number(m) - 1, Number(d))).toLocaleDateString(loc(c), {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: "UTC",
+  });
 };
 
 export function poTotal(lines: Pick<PoPdfLine, "unitCost" | "quantity">[]): number | null {
@@ -69,11 +105,18 @@ export async function generatePoPdf(data: PoPdfData): Promise<Buffer> {
   doc.rect(L, bandTop, R - L, barY - bandTop).fill(BAND);
   doc.rect(L, barY, R - L, barH).fill(INK);
 
-  try {
-    doc.image(path.join(process.cwd(), "public", "brand", "logo.png"), IX, 84, { height: 34 });
-  } catch {
-    doc.font("Bold").fontSize(26).fillColor(INK).text(data.company.name, IX, 84);
+  // The sender's own logo if they've uploaded one, otherwise their name set in type. Never a
+  // bundled brand mark — this document goes out to the sender's suppliers under their name.
+  let logoDrawn = false;
+  if (data.company.logo) {
+    try {
+      doc.image(data.company.logo, IX, 84, { height: 34 });
+      logoDrawn = true;
+    } catch {
+      logoDrawn = false;
+    }
   }
+  if (!logoDrawn) doc.font("Bold").fontSize(26).fillColor(INK).text(data.company.name, IX, 84);
   doc.font("Bold").fontSize(22).fillColor(INK).text("PURCHASE ORDER", IX, 92, { width: IR - IX, align: "right", characterSpacing: 0.5 });
 
   // Company / vendor columns
@@ -94,7 +137,7 @@ export async function generatePoPdf(data: PoPdfData): Promise<Buffer> {
   // Dark bar text
   doc.font("Bold").fontSize(11).fillColor("#ffffff");
   const barTextY = barY + (barH - 11) / 2 - 1;
-  doc.text(`PO DATE: ${fmtDate(data.dateISO)}`, IX, barTextY, { characterSpacing: 0.3 });
+  doc.text(`PO DATE: ${fmtDate(data.dateISO, data.company)}`, IX, barTextY, { characterSpacing: 0.3 });
   doc.text(`PURCHASE ORDER ${data.number}`, IX, barTextY, { width: IR - IX, align: "right", characterSpacing: 0.3 });
 
   // ---- Items table ----
@@ -127,12 +170,12 @@ export async function generatePoPdf(data: PoPdfData): Promise<Buffer> {
     const midY = y + (rowH - 11) / 2;
     if (line.unitCost == null) {
       doc.text("TBD", UNIT_R - 90, midY, { width: 90, align: "right" });
-      doc.text(fmtQty(line.quantity), QTY_R - 55, midY, { width: 55, align: "right" });
+      doc.text(fmtQty(line.quantity, data.company), QTY_R - 55, midY, { width: 55, align: "right" });
       doc.text("TBD", AMT_R - 90, midY, { width: 90, align: "right" });
     } else {
-      doc.text(`$  ${fmtUnit(line.unitCost)}`, UNIT_R - 90, midY, { width: 90, align: "right" });
-      doc.text(fmtQty(line.quantity), QTY_R - 55, midY, { width: 55, align: "right" });
-      doc.text(`$  ${fmtAmt(line.unitCost * line.quantity)}`, AMT_R - 90, midY, { width: 90, align: "right" });
+      doc.text(fmtUnit(line.unitCost, data.company), UNIT_R - 90, midY, { width: 90, align: "right" });
+      doc.text(fmtQty(line.quantity, data.company), QTY_R - 55, midY, { width: 55, align: "right" });
+      doc.text(fmtAmt(line.unitCost * line.quantity, data.company), AMT_R - 90, midY, { width: 90, align: "right" });
     }
     y += rowH;
     doc.moveTo(SKU_X, y).lineTo(IR, y).lineWidth(0.6).strokeColor(ROW_RULE).stroke();
@@ -146,7 +189,7 @@ export async function generatePoPdf(data: PoPdfData): Promise<Buffer> {
   const total = poTotal(data.lines);
   doc.font("Bold").fontSize(11).fillColor(INK);
   doc.text("TOTAL", UNIT_R - 90, y, { characterSpacing: 0.4 });
-  doc.text(total == null ? "TBD" : `$  ${fmtAmt(total)}`, AMT_R - 130, y, { width: 130, align: "right" });
+  doc.text(total == null ? "TBD" : fmtAmt(total, data.company), AMT_R - 130, y, { width: 130, align: "right" });
 
   doc.end();
   return done;

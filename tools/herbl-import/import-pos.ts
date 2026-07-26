@@ -9,7 +9,7 @@
 import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { prisma } from "../lib/prisma";
+import { prisma } from "../../lib/prisma";
 
 const DRIVE = "/Users/valentinesposito/Library/CloudStorage/GoogleDrive-valentinespo1@gmail.com/Shared drives/Herbl/PO:Invoices";
 const OUT = path.join(process.cwd(), "public", "uploads", "po");

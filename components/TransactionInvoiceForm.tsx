@@ -158,13 +158,18 @@ export function TransactionInvoiceForm({
         sku: isExcludedCategory(l.category) ? null : l.sku || null,
         concept: l.concept || null,
       }));
-      await upsertTransactionInvoice({
+      const res = await upsertTransactionInvoice({
         id: invoice?.id ?? null,
         supplierName: supplier.trim() || null,
         dateISO: dateISO || null,
         invoiceTotal: totalNum,
         lines: payloadLines,
       });
+      if (!res.ok) {
+        setError(res.error);
+        setPending(false);
+        return;
+      }
       onDone();
       router.refresh();
     } catch (e) {

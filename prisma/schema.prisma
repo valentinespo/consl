@@ -105,7 +105,7 @@ model StockMovement {
   // RAW: the material moved.
   materialType   MaterialType? @relation(fields: [materialTypeId], references: [id])
   materialTypeId String?
-  quantity       Int // units moved (always positive)
+  quantity       Float // units moved (always positive; Float so weight/volume works too)
   date           DateTime
   fromFacility   Facility      @relation("MovementFrom", fields: [fromFacilityId], references: [id])
   fromFacilityId String
@@ -433,7 +433,7 @@ model PurchaseOrderLine {
   description String
   unitCost    Float? // null = TBD (price not agreed yet)
   quantity    Float         @default(0)
-  lotUnits    Int? // SKU lines: finished units for the auto-created lot (qty may be in sachets)
+  lotUnits    Float? // SKU lines: finished units for the auto-created lot
 
   @@index([poId])
 }
@@ -447,15 +447,18 @@ model LotLine {
   lotId     String
   product   Product       @relation(fields: [productId], references: [id])
   productId String
-  units     Int
+  units     Float // finished units produced (Float so bulk/weight-based output works)
   seq       Int           @default(0) // stable ordering within a lot
   materials LotMaterial[]
 
   // ---- Engine-computed cost snapshot (per unit). Recomputed on data change. ----
-  teaCostPerUnit    Float  @default(0) // legacy: primary transaction-cost category (kept for compat)
-  otherCostPerUnit  Float  @default(0) // legacy: remaining transaction-cost categories
-  teabagCostPerUnit Float  @default(0) // legacy: FIFO material (kept for compat)
-  pouchCostPerUnit  Float  @default(0) // legacy: FIFO material (kept for compat)
+  // DEPRECATED: fixed tea-shaped cost columns. Nothing reads them and nothing writes them any
+  // more — materialCostsJson / transactionCostsJson carry every material and category instead.
+  // Kept until the migration pass can drop them properly (the deploy's `db push` cannot).
+  teaCostPerUnit    Float  @default(0)
+  otherCostPerUnit  Float  @default(0)
+  teabagCostPerUnit Float  @default(0)
+  pouchCostPerUnit  Float  @default(0)
   cogPerUnit        Float  @default(0)
   // JSON map of materialCode -> per-unit cost (the authoritative material breakdown).
   materialCostsJson String @default("{}")
@@ -516,7 +519,7 @@ model Transaction {
   supplierId           String?
   invoiceAmount        Float? // (legacy) — invoice total now lives on TransactionInvoice
   applicableAmount     Float               @default(0) // this line's amount
-  category             String              @default("TEA") // TEA | OTHER | NOT_APPLICABLE
+  category             String              @default("Ingredients") // free-form; see lib/categories.ts
   appliesToCog         Boolean             @default(true) // derived: false when category = NOT_APPLICABLE
   skus                 String? // SKU code, or null = spread proportionally by units
   concept              String?

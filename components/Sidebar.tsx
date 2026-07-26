@@ -31,16 +31,27 @@ const NAV = [
   { href: "/catalog", label: "Catalog", icon: Images },
 ];
 
-export function Sidebar({ orgName, onNavigate }: { orgName?: string | null; onNavigate?: () => void }) {
+export function Sidebar({
+  orgName,
+  logoUrl,
+  onNavigate,
+}: {
+  orgName?: string | null;
+  logoUrl?: string | null;
+  onNavigate?: () => void;
+}) {
   const pathname = usePathname();
   const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <aside className="flex h-full w-[230px] shrink-0 flex-col border-r border-border bg-surface">
       <div className="flex items-center gap-2 px-5 py-5">
-        <Image src="/brand/logo.png" alt="herbl" width={86} height={26} className="h-[22px] w-auto" priority />
-        {!onNavigate && (
-          <span className="ml-auto rounded-md bg-accent-soft px-2 py-0.5 text-[10px] font-semibold tracking-wide text-ink-soft">
-            OPS
+        {/* Each workspace shows its own logo, or its name — never a hardcoded brand mark. */}
+        {logoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={logoUrl} alt={orgName ?? "Logo"} className="h-[22px] w-auto object-contain" />
+        ) : (
+          <span className="truncate text-[15px] font-semibold tracking-tight text-ink">
+            {orgName ?? "Inventory"}
           </span>
         )}
       </div>

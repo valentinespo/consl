@@ -27,7 +27,13 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     <ClerkProvider signInUrl="/sign-in" signUpUrl="/sign-up" afterSignOutUrl="/sign-in">
       <html lang="en" className={`${inter.variable} ${geistMono.variable} h-full antialiased`}>
         <body className="min-h-full">
-          <AppShell orgName={org?.name ?? null} currencySymbol={org?.currencySymbol ?? "$"} locale={org?.locale ?? "en-US"}>
+          <AppShell
+            orgName={org?.name ?? null}
+            logoUrl={org?.logoUrl ?? null}
+            currencySymbol={org?.currencySymbol ?? "$"}
+            locale={org?.locale ?? "en-US"}
+            currencyCode={org?.currencyCode ?? "USD"}
+          >
             {children}
           </AppShell>
         </body>

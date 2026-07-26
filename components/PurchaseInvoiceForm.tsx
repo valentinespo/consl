@@ -137,7 +137,7 @@ export function PurchaseInvoiceForm({
         quantity: Number(l.quantity) || 0,
         total: Number(l.total) || 0,
       }));
-      await upsertPurchaseInvoice({
+      const res = await upsertPurchaseInvoice({
         id: invoice?.id ?? null,
         materialTypeId: material.id,
         supplierName: supplier.trim() || null,
@@ -145,6 +145,11 @@ export function PurchaseInvoiceForm({
         invoiceTotal: totalNum,
         lines: payloadLines,
       });
+      if (!res.ok) {
+        setError(res.error);
+        setPending(false);
+        return;
+      }
       onDone();
       router.refresh();
     } catch (e) {

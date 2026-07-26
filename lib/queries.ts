@@ -462,24 +462,47 @@ export async function getProductDetail(id: string) {
 export async function getMaterialDetail(id: string) {
   const material = await prisma.materialType.findFirst({ where: { id } });
   if (!material) return null;
-  const [purchases, invoices, lotMaterials] = await Promise.all([
+  // Movements count as usage on both the delete guard and the per-SKU-stocking lock, so the UI
+  // agrees with what updateMaterial/deleteMaterial will actually allow.
+  const [purchases, invoices, lotMaterials, movements] = await Promise.all([
     prisma.purchase.count({ where: { materialTypeId: id } }),
     prisma.purchaseInvoice.count({ where: { materialTypeId: id } }),
     prisma.lotMaterial.count({ where: { materialTypeId: id } }),
+    prisma.stockMovement.count({ where: { materialTypeId: id } }),
   ]);
-  return { material, usedBy: used({ purchases, "purchase invoices": invoices, "lot recipes": lotMaterials }) };
+  return {
+    material,
+    usedBy: used({
+      purchases,
+      "purchase invoices": invoices,
+      "lot recipes": lotMaterials,
+      "stock movements": movements,
+    }),
+  };
 }
 
 /** One facility + everything referencing it, including the supplier profile it's linked to. */
 export async function getFacilityDetail(id: string) {
   const facility = await prisma.facility.findFirst({ where: { id }, include: { supplierProfile: true } });
   if (!facility) return null;
-  const [lots, purchases, purchaseOrders] = await Promise.all([
+  // Movements on either side count: a 3PL you only ship *to* has no lots, purchases or POs, and
+  // deleting it would silently drop everything held there out of the ledger.
+  const [lots, purchases, purchaseOrders, movesFrom, movesTo] = await Promise.all([
     prisma.lot.count({ where: { facilityId: id } }),
     prisma.purchase.count({ where: { facilityId: id } }),
     prisma.purchaseOrder.count({ where: { facilityId: id } }),
+    prisma.stockMovement.count({ where: { fromFacilityId: id } }),
+    prisma.stockMovement.count({ where: { toFacilityId: id } }),
   ]);
-  return { facility, usedBy: used({ "production lots": lots, purchases, "purchase orders": purchaseOrders }) };
+  return {
+    facility,
+    usedBy: used({
+      "production lots": lots,
+      purchases,
+      "purchase orders": purchaseOrders,
+      "stock movements": movesFrom + movesTo,
+    }),
+  };
 }
 
 /** Every facility with its dependant counts, for the Facilities list. */

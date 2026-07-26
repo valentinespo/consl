@@ -8,28 +8,64 @@ import { recomputeAll } from "@/lib/recompute";
 /** Permanently delete a lot (cascades its SKU lines, bill of materials and transactions). */
 export async function deleteLot(formData: FormData) {
   const lotId = String(formData.get("lotId"));
-  await prisma.lot.delete({ where: { id: lotId } });
+  const lot = await prisma.lot.findFirst({ where: { id: lotId }, select: { id: true } });
+  if (!lot) redirect("/lots");
+
+  // Note which suppliers this lot's own transactions referenced, BEFORE the cascade removes them.
+  // Only those are candidates for cleanup — sweeping every supplier would delete the ones a user
+  // set up in advance, which have no purchases or transactions by definition.
+  const touched = await prisma.transaction.findMany({
+    where: { lotId: lot.id, supplierId: { not: null } },
+    select: { supplierId: true },
+    distinct: ["supplierId"],
+  });
+
+  await prisma.lot.delete({ where: { id: lot.id } });
   await recomputeAll();
-  // Remove suppliers left with no purchases or transactions after the cascade.
-  const suppliers = await prisma.supplier.findMany({ include: { _count: { select: { purchases: true, transactions: true } } } });
-  for (const s of suppliers) {
-    if (s._count.purchases === 0 && s._count.transactions === 0) await prisma.supplier.delete({ where: { id: s.id } }).catch(() => {});
+
+  for (const { supplierId } of touched) {
+    if (!supplierId) continue;
+    // All four reference tables — an invoice header alone still counts as in use.
+    const [purchases, transactions, purchaseInvoices, transactionInvoices] = await Promise.all([
+      prisma.purchase.count({ where: { supplierId } }),
+      prisma.transaction.count({ where: { supplierId } }),
+      prisma.purchaseInvoice.count({ where: { supplierId } }),
+      prisma.transactionInvoice.count({ where: { supplierId } }),
+    ]);
+    if (purchases + transactions + purchaseInvoices + transactionInvoices === 0) {
+      await prisma.supplier.delete({ where: { id: supplierId } }).catch(() => {});
+    }
   }
+
   revalidatePath("/", "layout");
   redirect("/lots");
 }
 
 /** The default recipe for a new lot line: every material this facility actually stocks, at its
- *  default rate. Replaces the old hardcoded "always a pouch, plus tea bags if they buy them" —
- *  a business that makes something other than tea gets its own materials seeded the same way. */
+ *  default rate. Stock counts however it arrived — bought here, or transferred in from another
+ *  facility. Deriving this from purchases alone gave a site fed only by transfers an empty bill
+ *  of materials, so its lots recorded $0.00 material cost with nothing to raise a shortfall on. */
 async function defaultMaterialsFor(facilityId: string) {
-  const purchased = await prisma.purchase.findMany({
-    where: { facilityId },
-    select: { materialTypeId: true },
-    distinct: ["materialTypeId"],
-  });
-  if (purchased.length === 0) return [];
-  return prisma.materialType.findMany({ where: { id: { in: purchased.map((p) => p.materialTypeId) } } });
+  const [purchased, movedIn] = await Promise.all([
+    prisma.purchase.findMany({
+      where: { facilityId },
+      select: { materialTypeId: true },
+      distinct: ["materialTypeId"],
+    }),
+    prisma.stockMovement.findMany({
+      where: { itemType: "RAW", toFacilityId: facilityId, materialTypeId: { not: null } },
+      select: { materialTypeId: true },
+      distinct: ["materialTypeId"],
+    }),
+  ]);
+  const ids = [
+    ...new Set([
+      ...purchased.map((p) => p.materialTypeId),
+      ...movedIn.map((m) => m.materialTypeId).filter((id): id is string => !!id),
+    ]),
+  ];
+  if (ids.length === 0) return [];
+  return prisma.materialType.findMany({ where: { id: { in: ids } } });
 }
 
 /** Smallest positive lot number not in use — deleted numbers get reused (e.g. a scrapped PO #21). */
@@ -63,7 +99,7 @@ export async function createLot(input: {
       facilityId: input.facilityId,
       status: input.status,
       finishedAt: input.status === "FINISHED" ? new Date() : null,
-      lines: { create: lines.map((l, i) => ({ productId: l.productId, units: Math.round(l.units), seq: i })) },
+      lines: { create: lines.map((l, i) => ({ productId: l.productId, units: l.units, seq: i })) },
     },
     include: { lines: true },
   });
@@ -137,7 +173,7 @@ export async function updateLot(payload: LotEditPayload) {
 
     let seq = 0;
     for (const l of lines) {
-      const units = Math.max(0, Math.round(l.units));
+      const units = Math.max(0, Number(l.units) || 0);
       const writeMaterials = async (lotLineId: string, mats: { materialTypeId: string; perUnit: number }[]) => {
         await tx.lotMaterial.deleteMany({ where: { lotLineId } });
         for (const m of mats) {

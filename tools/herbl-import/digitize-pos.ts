@@ -11,8 +11,8 @@
  */
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { prisma } from "../lib/prisma";
-import { poTotal } from "../lib/po-pdf";
+import { prisma } from "../../lib/prisma";
+import { poTotal } from "../../lib/po-pdf";
 
 const SKU_KEYWORDS: [RegExp, string][] = [
   [/calm/i, "CLM"],

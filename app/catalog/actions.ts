@@ -3,29 +3,43 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { recomputeAll } from "@/lib/recompute";
-import { saveImage } from "@/lib/storage";
+import { saveImage, deleteStored, safeKeySegment } from "@/lib/storage";
+import { checkOwned, type OwnedModel } from "@/lib/ownership";
 
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB
 const OK_EXT = new Set(["png", "jpg", "jpeg", "webp", "gif", "avif"]);
 
+type ImageKind = "product" | "material" | "supplier";
+const IMAGE_MODEL: Record<ImageKind, OwnedModel> = Object.assign(Object.create(null), {
+  product: "product",
+  material: "material",
+  supplier: "supplier",
+});
+
 /** Upload an image for a product, material, or supplier and store its URL. */
 export async function uploadEntityImage(formData: FormData) {
-  const kind = String(formData.get("kind")); // "product" | "material" | "supplier"
+  const kind = String(formData.get("kind")) as ImageKind;
   const id = String(formData.get("id"));
   const file = formData.get("file") as File | null;
+
+  // `kind` and `id` become the storage path, so both are validated before anything is written.
+  if (!IMAGE_MODEL[kind]) return { ok: false, error: "Unknown kind" };
+  const owned = await checkOwned([[IMAGE_MODEL[kind], id]]);
+  if (owned) return owned;
   if (!file || file.size === 0) return { ok: false, error: "No file" };
   if (file.size > MAX_BYTES) return { ok: false, error: "File too large (max 8MB)" };
 
   const ext = (file.name.split(".").pop() ?? "png").toLowerCase();
   if (!OK_EXT.has(ext)) return { ok: false, error: "Unsupported image type" };
 
-  const key = `${kind}/${id}-${Date.now()}.${ext}`;
-  const url = await saveImage(key, Buffer.from(await file.arrayBuffer()), file.type || `image/${ext}`);
+  const key = `${kind}/${safeKeySegment(id)}-${Date.now()}.${ext}`;
+  // Type comes from the validated extension — a client-declared text/html would be served as HTML.
+  const type = `image/${ext === "jpg" ? "jpeg" : ext}`;
+  const url = await saveImage(key, Buffer.from(await file.arrayBuffer()), type);
 
   if (kind === "product") await prisma.product.update({ where: { id }, data: { imageUrl: url } });
   else if (kind === "material") await prisma.materialType.update({ where: { id }, data: { imageUrl: url } });
-  else if (kind === "supplier") await prisma.supplier.update({ where: { id }, data: { photoUrl: url } });
-  else return { ok: false, error: "Unknown kind" };
+  else await prisma.supplier.update({ where: { id }, data: { photoUrl: url } });
 
   revalidatePath("/", "layout");
   return { ok: true, url };
@@ -196,13 +210,16 @@ export async function deleteProduct(id: string) {
   const product = await prisma.product.findFirst({ where: { id } });
   if (!product) return { ok: false as const, error: "Product not found" };
 
-  const [lotLines, purchases, poLines, transactions] = await Promise.all([
+  // Movements count too: deleting a product nulls `productId` on its stock movements, which
+  // re-points a per-SKU write-off at a pool that doesn't exist — resurrecting the written-off stock.
+  const [lotLines, purchases, poLines, transactions, movements] = await Promise.all([
     prisma.lotLine.count({ where: { productId: id } }),
     prisma.purchase.count({ where: { productId: id } }),
     prisma.purchaseOrderLine.count({ where: { productId: id } }),
     prisma.transaction.count({ where: { skus: product.code } }),
+    prisma.stockMovement.count({ where: { productId: id } }),
   ]);
-  if (lotLines + purchases + poLines + transactions > 0) {
+  if (lotLines + purchases + poLines + transactions + movements > 0) {
     return { ok: false as const, error: "This product is in use and can no longer be deleted." };
   }
 
@@ -216,12 +233,15 @@ export async function deleteMaterial(id: string) {
   const material = await prisma.materialType.findFirst({ where: { id } });
   if (!material) return { ok: false as const, error: "Material not found" };
 
-  const [purchases, invoices, lotMaterials] = await Promise.all([
+  // Include movements: deleting a material orphans its stock movements to a blank material code,
+  // which produces a phantom pool the engine can never drain.
+  const [purchases, invoices, lotMaterials, movements] = await Promise.all([
     prisma.purchase.count({ where: { materialTypeId: id } }),
     prisma.purchaseInvoice.count({ where: { materialTypeId: id } }),
     prisma.lotMaterial.count({ where: { materialTypeId: id } }),
+    prisma.stockMovement.count({ where: { materialTypeId: id } }),
   ]);
-  if (purchases + invoices + lotMaterials > 0) {
+  if (purchases + invoices + lotMaterials + movements > 0) {
     return { ok: false as const, error: "This raw material is in use and can no longer be deleted." };
   }
 
@@ -231,10 +251,24 @@ export async function deleteMaterial(id: string) {
 }
 
 export async function removeEntityImage(formData: FormData) {
-  const kind = String(formData.get("kind"));
+  const kind = String(formData.get("kind")) as ImageKind;
   const id = String(formData.get("id"));
-  if (kind === "product") await prisma.product.update({ where: { id }, data: { imageUrl: null } });
-  else if (kind === "material") await prisma.materialType.update({ where: { id }, data: { imageUrl: null } });
-  else if (kind === "supplier") await prisma.supplier.update({ where: { id }, data: { photoUrl: null } });
+  if (!IMAGE_MODEL[kind]) return;
+  if (await checkOwned([[IMAGE_MODEL[kind], id]])) return;
+
+  // Clear the reference and drop the stored object, so the image isn't still fetchable after removal.
+  if (kind === "product") {
+    const row = await prisma.product.findFirst({ where: { id }, select: { imageUrl: true } });
+    await prisma.product.update({ where: { id }, data: { imageUrl: null } });
+    await deleteStored(row?.imageUrl);
+  } else if (kind === "material") {
+    const row = await prisma.materialType.findFirst({ where: { id }, select: { imageUrl: true } });
+    await prisma.materialType.update({ where: { id }, data: { imageUrl: null } });
+    await deleteStored(row?.imageUrl);
+  } else {
+    const row = await prisma.supplier.findFirst({ where: { id }, select: { photoUrl: true } });
+    await prisma.supplier.update({ where: { id }, data: { photoUrl: null } });
+    await deleteStored(row?.photoUrl);
+  }
   revalidatePath("/", "layout");
 }

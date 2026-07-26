@@ -4,12 +4,8 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { recomputeAll } from "@/lib/recompute";
 import { isExcludedCategory } from "@/lib/categories";
-
-async function resolveSupplierId(name: string | null): Promise<string | null> {
-  if (!name) return null;
-  const existing = await prisma.supplier.findFirst({ where: { name } });
-  return existing ? existing.id : (await prisma.supplier.create({ data: { name } })).id;
-}
+import { resolveSupplierId, cleanupSupplierIfOrphan } from "@/lib/suppliers";
+import { checkOwned, type OwnedModel } from "@/lib/ownership";
 
 export type InvoiceLineInput = {
   category: string; // TEA | OTHER | NOT_APPLICABLE
@@ -29,10 +25,26 @@ export type InvoicePayload = {
 /** Create/update a transaction invoice + its allocation lines. Lines must sum to the total. */
 export async function upsertTransactionInvoice(payload: InvoicePayload) {
   const lines = payload.lines.filter((l) => l.category || l.amount);
-  if (lines.length === 0) throw new Error("Add at least one line.");
-  const sum = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  if (lines.length === 0) return { ok: false as const, error: "Add at least one line." };
+
+  // Reject non-finite money before the reconciliation check — any comparison with NaN is false,
+  // so a NaN total would pass it and then break every aggregate that touches this invoice.
+  if (!Number.isFinite(Number(payload.invoiceTotal))) {
+    return { ok: false as const, error: "Enter a valid invoice total." };
+  }
+  if (!lines.every((l) => Number.isFinite(Number(l.amount)))) {
+    return { ok: false as const, error: "Every line needs a valid amount." };
+  }
+
+  const owned = await checkOwned(lines.map((l) => ["lot", l.lotId] as [OwnedModel, string | null]));
+  if (owned) return owned;
+
+  const sum = lines.reduce((s, l) => s + Number(l.amount), 0);
   if (Math.abs(sum - payload.invoiceTotal) > 0.01) {
-    throw new Error(`Lines add up to $${sum.toFixed(2)} but the invoice total is $${payload.invoiceTotal.toFixed(2)}.`);
+    return {
+      ok: false as const,
+      error: `Lines add up to ${sum.toFixed(2)} but the invoice total is ${payload.invoiceTotal.toFixed(2)}.`,
+    };
   }
 
   const supplierId = await resolveSupplierId(payload.supplierName);
@@ -68,6 +80,7 @@ export async function upsertTransactionInvoice(payload: InvoicePayload) {
   for (const sid of new Set(staleSuppliers)) if (sid && sid !== supplierId) await cleanupSupplierIfOrphan(sid);
   await recomputeAll();
   revalidatePath("/", "layout");
+  return { ok: true as const };
 }
 
 export async function deleteTransactionInvoice(id: string) {
@@ -77,16 +90,4 @@ export async function deleteTransactionInvoice(id: string) {
   for (const sid of new Set([inv?.supplierId ?? null, ...lines.map((l) => l.supplierId)])) await cleanupSupplierIfOrphan(sid);
   await recomputeAll();
   revalidatePath("/", "layout");
-}
-
-/** Remove an auto-created supplier once it has no remaining purchases or transactions. */
-export async function cleanupSupplierIfOrphan(supplierId: string | null) {
-  if (!supplierId) return;
-  const [p, t, pi, ti] = await Promise.all([
-    prisma.purchase.count({ where: { supplierId } }),
-    prisma.transaction.count({ where: { supplierId } }),
-    prisma.purchaseInvoice.count({ where: { supplierId } }),
-    prisma.transactionInvoice.count({ where: { supplierId } }),
-  ]);
-  if (p + t + pi + ti === 0) await prisma.supplier.delete({ where: { id: supplierId } }).catch(() => {});
 }
