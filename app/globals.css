@@ -19,6 +19,9 @@
 
   --color-header: #1e3a8a; /* royal navy — the app header bar, same in both themes */
   --color-sidebar: #f7f7f6; /* one shade off the page, so the nav reads as its own zone */
+  /* Active nav item. Deliberately its own token, not accent-soft: that wash disappears against
+     the tinted sidebar in light mode, and nudging it here must not brighten every other chip. */
+  --color-nav-active: #dbeafe;
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
@@ -46,6 +49,7 @@ html[data-theme="dark"] {
   --color-negative: #ef4444;
   --color-warn: #f97316;
   --color-sidebar: #18181b;
+  --color-nav-active: #1b2545; /* same as accent-soft — dark mode was already right */
 }
 
 html[data-theme="dark"] * {
