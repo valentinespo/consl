@@ -4,15 +4,15 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  LayoutDashboard,
-  Boxes,
-  FlaskConical,
-  ArrowLeftRight,
-  ShoppingCart,
-  FileText,
-  Building2,
-  Warehouse,
-  Images,
+  LayoutDashboardFilled,
+  BoxesFilled,
+  FlaskConicalFilled,
+  ArrowLeftRightFilled,
+  ShoppingCartFilled,
+  FileTextFilled,
+  Building2Filled,
+  WarehouseFilled,
+  ImagesFilled,
   Settings,
 } from "@/components/icons";
 import { UserButton } from "@clerk/nextjs";
@@ -20,15 +20,15 @@ import { OrgSwitcher } from "@/components/OrgSwitcher";
 import type { MyOrg } from "@/lib/orgs";
 
 const NAV = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
-  { href: "/inventory", label: "Inventory", icon: Boxes },
-  { href: "/lots", label: "Production Lots", icon: FlaskConical },
-  { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
-  { href: "/purchases", label: "Purchases", icon: ShoppingCart },
-  { href: "/purchase-orders", label: "Purchase Orders", icon: FileText },
-  { href: "/suppliers", label: "Suppliers", icon: Building2 },
-  { href: "/facilities", label: "Facilities", icon: Warehouse },
-  { href: "/catalog", label: "Catalog", icon: Images },
+  { href: "/", label: "Dashboard", icon: LayoutDashboardFilled, exact: true },
+  { href: "/inventory", label: "Inventory", icon: BoxesFilled },
+  { href: "/lots", label: "Production Lots", icon: FlaskConicalFilled },
+  { href: "/transactions", label: "Transactions", icon: ArrowLeftRightFilled },
+  { href: "/purchases", label: "Purchases", icon: ShoppingCartFilled },
+  { href: "/purchase-orders", label: "Purchase Orders", icon: FileTextFilled },
+  { href: "/suppliers", label: "Suppliers", icon: Building2Filled },
+  { href: "/facilities", label: "Facilities", icon: WarehouseFilled },
+  { href: "/catalog", label: "Catalog", icon: ImagesFilled },
 ];
 
 export function Sidebar({
@@ -62,7 +62,7 @@ export function Sidebar({
                 active ? "bg-nav-active text-ink" : "text-muted hover:bg-surface-2 hover:text-ink-soft"
               }`}
             >
-              <Icon size={17} strokeWidth={2} className={active ? "text-ink" : "text-muted"} />
+              <Icon size={19} strokeWidth={2} className={active ? "text-ink" : "text-muted"} />
               {item.label}
             </Link>
           );

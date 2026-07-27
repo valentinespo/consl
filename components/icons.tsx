@@ -38,6 +38,18 @@ export const Warehouse = polaris(P.OrganizationIcon);
 export const Images = polaris(P.ProductIcon);
 export const Settings = polaris(P.SettingsIcon);
 
+/* ---- Sidebar nav: filled variants, used only there. Polaris ships no filled wrench,
+   transaction or receipt, so those three reuse the regular drawing. ---- */
+export const LayoutDashboardFilled = polaris(P.HomeFilledIcon);
+export const BoxesFilled = polaris(P.InventoryFilledIcon);
+export const FlaskConicalFilled = polaris(P.WrenchIcon);
+export const ArrowLeftRightFilled = polaris(P.TransactionIcon);
+export const ShoppingCartFilled = polaris(P.CartFilledIcon);
+export const FileTextFilled = polaris(P.ReceiptIcon);
+export const Building2Filled = polaris(P.StoreFilledIcon);
+export const WarehouseFilled = polaris(P.OrganizationFilledIcon);
+export const ImagesFilled = polaris(P.ProductFilledIcon);
+
 /* ---- Header & theme ---- */
 export const Menu = polaris(P.MenuIcon);
 export const Search = polaris(P.SearchIcon);
