@@ -4,7 +4,7 @@ import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Settings, Check, GripVertical } from "lucide-react";
 import { HoverHint } from "@/components/HoverHint";
-import { BATCH_HELP, FLOOR_HELP, LEAD_HELP, REORDER_TO_HELP, SHIP_HELP } from "@/lib/restock-help";
+import { BATCH_HELP, BUFFER_HELP, FLOOR_HELP, LEAD_HELP, REORDER_TO_HELP, SHIP_HELP } from "@/lib/restock-help";
 import { SkuAvatar } from "@/components/ui";
 import { TotalValueCard } from "@/components/TotalValueCard";
 import { updateGlobalDefaults, updateSkuPolicy, setSortMode, saveManualOrder, setSkuWindow } from "@/app/inventory/actions";
@@ -18,6 +18,15 @@ const SORT_LABEL: Record<SortMode, string> = { sales: "Monthly sales", available
 const WINDOWS = [10, 30, 90] as const;
 type Win = (typeof WINDOWS)[number];
 
+
+/** The org-wide restock settings every SKU falls back to. */
+export type Defaults = {
+  minMonths: number;
+  leadMonths: number;
+  shipDays: number;
+  shipBufferX: number;
+  reorderTo: number;
+};
 
 type Status = "ok" | "reordered" | "reorder" | "oos" | "ship";
 const STATUS: Record<Status, { bg: string; fg: string; dot: string; label: string }> = {
@@ -76,7 +85,7 @@ export function RestockDashboard({
 }: {
   rows: RestockRow[];
   totals: RestockTotals;
-  defaults: { minMonths: number; leadMonths: number; shipMonths: number; reorderTo: number };
+  defaults: Defaults;
   sortMode: string;
   nowMs: number;
 }) {
@@ -191,7 +200,7 @@ export function RestockDashboard({
             }`}
           >
             <Settings size={13} />
-            Floor {defaults.minMonths}mo · Lead {defaults.leadMonths}mo · Ship {defaults.shipMonths}mo
+            Floor {defaults.minMonths}mo · Lead {defaults.leadMonths}mo · Ship {defaults.shipDays}d
           </button>
         </div>
         <div className="flex flex-wrap gap-2.5 text-[11px] text-muted">
@@ -377,7 +386,7 @@ export function RestockDashboard({
   );
 }
 
-type Defaults = { minMonths: number; leadMonths: number; shipMonths: number; reorderTo: number };
+
 
 /** Org-wide restock settings. Shipping time is here only — it's a property of how you move stock,
  *  not of any one product, so there's deliberately no per-SKU override for it. */
@@ -394,21 +403,24 @@ function GlobalDefaultsEditor({
 }) {
   const [f, setF] = useState(String(defaults.minMonths));
   const [l, setL] = useState(String(defaults.leadMonths));
-  const [sh, setSh] = useState(String(defaults.shipMonths));
+  const [sh, setSh] = useState(String(defaults.shipDays));
+  const [bx, setBx] = useState(String(defaults.shipBufferX));
   const [rt, setRt] = useState(String(defaults.reorderTo));
   const num = (v: string, fallback: number) => (v.trim() === "" ? fallback : parseFloat(v) || fallback);
   return (
     <div className="mb-2 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface-2 px-3 py-2.5">
       <NumField label="Default floor (months)" value={f} onChange={setF} help={FLOOR_HELP} />
       <NumField label="Default lead time (months)" value={l} onChange={setL} help={LEAD_HELP} />
-      <NumField label="Shipping time (months)" value={sh} onChange={setSh} help={SHIP_HELP} />
+      <NumField label="Shipping time (days)" value={sh} onChange={setSh} help={SHIP_HELP} />
+      <NumField label="Shipping buffer (×)" value={bx} onChange={setBx} help={BUFFER_HELP} />
       <NumField label="Default reorder to (months)" value={rt} onChange={setRt} help={REORDER_TO_HELP} />
       <button
         onClick={() =>
           onSave({
             minMonths: num(f, 5),
             leadMonths: num(l, 4.5),
-            shipMonths: num(sh, 1),
+            shipDays: num(sh, 30),
+            shipBufferX: num(bx, 3),
             reorderTo: num(rt, 12),
           })
         }
@@ -425,6 +437,7 @@ function GlobalDefaultsEditor({
 export type SkuPolicy = {
   minMonths: number | null;
   leadMonths: number | null;
+  shipDays: number | null;
   reorderToMonths: number | null;
   batchSize: number | null;
 };
@@ -447,6 +460,7 @@ function SkuPolicyEditor({
 }) {
   const [f, setF] = useState(row.rawMinMonths != null ? String(row.rawMinMonths) : "");
   const [l, setL] = useState(row.rawLeadMonths != null ? String(row.rawLeadMonths) : "");
+  const [sh, setSh] = useState(row.rawShipDays != null ? String(row.rawShipDays) : "");
   const [rt, setRt] = useState(row.rawReorderToMonths != null ? String(row.rawReorderToMonths) : "");
   const [b, setB] = useState(row.batchSize > 0 ? String(row.batchSize) : "");
   const opt = (v: string) => (v.trim() === "" ? null : parseFloat(v));
@@ -454,17 +468,20 @@ function SkuPolicyEditor({
     <div className={`flex flex-wrap items-end gap-3 bg-surface-2 px-4 py-3 ${bordered ? "border-b border-line" : ""}`}>
       <NumField label={`Floor (months) · default ${defaults.minMonths}`} value={f} onChange={setF} placeholder={String(defaults.minMonths)} help={FLOOR_HELP} />
       <NumField label={`Lead time (months) · default ${defaults.leadMonths}`} value={l} onChange={setL} placeholder={String(defaults.leadMonths)} help={LEAD_HELP} />
+      <NumField label={`Shipping time (days) · default ${defaults.shipDays}`} value={sh} onChange={setSh} placeholder={String(defaults.shipDays)} help={SHIP_HELP} />
       <NumField label={`Reorder to (months) · default ${defaults.reorderTo}`} value={rt} onChange={setRt} placeholder={String(defaults.reorderTo)} help={REORDER_TO_HELP} />
       <NumField label="Batch size (units)" value={b} onChange={setB} placeholder="No rounding" help={BATCH_HELP} />
       <button
-        onClick={() => onSave({ minMonths: opt(f), leadMonths: opt(l), reorderToMonths: opt(rt), batchSize: opt(b) })}
+        onClick={() =>
+          onSave({ minMonths: opt(f), leadMonths: opt(l), shipDays: opt(sh), reorderToMonths: opt(rt), batchSize: opt(b) })
+        }
         disabled={pending}
         className="inline-flex items-center gap-1 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-60"
       >
         <Check size={13} /> Save
       </button>
       <button
-        onClick={() => onSave({ minMonths: null, leadMonths: null, reorderToMonths: null, batchSize: null })}
+        onClick={() => onSave({ minMonths: null, leadMonths: null, shipDays: null, reorderToMonths: null, batchSize: null })}
         className="text-[12px] text-muted hover:text-ink-soft"
       >
         Use defaults

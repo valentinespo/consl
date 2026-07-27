@@ -19,13 +19,15 @@ export async function syncAmazon() {
 export async function updateGlobalDefaults(d: {
   minMonths: number;
   leadMonths: number;
-  shipMonths: number;
+  shipDays: number;
+  shipBufferX: number;
   reorderTo: number;
 }) {
   await saveOrgSettings({
     defaultMinMonths: clamp(d.minMonths, 0, 120),
     defaultLeadMonths: clamp(d.leadMonths, 0, 120),
-    shipMonths: clamp(d.shipMonths, 0, 120),
+    shipDays: Math.round(clamp(d.shipDays, 0, 3650)),
+    shipBufferX: clamp(d.shipBufferX, 0, 100),
     defaultReorderTo: clamp(d.reorderTo, 0.1, 120),
   });
   revalidatePath("/inventory");
@@ -39,6 +41,7 @@ export async function updateSkuPolicy(
   p: {
     minMonths: number | null;
     leadMonths: number | null;
+    shipDays: number | null;
     reorderToMonths: number | null;
     batchSize: number | null;
   },
@@ -48,6 +51,7 @@ export async function updateSkuPolicy(
     data: {
       minMonths: p.minMonths == null ? null : clamp(p.minMonths, 0, 120),
       leadMonths: p.leadMonths == null ? null : clamp(p.leadMonths, 0, 120),
+      shipDays: p.shipDays == null ? null : Math.round(clamp(p.shipDays, 0, 3650)),
       reorderToMonths: p.reorderToMonths == null ? null : clamp(p.reorderToMonths, 0.1, 120),
       batchSize: p.batchSize == null ? null : Math.max(0, Math.floor(p.batchSize)) || null,
     },

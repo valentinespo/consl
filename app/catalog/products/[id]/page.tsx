@@ -53,9 +53,10 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
               Edit on Inventory →
             </Link>
           </div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
             <Ro label="Floor" value={product.minMonths} suffix="mo" />
             <Ro label="Lead time" value={product.leadMonths} suffix="mo" />
+            <Ro label="Shipping time" value={product.shipDays} suffix="d" />
             <Ro label="Reorder to" value={product.reorderToMonths} suffix="mo" />
             <Ro label="Batch size" value={product.batchSize} suffix="units" />
           </div>

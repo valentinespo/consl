@@ -10,13 +10,19 @@ export const FLOOR_HELP = {
 export const LEAD_HELP = {
   title: "Lead time",
   body:
-    "How long a production run takes, from placing the order to having units you can sell. It's what decides whether an order placed today lands before you run out.",
+    "How long a production run takes, from placing it to having finished units in your hands. Production only — getting them to the channel is the shipping time, and new stock isn't sellable until both are done.",
 };
 
 export const SHIP_HELP = {
   title: "Shipping time",
   body:
-    "How long it takes to move finished stock you already own from your own warehouse onto the sales channel. Much shorter than a production run — that difference is what lets the app tell 'I can fix this next week' apart from 'I need to start a run now'.",
+    "How long it takes to move finished stock onto the sales channel, in days. It counts twice: stock at your own warehouse is only sellable this many days from now, and a production run isn't sellable until it has been made and then shipped.",
+};
+
+export const BUFFER_HELP = {
+  title: "Shipping buffer",
+  body:
+    "How much cover the channel should still hold when you start moving stock, as a multiple of the shipping time. At 3× with 15-day shipping, the product is flagged to ship once the channel drops under 45 days — leaving two spare shipping windows to get it wrong. Raise it to be more cautious, lower it to hold less stock at the channel.",
 };
 
 export const REORDER_TO_HELP = {

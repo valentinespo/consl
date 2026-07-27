@@ -193,7 +193,8 @@ model Product {
   tiktokSku          String?
   // --- Per-SKU restock policy (null = use the global default) ---
   minMonths          Float? // floor: months of stock to never fall below
-  leadMonths         Float? // production lead time: PO date → stock landing at FBA
+  leadMonths         Float? // production only: placing a run → finished units in hand
+  shipDays           Int? // per-SKU shipping time override, in days
   // Null on all three means "use the global default" — the column default was dropped so new
   // products inherit changes to the org setting instead of being frozen at whatever it was.
   reorderToMonths    Float? // target: how much cover an order brings you back up to
@@ -278,11 +279,16 @@ model Settings {
   orgId             String?
   organization      Organization? @relation(fields: [orgId], references: [id])
   defaultMinMonths  Float         @default(5) // months of stock to never fall below
-  defaultLeadMonths Float         @default(4.5) // production lead time (PO → landing at FBA)
-  // Moving finished stock you already own from your own warehouse onto the channel. Much shorter
-  // than a production run, and the difference is the whole point — without it the engine can't
-  // tell "I can fix this next week" from "I need to start a run now".
+  defaultLeadMonths Float         @default(4.5) // production only: placing a run → units in hand
+  /// Deprecated: superseded by shipDays. Kept because dropping a column would need
+  /// --accept-data-loss, which the deploy's own `db push` can't pass either.
   shipMonths        Float         @default(1)
+  // Moving finished stock you already own onto the channel. Days, not months — it's a truck, not
+  // a production run, and rounding a fortnight to "0.5 months" reads as a guess.
+  shipDays          Int           @default(30)
+  // How much cover the channel should still hold when you start shipping, as a multiple of the
+  // shipping time. 3× with 15-day shipping = start moving stock once the channel is under 45 days.
+  shipBufferX       Float         @default(3)
   // Target cover an order brings you back up to. Per-SKU `reorderToMonths` overrides it.
   defaultReorderTo  Float         @default(12)
   sortMode          String        @default("sales") // inventory dashboard sort: sales | available | manual

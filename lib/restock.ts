@@ -40,7 +40,9 @@ export type RestockRow = {
   leadMonths: number; // resolved lead time
   rawMinMonths: number | null; // per-SKU override, null = using default
   rawLeadMonths: number | null;
-  shipMonths: number; // global: how long moving stock from your warehouse to the channel takes
+  shipDays: number; // resolved shipping time, in days (per-SKU override or global default)
+  rawShipDays: number | null; // per-SKU override, null = using the default
+  shipBufferX: number; // global: start shipping at this multiple of the shipping time
   reorderToMonths: number; // resolved target cover an order brings you back to
   rawReorderToMonths: number | null; // per-SKU override, null = using the default
   batchSize: number; // 0 = don't round the order
@@ -67,7 +69,13 @@ export async function getRestock(): Promise<{
   rows: RestockRow[];
   lastSync: Date | null;
   totals: RestockTotals;
-  defaults: { minMonths: number; leadMonths: number; shipMonths: number; reorderTo: number };
+  defaults: {
+    minMonths: number;
+    leadMonths: number;
+    shipDays: number;
+    shipBufferX: number;
+    reorderTo: number;
+  };
   sortMode: string;
 }> {
   const [products, snaps, lots, rawInv, settings, allProducts, movements, allFacilities] = await Promise.all([
@@ -208,7 +216,9 @@ export async function getRestock(): Promise<{
       leadMonths: p.leadMonths ?? settings.defaultLeadMonths,
       rawMinMonths: p.minMonths,
       rawLeadMonths: p.leadMonths,
-      shipMonths: settings.shipMonths,
+      shipDays: p.shipDays ?? settings.shipDays,
+      rawShipDays: p.shipDays,
+      shipBufferX: settings.shipBufferX,
       reorderToMonths: p.reorderToMonths ?? settings.defaultReorderTo,
       rawReorderToMonths: p.reorderToMonths,
       batchSize: p.batchSize ?? 0,
@@ -242,7 +252,8 @@ export async function getRestock(): Promise<{
     defaults: {
       minMonths: settings.defaultMinMonths,
       leadMonths: settings.defaultLeadMonths,
-      shipMonths: settings.shipMonths,
+      shipDays: settings.shipDays,
+      shipBufferX: settings.shipBufferX,
       reorderTo: settings.defaultReorderTo,
     },
     totals,

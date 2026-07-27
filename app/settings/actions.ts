@@ -81,7 +81,8 @@ export async function getAppSettings() {
     lastSyncAt: s.lastSyncAt ? s.lastSyncAt.toISOString() : null,
     defaultMinMonths: s.defaultMinMonths,
     defaultLeadMonths: s.defaultLeadMonths,
-    shipMonths: s.shipMonths,
+    shipDays: s.shipDays,
+    shipBufferX: s.shipBufferX,
     defaultReorderTo: s.defaultReorderTo,
   };
 }
@@ -94,7 +95,8 @@ export async function saveSettings(input: {
   syncTz: string;
   defaultMinMonths: number;
   defaultLeadMonths: number;
-  shipMonths: number;
+  shipDays: number;
+  shipBufferX: number;
   defaultReorderTo: number;
 }) {
   const data = {
@@ -104,7 +106,8 @@ export async function saveSettings(input: {
     syncTz: input.syncTz.trim() || "America/Argentina/Buenos_Aires",
     defaultMinMonths: Math.max(0, input.defaultMinMonths) || 5,
     defaultLeadMonths: Math.max(0, input.defaultLeadMonths) || 4.5,
-    shipMonths: Math.max(0, input.shipMonths) || 1,
+    shipDays: Math.round(Math.max(0, input.shipDays)) || 30,
+    shipBufferX: Math.max(0, input.shipBufferX) || 3,
     defaultReorderTo: Math.max(0.5, input.defaultReorderTo) || 12,
   };
   await saveOrgSettings(data);

@@ -66,11 +66,18 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
   const hasPO = r.inProduction > 0;
   const total = A + L + P;
 
-  // When the soonest lot lands. Overdue lots are treated as landing now rather than in the past.
+  // Shipping is its own clock now, so a production run is only sellable once it has been made
+  // *and* moved. Lead time covers the making; shipping covers the moving; nothing is sellable
+  // until both are done.
+  const shipM = r.shipDays / MONTH;
+  const shipBuffer = shipM * r.shipBufferX;
+  const makeAndMove = r.leadMonths + shipM;
+
+  // When the soonest lot becomes sellable. Overdue lots are treated as landing now, not in the past.
   let Tc = 0;
   let overdue = false;
   if (hasPO && r.soonestPoISO) {
-    const t = (new Date(r.soonestPoISO).getTime() + r.leadMonths * MONTH_MS - nowMs) / MONTH_MS;
+    const t = (new Date(r.soonestPoISO).getTime() + makeAndMove * MONTH_MS - nowMs) / MONTH_MS;
     overdue = t < 0;
     Tc = Math.max(0, t);
   }
@@ -95,9 +102,9 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
     // lot lands: if the channel plus everything you'd ship still runs out first, you're dark even
     // having done everything right. Report the larger rather than the sum — one number, and it
     // never overstates the outage.
-    const gapToShipment = r.atLocations > 0 ? Math.max(0, r.shipMonths - A) : 0;
-    // With nothing on order, the soonest replacement is a run started today.
-    const nextArrival = hasPO ? Tc : r.leadMonths;
+    const gapToShipment = r.atLocations > 0 ? Math.max(0, shipM - A) : 0;
+    // With nothing on order, the soonest replacement is a run started today — made, then moved.
+    const nextArrival = hasPO ? Tc : makeAndMove;
     const gapToArrival = Math.max(0, nextArrival - (A + L));
     dryMonths = Math.max(gapToShipment, gapToArrival);
 
@@ -114,15 +121,20 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
             : r.atLocations > 0
               ? "even after shipping"
               : undefined;
-    } else if (A >= r.minMonths) {
-      status = "ok";
-      statusLabel = "Healthy";
-    } else if (r.atLocations > 0) {
-      // Below floor with units you already own — moving them is always the first thing to do,
-      // and producing more would leave stock sitting in two places.
+    } else if (r.atLocations > 0 && A <= shipBuffer) {
+      // Moving stock and making more are different questions on different clocks. The floor asks
+      // whether you own enough; this asks whether the channel is close enough to empty that the
+      // truck has to leave. Tying it to the floor meant nagging about a shipment months before
+      // one was needed, on a channel with plenty of cover.
       status = "ship";
       statusLabel = "Ship stock";
-    } else if (hasPO && total >= r.minMonths) {
+      note = `ship within ${Math.round((A - shipM) * MONTH)}d`;
+    } else if (A + L >= r.minMonths) {
+      // Enough owned and already in your hands, without leaning on anything still being made.
+      status = "ok";
+      statusLabel = "Healthy";
+    } else if (total >= r.minMonths) {
+      // Only clears the floor once the incoming lot is counted — which is what Reordered means.
       status = "reordered";
       statusLabel = "Reordered";
     } else {
@@ -133,7 +145,7 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
   if (overdue) note = note ? `${note} · production overdue` : "production overdue";
 
   // --- What to do about it. Any combination of these can apply at once. ----------------------
-  if (r.atLocations > 0 && (A < r.minMonths || dryMonths > 0)) {
+  if (r.atLocations > 0 && (A <= shipBuffer || dryMonths > 0)) {
     shipQty = Math.min(r.atLocations, gapToTarget);
   }
   const belowFloor = monthly > 0 && total < r.minMonths;
