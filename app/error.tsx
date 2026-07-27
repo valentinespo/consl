@@ -30,7 +30,7 @@ export default function Error({ error, reset }: { error: Error & { digest?: stri
       <div className="flex gap-2">
         <button
           onClick={reset}
-          className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-white hover:opacity-90"
+          className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-bg hover:opacity-90"
         >
           Try again
         </button>

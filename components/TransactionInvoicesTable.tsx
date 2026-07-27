@@ -136,7 +136,7 @@ export function TransactionInvoicesTable({
         )}
         <button
           onClick={() => setAdding((v) => !v)}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-2 text-[12.5px] font-medium text-white hover:opacity-90"
+          className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-2 text-[12.5px] font-medium text-bg hover:opacity-90"
         >
           <Plus size={15} /> Add transaction
         </button>

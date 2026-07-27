@@ -292,7 +292,7 @@ export function DateRangePicker({
                     onChange(draft);
                     setBox(null);
                   }}
-                  className="rounded-lg bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:opacity-90"
+                  className="rounded-lg bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-bg hover:opacity-90"
                 >
                   Apply
                 </button>

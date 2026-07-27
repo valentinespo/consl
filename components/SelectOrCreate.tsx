@@ -74,7 +74,7 @@ export function SelectOrCreate({
             type="button"
             onClick={create}
             disabled={pending || !text.trim()}
-            className="shrink-0 rounded-lg bg-ink px-3 text-[12.5px] font-medium text-white hover:opacity-90 disabled:opacity-40"
+            className="shrink-0 rounded-lg bg-ink px-3 text-[12.5px] font-medium text-bg hover:opacity-90 disabled:opacity-40"
           >
             {pending ? "…" : "Create"}
           </button>

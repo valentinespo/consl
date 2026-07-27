@@ -37,7 +37,7 @@ export function NewFacilityButton() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-white hover:opacity-90"
+        className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-bg hover:opacity-90"
       >
         <Plus size={15} /> New facility
       </button>
@@ -78,7 +78,7 @@ export function NewFacilityButton() {
                 <button
                   onClick={save}
                   disabled={pending || !code.trim() || !name.trim()}
-                  className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-40"
+                  className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-bg hover:opacity-90 disabled:opacity-40"
                 >
                   {pending ? "Saving…" : "Create facility"}
                 </button>

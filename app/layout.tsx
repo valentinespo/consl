@@ -34,7 +34,21 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const orgs = await listMyOrgs().catch(() => []);
   return (
     <ClerkProvider signInUrl="/sign-in" signUpUrl="/sign-up" afterSignOutUrl="/sign-in">
-      <html lang="en" className={`${inter.variable} ${geistMono.variable} h-full antialiased`}>
+      <html
+        lang="en"
+        data-theme="light"
+        suppressHydrationWarning
+        className={`${inter.variable} ${geistMono.variable} h-full antialiased`}
+      >
+        <head>
+          {/* Resolves the saved theme (or the OS setting) before first paint, so a dark-mode user
+              never sees a white flash. ThemeToggle mirrors this logic for changes after load. */}
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `(function(){try{var p=localStorage.getItem("so-theme")||"system";var d=p==="dark"||(p!=="light"&&matchMedia("(prefers-color-scheme: dark)").matches);var e=document.documentElement;e.dataset.theme=d?"dark":"light";e.style.colorScheme=d?"dark":"light";}catch(e){}})()`,
+            }}
+          />
+        </head>
         <body className="min-h-full">
           <AppShell
             orgName={org?.name ?? null}

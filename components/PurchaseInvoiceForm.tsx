@@ -273,7 +273,7 @@ export function PurchaseInvoiceForm({
               {cancelLabel}
             </button>
           )}
-          <button type="button" onClick={submit} disabled={pending || !balanced || totalNum === 0 || (editing && !dirty)} className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-50" title={editing && !dirty ? "No changes to save" : !balanced ? "Lines must sum to the invoice total" : undefined}>
+          <button type="button" onClick={submit} disabled={pending || !balanced || totalNum === 0 || (editing && !dirty)} className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-bg hover:opacity-90 disabled:opacity-50" title={editing && !dirty ? "No changes to save" : !balanced ? "Lines must sum to the invoice total" : undefined}>
             {pending ? "Saving…" : editing ? "Save changes" : "Save & recompute"}
           </button>
         </div>

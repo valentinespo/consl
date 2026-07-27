@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
@@ -17,7 +16,6 @@ import {
   Settings,
 } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
-import { AppLogo } from "@/components/AppLogo";
 import { OrgSwitcher } from "@/components/OrgSwitcher";
 import type { MyOrg } from "@/lib/orgs";
 
@@ -44,12 +42,11 @@ export function Sidebar({
 }) {
   const pathname = usePathname();
   return (
-    <aside className="flex h-full w-[230px] shrink-0 flex-col border-r border-border bg-surface">
-      {/* The product's mark, then which company you're in — two different things, stacked. */}
-      <div className="px-5 pb-3 pt-5">
-        <AppLogo />
+    <aside className="flex h-full w-[230px] shrink-0 flex-col overflow-y-auto border-r border-border bg-sidebar">
+      {/* The product's mark lives in the header now; the sidebar leads with which company you're in. */}
+      <div className="pt-3">
+        <OrgSwitcher orgs={orgs} onNavigate={onNavigate} />
       </div>
-      <OrgSwitcher orgs={orgs} onNavigate={onNavigate} />
       <div className="mt-3 border-t border-border" />
 
       <nav className="flex-1 px-3 py-2">

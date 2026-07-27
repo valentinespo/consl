@@ -125,7 +125,7 @@ export function WelcomeForm({ additional = false }: { additional?: boolean }) {
           <button
             onClick={submit}
             disabled={pending || !name.trim()}
-            className="h-10 w-full rounded-lg bg-ink text-[14px] font-medium text-white hover:opacity-90 disabled:opacity-40"
+            className="h-10 w-full rounded-lg bg-ink text-[14px] font-medium text-bg hover:opacity-90 disabled:opacity-40"
           >
             {pending ? "Creating…" : additional ? "Create company" : "Create company"}
           </button>

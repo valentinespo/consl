@@ -224,7 +224,7 @@ export function DashboardGrid({ data, initialLayout }: { data: DashboardData; in
           <button
             onClick={() => { if (editing) persist(itemsRef.current); setEditing((v) => !v); setAddOpen(false); }}
             className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition-colors ${
-              editing ? "bg-ink text-white" : "border border-border bg-surface text-ink-soft hover:bg-surface-2"
+              editing ? "bg-ink text-bg" : "border border-border bg-surface text-ink-soft hover:bg-surface-2"
             }`}
           >
             {editing ? <><Check size={14} /> Done</> : <><Pencil size={14} /> Edit dashboard</>}
@@ -257,7 +257,7 @@ export function DashboardGrid({ data, initialLayout }: { data: DashboardData; in
 
                   {editing && (
                     <>
-                      <div className="absolute left-1.5 top-1.5 z-10 rounded-md bg-ink/80 p-1 text-white shadow-sm" title="Drag to move">
+                      <div className="absolute left-1.5 top-1.5 z-10 rounded-md bg-ink/80 p-1 text-bg shadow-sm" title="Drag to move">
                         <Move size={12} />
                       </div>
                       <button
@@ -271,7 +271,7 @@ export function DashboardGrid({ data, initialLayout }: { data: DashboardData; in
                       <div
                         onPointerDown={(e) => { e.stopPropagation(); onPointerDown(e, it.id, "resize"); }}
                         title="Drag to resize"
-                        className="absolute bottom-1.5 right-1.5 z-10 cursor-se-resize rounded-md bg-ink/80 p-1 text-white shadow-sm"
+                        className="absolute bottom-1.5 right-1.5 z-10 cursor-se-resize rounded-md bg-ink/80 p-1 text-bg shadow-sm"
                       >
                         <Scaling size={12} />
                       </div>

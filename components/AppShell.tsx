@@ -2,13 +2,18 @@
 
 import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
-import { Menu, X } from "lucide-react";
+import { X } from "lucide-react";
 import { Sidebar } from "@/components/Sidebar";
+import { AppHeader } from "@/components/AppHeader";
 import { CurrencyProvider } from "@/components/CurrencyProvider";
-import { AppLogo } from "@/components/AppLogo";
 import type { MyOrg } from "@/lib/orgs";
 
-/** App chrome: fixed sidebar on desktop, slide-in drawer + top bar on mobile. Auth screens render bare. */
+/**
+ * App chrome, Shopify-style: a midnight-navy header across the top, and below it one rounded
+ * "page" holding the sidebar and content. The rounding is done by clipping the page frame over
+ * the navy root background, so the header colour shows through the two top corners.
+ * Auth screens render bare.
+ */
 export function AppShell({
   children,
   orgName,
@@ -38,45 +43,36 @@ export function AppShell({
 
   return (
     <CurrencyProvider symbol={currencySymbol} locale={locale} code={currencyCode}>
-    <div className="lg:flex">
-      {/* Desktop sidebar */}
-      <div className="hidden lg:sticky lg:top-0 lg:block lg:h-screen lg:shrink-0">
-        <Sidebar orgName={orgName} orgs={orgs} />
-      </div>
+      <div className="flex h-dvh flex-col bg-header">
+        <AppHeader onMenu={() => setOpen(true)} />
 
-      {/* Mobile drawer */}
-      {open && (
-        <div className="fixed inset-0 z-50 lg:hidden">
-          <div className="absolute inset-0 bg-black/30" onClick={() => setOpen(false)} aria-hidden />
-          <div className="absolute inset-y-0 left-0 h-full shadow-xl">
-            <Sidebar orgName={orgName} orgs={orgs} onNavigate={() => setOpen(false)} />
-            <button
-              onClick={() => setOpen(false)}
-              aria-label="Close menu"
-              className="absolute right-3 top-4 rounded-lg p-1 text-muted hover:bg-surface-2 hover:text-ink-soft"
-            >
-              <X size={18} />
-            </button>
+        {/* Mobile drawer */}
+        {open && (
+          <div className="fixed inset-0 z-50 lg:hidden">
+            <div className="absolute inset-0 bg-black/30" onClick={() => setOpen(false)} aria-hidden />
+            <div className="absolute inset-y-0 left-0 h-full shadow-xl">
+              <Sidebar orgName={orgName} orgs={orgs} onNavigate={() => setOpen(false)} />
+              <button
+                onClick={() => setOpen(false)}
+                aria-label="Close menu"
+                className="absolute right-3 top-4 rounded-lg p-1 text-muted hover:bg-surface-2 hover:text-ink-soft"
+              >
+                <X size={18} />
+              </button>
+            </div>
           </div>
+        )}
+
+        {/* The page frame. rounded + overflow-hidden lets the navy show through the corners. */}
+        <div className="flex min-h-0 flex-1 overflow-hidden rounded-t-[14px]">
+          <div className="hidden h-full shrink-0 lg:block">
+            <Sidebar orgName={orgName} orgs={orgs} />
+          </div>
+          <main className="min-w-0 flex-1 overflow-y-auto bg-bg">
+            <div className="mx-auto max-w-[1180px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</div>
+          </main>
         </div>
-      )}
-
-      {/* Content column */}
-      <div className="flex min-w-0 flex-1 flex-col">
-        {/* Mobile top bar */}
-        <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-border bg-surface/95 px-4 py-2.5 backdrop-blur lg:hidden">
-          <button onClick={() => setOpen(true)} aria-label="Open menu" className="-ml-1 rounded-lg p-1.5 text-ink-soft hover:bg-surface-2">
-            <Menu size={22} />
-          </button>
-          <AppLogo />
-          {orgName && <span className="truncate text-[13px] text-muted">{orgName}</span>}
-        </header>
-
-        <main className="flex-1 lg:h-screen lg:overflow-y-auto">
-          <div className="mx-auto max-w-[1180px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</div>
-        </main>
       </div>
-    </div>
     </CurrencyProvider>
   );
 }

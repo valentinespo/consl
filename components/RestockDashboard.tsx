@@ -166,7 +166,7 @@ export function RestockDashboard({
       {/* Controls */}
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2.5">
-          <span className="text-[13px] font-medium text-ink">By SKU</span>
+          <span className="text-[13px] font-medium text-ink">Window</span>
           <div className="flex gap-0.5 rounded-lg border border-border bg-surface p-0.5">
             {WINDOWS.map((w) => (
               <button key={w} onClick={() => setWin(w)} className={`rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors ${win === w ? "bg-accent-soft text-accent" : "text-muted hover:text-ink-soft"}`}>
@@ -184,7 +184,7 @@ export function RestockDashboard({
               ))}
             </div>
             {arranging && (
-              <button onClick={confirmOrder} disabled={pending} className="inline-flex items-center gap-1 rounded-lg bg-ink px-2.5 py-1.5 text-[12px] font-medium text-white disabled:opacity-60">
+              <button onClick={confirmOrder} disabled={pending} className="inline-flex items-center gap-1 rounded-lg bg-ink px-2.5 py-1.5 text-[12px] font-medium text-bg disabled:opacity-60">
                 <Check size={13} /> Done
               </button>
             )}
@@ -453,7 +453,7 @@ function GlobalDefaultsEditor({
           })
         }
         disabled={pending}
-        className="inline-flex items-center gap-1 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-60"
+        className="inline-flex items-center gap-1 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-bg disabled:opacity-60"
       >
         <Check size={13} /> Save defaults
       </button>
@@ -510,7 +510,7 @@ function SkuPolicyEditor({
           onSave({ minMonths: opt(f), leadMonths: opt(l), shipDays: opt(sh), reorderToMonths: opt(rt), batchSize: opt(b) })
         }
         disabled={pending}
-        className="inline-flex items-center gap-1 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-60"
+        className="inline-flex items-center gap-1 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-bg disabled:opacity-60"
       >
         <Check size={13} /> Save
       </button>
@@ -563,7 +563,7 @@ function WindowOverrideEditor({
       <div className="pb-0.5 text-[11px] text-muted">
         averages {Math.max(1, w - Math.min(exNum, w - 1))} day{w - Math.min(exNum, w - 1) === 1 ? "" : "s"}
       </div>
-      <button onClick={() => onSave(w, exNum > 0 ? exNum : null)} disabled={pending} className="inline-flex items-center gap-1 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-60">
+      <button onClick={() => onSave(w, exNum > 0 ? exNum : null)} disabled={pending} className="inline-flex items-center gap-1 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-bg disabled:opacity-60">
         <Check size={13} /> Save override
       </button>
       {hasOverride && (

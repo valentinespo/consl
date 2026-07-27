@@ -26,7 +26,7 @@ export function JoinButton({ token, orgName }: { token: string; orgName: string 
       <button
         onClick={join}
         disabled={pending}
-        className="mt-5 h-10 w-full rounded-lg bg-ink text-[14px] font-medium text-white hover:opacity-90 disabled:opacity-40"
+        className="mt-5 h-10 w-full rounded-lg bg-ink text-[14px] font-medium text-bg hover:opacity-90 disabled:opacity-40"
       >
         {pending ? "Joining…" : `Join ${orgName}`}
       </button>

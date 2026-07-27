@@ -35,7 +35,7 @@ export function SyncAmazonButton({ lastSync }: { lastSync: string | null }) {
       <button
         onClick={sync}
         disabled={pending}
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-bg transition-opacity hover:opacity-90 disabled:opacity-60"
       >
         <RefreshCw size={14} className={pending ? "animate-spin" : ""} />
         {pending ? "Syncing…" : "Sync Amazon"}

@@ -200,7 +200,7 @@ export function MovementForm({
         <button
           onClick={save}
           disabled={pending || !canSave}
-          className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-40"
+          className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-bg hover:opacity-90 disabled:opacity-40"
         >
           {pending ? "Saving…" : "Record movement"}
         </button>
@@ -228,7 +228,7 @@ export function NewMovementPanel({
     return (
       <button
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-white hover:opacity-90"
+        className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-bg hover:opacity-90"
       >
         Record movement
       </button>

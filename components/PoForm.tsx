@@ -364,7 +364,7 @@ export function PoForm({
           <button type="button" onClick={onDone} className="rounded-lg border border-border px-3.5 py-2 text-[13px] text-ink-soft hover:bg-surface-2">
             Cancel
           </button>
-          <button type="button" onClick={submit} disabled={pending} className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-50">
+          <button type="button" onClick={submit} disabled={pending} className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-bg hover:opacity-90 disabled:opacity-50">
             {pending ? "Working…" : editing ? "Save & regenerate PDF" : "Generate PO + lot"}
           </button>
         </div>

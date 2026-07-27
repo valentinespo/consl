@@ -54,7 +54,7 @@ export function MaterialPurchaseInvoices({ group, options }: { group: Group; opt
           <span className="text-[12.5px] text-muted">
             {qty(group.totalQty)} {material.unitLabel}s · {money(group.totalSpend)} spent
           </span>
-          <button onClick={() => setAdding((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-white hover:opacity-90">
+          <button onClick={() => setAdding((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-bg hover:opacity-90">
             <Plus size={15} /> Add purchase
           </button>
         </div>

@@ -55,7 +55,7 @@ export function SaveBar({
       <button
         onClick={onSave}
         disabled={!dirty || pending}
-        className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+        className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-bg transition-opacity hover:opacity-90 disabled:opacity-40"
       >
         {pending ? "Saving…" : label}
       </button>

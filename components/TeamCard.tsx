@@ -152,7 +152,7 @@ export function TeamCard({
             <button
               onClick={invite}
               disabled={pending || !email.trim()}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-ink px-3 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-40"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-ink px-3 text-[13px] font-medium text-bg hover:opacity-90 disabled:opacity-40"
             >
               <UserPlus size={15} />
               {pending ? "Creating…" : "Create link"}

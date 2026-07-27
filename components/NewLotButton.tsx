@@ -58,7 +58,7 @@ export function NewLotButton({ facilities, products }: { facilities: Facility[];
 
   return (
     <>
-      <button onClick={() => setOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-white hover:opacity-90">
+      <button onClick={() => setOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-bg hover:opacity-90">
         <Plus size={16} /> New lot
       </button>
 
@@ -142,7 +142,7 @@ export function NewLotButton({ facilities, products }: { facilities: Facility[];
                 <button onClick={() => setOpen(false)} className="rounded-lg border border-border px-3.5 py-2 text-[13px] text-ink-soft hover:bg-surface-2">
                   Cancel
                 </button>
-                <button onClick={save} disabled={pending} className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-50">
+                <button onClick={save} disabled={pending} className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-bg hover:opacity-90 disabled:opacity-50">
                   {pending ? "Creating…" : "Create lot"}
                 </button>
               </div>
