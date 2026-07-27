@@ -29,7 +29,7 @@ export async function getAlerts(rows: RestockRow[]): Promise<Alert[]> {
         key: `ship:${r.code}`,
         kind: "ship",
         title: `${r.name} — ship stock you already have`,
-        detail: `${num(c.shipQty)} units at ${r.atLocationsBy.map((x) => x.code).join(" / ") || "your locations"}`,
+        detail: `Stock waiting at ${r.atLocationsBy.map((x) => x.code).join(" / ") || "your locations"}`,
         severity: "warn",
       });
     } else if (c.belowFloor) {

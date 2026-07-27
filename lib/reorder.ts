@@ -18,8 +18,8 @@ export type ReorderResult = {
   status: ReorderStatus;
   statusLabel: string;
   note?: string;
-  recommendedQty: number;
-  shipQty: number; // units worth shipping from your locations to top the channel back up
+  recommendedQty: number; // units to order — a fixed run size, not a top-up
+  ship: boolean; // there's stock of your own worth moving onto the channel
   expedite: boolean; // a lot is already coming and pulling it forward is what closes the gap
   dryDays: number; // days you'd be unable to sell, doing the best you can from today
   belowFloor: boolean;
@@ -86,11 +86,7 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
   let statusLabel = "Healthy";
   let note: string | undefined;
   let recommendedQty = 0;
-  let shipQty = 0;
   let dryMonths = 0;
-
-  // Units that would bring the sales channel back up to its target.
-  const gapToTarget = Math.max(0, Math.ceil(r.reorderToMonths * monthly - r.onHand));
 
   if (monthly === 0) {
     status = "ok";
@@ -145,13 +141,15 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
   if (overdue) note = note ? `${note} · production overdue` : "production overdue";
 
   // --- What to do about it. Any combination of these can apply at once. ----------------------
-  if (r.atLocations > 0 && (A <= shipBuffer || dryMonths > 0)) {
-    shipQty = Math.min(r.atLocations, gapToTarget);
-  }
+  // How much to send is a judgement call — how full the channel should run, what a pallet holds,
+  // what the storage costs. The app knows a shipment is due, not what belongs on it.
+  const ship = r.atLocations > 0 && (A <= shipBuffer || dryMonths > 0);
   const belowFloor = monthly > 0 && total < r.minMonths;
   if (belowFloor) {
-    // Net off stock you already own — producing more of it would be double-ordering.
-    const raw = Math.max(0, Math.ceil(r.reorderToMonths * monthly - r.onHand - r.inProduction - r.atLocations));
+    // A fixed run size — this many months of sales, every time. Deliberately NOT netted off what
+    // you already hold: production runs are planned in whole batches, and a top-up calculation
+    // produces a different odd number every time you look at it.
+    const raw = Math.ceil(r.reorderToMonths * monthly);
     recommendedQty = r.batchSize > 0 && raw > 0 ? Math.ceil(raw / r.batchSize) * r.batchSize : raw;
   }
   // Pulling a lot forward only helps if there is one and you'd otherwise be dark waiting for it.
@@ -169,7 +167,7 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
     statusLabel,
     note,
     recommendedQty,
-    shipQty,
+    ship,
     expedite,
     dryDays: Math.round(dryMonths * MONTH),
     belowFloor,

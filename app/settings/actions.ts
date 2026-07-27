@@ -108,7 +108,7 @@ export async function saveSettings(input: {
     defaultLeadMonths: Math.max(0, input.defaultLeadMonths) || 4.5,
     shipDays: Math.round(Math.max(0, input.shipDays)) || 30,
     shipBufferX: Math.max(0, input.shipBufferX) || 3,
-    defaultReorderTo: Math.max(0.5, input.defaultReorderTo) || 12,
+    defaultReorderTo: Math.max(0.5, input.defaultReorderTo) || 8,
   };
   await saveOrgSettings(data);
   revalidatePath("/", "layout");

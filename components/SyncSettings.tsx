@@ -195,7 +195,7 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
           <div className="text-[12px] font-medium uppercase tracking-wide text-muted">Restock defaults</div>
           <p className="mt-1.5 max-w-[62ch] text-[12.5px] text-muted">
             How much cover you want to hold, how long stock takes to make and to move, and
-            how much an order tops you back up to. Used for every product that doesn&apos;t have its
+            how big a production run is. Used for every product that doesn&apos;t have its
             own override on the Inventory page — except shipping time, which is always org-wide.
           </p>
         </div>
@@ -244,7 +244,7 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
               className={`${inputCls} tabular`}
             />
           </Field>
-          <Field label="Reorder to (months)" hint="How much an order tops you up to." help={REORDER_TO_HELP}>
+          <Field label="Order size (months)" hint="Months of sales per production run." help={REORDER_TO_HELP}>
             <input
               type="number"
               step={0.5}

@@ -26,9 +26,9 @@ export const BUFFER_HELP = {
 };
 
 export const REORDER_TO_HELP = {
-  title: "Reorder to",
+  title: "Order size",
   body:
-    "When you do order, how many months of cover to bring the channel back up to. The floor decides when to shout; this decides how much. It also sets how much is worth shipping over in one go.",
+    "How big a production run is, measured in months of sales. Always this much — it deliberately doesn't subtract what you already hold, because runs are planned in whole batches and a top-up sum gives a different odd number every time you look at it. The floor decides when to order; this decides how much.",
 };
 
 export const BATCH_HELP = {

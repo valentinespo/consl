@@ -112,7 +112,7 @@ export function RestockDashboard({
   const needsPO = computed.filter((r) => r.belowFloor).length;
   // Counted off the actions rather than the status, so a stockout that also needs shipping shows
   // up in both tiles instead of only the more severe one.
-  const toShip = computed.filter((r) => r.shipQty > 0).length;
+  const toShip = computed.filter((r) => r.ship).length;
   const expedite = computed.filter((r) => r.expedite).length;
   const healthy = computed.filter((r) => r.status === "ok" || r.status === "reordered").length;
   const unitsToOrder = computed.reduce((s, r) => s + (r.belowFloor ? r.recommendedQty : 0), 0);
@@ -325,9 +325,9 @@ export function RestockDashboard({
                       // forward, and still start a run. Showing only the first one was how the
                       // ship instruction used to vanish the moment a row turned red.
                       const acts: { label: string; sub: string; color?: string }[] = [];
-                      if (r.shipQty > 0)
+                      if (r.ship)
                         acts.push({
-                          label: `Ship ${n(r.shipQty)} units`,
+                          label: "Ship units",
                           sub: `From ${r.atLocationsBy.map((x) => x.code).join(" / ") || "your locations"}`,
                           color: SEG.locations,
                         });
@@ -413,7 +413,7 @@ function GlobalDefaultsEditor({
       <NumField label="Default lead time (months)" value={l} onChange={setL} help={LEAD_HELP} />
       <NumField label="Shipping time (days)" value={sh} onChange={setSh} help={SHIP_HELP} />
       <NumField label="Shipping buffer (×)" value={bx} onChange={setBx} help={BUFFER_HELP} />
-      <NumField label="Default reorder to (months)" value={rt} onChange={setRt} help={REORDER_TO_HELP} />
+      <NumField label="Order size (months)" value={rt} onChange={setRt} help={REORDER_TO_HELP} />
       <button
         onClick={() =>
           onSave({
@@ -421,7 +421,7 @@ function GlobalDefaultsEditor({
             leadMonths: num(l, 4.5),
             shipDays: num(sh, 30),
             shipBufferX: num(bx, 3),
-            reorderTo: num(rt, 12),
+            reorderTo: num(rt, 8),
           })
         }
         disabled={pending}
@@ -469,7 +469,7 @@ function SkuPolicyEditor({
       <NumField label={`Floor (months) · default ${defaults.minMonths}`} value={f} onChange={setF} placeholder={String(defaults.minMonths)} help={FLOOR_HELP} />
       <NumField label={`Lead time (months) · default ${defaults.leadMonths}`} value={l} onChange={setL} placeholder={String(defaults.leadMonths)} help={LEAD_HELP} />
       <NumField label={`Shipping time (days) · default ${defaults.shipDays}`} value={sh} onChange={setSh} placeholder={String(defaults.shipDays)} help={SHIP_HELP} />
-      <NumField label={`Reorder to (months) · default ${defaults.reorderTo}`} value={rt} onChange={setRt} placeholder={String(defaults.reorderTo)} help={REORDER_TO_HELP} />
+      <NumField label={`Order size (months) · default ${defaults.reorderTo}`} value={rt} onChange={setRt} placeholder={String(defaults.reorderTo)} help={REORDER_TO_HELP} />
       <NumField label="Batch size (units)" value={b} onChange={setB} placeholder="No rounding" help={BATCH_HELP} />
       <button
         onClick={() =>

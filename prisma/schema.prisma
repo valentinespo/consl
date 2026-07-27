@@ -197,7 +197,7 @@ model Product {
   shipDays           Int? // per-SKU shipping time override, in days
   // Null on all three means "use the global default" — the column default was dropped so new
   // products inherit changes to the org setting instead of being frozen at whatever it was.
-  reorderToMonths    Float? // target: how much cover an order brings you back up to
+  reorderToMonths    Float? // order size: months of sales per run
   batchSize          Int? // co-packer minimum / standard run size; null = don't round the order
   sortIndex          Int? // manual sort position on the inventory dashboard
   windowDays         Int? // per-SKU velocity window override (10/30/90); null = use the global toggle
@@ -289,8 +289,9 @@ model Settings {
   // How much cover the channel should still hold when you start shipping, as a multiple of the
   // shipping time. 3× with 15-day shipping = start moving stock once the channel is under 45 days.
   shipBufferX       Float         @default(3)
-  // Target cover an order brings you back up to. Per-SKU `reorderToMonths` overrides it.
-  defaultReorderTo  Float         @default(12)
+  // Months of sales per production run — a fixed size, not a top-up to a level.
+  // Per-SKU `reorderToMonths` overrides it.
+  defaultReorderTo  Float         @default(8)
   sortMode          String        @default("sales") // inventory dashboard sort: sales | available | manual
   // --- Automatic daily Amazon sync + inventory-value snapshot ---
   syncEnabled       Boolean       @default(true)

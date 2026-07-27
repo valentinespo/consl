@@ -57,7 +57,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
             <Ro label="Floor" value={product.minMonths} suffix="mo" />
             <Ro label="Lead time" value={product.leadMonths} suffix="mo" />
             <Ro label="Shipping time" value={product.shipDays} suffix="d" />
-            <Ro label="Reorder to" value={product.reorderToMonths} suffix="mo" />
+            <Ro label="Order size" value={product.reorderToMonths} suffix="mo" />
             <Ro label="Batch size" value={product.batchSize} suffix="units" />
           </div>
         </Card>

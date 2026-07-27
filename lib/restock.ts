@@ -43,7 +43,7 @@ export type RestockRow = {
   shipDays: number; // resolved shipping time, in days (per-SKU override or global default)
   rawShipDays: number | null; // per-SKU override, null = using the default
   shipBufferX: number; // global: start shipping at this multiple of the shipping time
-  reorderToMonths: number; // resolved target cover an order brings you back to
+  reorderToMonths: number; // resolved order size, in months of sales
   rawReorderToMonths: number | null; // per-SKU override, null = using the default
   batchSize: number; // 0 = don't round the order
   sortIndex: number | null;

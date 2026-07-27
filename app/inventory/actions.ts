@@ -28,7 +28,7 @@ export async function updateGlobalDefaults(d: {
     defaultLeadMonths: clamp(d.leadMonths, 0, 120),
     shipDays: Math.round(clamp(d.shipDays, 0, 3650)),
     shipBufferX: clamp(d.shipBufferX, 0, 100),
-    defaultReorderTo: clamp(d.reorderTo, 0.1, 120),
+    defaultReorderTo: clamp(d.reorderTo, 0.1, 120), // months of sales per order
   });
   revalidatePath("/inventory");
   revalidatePath("/settings/sync");
