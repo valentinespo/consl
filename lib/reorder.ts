@@ -4,7 +4,7 @@ export const MONTH = 30.44;
 export const MONTH_MS = MONTH * 86_400_000;
 const DAY = 86_400_000;
 
-export type ReorderStatus = "ok" | "reordered" | "belowFloor" | "oos";
+export type ReorderStatus = "ok" | "reordered" | "channelLow" | "belowFloor" | "oos";
 export type Win = 10 | 30 | 90;
 
 export type ReorderResult = {
@@ -87,6 +87,7 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
   let note: string | undefined;
   let recommendedQty = 0;
   let dryMonths = 0;
+  let ship = false;
 
   if (monthly === 0) {
     status = "ok";
@@ -103,6 +104,7 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
     const nextArrival = hasPO ? Tc : makeAndMove;
     const gapToArrival = Math.max(0, nextArrival - (A + L));
     dryMonths = Math.max(gapToShipment, gapToArrival);
+    ship = r.atLocations > 0 && (A <= shipBuffer || dryMonths > 0);
 
     if (dryMonths > 0) {
       status = "oos";
@@ -117,6 +119,13 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
             : r.atLocations > 0
               ? "even after shipping"
               : undefined;
+    } else if (ship) {
+      // The channel is close enough to empty that a shipment has to leave. Owning plenty at a
+      // warehouse doesn't make this healthy — a green pill on a channel with days of cover left is
+      // exactly the row someone scrolls past. It's a situation, not an instruction: what to do
+      // about it is the Ship action.
+      status = "channelLow";
+      statusLabel = "Channel low";
     } else if (A + L >= r.minMonths) {
       // Enough owned and already in your hands, without leaning on anything still being made.
       status = "ok";
@@ -135,7 +144,6 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
   // --- What to do about it. Any combination of these can apply at once. ----------------------
   // How much to send is a judgement call — how full the channel should run, what a pallet holds,
   // what the storage costs. The app knows a shipment is due, not what belongs on it.
-  const ship = r.atLocations > 0 && (A <= shipBuffer || dryMonths > 0);
   // Cover left at the channel once the truck's travel time is taken off — how long you can still
   // sit on it before shipping stops being enough.
   const shipWithinDays = ship ? Math.max(0, Math.round((A - shipM) * MONTH)) : 0;

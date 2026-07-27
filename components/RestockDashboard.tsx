@@ -30,10 +30,11 @@ export type Defaults = {
 
 /** Where the SKU stands. Deliberately four situations and no instructions — what to do about it
  *  lives in the Action column, because a row can need shipping, expediting and a PO at once. */
-type Status = "ok" | "reordered" | "belowFloor" | "oos";
+type Status = "ok" | "reordered" | "channelLow" | "belowFloor" | "oos";
 const STATUS: Record<Status, { bg: string; fg: string; dot: string }> = {
   ok: { bg: "#dcfce7", fg: "#166534", dot: "#16a34a" },
   reordered: { bg: "#dcfce7", fg: "#166534", dot: "#16a34a" },
+  channelLow: { bg: "#ede9fe", fg: "#5b21b6", dot: "#8b5cf6" },
   belowFloor: { bg: "#ffedd5", fg: "#9a3412", dot: "#ea580c" },
   oos: { bg: "#fee2e2", fg: "#b91c1c", dot: "#dc2626" },
 };
@@ -48,6 +49,10 @@ const STATUS_HELP: Record<Status, { title: string; body: string }> = {
   reordered: {
     title: "Reordered",
     body: "Below your floor, but a lot is already coming and it lands in time. Nothing to do.",
+  },
+  channelLow: {
+    title: "Channel low",
+    body: "The sales channel is close enough to empty that a shipment needs to leave now. You have units at your own locations to cover it.",
   },
   belowFloor: {
     title: "Below floor",
