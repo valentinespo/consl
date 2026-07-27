@@ -37,33 +37,28 @@ const STATUS: Record<Status, { bg: string; fg: string; dot: string; label: strin
   ship: { bg: "#ede9fe", fg: "#5b21b6", dot: "#8b5cf6", label: "Ship stock" },
 };
 
-/** What each status actually means, in the terms the person reading it thinks in. Kept next to
- *  the colours so the two can't drift apart. */
+/** What each status means, in the terms the person reading it thinks in. Kept next to the colours
+ *  so the two can't drift apart, and kept short — it's a tooltip, not a manual. */
 const STATUS_HELP: Record<Status, { title: string; body: string }> = {
   ok: {
     title: "Healthy",
-    body:
-      "The sales channel holds at least your floor, and it won't run dry before more stock can reach it. Nothing to do.",
+    body: "You hold at least your floor, and the channel won't run dry before more stock can reach it.",
   },
   reordered: {
     title: "Reordered",
-    body:
-      "Below your floor, but a production lot is already on its way, it lands before you run out, and it's big enough. Covered — no new order needed.",
+    body: "Below your floor, but a lot is already coming and it lands in time. Nothing to do.",
   },
   reorder: {
     title: "Reorder",
-    body:
-      "Below your floor with nothing on the way that closes the gap, and no stock of your own to move. Place an order.",
+    body: "Below your floor with nothing coming that closes the gap. Place an order.",
   },
   oos: {
     title: "Out of stock",
-    body:
-      "The channel genuinely hits zero — this is the number of days you won't be able to sell. It already counts everything that can reach the channel in time, including stock you'd ship today and any lot already coming, so it's what's left after doing the best you can. Only expediting a lot, or accepting the gap, changes it.",
+    body: "The channel hits zero — this is how many days you can't sell. It already counts stock you'd ship today and any lot on the way.",
   },
   ship: {
     title: "Ship stock",
-    body:
-      "Below your floor, but you already own finished units at your own locations. Move those first — producing more would leave stock sitting in two places. There's no shortage here, just stock in the wrong place.",
+    body: "You have finished units at your own locations and the channel is getting close to empty. Move them over.",
   },
 };
 
