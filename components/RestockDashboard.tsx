@@ -241,6 +241,14 @@ export function RestockDashboard({
         {displayRows.length === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">No Amazon-mapped SKUs yet — hit Sync.</div>}
         {displayRows.map((r, i) => {
           const st = STATUS[r.status];
+          // This SKU pins at least one of its own restock settings, so it ignores a default. Keep
+          // the gear blue even when closed, as a badge that this row is overriding something.
+          const hasPolicyOverride =
+            r.rawMinMonths != null ||
+            r.rawLeadMonths != null ||
+            r.rawShipDays != null ||
+            r.rawReorderToMonths != null ||
+            r.rawBatchSize != null;
           const totalUnits = r.onHand + r.atLocations + r.inProduction;
           const seg = (v: number, c: string) => (v > 0 ? <div key={c} style={{ width: `${(v / (totalUnits || 1)) * 100}%`, background: c }} /> : null);
           const parts = [
@@ -364,10 +372,10 @@ export function RestockDashboard({
                   </div>
                   <button
                     onClick={() => setEditSku(editSku === r.id ? null : r.id)}
-                    title="Restock policy for this product"
+                    title={hasPolicyOverride ? "Custom restock policy for this product" : "Restock policy for this product"}
                     aria-expanded={editSku === r.id}
                     className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border transition-colors ${
-                      editSku === r.id
+                      editSku === r.id || hasPolicyOverride
                         ? "border-accent-strong bg-accent-soft text-accent"
                         : "border-border bg-surface-2 text-muted hover:border-accent-strong hover:bg-accent-soft/40 hover:text-accent"
                     }`}
@@ -428,7 +436,7 @@ function GlobalDefaultsEditor({
   return (
     <div className="mb-2 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface-2 px-3 py-2.5">
       <NumField label="Default floor (months)" value={f} onChange={setF} help={FLOOR_HELP} />
-      <NumField label="Default lead time (months)" value={l} onChange={setL} help={LEAD_HELP} />
+      <NumField label="Production lead time (months)" value={l} onChange={setL} help={LEAD_HELP} />
       <NumField label="Shipping time (days)" value={sh} onChange={setSh} help={SHIP_HELP} />
       <NumField label="Shipping buffer (×)" value={bx} onChange={setBx} help={BUFFER_HELP} />
       <NumField label="Order size (months)" value={rt} onChange={setRt} help={REORDER_TO_HELP} />
@@ -486,12 +494,12 @@ function SkuPolicyEditor({
   const opt = (v: string) => (v.trim() === "" ? null : parseFloat(v));
   return (
     <div className={`flex flex-wrap items-end gap-3 bg-surface-2 px-4 py-3 ${bordered ? "border-b border-line" : ""}`}>
-      <NumField label={`Floor (months) · default ${defaults.minMonths}`} value={f} onChange={setF} placeholder={String(defaults.minMonths)} help={FLOOR_HELP} />
-      <NumField label={`Lead time (months) · default ${defaults.leadMonths}`} value={l} onChange={setL} placeholder={String(defaults.leadMonths)} help={LEAD_HELP} />
-      <NumField label={`Shipping time (days) · default ${defaults.shipDays}`} value={sh} onChange={setSh} placeholder={String(defaults.shipDays)} help={SHIP_HELP} />
-      <NumField label={`Order size (months) · default ${defaults.reorderTo}`} value={rt} onChange={setRt} placeholder={String(defaults.reorderTo)} help={REORDER_TO_HELP} />
+      <NumField label="Floor (months)" value={f} onChange={setF} placeholder={String(defaults.minMonths)} help={FLOOR_HELP} />
+      <NumField label="Production lead time (months)" value={l} onChange={setL} placeholder={String(defaults.leadMonths)} help={LEAD_HELP} />
+      <NumField label="Shipping time (days)" value={sh} onChange={setSh} placeholder={String(defaults.shipDays)} help={SHIP_HELP} />
+      <NumField label="Order size (months)" value={rt} onChange={setRt} placeholder={String(defaults.reorderTo)} help={REORDER_TO_HELP} />
       <NumField
-        label={`Batch size (units) · default ${defaults.batchSize || "none"}`}
+        label="Batch size (units)"
         value={b}
         onChange={setB}
         placeholder={defaults.batchSize > 0 ? String(defaults.batchSize) : "No rounding"}
