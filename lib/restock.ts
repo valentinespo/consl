@@ -45,7 +45,8 @@ export type RestockRow = {
   shipBufferX: number; // global: start shipping at this multiple of the shipping time
   reorderToMonths: number; // resolved order size, in months of sales
   rawReorderToMonths: number | null; // per-SKU override, null = using the default
-  batchSize: number; // 0 = don't round the order
+  batchSize: number; // resolved run size; 0 = don't round the order
+  rawBatchSize: number | null; // per-SKU override, null = using the default
   sortIndex: number | null;
 };
 
@@ -75,6 +76,7 @@ export async function getRestock(): Promise<{
     shipDays: number;
     shipBufferX: number;
     reorderTo: number;
+    batchSize: number;
   };
   sortMode: string;
 }> {
@@ -221,7 +223,8 @@ export async function getRestock(): Promise<{
       shipBufferX: settings.shipBufferX,
       reorderToMonths: p.reorderToMonths ?? settings.defaultReorderTo,
       rawReorderToMonths: p.reorderToMonths,
-      batchSize: p.batchSize ?? 0,
+      batchSize: p.batchSize ?? settings.defaultBatchSize,
+      rawBatchSize: p.batchSize,
       sortIndex: p.sortIndex,
     };
   });
@@ -255,6 +258,7 @@ export async function getRestock(): Promise<{
       shipDays: settings.shipDays,
       shipBufferX: settings.shipBufferX,
       reorderTo: settings.defaultReorderTo,
+      batchSize: settings.defaultBatchSize,
     },
     totals,
   };

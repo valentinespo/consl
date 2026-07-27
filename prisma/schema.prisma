@@ -292,6 +292,8 @@ model Settings {
   // Months of sales per production run — a fixed size, not a top-up to a level.
   // Per-SKU `reorderToMonths` overrides it.
   defaultReorderTo  Float         @default(8)
+  // Round every order up to a multiple of this. 0 = order any quantity. Per-SKU `batchSize` wins.
+  defaultBatchSize  Int           @default(0)
   sortMode          String        @default("sales") // inventory dashboard sort: sales | available | manual
   // --- Automatic daily Amazon sync + inventory-value snapshot ---
   syncEnabled       Boolean       @default(true)

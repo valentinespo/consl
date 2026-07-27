@@ -7,7 +7,7 @@ import { Card } from "@/components/ui";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
 import { useMoney } from "@/components/CurrencyProvider";
 import { saveSettings, runSyncNow } from "@/app/settings/actions";
-import { BUFFER_HELP, FLOOR_HELP, LEAD_HELP, REORDER_TO_HELP, SHIP_HELP } from "@/lib/restock-help";
+import { BATCH_HELP, BUFFER_HELP, FLOOR_HELP, LEAD_HELP, REORDER_TO_HELP, SHIP_HELP } from "@/lib/restock-help";
 
 export type AppSettings = {
   syncEnabled: boolean;
@@ -20,6 +20,7 @@ export type AppSettings = {
   shipDays: number;
   shipBufferX: number;
   defaultReorderTo: number;
+  defaultBatchSize: number;
 };
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -99,7 +100,8 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
     s.defaultLeadMonths !== initial.defaultLeadMonths ||
     s.shipDays !== initial.shipDays ||
     s.shipBufferX !== initial.shipBufferX ||
-    s.defaultReorderTo !== initial.defaultReorderTo;
+    s.defaultReorderTo !== initial.defaultReorderTo ||
+    s.defaultBatchSize !== initial.defaultBatchSize;
 
   function save() {
     setError(null);
@@ -114,6 +116,7 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
         shipDays: s.shipDays,
         shipBufferX: s.shipBufferX,
         defaultReorderTo: s.defaultReorderTo,
+        defaultBatchSize: s.defaultBatchSize,
       });
       setSaved(true);
       router.refresh();
@@ -251,6 +254,16 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
               min={0.5}
               value={s.defaultReorderTo}
               onChange={(e) => set("defaultReorderTo", Number(e.target.value))}
+              className={`${inputCls} tabular`}
+            />
+          </Field>
+          <Field label="Batch size (units)" hint="0 = order any quantity." help={BATCH_HELP}>
+            <input
+              type="number"
+              step={1}
+              min={0}
+              value={s.defaultBatchSize}
+              onChange={(e) => set("defaultBatchSize", Number(e.target.value))}
               className={`${inputCls} tabular`}
             />
           </Field>

@@ -84,6 +84,7 @@ export async function getAppSettings() {
     shipDays: s.shipDays,
     shipBufferX: s.shipBufferX,
     defaultReorderTo: s.defaultReorderTo,
+    defaultBatchSize: s.defaultBatchSize,
   };
 }
 
@@ -98,6 +99,7 @@ export async function saveSettings(input: {
   shipDays: number;
   shipBufferX: number;
   defaultReorderTo: number;
+  defaultBatchSize: number;
 }) {
   const data = {
     syncEnabled: !!input.syncEnabled,
@@ -109,6 +111,7 @@ export async function saveSettings(input: {
     shipDays: Math.round(Math.max(0, input.shipDays)) || 30,
     shipBufferX: Math.max(0, input.shipBufferX) || 3,
     defaultReorderTo: Math.max(0.5, input.defaultReorderTo) || 8,
+    defaultBatchSize: Math.max(0, Math.round(input.defaultBatchSize)) || 0,
   };
   await saveOrgSettings(data);
   revalidatePath("/", "layout");

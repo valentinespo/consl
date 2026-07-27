@@ -22,6 +22,7 @@ export async function updateGlobalDefaults(d: {
   shipDays: number;
   shipBufferX: number;
   reorderTo: number;
+  batchSize: number;
 }) {
   await saveOrgSettings({
     defaultMinMonths: clamp(d.minMonths, 0, 120),
@@ -29,6 +30,7 @@ export async function updateGlobalDefaults(d: {
     shipDays: Math.round(clamp(d.shipDays, 0, 3650)),
     shipBufferX: clamp(d.shipBufferX, 0, 100),
     defaultReorderTo: clamp(d.reorderTo, 0.1, 120), // months of sales per order
+    defaultBatchSize: Math.round(clamp(d.batchSize, 0, 10_000_000)),
   });
   revalidatePath("/inventory");
   revalidatePath("/settings/sync");

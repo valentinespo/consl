@@ -29,5 +29,5 @@ export const REORDER_TO_HELP = {
 
 export const BATCH_HELP = {
   title: "Batch size",
-  body: "Rounds the order up to a multiple of your co-packer's run size. Blank means no rounding.",
+  body: "Rounds the order up to a multiple of your co-packer's run size — at 10, an order of 1,273 becomes 1,280. Blank or 0 means no rounding.",
 };

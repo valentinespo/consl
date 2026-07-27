@@ -26,6 +26,7 @@ export type Defaults = {
   shipDays: number;
   shipBufferX: number;
   reorderTo: number;
+  batchSize: number;
 };
 
 /** Where the SKU stands. Deliberately four situations and no instructions — what to do about it
@@ -421,6 +422,7 @@ function GlobalDefaultsEditor({
   const [sh, setSh] = useState(String(defaults.shipDays));
   const [bx, setBx] = useState(String(defaults.shipBufferX));
   const [rt, setRt] = useState(String(defaults.reorderTo));
+  const [bs, setBs] = useState(String(defaults.batchSize));
   const num = (v: string, fallback: number) => (v.trim() === "" ? fallback : parseFloat(v) || fallback);
   return (
     <div className="mb-2 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface-2 px-3 py-2.5">
@@ -429,6 +431,7 @@ function GlobalDefaultsEditor({
       <NumField label="Shipping time (days)" value={sh} onChange={setSh} help={SHIP_HELP} />
       <NumField label="Shipping buffer (×)" value={bx} onChange={setBx} help={BUFFER_HELP} />
       <NumField label="Order size (months)" value={rt} onChange={setRt} help={REORDER_TO_HELP} />
+      <NumField label="Default batch size (units)" value={bs} onChange={setBs} help={BATCH_HELP} />
       <button
         onClick={() =>
           onSave({
@@ -437,6 +440,7 @@ function GlobalDefaultsEditor({
             shipDays: num(sh, 30),
             shipBufferX: num(bx, 3),
             reorderTo: num(rt, 8),
+            batchSize: num(bs, 0),
           })
         }
         disabled={pending}
@@ -477,7 +481,7 @@ function SkuPolicyEditor({
   const [l, setL] = useState(row.rawLeadMonths != null ? String(row.rawLeadMonths) : "");
   const [sh, setSh] = useState(row.rawShipDays != null ? String(row.rawShipDays) : "");
   const [rt, setRt] = useState(row.rawReorderToMonths != null ? String(row.rawReorderToMonths) : "");
-  const [b, setB] = useState(row.batchSize > 0 ? String(row.batchSize) : "");
+  const [b, setB] = useState(row.rawBatchSize != null ? String(row.rawBatchSize) : "");
   const opt = (v: string) => (v.trim() === "" ? null : parseFloat(v));
   return (
     <div className={`flex flex-wrap items-end gap-3 bg-surface-2 px-4 py-3 ${bordered ? "border-b border-line" : ""}`}>
@@ -485,7 +489,13 @@ function SkuPolicyEditor({
       <NumField label={`Lead time (months) · default ${defaults.leadMonths}`} value={l} onChange={setL} placeholder={String(defaults.leadMonths)} help={LEAD_HELP} />
       <NumField label={`Shipping time (days) · default ${defaults.shipDays}`} value={sh} onChange={setSh} placeholder={String(defaults.shipDays)} help={SHIP_HELP} />
       <NumField label={`Order size (months) · default ${defaults.reorderTo}`} value={rt} onChange={setRt} placeholder={String(defaults.reorderTo)} help={REORDER_TO_HELP} />
-      <NumField label="Batch size (units)" value={b} onChange={setB} placeholder="No rounding" help={BATCH_HELP} />
+      <NumField
+        label={`Batch size (units) · default ${defaults.batchSize || "none"}`}
+        value={b}
+        onChange={setB}
+        placeholder={defaults.batchSize > 0 ? String(defaults.batchSize) : "No rounding"}
+        help={BATCH_HELP}
+      />
       <button
         onClick={() =>
           onSave({ minMonths: opt(f), leadMonths: opt(l), shipDays: opt(sh), reorderToMonths: opt(rt), batchSize: opt(b) })
