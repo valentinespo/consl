@@ -29,8 +29,9 @@ export type Defaults = {
   batchSize: number;
 };
 
-/** Where the SKU stands. Deliberately four situations and no instructions — what to do about it
- *  lives in the Action column, because a row can need shipping, expediting and a PO at once. */
+/** Where the SKU stands. Five situations and no instructions — what to do about it lives in the
+ *  Action column, because a row can need shipping, expediting and a PO at once. A green pill
+ *  guarantees the action column is empty. */
 type Status = "ok" | "reordered" | "channelLow" | "belowFloor" | "oos";
 const STATUS: Record<Status, { bg: string; fg: string; dot: string }> = {
   ok: { bg: "#dcfce7", fg: "#166534", dot: "#16a34a" },
@@ -52,8 +53,8 @@ const STATUS_HELP: Record<Status, { title: string; body: string }> = {
     body: "Below your floor, but a lot is already coming and it lands in time. Nothing to do.",
   },
   channelLow: {
-    title: "Channel low",
-    body: "The sales channel is close enough to empty that a shipment needs to leave now. You have units at your own locations to cover it.",
+    title: "Running low",
+    body: "The sales channel is running low — a shipment needs to leave within the days shown in the Action column. You already own the stock to send.",
   },
   belowFloor: {
     title: "Below floor",
@@ -61,7 +62,7 @@ const STATUS_HELP: Record<Status, { title: string; body: string }> = {
   },
   oos: {
     title: "Out of stock",
-    body: "The channel hits zero — this is how many days you can't sell. It already counts stock you'd ship today and any lot on the way.",
+    body: "The channel hits zero — this is how many days you can't sell, counting stock you'd ship today and any lot on the way. The Action column lists everything that shrinks it.",
   },
 };
 
@@ -110,13 +111,13 @@ export function RestockDashboard({
     return arr;
   }, [byId, sort]);
   const displayRows = arranging ? order.map((id) => byId.get(id)).filter((r): r is Computed => !!r) : computed;
-  const needsPO = computed.filter((r) => r.belowFloor).length;
+  const needsPO = computed.filter((r) => r.order).length;
   // Counted off the actions rather than the status, so a stockout that also needs shipping shows
   // up in both tiles instead of only the more severe one.
   const toShip = computed.filter((r) => r.ship).length;
   const expedite = computed.filter((r) => r.expedite).length;
   const healthy = computed.filter((r) => r.status === "ok" || r.status === "reordered").length;
-  const unitsToOrder = computed.reduce((s, r) => s + (r.belowFloor ? r.recommendedQty : 0), 0);
+  const unitsToOrder = computed.reduce((s, r) => s + r.recommendedQty, 0);
 
   function pickSort(m: SortMode) {
     setSort(m);

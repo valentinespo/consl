@@ -45,7 +45,7 @@ export async function getAlerts(rows: RestockRow[]): Promise<Alert[]> {
         severity: "warn",
       });
     }
-    if (c.belowFloor) {
+    if (c.order) {
       alerts.push({
         key: `reorder:${r.code}`,
         kind: "reorder",
