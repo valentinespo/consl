@@ -344,8 +344,8 @@ function CoverWidget({ months }: { months: number }) {
           <div className="h-full rounded-full transition-all" style={{ width: `${frac * 100}%`, background: bar }} />
         </div>
         <div className="mt-1.5 flex justify-between text-[10.5px] text-muted">
-          <span>at today’s sell-through</span>
-          <span>target {target}mo</span>
+          <span>At today’s sell-through</span>
+          <span>Target {target}mo</span>
         </div>
       </div>
     </Card>
@@ -508,8 +508,8 @@ function ReorderAlertsWidget({ alerts }: { alerts: Alert[] }) {
     <Card className="flex h-full flex-col">
       <WidgetHead icon={AlertTriangle} title="Reorder alerts" tint="amber" />
       <div className="mb-3 grid grid-cols-2 gap-2.5">
-        <MetricTile value={reorder.length} label="need a PO" tint="amber" icon={ShoppingCart} />
-        <MetricTile value={expedite.length} label="to expedite" tint="red" icon={Zap} />
+        <MetricTile value={reorder.length} label="Need a PO" tint="amber" icon={ShoppingCart} />
+        <MetricTile value={expedite.length} label="To expedite" tint="red" icon={Zap} />
       </div>
       <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto">
         {list.map((a) => (

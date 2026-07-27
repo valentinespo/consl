@@ -10,6 +10,7 @@ import { TotalValueCard } from "@/components/TotalValueCard";
 import { updateGlobalDefaults, updateSkuPolicy, setSortMode, saveManualOrder, setSkuWindow } from "@/app/inventory/actions";
 import type { RestockRow, RestockTotals } from "@/lib/restock";
 import { computeReorder, type ReorderResult } from "@/lib/reorder";
+import { SEG } from "@/lib/segments";
 
 type SortMode = "sales" | "available" | "manual";
 const SORT_LABEL: Record<SortMode, string> = { sales: "Monthly sales", available: "Units available", manual: "Manual" };
@@ -17,14 +18,6 @@ const SORT_LABEL: Record<SortMode, string> = { sales: "Monthly sales", available
 const WINDOWS = [10, 30, 90] as const;
 type Win = (typeof WINDOWS)[number];
 
-const SEG = {
-  available: "#16a34a",
-  inbound: "#4ade80",
-  reserved: "#bbf7d0",
-  awd: "#2563eb",
-  locations: "#8b5cf6", // finished stock at your own facilities — matches the dashboard bucket
-  production: "#f59e0b",
-};
 
 type Status = "ok" | "reordered" | "reorder" | "oos" | "ship";
 const STATUS: Record<Status, { bg: string; fg: string; dot: string; label: string }> = {
@@ -169,7 +162,7 @@ export function RestockDashboard({
             ))}
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-muted">sort</span>
+            <span className="text-[11px] text-muted">Sort</span>
             <div className="flex gap-0.5 rounded-lg border border-border bg-surface p-0.5">
               {(["sales", "available", "manual"] as SortMode[]).map((m) => (
                 <button key={m} onClick={() => pickSort(m)} className={`rounded-md px-2 py-1 text-[12px] font-medium transition-colors ${sort === m && !arranging ? "bg-accent-soft text-accent" : arranging && m === "manual" ? "bg-accent-soft text-accent" : "text-muted hover:text-ink-soft"}`}>
@@ -196,16 +189,16 @@ export function RestockDashboard({
             }`}
           >
             <Settings size={13} />
-            floor {defaults.minMonths}mo · lead {defaults.leadMonths}mo
+            Floor {defaults.minMonths}mo · Lead {defaults.leadMonths}mo
           </button>
         </div>
         <div className="flex flex-wrap gap-2.5 text-[11px] text-muted">
-          <Legend color={SEG.available} label="available" />
-          <Legend color={SEG.inbound} label="inbound" />
-          <Legend color={SEG.reserved} label="reserved" />
+          <Legend color={SEG.available} label="Available" />
+          <Legend color={SEG.inbound} label="Inbound" />
+          <Legend color={SEG.reserved} label="Reserved" />
           <Legend color={SEG.awd} label="AWD" />
-          <Legend color={SEG.locations} label="at my locations" />
-          <Legend color={SEG.production} label="production" />
+          <Legend color={SEG.locations} label="At my locations" />
+          <Legend color={SEG.production} label="Production" />
         </div>
       </div>
 
@@ -225,12 +218,12 @@ export function RestockDashboard({
           const totalUnits = r.onHand + r.atLocations + r.inProduction;
           const seg = (v: number, c: string) => (v > 0 ? <div key={c} style={{ width: `${(v / (totalUnits || 1)) * 100}%`, background: c }} /> : null);
           const parts = [
-            r.fbaAvailable && `${n(r.fbaAvailable)} avail`,
-            r.fbaInbound && `${n(r.fbaInbound)} inbound`,
-            r.fbaReserved && `${n(r.fbaReserved)} reserved`,
+            r.fbaAvailable && `${n(r.fbaAvailable)} Available`,
+            r.fbaInbound && `${n(r.fbaInbound)} Inbound`,
+            r.fbaReserved && `${n(r.fbaReserved)} Reserved`,
             r.awdTotal && `${n(r.awdTotal)} AWD`,
-            r.atLocations && `${n(r.atLocations)} at ${r.atLocationsBy.map((x) => x.code).join("/")}`,
-            r.inProduction && `${n(r.inProduction)} prod`,
+            r.atLocations && `${n(r.atLocations)} At ${r.atLocationsBy.map((x) => x.code).join("/")}`,
+            r.inProduction && `${n(r.inProduction)} In production`,
           ].filter(Boolean);
           return (
             <div
@@ -271,7 +264,7 @@ export function RestockDashboard({
                 {/* Total units */}
                 <div>
                   <div className="text-[15px] font-medium leading-none tabular text-ink">{n(totalUnits)}</div>
-                  <div className="mt-0.5 text-[10px] uppercase tracking-wide text-muted">units</div>
+                  <div className="mt-0.5 text-[10px] uppercase tracking-wide text-muted">Units</div>
                 </div>
                 {/* Pipeline bar */}
                 <div className="min-w-0">
@@ -283,21 +276,23 @@ export function RestockDashboard({
                     {seg(r.atLocations, SEG.locations)}
                     {seg(r.inProduction, SEG.production)}
                   </div>
-                  <div className="mt-1.5 truncate text-[11px] tabular text-muted">{parts.join(" · ")}</div>
+                  {/* Wraps rather than truncates — spelling the buckets out in full is pointless
+                      if the line gets cut off halfway through "Reserved". */}
+                  <div className="mt-1.5 text-[11px] tabular text-muted">{parts.join(" · ")}</div>
                 </div>
                 {/* Coverage: months on hand, then what's waiting at your locations and in production */}
                 <div>
                   <div className="tabular text-[15px] font-medium leading-none text-ink">{mo(r.onHandCover)}<span className="text-[10.5px] font-normal text-muted"> mo</span></div>
-                  <div className="mt-0.5 text-[10px] uppercase tracking-wide text-muted">on hand</div>
+                  <div className="mt-0.5 text-[10px] uppercase tracking-wide text-muted">On hand</div>
                   {r.atLocations > 0 && (
                     <div className="mt-1.5 tabular text-[13px] font-medium leading-none" style={{ color: SEG.locations }}>
                       +{mo(r.locCover)}<span className="text-[10.5px] font-normal text-muted"> mo at my locations</span>
                     </div>
                   )}
                   {r.inProduction > 0 ? (
-                    <div className="mt-1.5 tabular text-[13px] font-medium leading-none" style={{ color: SEG.production }}>+{mo(r.prodCover)}<span className="text-[10.5px] font-normal text-muted"> mo prod</span></div>
+                    <div className="mt-1.5 tabular text-[13px] font-medium leading-none" style={{ color: SEG.production }}>+{mo(r.prodCover)}<span className="text-[10.5px] font-normal text-muted"> mo in production</span></div>
                   ) : (
-                    r.atLocations === 0 && <div className="mt-1.5 text-[11px] text-muted">no prod</div>
+                    r.atLocations === 0 && <div className="mt-1.5 text-[11px] text-muted">No production</div>
                   )}
                 </div>
                 {/* Status */}
@@ -318,19 +313,19 @@ export function RestockDashboard({
                           Ship {n(r.shipQty)} units
                         </div>
                         <div className="text-[10.5px] text-muted">
-                          from {r.atLocationsBy.map((x) => x.code).join(" / ") || "your locations"}
-                          {r.recommendedQty > 0 && ` · then order ${n(r.recommendedQty)}`}
+                          From {r.atLocationsBy.map((x) => x.code).join(" / ") || "your locations"}
+                          {r.recommendedQty > 0 && ` · Then order ${n(r.recommendedQty)}`}
                         </div>
                       </>
                     ) : r.belowFloor ? (
                       <>
                         <div className="text-[12.5px] font-medium tabular text-ink">{r.recommendedQty > 0 ? `${n(r.recommendedQty)} units` : "Order"}</div>
-                        <div className="text-[10.5px] text-muted">recommended</div>
+                        <div className="text-[10.5px] text-muted">Recommended</div>
                       </>
                     ) : r.status === "oos" ? (
                       <>
                         <div className="text-[12.5px] font-medium" style={{ color: "#b91c1c" }}>Expedite</div>
-                        <div className="text-[10.5px] text-muted">incoming lot</div>
+                        <div className="text-[10.5px] text-muted">Incoming lot</div>
                       </>
                     ) : (
                       <span className="text-[12px] text-muted">Covered</span>

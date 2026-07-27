@@ -2,18 +2,11 @@
 
 import { useMoney } from "@/components/CurrencyProvider";
 import type { ValueHistoryPoint } from "@/lib/restock";
+import { BUCKETS as SERIES } from "@/lib/segments";
 
 const W = 1000;
 const H = 150;
 
-// Bottom → top, matching the value-card pills.
-const SERIES = [
-  { key: "fba", color: "#16a34a", label: "FBA" },
-  { key: "awd", color: "#2563eb", label: "AWD" },
-  { key: "inProduction", color: "#f59e0b", label: "In production" },
-  { key: "atLocations", color: "#8b5cf6", label: "At my locations" },
-  { key: "raw", color: "#94a3b8", label: "Raw materials" },
-] as const;
 
 /** Stacked area of inventory value split by bucket over time. */
 export function ValueStackedChart({ data }: { data: ValueHistoryPoint[] }) {
