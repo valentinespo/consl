@@ -4,7 +4,7 @@ export const MONTH = 30.44;
 export const MONTH_MS = MONTH * 86_400_000;
 const DAY = 86_400_000;
 
-export type ReorderStatus = "ok" | "reordered" | "reorder" | "oos" | "ship";
+export type ReorderStatus = "ok" | "reordered" | "belowFloor" | "oos";
 export type Win = 10 | 30 | 90;
 
 export type ReorderResult = {
@@ -20,6 +20,7 @@ export type ReorderResult = {
   note?: string;
   recommendedQty: number; // units to order — a fixed run size, not a top-up
   ship: boolean; // there's stock of your own worth moving onto the channel
+  shipWithinDays: number; // how long you can still wait before shipping is too late
   expedite: boolean; // a lot is already coming and pulling it forward is what closes the gap
   dryDays: number; // days you'd be unable to sell, doing the best you can from today
   belowFloor: boolean;
@@ -35,10 +36,9 @@ export type ReorderResult = {
  * when the question that matters is "do I run out?". Those give different answers, and the gap
  * between them is where stockouts hid.
  *
- * So there is exactly one severe status. Out of stock means the channel genuinely hits zero, and
- * it is tested first, because everything else is about a comfort level and none of it may mask a
- * real outage. The rest of the ladder then reads: is the channel below its floor, and if so, what
- * closes it — moving stock you already own, a lot already coming, or a new order.
+ * Status says where you stand; it never says what to do. Shipping, expediting and ordering are
+ * returned as independent flags precisely because a row can need all three at once, and folding
+ * them into one status is what used to let a stockout hide behind "ship the stock you have".
  */
 export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): ReorderResult {
   const win: Win = r.windowDays === 10 || r.windowDays === 30 || r.windowDays === 90 ? r.windowDays : globalWin;
@@ -117,14 +117,6 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
             : r.atLocations > 0
               ? "even after shipping"
               : undefined;
-    } else if (r.atLocations > 0 && A <= shipBuffer) {
-      // Moving stock and making more are different questions on different clocks. The floor asks
-      // whether you own enough; this asks whether the channel is close enough to empty that the
-      // truck has to leave. Tying it to the floor meant nagging about a shipment months before
-      // one was needed, on a channel with plenty of cover.
-      status = "ship";
-      statusLabel = "Ship stock";
-      note = `ship within ${Math.round((A - shipM) * MONTH)}d`;
     } else if (A + L >= r.minMonths) {
       // Enough owned and already in your hands, without leaning on anything still being made.
       status = "ok";
@@ -134,8 +126,8 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
       status = "reordered";
       statusLabel = "Reordered";
     } else {
-      status = "reorder";
-      statusLabel = "Reorder";
+      status = "belowFloor";
+      statusLabel = "Below floor";
     }
   }
   if (overdue) note = note ? `${note} · production overdue` : "production overdue";
@@ -144,6 +136,9 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
   // How much to send is a judgement call — how full the channel should run, what a pallet holds,
   // what the storage costs. The app knows a shipment is due, not what belongs on it.
   const ship = r.atLocations > 0 && (A <= shipBuffer || dryMonths > 0);
+  // Cover left at the channel once the truck's travel time is taken off — how long you can still
+  // sit on it before shipping stops being enough.
+  const shipWithinDays = ship ? Math.max(0, Math.round((A - shipM) * MONTH)) : 0;
   const belowFloor = monthly > 0 && total < r.minMonths;
   if (belowFloor) {
     // A fixed run size — this many months of sales, every time. Deliberately NOT netted off what
@@ -168,6 +163,7 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
     note,
     recommendedQty,
     ship,
+    shipWithinDays,
     expedite,
     dryDays: Math.round(dryMonths * MONTH),
     belowFloor,

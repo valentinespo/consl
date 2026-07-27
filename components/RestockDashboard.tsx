@@ -28,13 +28,14 @@ export type Defaults = {
   reorderTo: number;
 };
 
-type Status = "ok" | "reordered" | "reorder" | "oos" | "ship";
-const STATUS: Record<Status, { bg: string; fg: string; dot: string; label: string }> = {
-  ok: { bg: "#dcfce7", fg: "#166534", dot: "#16a34a", label: "Healthy" },
-  reordered: { bg: "#dcfce7", fg: "#166534", dot: "#16a34a", label: "Reordered" },
-  reorder: { bg: "#ffedd5", fg: "#9a3412", dot: "#ea580c", label: "Reorder" },
-  oos: { bg: "#fee2e2", fg: "#b91c1c", dot: "#dc2626", label: "OOS" },
-  ship: { bg: "#ede9fe", fg: "#5b21b6", dot: "#8b5cf6", label: "Ship stock" },
+/** Where the SKU stands. Deliberately four situations and no instructions — what to do about it
+ *  lives in the Action column, because a row can need shipping, expediting and a PO at once. */
+type Status = "ok" | "reordered" | "belowFloor" | "oos";
+const STATUS: Record<Status, { bg: string; fg: string; dot: string }> = {
+  ok: { bg: "#dcfce7", fg: "#166534", dot: "#16a34a" },
+  reordered: { bg: "#dcfce7", fg: "#166534", dot: "#16a34a" },
+  belowFloor: { bg: "#ffedd5", fg: "#9a3412", dot: "#ea580c" },
+  oos: { bg: "#fee2e2", fg: "#b91c1c", dot: "#dc2626" },
 };
 
 /** What each status means, in the terms the person reading it thinks in. Kept next to the colours
@@ -48,19 +49,18 @@ const STATUS_HELP: Record<Status, { title: string; body: string }> = {
     title: "Reordered",
     body: "Below your floor, but a lot is already coming and it lands in time. Nothing to do.",
   },
-  reorder: {
-    title: "Reorder",
-    body: "Below your floor with nothing coming that closes the gap. Place an order.",
+  belowFloor: {
+    title: "Below floor",
+    body: "You own less cover than your floor, counting everything including production. Place an order.",
   },
   oos: {
     title: "Out of stock",
     body: "The channel hits zero — this is how many days you can't sell. It already counts stock you'd ship today and any lot on the way.",
   },
-  ship: {
-    title: "Ship stock",
-    body: "You have finished units at your own locations and the channel is getting close to empty. Move them over.",
-  },
 };
+
+/** One column template, used by the header and every row — they must not drift apart. */
+const GRID = "grid-cols-[minmax(180px,1.4fr)_84px_minmax(0,1.7fr)_112px_128px_112px]";
 
 const n = (x: number) => Math.round(x).toLocaleString("en-US");
 const mo = (x: number) => (x === Infinity ? "∞" : x.toFixed(1));
@@ -218,6 +218,19 @@ export function RestockDashboard({
       )}
 
       <div className="overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface">
+        {/* Column headings. Same grid template as every row, so they stay lined up. */}
+        {displayRows.length > 0 && (
+          <div
+            className={`grid ${GRID} items-end gap-4 border-b border-border bg-surface-2/60 px-4 py-2 text-[10px] font-medium uppercase tracking-wide text-muted`}
+          >
+            <div>Product</div>
+            <div>Units</div>
+            <div>Where the stock is</div>
+            <div>Cover</div>
+            <div>Status</div>
+            <div className="text-right">Action</div>
+          </div>
+        )}
         {displayRows.length === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">No Amazon-mapped SKUs yet — hit Sync.</div>}
         {displayRows.map((r, i) => {
           const st = STATUS[r.status];
@@ -241,7 +254,7 @@ export function RestockDashboard({
               onDragEnd={() => { dragId.current = null; }}
               className={arranging ? "cursor-grab active:cursor-grabbing" : ""}
             >
-              <div className={`grid grid-cols-[minmax(180px,1.4fr)_84px_minmax(0,1.7fr)_112px_128px_112px] items-center gap-4 px-4 py-3 ${i < displayRows.length - 1 && editSku !== r.id && winSku !== r.id ? "border-b border-line" : ""}`}>
+              <div className={`grid ${GRID} items-center gap-4 px-4 py-3 ${i < displayRows.length - 1 && editSku !== r.id && winSku !== r.id ? "border-b border-line" : ""}`}>
                 {/* SKU */}
                 <div className="flex min-w-0 items-center gap-2.5">
                   {arranging && <GripVertical size={16} className="shrink-0 text-muted" />}
@@ -323,7 +336,9 @@ export function RestockDashboard({
                       if (r.ship)
                         acts.push({
                           label: "Ship units",
-                          sub: `From ${r.atLocationsBy.map((x) => x.code).join(" / ") || "your locations"}`,
+                          sub:
+                            `From ${r.atLocationsBy.map((x) => x.code).join(" / ") || "your locations"}` +
+                            (r.shipWithinDays > 0 ? ` · within ${r.shipWithinDays}d` : ""),
                           color: SEG.locations,
                         });
                       if (r.expedite) acts.push({ label: "Expedite", sub: "Incoming lot", color: "#b91c1c" });

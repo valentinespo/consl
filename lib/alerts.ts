@@ -23,29 +23,34 @@ export async function getAlerts(rows: RestockRow[]): Promise<Alert[]> {
   for (const r of rows) {
     const win = r.windowDays === 10 || r.windowDays === 30 || r.windowDays === 90 ? r.windowDays : 90;
     const c = computeReorder(r, win, now);
-    if (c.status === "ship") {
-      // Already made and already yours — it just needs moving, so this beats a reorder alert.
+    // Independent, not a chain: a row can need a shipment *and* a PO *and* an expedite, and an
+    // if/else here would silently drop the other two.
+    if (c.ship) {
       alerts.push({
         key: `ship:${r.code}`,
         kind: "ship",
         title: `${r.name} — ship stock you already have`,
-        detail: `Stock waiting at ${r.atLocationsBy.map((x) => x.code).join(" / ") || "your locations"}`,
+        detail: `Waiting at ${r.atLocationsBy.map((x) => x.code).join(" / ") || "your locations"}${
+          c.shipWithinDays > 0 ? ` · within ${c.shipWithinDays}d` : ""
+        }`,
         severity: "warn",
       });
-    } else if (c.belowFloor) {
-      alerts.push({
-        key: `reorder:${r.code}`,
-        kind: "reorder",
-        title: `${r.name} needs a PO`,
-        detail: c.recommendedQty > 0 ? `${num(c.recommendedQty)} units recommended` : "below the floor",
-        severity: "warn",
-      });
-    } else if (c.status === "oos") {
+    }
+    if (c.expedite) {
       alerts.push({
         key: `expedite:${r.code}`,
         kind: "expedite",
         title: `${r.name} — expedite incoming lot`,
         detail: c.statusLabel,
+        severity: "warn",
+      });
+    }
+    if (c.belowFloor) {
+      alerts.push({
+        key: `reorder:${r.code}`,
+        kind: "reorder",
+        title: `${r.name} needs a PO`,
+        detail: c.recommendedQty > 0 ? `${num(c.recommendedQty)} units recommended` : "below the floor",
         severity: "warn",
       });
     }
