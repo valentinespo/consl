@@ -5,7 +5,6 @@ import Link from "next/link";
 import { ChevronRight } from "@/components/icons";
 import { Pill, FacilityTag, SkuAvatar } from "@/components/ui";
 import { LotLineCards, type LotLineSummary } from "@/components/LotLineCards";
-import { qty, date } from "@/lib/format";
 import { useMoney } from "@/components/CurrencyProvider";
 
 export type RecentLot = {
@@ -22,7 +21,7 @@ export type RecentLot = {
 };
 
 export function RecentLots({ lots }: { lots: RecentLot[] }) {
-  const { money } = useMoney();
+  const { money, qty, date } = useMoney();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggle = (id: string) =>
     setExpanded((prev) => {

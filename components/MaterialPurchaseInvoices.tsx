@@ -2,7 +2,6 @@
 
 import { Fragment, useState } from "react";
 import { Plus, ChevronRight } from "@/components/icons";
-import { qty, date } from "@/lib/format";
 import { useMoney } from "@/components/CurrencyProvider";
 import { Card, FacilityTag, SkuAvatar, SupplierAvatar } from "@/components/ui";
 import { PurchaseInvoiceForm, type PurchaseInvoiceRow, type PurchaseOptions, type PurchaseMaterial } from "@/components/PurchaseInvoiceForm";
@@ -19,7 +18,7 @@ type Group = {
 const LIMIT = 3;
 
 export function MaterialPurchaseInvoices({ group, options }: { group: Group; options: PurchaseOptions }) {
-  const { money } = useMoney();
+  const { money, qty, date } = useMoney();
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());

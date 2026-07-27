@@ -5,7 +5,6 @@ import Link from "next/link";
 import { ChevronRight } from "@/components/icons";
 import { Pill, FacilityTag, SkuAvatar } from "@/components/ui";
 import { LotLineCards, type LotLineSummary } from "@/components/LotLineCards";
-import { qty, date } from "@/lib/format";
 import { useMoney } from "@/components/CurrencyProvider";
 
 export type LotRow = {
@@ -25,7 +24,7 @@ export type LotRow = {
 };
 
 export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: string[] }) {
-  const { money, perUnit } = useMoney();
+  const { money, perUnit, qty, date } = useMoney();
   const [q, setQ] = useState("");
   const [facility, setFacility] = useState("ALL");
   const [status, setStatus] = useState("ALL");

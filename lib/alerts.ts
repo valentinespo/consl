@@ -2,6 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getInventory } from "@/lib/queries";
 import { computeReorder } from "@/lib/reorder";
+import { getFmt } from "@/lib/fmt-server";
 import type { RestockRow } from "@/lib/restock";
 
 export type Alert = {
@@ -12,11 +13,11 @@ export type Alert = {
   severity: "critical" | "warn";
 };
 
-const num = (x: number) => Math.round(x).toLocaleString("en-US");
 
 /** Active dashboard notifications: SKUs needing a PO / expedite + materials below their threshold.
  *  Dismissed alerts are hidden; dismissals whose condition has resolved are pruned (so they recur fresh). */
 export async function getAlerts(rows: RestockRow[]): Promise<Alert[]> {
+  const { qty: num } = await getFmt(); // counts in the org's locale
   const now = Date.now();
   const alerts: Alert[] = [];
 

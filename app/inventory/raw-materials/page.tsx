@@ -78,7 +78,7 @@ export default async function RawMaterialsPage() {
 
   const poolCount = live.length;
   const org = await getCurrentOrg().catch(() => null);
-  const cur: Currency = { symbol: org?.currencySymbol ?? "$", locale: org?.locale ?? "en-US" };
+  const cur: Currency = { symbol: org?.currencySymbol ?? "$", locale: org?.locale ?? "en-US", code: org?.currencyCode ?? "USD" };
 
   return (
     <>

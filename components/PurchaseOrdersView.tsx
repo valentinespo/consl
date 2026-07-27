@@ -4,7 +4,6 @@ import { Fragment, useState } from "react";
 import Link from "next/link";
 import { ChevronRight, FileText } from "@/components/icons";
 import { Pill, SkuAvatar } from "@/components/ui";
-import { date } from "@/lib/format";
 import { useMoney } from "@/components/CurrencyProvider";
 import { PoForm, type PoFacility, type PoProduct, type PoRow } from "@/components/PoForm";
 import { setPoStatus, deletePurchaseOrder } from "@/app/purchase-orders/actions";
@@ -37,7 +36,7 @@ export function PurchaseOrdersView({
   nextLotNr: number;
   todayISO: string;
 }) {
-  const { money } = useMoney();
+  const { money, date } = useMoney();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const router = useRouter();
   const toggle = (id: string) =>
@@ -192,7 +191,7 @@ function ImportedPo({ po }: { po: PoListRow }) {
 
 /** Read-only list of a PO's lines. */
 function PoLinesList({ po }: { po: PoListRow }) {
-  const { money } = useMoney();
+  const { money, qty } = useMoney();
   return (
     <div className="space-y-1.5">
       {po.lines.map((l, i) => (
@@ -200,7 +199,7 @@ function PoLinesList({ po }: { po: PoListRow }) {
           {l.sku ? <SkuAvatar code={l.sku} imageUrl={l.skuImageUrl} size={22} /> : <span className="rounded-md border border-border px-1.5 py-0.5 text-[10.5px] text-muted">FEE</span>}
           <span className="text-ink-soft">{l.description}</span>
           <span className="ml-auto tabular text-muted">
-            {l.unitCost == null ? "TBD" : money(l.unitCost, 2)} × {l.quantity.toLocaleString("en-US")} ={" "}
+            {l.unitCost == null ? "TBD" : money(l.unitCost, 2)} × {qty(l.quantity)} ={" "}
             <span className="font-medium text-ink">{l.unitCost == null ? "TBD" : money(l.unitCost * l.quantity, 2)}</span>
           </span>
         </div>

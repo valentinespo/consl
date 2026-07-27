@@ -2,7 +2,6 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getFacilityDetail, getFacilitiesDetailed, getFinishedStock, getRawStockByFacility, getMaterialTypes, getSupplierOptions } from "@/lib/queries";
 import { getFmt } from "@/lib/fmt-server";
-import { qty } from "@/lib/format";
 import { Package } from "@/components/icons";
 import { PageHeader, Card, SkuAvatar } from "@/components/ui";
 import { PrevNextNav, neighbours } from "@/components/PrevNextNav";
@@ -15,7 +14,7 @@ export const dynamic = "force-dynamic";
 
 export default async function FacilityDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [detail, facilities, stock, rawByFacilityCode, materials, suppliers, { money }] = await Promise.all([
+  const [detail, facilities, stock, rawByFacilityCode, materials, suppliers, { money, qty }] = await Promise.all([
     getFacilityDetail(id),
     getFacilitiesDetailed(),
     getFinishedStock(),

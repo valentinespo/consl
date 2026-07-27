@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X } from "@/components/icons";
 import { Card, SkuAvatar, SectionTitle } from "@/components/ui";
-import { qty } from "@/lib/format";
 import { useMoney } from "@/components/CurrencyProvider";
 import { updateLot } from "@/app/lots/actions";
 import { LotBom, type MaterialType, type Mat } from "@/components/LotBom";
@@ -82,7 +81,7 @@ export function LotEditor({
   materialTypes: MaterialType[];
   skuTxnCounts: Record<string, number>;
 }) {
-  const { perUnit } = useMoney();
+  const { perUnit, qty } = useMoney();
   const router = useRouter();
   const seed = useMemo(() => {
     const lines: StateLine[] = initialLines.map((l) => ({

@@ -2,7 +2,8 @@
 
 import { X, Undo2 } from "@/components/icons";
 import { SkuAvatar } from "@/components/ui";
-import { qty, plural } from "@/lib/format";
+import { plural } from "@/lib/format";
+import { useMoney } from "@/components/CurrencyProvider";
 
 export type MaterialType = { id: string; code: string; name: string; unitLabel: string; defaultPerUnit: number };
 export type Mat = { materialTypeId: string; perUnit: number };
@@ -27,6 +28,7 @@ export function LotBom({
   onSharedChange: (m: Mat[]) => void;
   onOverridesChange: (o: Record<string, Mat[]>) => void;
 }) {
+  const { qty } = useMoney();
   const mt = (id: string) => materialTypes.find((m) => m.id === id);
   const lineByKey = (k: string) => lines.find((l) => l.key === k);
   const overriddenKeys = Object.keys(overrides).filter((k) => lineByKey(k));

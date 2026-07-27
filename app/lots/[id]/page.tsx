@@ -11,7 +11,6 @@ import {
   getProducts,
   getCategoriesInUse,
 } from "@/lib/queries";
-import { qty, date } from "@/lib/format";
 import { getFmt } from "@/lib/fmt-server";
 import { buildCostChips } from "@/lib/lot-costs";
 import { PageHeader, Pill, FacilityTag } from "@/components/ui";
@@ -37,7 +36,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
     getCategoriesInUse(),
   ]);
   if (!lot) notFound();
-  const { money } = await getFmt();
+  const { money, qty, date } = await getFmt();
 
   const totalUnits = lot.lines.reduce((s, l) => s + l.units, 0);
   const totalCog = lot.lines.reduce((s, l) => s + l.cogPerUnit * l.units, 0);

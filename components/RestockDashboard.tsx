@@ -11,6 +11,7 @@ import { updateGlobalDefaults, updateSkuPolicy, setSortMode, saveManualOrder, se
 import type { RestockRow, RestockTotals } from "@/lib/restock";
 import { computeReorder, type ReorderResult } from "@/lib/reorder";
 import { SEG } from "@/lib/segments";
+import { useMoney } from "@/components/CurrencyProvider";
 
 type SortMode = "sales" | "available" | "manual";
 const SORT_LABEL: Record<SortMode, string> = { sales: "Monthly sales", available: "Units available", manual: "Manual" };
@@ -69,7 +70,6 @@ const STATUS_HELP: Record<Status, { title: string; body: string }> = {
 /** One column template, used by the header and every row — they must not drift apart. */
 const GRID = "grid-cols-[minmax(180px,1.4fr)_84px_minmax(0,1.7fr)_112px_128px_112px]";
 
-const n = (x: number) => Math.round(x).toLocaleString("en-US");
 const mo = (x: number) => (x === Infinity ? "∞" : x.toFixed(1));
 
 type Computed = RestockRow & ReorderResult;
@@ -91,6 +91,7 @@ export function RestockDashboard({
   sortMode: string;
   nowMs: number;
 }) {
+  const { qty: n } = useMoney(); // unit counts in the org's locale
   const [win, setWin] = useState<Win>(90);
   const [pending, start] = useTransition();
   const [editSku, setEditSku] = useState<string | null>(null);

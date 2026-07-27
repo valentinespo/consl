@@ -10,7 +10,6 @@ import {
   getFacilities,
 } from "@/lib/queries";
 import { getFmt } from "@/lib/fmt-server";
-import { qty } from "@/lib/format";
 import { PageHeader, Card, SectionTitle, SkuAvatar } from "@/components/ui";
 import { EmptyState } from "@/components/EmptyState";
 import { NewFacilityButton } from "@/components/NewFacilityButton";
@@ -22,7 +21,7 @@ import { facilityTypeLabel, isProductionSite } from "@/lib/facility-types";
 export const dynamic = "force-dynamic";
 
 export default async function FacilitiesPage() {
-  const [facilities, stock, rawByFacilityCode, movements, products, materials, facilityOptions, { money }] = await Promise.all([
+  const [facilities, stock, rawByFacilityCode, movements, products, materials, facilityOptions, { money, qty, date }] = await Promise.all([
     getFacilitiesDetailed(),
     getFinishedStock(),
     getRawStockByFacility(),
@@ -186,7 +185,7 @@ export default async function FacilitiesPage() {
             body="When stock leaves the place it was made or received — to a 3PL, to Amazon, to a customer, or written off — record it here so your inventory always shows where things actually are."
           />
         ) : (
-          <MovementsLedger movements={movements} />
+          <MovementsLedger movements={movements} qty={qty} date={date} />
         )}
       </div>
     </>

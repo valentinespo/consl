@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { qty, date } from "@/lib/format";
 import { getFmt } from "@/lib/fmt-server";
 import { PageHeader, StatCard, SkuAvatar, FacilityTag } from "@/components/ui";
 import { InventoryNav } from "@/components/InventoryNav";
@@ -24,7 +23,7 @@ export default async function ProductionPage() {
   }));
   const totalUnits = rows.reduce((s, r) => s + r.units, 0);
   const totalValue = rows.reduce((s, r) => s + r.value, 0);
-  const { money } = await getFmt();
+  const { money, qty, date } = await getFmt();
 
   return (
     <>

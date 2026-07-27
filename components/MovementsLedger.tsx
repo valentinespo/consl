@@ -2,7 +2,6 @@ import { Package } from "@/components/icons";
 import { SkuAvatar, FacilityTag } from "@/components/ui";
 import { DeleteMovement } from "@/components/DeleteMovement";
 import { destinationLabel } from "@/lib/destinations";
-import { qty, date as fmtDate } from "@/lib/format";
 
 export type MovementRow = {
   id: string;
@@ -20,7 +19,15 @@ export type MovementRow = {
 };
 
 /** The movement history — finished goods and raw materials — showing what left where and when. */
-export function MovementsLedger({ movements }: { movements: MovementRow[] }) {
+export function MovementsLedger({
+  movements,
+  qty,
+  date: fmtDate,
+}: {
+  movements: MovementRow[];
+  qty: (n: number | null | undefined) => string;
+  date: (d: Date | string | null | undefined) => string;
+}) {
   return (
     <div className="overflow-x-auto rounded-[var(--radius-card)] border border-border bg-surface">
       <table className="w-full min-w-[760px] text-[13px]">

@@ -4,7 +4,6 @@ import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
 import { Plus, ArrowUpDown, ChevronRight } from "@/components/icons";
 import { Pill, SupplierAvatar, SkuAvatar } from "@/components/ui";
-import { date } from "@/lib/format";
 import { useMoney } from "@/components/CurrencyProvider";
 import { TransactionInvoiceForm, type InvoiceRow, type LotOption } from "@/components/TransactionInvoiceForm";
 import { DocumentList } from "@/components/DocumentList";
@@ -34,7 +33,7 @@ export function TransactionInvoicesTable({
   showLotColumn?: boolean;
   defaultLotId?: string;
 }) {
-  const { money } = useMoney();
+  const { money, date } = useMoney();
   const [q, setQ] = useState("");
   const [category, setCategory] = useState("ALL");
   // Filter offers every category actually present in the data.

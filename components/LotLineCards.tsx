@@ -1,7 +1,6 @@
 "use client";
 
 import { SkuAvatar } from "@/components/ui";
-import { qty } from "@/lib/format";
 import { useMoney } from "@/components/CurrencyProvider";
 import type { CostChip } from "@/lib/lot-costs";
 
@@ -27,7 +26,7 @@ function Chip({ chip }: { chip: CostChip }) {
 }
 
 export function LotLineCards({ lines }: { lines: LotLineSummary[] }) {
-  const { perUnit } = useMoney();
+  const { perUnit, qty } = useMoney();
   return (
     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
       {lines.map((ln) => (
