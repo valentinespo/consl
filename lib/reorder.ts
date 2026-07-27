@@ -74,12 +74,12 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
     status = "ship";
     statusLabel = "Ship stock";
     shipQty = Math.min(r.atLocations, gapToTarget);
-    // Two different warnings. `total` counts everything you own or have coming, so if that still
-    // falls short of the lead time then shipping alone can't fix it and a run has to start too —
-    // same measure and wording the reorder branches use. Otherwise shipping does cover it, and the
-    // only thing worth saying is how far behind the channel has already fallen.
+    // Deliberately NOT measured against the lead time. Lead time is how long it takes to *make*
+    // more; these units already exist and only need moving, which takes days. Saying the channel
+    // is months "short" when a truck fixes it in a week is just noise, so the only warning worth
+    // printing is one about running dry before that truck can arrive.
     if (total < r.leadMonths) note = `off by ${Math.round((r.leadMonths - total) * MONTH)}d after shipping`;
-    else if (A < r.leadMonths) note = `channel is ${Math.round((r.leadMonths - A) * MONTH)}d short`;
+    else if (A < 1) note = `ship now — channel runs dry in ${Math.round(A * MONTH)}d`;
   } else if (hasPO) {
     if (A < Tc) {
       status = "oos";

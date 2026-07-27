@@ -61,7 +61,7 @@ const STATUS_HELP: Record<Status, { title: string; body: string }> = {
   ship: {
     title: "Ship stock",
     body:
-      "You already have finished units at your own locations while the channel is below its floor. Send those first — producing more would leave stock sitting in two places. If shipping everything still isn't enough, the row says how many days short you'd remain.",
+      "You already have finished units at your own locations while the channel is below its floor. Send those first — producing more would leave stock sitting in two places. There's no real shortage here: the stock exists, it just needs moving. A warning only appears if the channel would run dry before a shipment could land, or if shipping everything still wouldn't be enough.",
   },
 };
 
