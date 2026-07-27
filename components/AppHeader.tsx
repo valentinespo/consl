@@ -25,8 +25,8 @@ export function AppHeader({ onMenu }: { onMenu?: () => void }) {
         <Image
           src="/brand/logo-white-2.png"
           alt="SellerOps"
-          width={2129}
-          height={413}
+          width={1882}
+          height={400}
           priority
           className="ml-1 h-[19px] w-auto"
         />
