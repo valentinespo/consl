@@ -1,9 +1,12 @@
 import "server-only";
 import { prismaBase } from "@/lib/prisma-base";
 import { runWithOrg } from "@/lib/tenant";
+import { prisma } from "@/lib/prisma";
 import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
 import { syncAmazonCore } from "@/lib/sync";
 import { getRestock } from "@/lib/restock";
+import { deleteStored } from "@/lib/storage";
+import { DELETE_GRACE_DAYS } from "@/lib/constants";
 
 /** Current date + minute-of-day in a given IANA timezone. */
 function nowInTz(tz: string): { day: string; minutes: number } {
@@ -77,12 +80,55 @@ async function runOrgDaily(orgId: string): Promise<void> {
   }
 }
 
-/** One scheduler tick: check every org and run its daily sync if due. */
+/**
+ * Permanently delete companies whose grace period has elapsed. Deleting an org cascades across
+ * every tenant table (verified), but stored files live outside the database, so gather and remove
+ * those first. Best-effort per org: one failure must not stop the rest or the sync loop.
+ */
+async function purgeExpiredOrgs(): Promise<void> {
+  const cutoff = new Date(Date.now() - DELETE_GRACE_DAYS * 86_400_000);
+  const expired = await prismaBase.organization.findMany({
+    where: { deactivatedAt: { not: null, lt: cutoff } },
+    select: { id: true, name: true, logoUrl: true, iconUrl: true },
+  });
+  for (const org of expired) {
+    try {
+      // Collect every stored-file URL this org owns, then delete the files (best-effort).
+      const urls: (string | null)[] = [org.logoUrl, org.iconUrl];
+      await runWithOrg(org.id, async () => {
+        const [docs, products, materials, suppliers, pos] = await Promise.all([
+          prisma.document.findMany({ select: { fileUrl: true } }),
+          prisma.product.findMany({ select: { imageUrl: true } }),
+          prisma.materialType.findMany({ select: { imageUrl: true } }),
+          prisma.supplier.findMany({ select: { photoUrl: true } }),
+          prisma.purchaseOrder.findMany({ select: { pdfUrl: true } }),
+        ]);
+        urls.push(
+          ...docs.map((d) => d.fileUrl),
+          ...products.map((p) => p.imageUrl),
+          ...materials.map((m) => m.imageUrl),
+          ...suppliers.map((s) => s.photoUrl),
+          ...pos.map((p) => p.pdfUrl),
+        );
+      });
+      await Promise.allSettled(urls.map((u) => deleteStored(u)));
+      // Then the rows — the cascade removes everything that belongs to the org.
+      await prismaBase.organization.delete({ where: { id: org.id } });
+      console.log(`[scheduler] purged expired company ${org.name} (${org.id})`);
+    } catch (e) {
+      console.error(`[scheduler] purge failed for org ${org.id}:`, (e as Error).message);
+    }
+  }
+}
+
+/** One scheduler tick: purge expired companies, then run each live org's daily sync if due. */
 async function tick(): Promise<void> {
   if (running) return;
   running = true;
   try {
-    const orgs = await prismaBase.organization.findMany({ select: { id: true } });
+    await purgeExpiredOrgs();
+    // Only live orgs sync; a deactivated one is on its way out.
+    const orgs = await prismaBase.organization.findMany({ where: { deactivatedAt: null }, select: { id: true } });
     // One org's failure must never stop the others; runOrgDaily already swallows its own errors.
     await Promise.allSettled(orgs.map((o) => runOrgDaily(o.id)));
   } catch (e) {

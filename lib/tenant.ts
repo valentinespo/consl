@@ -31,7 +31,7 @@ const orgIdFromAuth = cache(async (): Promise<string | null> => {
   if (!userId) return null;
 
   const memberships = await prismaBase.membership.findMany({
-    where: { clerkUserId: userId },
+    where: { clerkUserId: userId, organization: { deactivatedAt: null } },
     select: { orgId: true },
     orderBy: { createdAt: "asc" },
   });

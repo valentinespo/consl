@@ -17,6 +17,7 @@ export const listMyOrgs = cache(async (): Promise<MyOrg[]> => {
   // listed. That makes the switcher exercisable locally; it cannot happen on a deployment.
   if (devAuthBypass) {
     const all = await prismaBase.organization.findMany({
+      where: { deactivatedAt: null },
       select: { id: true, name: true, iconUrl: true },
       orderBy: { name: "asc" },
     });
@@ -27,7 +28,7 @@ export const listMyOrgs = cache(async (): Promise<MyOrg[]> => {
   if (!userId) return [];
 
   const memberships = await prismaBase.membership.findMany({
-    where: { clerkUserId: userId },
+    where: { clerkUserId: userId, organization: { deactivatedAt: null } },
     select: { orgId: true, role: true, organization: { select: { id: true, name: true, iconUrl: true } } },
     orderBy: { createdAt: "asc" },
   });

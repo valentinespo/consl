@@ -114,12 +114,12 @@ export async function acceptInvite(token: string) {
 }
 
 /**
- * Permanently delete the whole company and everything in it. Owners only.
+ * Delete the whole company. Owners only.
  *
- * Every tenant table cascades from Organization, so one delete removes the products, lots,
- * purchases, invoices, movements, documents and memberships along with it. There is no undo and
- * no soft-delete, which is why the UI makes you type the name and confirm twice — and why the
- * name is re-checked here rather than trusted from the client.
+ * This is a soft delete: the company goes dark immediately (hidden from the switcher, unreachable),
+ * but its data is kept for a grace period so a customer who changes their mind — or comes back —
+ * can be restored. The scheduler purges anything past the grace window for good (cascading across
+ * every tenant table). The name is typed and confirmed twice in the UI and re-checked here.
  */
 export async function deleteOrganization(confirmName: string) {
   const gate = await requireOwner();
@@ -135,11 +135,11 @@ export async function deleteOrganization(confirmName: string) {
     return { ok: false as const, error: "That doesn't match the company name." };
   }
 
-  // Cascades across every tenant table via the Organization relations.
-  await prismaBase.organization.delete({ where: { id: org.id } });
+  // Mark it deactivated rather than dropping rows. Access resolution and the switcher both filter
+  // these out, so it disappears at once; the purge job finishes the job after the grace period.
+  await prismaBase.organization.update({ where: { id: org.id }, data: { deactivatedAt: new Date() } });
 
-  // Drop the active-company cookie so the next request resolves a company they still belong to,
-  // rather than pointing at one that no longer exists.
+  // Drop the active-company cookie so the next request resolves a company they still belong to.
   await clearActiveOrgCookie();
 
   revalidatePath("/", "layout");

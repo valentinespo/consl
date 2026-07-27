@@ -30,6 +30,9 @@ model Organization {
   currencyCode   String @default("USD")
   currencySymbol String @default("$")
   locale         String @default("en-US")
+  // Soft delete: set when the owner deletes the company. It goes dark immediately and is purged
+  // for good after a grace period (see the scheduler). Null = active.
+  deactivatedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -96,7 +99,7 @@ model Invite {
 model Facility {
   id              String          @id @default(cuid())
   orgId           String?
-  organization    Organization?   @relation(fields: [orgId], references: [id])
+  organization    Organization?   @relation(fields: [orgId], references: [id], onDelete: Cascade)
   code            String
   name            String
   type            String          @default("co-packer") // co-packer | warehouse | 3pl | other
@@ -123,7 +126,7 @@ model Facility {
 model StockMovement {
   id             String        @id @default(cuid())
   orgId          String?
-  organization   Organization? @relation(fields: [orgId], references: [id])
+  organization   Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
   itemType       String        @default("FINISHED") // FINISHED | RAW
   // FINISHED: the SKU moved. RAW sku-specific (e.g. printed pouches): the SKU whose pool this draws.
   product        Product?      @relation(fields: [productId], references: [id])
@@ -151,7 +154,7 @@ model StockMovement {
 model Supplier {
   id                  String               @id @default(cuid())
   orgId               String?
-  organization        Organization?        @relation(fields: [orgId], references: [id])
+  organization        Organization?        @relation(fields: [orgId], references: [id], onDelete: Cascade)
   name                String              
   photoUrl            String?
   email               String?
@@ -174,7 +177,7 @@ model Supplier {
 model Product {
   id                 String              @id @default(cuid())
   orgId              String?
-  organization       Organization?       @relation(fields: [orgId], references: [id])
+  organization       Organization?       @relation(fields: [orgId], references: [id], onDelete: Cascade)
   code               String             
   name               String
   imageUrl           String?
@@ -218,7 +221,7 @@ model Product {
 model SkuSnapshot {
   id               String        @id @default(cuid())
   orgId            String?
-  organization     Organization? @relation(fields: [orgId], references: [id])
+  organization     Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
   product          Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
   productId        String
   capturedAt       DateTime      @default(now())
@@ -248,7 +251,7 @@ model DismissedNotification {
   id          String        @id @default(cuid())
   key          String // stable alert key, e.g. "reorder:LDX" | "material:TEABAG"
   orgId        String?
-  organization Organization? @relation(fields: [orgId], references: [id])
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
   dismissedAt  DateTime      @default(now())
 
   @@unique([orgId, key])
@@ -260,7 +263,7 @@ model DismissedNotification {
 model InventoryValueSnapshot {
   id           String        @id @default(cuid())
   orgId        String?
-  organization Organization? @relation(fields: [orgId], references: [id])
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
   day          String        // "YYYY-MM-DD"
   capturedAt   DateTime      @default(now())
   raw          Float
@@ -277,7 +280,7 @@ model InventoryValueSnapshot {
 model Settings {
   id                String        @id @default(cuid())
   orgId             String?
-  organization      Organization? @relation(fields: [orgId], references: [id])
+  organization      Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
   defaultMinMonths  Float         @default(5) // months of stock to never fall below
   defaultLeadMonths Float         @default(4.5) // production only: placing a run → units in hand
   /// Deprecated: superseded by shipDays. Kept because dropping a column would need
@@ -313,7 +316,7 @@ model Settings {
 model MaterialType {
   id                String            @id @default(cuid())
   orgId             String?
-  organization      Organization?     @relation(fields: [orgId], references: [id])
+  organization      Organization?     @relation(fields: [orgId], references: [id], onDelete: Cascade)
   code              String            // TEABAG | POUCH | ...
   name              String
   unitLabel         String            @default("unit") // "bag", "pouch"
@@ -336,7 +339,7 @@ model MaterialType {
 model PurchaseInvoice {
   id             String        @id @default(cuid())
   orgId          String?
-  organization   Organization? @relation(fields: [orgId], references: [id])
+  organization   Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
   supplier       Supplier?     @relation(fields: [supplierId], references: [id])
   supplierId     String?
   materialType   MaterialType  @relation(fields: [materialTypeId], references: [id])
@@ -356,7 +359,7 @@ model PurchaseInvoice {
 model Purchase {
   id             String           @id @default(cuid())
   orgId          String?
-  organization   Organization?    @relation(fields: [orgId], references: [id])
+  organization   Organization?    @relation(fields: [orgId], references: [id], onDelete: Cascade)
   invoice        PurchaseInvoice? @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   invoiceId      String?
   materialType   MaterialType     @relation(fields: [materialTypeId], references: [id])
@@ -391,7 +394,7 @@ enum LotStatus {
 model Lot {
   id                 String         @id @default(cuid())
   orgId              String?
-  organization       Organization?  @relation(fields: [orgId], references: [id])
+  organization       Organization?  @relation(fields: [orgId], references: [id], onDelete: Cascade)
   poNumber           String? // e.g. "#7-CCP"
   lotNr              Int // numeric LOT NR used by transactions
   poDate             DateTime?
@@ -420,7 +423,7 @@ model Lot {
 model Document {
   id                   String              @id @default(cuid())
   orgId                String?
-  organization         Organization?       @relation(fields: [orgId], references: [id])
+  organization         Organization?       @relation(fields: [orgId], references: [id], onDelete: Cascade)
   label                String? // free text; e.g. "COA", "BOL", "Invoice"
   fileUrl              String
   fileName             String?
@@ -443,7 +446,7 @@ model Document {
 model PurchaseOrder {
   id           String              @id @default(cuid())
   orgId        String?
-  organization Organization?       @relation(fields: [orgId], references: [id])
+  organization Organization?       @relation(fields: [orgId], references: [id], onDelete: Cascade)
   number       String              // e.g. "#21-CRW"
   date         DateTime
   status       String              @default("DRAFT") // DRAFT | SENT
@@ -466,7 +469,7 @@ model PurchaseOrder {
 model PurchaseOrderLine {
   id          String        @id @default(cuid())
   orgId        String?
-  organization Organization? @relation(fields: [orgId], references: [id])
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
   po          PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
   poId        String
   seq         Int           @default(0)
@@ -485,7 +488,7 @@ model PurchaseOrderLine {
 model LotLine {
   id        String        @id @default(cuid())
   orgId        String?
-  organization Organization? @relation(fields: [orgId], references: [id])
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
   lot       Lot           @relation(fields: [lotId], references: [id], onDelete: Cascade)
   lotId     String
   product   Product       @relation(fields: [productId], references: [id])
@@ -518,7 +521,7 @@ model LotLine {
 model LotMaterial {
   id             String       @id @default(cuid())
   orgId        String?
-  organization Organization? @relation(fields: [orgId], references: [id])
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
   lotLine        LotLine      @relation(fields: [lotLineId], references: [id], onDelete: Cascade)
   lotLineId      String
   materialType   MaterialType @relation(fields: [materialTypeId], references: [id])
@@ -535,7 +538,7 @@ model LotMaterial {
 model TransactionInvoice {
   id           String        @id @default(cuid())
   orgId        String?
-  organization Organization? @relation(fields: [orgId], references: [id])
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
   supplier     Supplier?     @relation(fields: [supplierId], references: [id])
   supplierId   String?
   date         DateTime?
@@ -551,7 +554,7 @@ model TransactionInvoice {
 model Transaction {
   id                   String              @id @default(cuid())
   orgId                String?
-  organization         Organization?       @relation(fields: [orgId], references: [id])
+  organization         Organization?       @relation(fields: [orgId], references: [id], onDelete: Cascade)
   invoice              TransactionInvoice? @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   invoiceId            String?
   // Per-line lot (transactions survive lot deletion -> become unassigned).

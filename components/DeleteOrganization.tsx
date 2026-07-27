@@ -4,6 +4,7 @@ import { useState } from "react";
 import { AlertTriangle } from "@/components/icons";
 import { Card } from "@/components/ui";
 import { deleteOrganization } from "@/app/team/actions";
+import { DELETE_GRACE_DAYS } from "@/lib/constants";
 
 /**
  * Deleting a company takes everything in it with it, and there is no undo. Two deliberate steps:
@@ -40,9 +41,11 @@ export function DeleteOrganization({ orgName, isOwner }: { orgName: string; isOw
         Danger zone
       </div>
       <p className="mb-4 max-w-[62ch] text-[12.5px] text-muted">
-        Deleting <span className="font-medium text-ink">{orgName}</span> removes all its products,
-        production lots, purchases, invoices, stock movements, documents and everyone&apos;s access —
-        permanently, with no way to undo it. Your other companies are unaffected.
+        Deleting <span className="font-medium text-ink">{orgName}</span> shuts it down right away —
+        it disappears for everyone and no one can open it. Its data is kept for {DELETE_GRACE_DAYS} days
+        in case you want it back (reach out and we&apos;ll restore it), then it&apos;s erased for good:
+        every product, lot, purchase, invoice, movement and document, with no way to recover it. Your
+        other companies are unaffected.
       </p>
 
       {!armed ? (
@@ -57,7 +60,7 @@ export function DeleteOrganization({ orgName, isOwner }: { orgName: string; isOw
           <div className="text-[13px] font-medium text-ink">
             Type <span className="font-mono">{orgName}</span> to confirm
           </div>
-          <p className="mt-0.5 text-[11.5px] text-muted">This cannot be undone.</p>
+          <p className="mt-0.5 text-[11.5px] text-muted">Recoverable for {DELETE_GRACE_DAYS} days, then permanent.</p>
           <input
             autoFocus
             value={typed}
@@ -79,7 +82,7 @@ export function DeleteOrganization({ orgName, isOwner }: { orgName: string; isOw
               disabled={!matches || pending}
               className="rounded-lg bg-negative px-3.5 py-2 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-40"
             >
-              {pending ? "Deleting…" : "Permanently delete"}
+              {pending ? "Deleting…" : "Delete company"}
             </button>
             <button
               onClick={() => {
