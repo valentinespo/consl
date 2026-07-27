@@ -40,8 +40,10 @@ export type RestockRow = {
   leadMonths: number; // resolved lead time
   rawMinMonths: number | null; // per-SKU override, null = using default
   rawLeadMonths: number | null;
-  reorderToMonths: number;
-  batchSize: number;
+  shipMonths: number; // global: how long moving stock from your warehouse to the channel takes
+  reorderToMonths: number; // resolved target cover an order brings you back to
+  rawReorderToMonths: number | null; // per-SKU override, null = using the default
+  batchSize: number; // 0 = don't round the order
   sortIndex: number | null;
 };
 
@@ -65,7 +67,7 @@ export async function getRestock(): Promise<{
   rows: RestockRow[];
   lastSync: Date | null;
   totals: RestockTotals;
-  defaults: { minMonths: number; leadMonths: number };
+  defaults: { minMonths: number; leadMonths: number; shipMonths: number; reorderTo: number };
   sortMode: string;
 }> {
   const [products, snaps, lots, rawInv, settings, allProducts, movements, allFacilities] = await Promise.all([
@@ -206,7 +208,9 @@ export async function getRestock(): Promise<{
       leadMonths: p.leadMonths ?? settings.defaultLeadMonths,
       rawMinMonths: p.minMonths,
       rawLeadMonths: p.leadMonths,
-      reorderToMonths: p.reorderToMonths ?? 12,
+      shipMonths: settings.shipMonths,
+      reorderToMonths: p.reorderToMonths ?? settings.defaultReorderTo,
+      rawReorderToMonths: p.reorderToMonths,
       batchSize: p.batchSize ?? 0,
       sortIndex: p.sortIndex,
     };
@@ -235,7 +239,12 @@ export async function getRestock(): Promise<{
     rows,
     lastSync,
     sortMode: settings.sortMode,
-    defaults: { minMonths: settings.defaultMinMonths, leadMonths: settings.defaultLeadMonths },
+    defaults: {
+      minMonths: settings.defaultMinMonths,
+      leadMonths: settings.defaultLeadMonths,
+      shipMonths: settings.shipMonths,
+      reorderTo: settings.defaultReorderTo,
+    },
     totals,
   };
 }

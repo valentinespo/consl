@@ -54,10 +54,10 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
             </Link>
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Ro label="Min months" value={product.minMonths} />
-            <Ro label="Lead months" value={product.leadMonths} />
+            <Ro label="Floor" value={product.minMonths} suffix="mo" />
+            <Ro label="Lead time" value={product.leadMonths} suffix="mo" />
             <Ro label="Reorder to" value={product.reorderToMonths} suffix="mo" />
-            <Ro label="Batch size" value={product.batchSize} />
+            <Ro label="Batch size" value={product.batchSize} suffix="units" />
           </div>
         </Card>
       </div>
@@ -78,7 +78,7 @@ function Ro({ label, value, suffix }: { label: string; value: number | null; suf
     <div className="rounded-lg border border-border bg-surface-2/50 px-3 py-2">
       <div className="text-[11px] text-muted">{label}</div>
       <div className="tabular mt-0.5 text-[14px] font-medium text-ink">
-        {value == null ? <span className="text-muted">default</span> : `${value}${suffix ? ` ${suffix}` : ""}`}
+        {value == null ? <span className="text-[13px] text-muted">Using default</span> : `${value}${suffix ? ` ${suffix}` : ""}`}
       </div>
     </div>
   );

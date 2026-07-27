@@ -4,7 +4,7 @@ import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Settings, Check, GripVertical } from "lucide-react";
 import { HoverHint } from "@/components/HoverHint";
-import { FLOOR_HELP, LEAD_HELP } from "@/lib/restock-help";
+import { BATCH_HELP, FLOOR_HELP, LEAD_HELP, REORDER_TO_HELP, SHIP_HELP } from "@/lib/restock-help";
 import { SkuAvatar } from "@/components/ui";
 import { TotalValueCard } from "@/components/TotalValueCard";
 import { updateGlobalDefaults, updateSkuPolicy, setSortMode, saveManualOrder, setSkuWindow } from "@/app/inventory/actions";
@@ -34,27 +34,27 @@ const STATUS_HELP: Record<Status, { title: string; body: string }> = {
   ok: {
     title: "Healthy",
     body:
-      "The sales channel holds at least your floor — enough cover to get through a production run without running dry. Nothing to do.",
+      "The sales channel holds at least your floor, and it won't run dry before more stock can reach it. Nothing to do.",
   },
   reordered: {
     title: "Reordered",
     body:
-      "Channel stock is below your floor, but a production lot is already on its way and it lands in time. Covered — no new order needed.",
+      "Below your floor, but a production lot is already on its way, it lands before you run out, and it's big enough. Covered — no new order needed.",
   },
   reorder: {
     title: "Reorder",
     body:
-      "Cover is below your floor and nothing incoming closes the gap. Place a purchase order now — waiting eats into the lead time.",
+      "Below your floor with nothing on the way that closes the gap, and no stock of your own to move. Place an order.",
   },
   oos: {
     title: "Out of stock",
     body:
-      "A lot is coming, but at the current sales rate the channel runs out before it arrives. The number of days is how long you'll be unable to sell. Expediting the lot is the only thing that closes the gap — if you were holding units of your own, this would say Ship stock instead.",
+      "The channel genuinely hits zero — this is the number of days you won't be able to sell. It already counts everything that can reach the channel in time, including stock you'd ship today and any lot already coming, so it's what's left after doing the best you can. Only expediting a lot, or accepting the gap, changes it.",
   },
   ship: {
     title: "Ship stock",
     body:
-      "You already have finished units at your own locations while the channel is below its floor. Send those first — producing more would leave stock sitting in two places. There's no real shortage here: the stock exists, it just needs moving. A warning only appears if the channel would run dry before a shipment could land, or if shipping everything still wouldn't be enough.",
+      "Below your floor, but you already own finished units at your own locations. Move those first — producing more would leave stock sitting in two places. There's no shortage here, just stock in the wrong place.",
   },
 };
 
@@ -76,7 +76,7 @@ export function RestockDashboard({
 }: {
   rows: RestockRow[];
   totals: RestockTotals;
-  defaults: { minMonths: number; leadMonths: number };
+  defaults: { minMonths: number; leadMonths: number; shipMonths: number; reorderTo: number };
   sortMode: string;
   nowMs: number;
 }) {
@@ -101,8 +101,10 @@ export function RestockDashboard({
   }, [byId, sort]);
   const displayRows = arranging ? order.map((id) => byId.get(id)).filter((r): r is Computed => !!r) : computed;
   const needsPO = computed.filter((r) => r.belowFloor).length;
-  const toShip = computed.filter((r) => r.status === "ship").length;
-  const expedite = computed.filter((r) => r.status === "oos" && !r.belowFloor).length;
+  // Counted off the actions rather than the status, so a stockout that also needs shipping shows
+  // up in both tiles instead of only the more severe one.
+  const toShip = computed.filter((r) => r.shipQty > 0).length;
+  const expedite = computed.filter((r) => r.expedite).length;
   const healthy = computed.filter((r) => r.status === "ok" || r.status === "reordered").length;
   const unitsToOrder = computed.reduce((s, r) => s + (r.belowFloor ? r.recommendedQty : 0), 0);
 
@@ -189,7 +191,7 @@ export function RestockDashboard({
             }`}
           >
             <Settings size={13} />
-            Floor {defaults.minMonths}mo · Lead {defaults.leadMonths}mo
+            Floor {defaults.minMonths}mo · Lead {defaults.leadMonths}mo · Ship {defaults.shipMonths}mo
           </button>
         </div>
         <div className="flex flex-wrap gap-2.5 text-[11px] text-muted">
@@ -206,7 +208,7 @@ export function RestockDashboard({
         <GlobalDefaultsEditor
           defaults={defaults}
           pending={pending}
-          onSave={(f, l) => start(async () => { await updateGlobalDefaults(f, l); setEditGlobal(false); router.refresh(); })}
+          onSave={(d) => start(async () => { await updateGlobalDefaults(d); setEditGlobal(false); router.refresh(); })}
           onClose={() => setEditGlobal(false)}
         />
       )}
@@ -309,33 +311,34 @@ export function RestockDashboard({
                 {/* Action + gear */}
                 <div className="flex items-center justify-end gap-2">
                   <div className="text-right">
-                    {r.status === "ship" ? (
-                      <>
-                        <div className="text-[12.5px] font-medium tabular" style={{ color: SEG.locations }}>
-                          Ship {n(r.shipQty)} units
+                    {(() => {
+                      // A row can need several things at once — ship what you have, pull the lot
+                      // forward, and still start a run. Showing only the first one was how the
+                      // ship instruction used to vanish the moment a row turned red.
+                      const acts: { label: string; sub: string; color?: string }[] = [];
+                      if (r.shipQty > 0)
+                        acts.push({
+                          label: `Ship ${n(r.shipQty)} units`,
+                          sub: `From ${r.atLocationsBy.map((x) => x.code).join(" / ") || "your locations"}`,
+                          color: SEG.locations,
+                        });
+                      if (r.expedite) acts.push({ label: "Expedite", sub: "Incoming lot", color: "#b91c1c" });
+                      if (r.recommendedQty > 0)
+                        acts.push({ label: `Order ${n(r.recommendedQty)} units`, sub: "Recommended" });
+                      if (acts.length === 0) return <span className="text-[12px] text-muted">Covered</span>;
+                      return acts.map((a, k) => (
+                        <div key={a.label} className={k > 0 ? "mt-1.5" : ""}>
+                          <div className="text-[12.5px] font-medium tabular" style={a.color ? { color: a.color } : undefined}>
+                            {a.label}
+                          </div>
+                          <div className="text-[10.5px] text-muted">{a.sub}</div>
                         </div>
-                        <div className="text-[10.5px] text-muted">
-                          From {r.atLocationsBy.map((x) => x.code).join(" / ") || "your locations"}
-                          {r.recommendedQty > 0 && ` · Then order ${n(r.recommendedQty)}`}
-                        </div>
-                      </>
-                    ) : r.belowFloor ? (
-                      <>
-                        <div className="text-[12.5px] font-medium tabular text-ink">{r.recommendedQty > 0 ? `${n(r.recommendedQty)} units` : "Order"}</div>
-                        <div className="text-[10.5px] text-muted">Recommended</div>
-                      </>
-                    ) : r.status === "oos" ? (
-                      <>
-                        <div className="text-[12.5px] font-medium" style={{ color: "#b91c1c" }}>Expedite</div>
-                        <div className="text-[10.5px] text-muted">Incoming lot</div>
-                      </>
-                    ) : (
-                      <span className="text-[12px] text-muted">Covered</span>
-                    )}
+                      ));
+                    })()}
                   </div>
                   <button
                     onClick={() => setEditSku(editSku === r.id ? null : r.id)}
-                    title="Floor and lead time for this product"
+                    title="Restock policy for this product"
                     aria-expanded={editSku === r.id}
                     className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border transition-colors ${
                       editSku === r.id
@@ -362,7 +365,7 @@ export function RestockDashboard({
                   row={r}
                   defaults={defaults}
                   pending={pending}
-                  onSave={(f, l) => start(async () => { await updateSkuPolicy(r.id, f, l); setEditSku(null); router.refresh(); })}
+                  onSave={(pol) => start(async () => { await updateSkuPolicy(r.id, pol); setEditSku(null); router.refresh(); })}
                   bordered={i < computed.length - 1}
                 />
               )}
@@ -374,14 +377,44 @@ export function RestockDashboard({
   );
 }
 
-function GlobalDefaultsEditor({ defaults, pending, onSave, onClose }: { defaults: { minMonths: number; leadMonths: number }; pending: boolean; onSave: (f: number, l: number) => void; onClose: () => void }) {
+type Defaults = { minMonths: number; leadMonths: number; shipMonths: number; reorderTo: number };
+
+/** Org-wide restock settings. Shipping time is here only — it's a property of how you move stock,
+ *  not of any one product, so there's deliberately no per-SKU override for it. */
+function GlobalDefaultsEditor({
+  defaults,
+  pending,
+  onSave,
+  onClose,
+}: {
+  defaults: Defaults;
+  pending: boolean;
+  onSave: (d: Defaults) => void;
+  onClose: () => void;
+}) {
   const [f, setF] = useState(String(defaults.minMonths));
   const [l, setL] = useState(String(defaults.leadMonths));
+  const [sh, setSh] = useState(String(defaults.shipMonths));
+  const [rt, setRt] = useState(String(defaults.reorderTo));
+  const num = (v: string, fallback: number) => (v.trim() === "" ? fallback : parseFloat(v) || fallback);
   return (
     <div className="mb-2 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface-2 px-3 py-2.5">
       <NumField label="Default floor (months)" value={f} onChange={setF} help={FLOOR_HELP} />
       <NumField label="Default lead time (months)" value={l} onChange={setL} help={LEAD_HELP} />
-      <button onClick={() => onSave(parseFloat(f) || 5, parseFloat(l) || 4.5)} disabled={pending} className="inline-flex items-center gap-1 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-60">
+      <NumField label="Shipping time (months)" value={sh} onChange={setSh} help={SHIP_HELP} />
+      <NumField label="Default reorder to (months)" value={rt} onChange={setRt} help={REORDER_TO_HELP} />
+      <button
+        onClick={() =>
+          onSave({
+            minMonths: num(f, 5),
+            leadMonths: num(l, 4.5),
+            shipMonths: num(sh, 1),
+            reorderTo: num(rt, 12),
+          })
+        }
+        disabled={pending}
+        className="inline-flex items-center gap-1 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-60"
+      >
         <Check size={13} /> Save defaults
       </button>
       <button onClick={onClose} className="text-[12px] text-muted hover:text-ink-soft">Cancel</button>
@@ -389,17 +422,53 @@ function GlobalDefaultsEditor({ defaults, pending, onSave, onClose }: { defaults
   );
 }
 
-function SkuPolicyEditor({ row, defaults, pending, onSave, bordered }: { row: RestockRow; defaults: { minMonths: number; leadMonths: number }; pending: boolean; onSave: (f: number | null, l: number | null) => void; bordered: boolean }) {
+export type SkuPolicy = {
+  minMonths: number | null;
+  leadMonths: number | null;
+  reorderToMonths: number | null;
+  batchSize: number | null;
+};
+
+/** Per-SKU overrides. Blank means "use the default", which is why every box shows the default it
+ *  would fall back to — including reorder-to and batch size, which until now could be seen on the
+ *  catalog page but changed nowhere at all. */
+function SkuPolicyEditor({
+  row,
+  defaults,
+  pending,
+  onSave,
+  bordered,
+}: {
+  row: RestockRow;
+  defaults: Defaults;
+  pending: boolean;
+  onSave: (p: SkuPolicy) => void;
+  bordered: boolean;
+}) {
   const [f, setF] = useState(row.rawMinMonths != null ? String(row.rawMinMonths) : "");
   const [l, setL] = useState(row.rawLeadMonths != null ? String(row.rawLeadMonths) : "");
+  const [rt, setRt] = useState(row.rawReorderToMonths != null ? String(row.rawReorderToMonths) : "");
+  const [b, setB] = useState(row.batchSize > 0 ? String(row.batchSize) : "");
+  const opt = (v: string) => (v.trim() === "" ? null : parseFloat(v));
   return (
     <div className={`flex flex-wrap items-end gap-3 bg-surface-2 px-4 py-3 ${bordered ? "border-b border-line" : ""}`}>
       <NumField label={`Floor (months) · default ${defaults.minMonths}`} value={f} onChange={setF} placeholder={String(defaults.minMonths)} help={FLOOR_HELP} />
       <NumField label={`Lead time (months) · default ${defaults.leadMonths}`} value={l} onChange={setL} placeholder={String(defaults.leadMonths)} help={LEAD_HELP} />
-      <button onClick={() => onSave(f.trim() === "" ? null : parseFloat(f), l.trim() === "" ? null : parseFloat(l))} disabled={pending} className="inline-flex items-center gap-1 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-60">
+      <NumField label={`Reorder to (months) · default ${defaults.reorderTo}`} value={rt} onChange={setRt} placeholder={String(defaults.reorderTo)} help={REORDER_TO_HELP} />
+      <NumField label="Batch size (units)" value={b} onChange={setB} placeholder="No rounding" help={BATCH_HELP} />
+      <button
+        onClick={() => onSave({ minMonths: opt(f), leadMonths: opt(l), reorderToMonths: opt(rt), batchSize: opt(b) })}
+        disabled={pending}
+        className="inline-flex items-center gap-1 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-60"
+      >
         <Check size={13} /> Save
       </button>
-      <button onClick={() => onSave(null, null)} className="text-[12px] text-muted hover:text-ink-soft">Use defaults</button>
+      <button
+        onClick={() => onSave({ minMonths: null, leadMonths: null, reorderToMonths: null, batchSize: null })}
+        className="text-[12px] text-muted hover:text-ink-soft"
+      >
+        Use defaults
+      </button>
     </div>
   );
 }

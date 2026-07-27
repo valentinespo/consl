@@ -194,8 +194,10 @@ model Product {
   // --- Per-SKU restock policy (null = use the global default) ---
   minMonths          Float? // floor: months of stock to never fall below
   leadMonths         Float? // production lead time: PO date → stock landing at FBA
-  reorderToMonths    Float?              @default(12) // target: how much cover to bring back to
-  batchSize          Int? // co-packer minimum / standard run size
+  // Null on all three means "use the global default" — the column default was dropped so new
+  // products inherit changes to the org setting instead of being frozen at whatever it was.
+  reorderToMonths    Float? // target: how much cover an order brings you back up to
+  batchSize          Int? // co-packer minimum / standard run size; null = don't round the order
   sortIndex          Int? // manual sort position on the inventory dashboard
   windowDays         Int? // per-SKU velocity window override (10/30/90); null = use the global toggle
   excludeDays        Int? // drop the most recent X (OOS) days from the velocity window
@@ -277,6 +279,12 @@ model Settings {
   organization      Organization? @relation(fields: [orgId], references: [id])
   defaultMinMonths  Float         @default(5) // months of stock to never fall below
   defaultLeadMonths Float         @default(4.5) // production lead time (PO → landing at FBA)
+  // Moving finished stock you already own from your own warehouse onto the channel. Much shorter
+  // than a production run, and the difference is the whole point — without it the engine can't
+  // tell "I can fix this next week" from "I need to start a run now".
+  shipMonths        Float         @default(1)
+  // Target cover an order brings you back up to. Per-SKU `reorderToMonths` overrides it.
+  defaultReorderTo  Float         @default(12)
   sortMode          String        @default("sales") // inventory dashboard sort: sales | available | manual
   // --- Automatic daily Amazon sync + inventory-value snapshot ---
   syncEnabled       Boolean       @default(true)

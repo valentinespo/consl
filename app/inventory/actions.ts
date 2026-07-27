@@ -15,18 +15,50 @@ export async function syncAmazon() {
   return r;
 }
 
-/** Update the global default floor + lead time. */
-export async function updateGlobalDefaults(minMonths: number, leadMonths: number) {
-  await saveOrgSettings({ defaultMinMonths: minMonths, defaultLeadMonths: leadMonths });
+/** Update the org-wide restock defaults. Shipping time is global only — it isn't per SKU. */
+export async function updateGlobalDefaults(d: {
+  minMonths: number;
+  leadMonths: number;
+  shipMonths: number;
+  reorderTo: number;
+}) {
+  await saveOrgSettings({
+    defaultMinMonths: clamp(d.minMonths, 0, 120),
+    defaultLeadMonths: clamp(d.leadMonths, 0, 120),
+    shipMonths: clamp(d.shipMonths, 0, 120),
+    defaultReorderTo: clamp(d.reorderTo, 0.1, 120),
+  });
+  revalidatePath("/inventory");
+  revalidatePath("/settings/sync");
+  return { ok: true as const };
+}
+
+/** Set per-SKU policy overrides. Null on a field means "use the global default". */
+export async function updateSkuPolicy(
+  productId: string,
+  p: {
+    minMonths: number | null;
+    leadMonths: number | null;
+    reorderToMonths: number | null;
+    batchSize: number | null;
+  },
+) {
+  await prisma.product.update({
+    where: { id: productId },
+    data: {
+      minMonths: p.minMonths == null ? null : clamp(p.minMonths, 0, 120),
+      leadMonths: p.leadMonths == null ? null : clamp(p.leadMonths, 0, 120),
+      reorderToMonths: p.reorderToMonths == null ? null : clamp(p.reorderToMonths, 0.1, 120),
+      batchSize: p.batchSize == null ? null : Math.max(0, Math.floor(p.batchSize)) || null,
+    },
+  });
   revalidatePath("/inventory");
   return { ok: true as const };
 }
 
-/** Set a per-SKU floor + lead override. Pass null to fall back to the global default. */
-export async function updateSkuPolicy(productId: string, minMonths: number | null, leadMonths: number | null) {
-  await prisma.product.update({ where: { id: productId }, data: { minMonths, leadMonths } });
-  revalidatePath("/inventory");
-  return { ok: true as const };
+/** Keep a typo in a settings box from producing a nonsense engine input. */
+function clamp(v: number, lo: number, hi: number) {
+  return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : lo;
 }
 
 /** Set (or clear) a per-SKU velocity window override + OOS-day exclusion. Pass nulls to clear. */

@@ -7,7 +7,7 @@ import { Card } from "@/components/ui";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
 import { useMoney } from "@/components/CurrencyProvider";
 import { saveSettings, runSyncNow } from "@/app/settings/actions";
-import { FLOOR_HELP, LEAD_HELP } from "@/lib/restock-help";
+import { FLOOR_HELP, LEAD_HELP, REORDER_TO_HELP, SHIP_HELP } from "@/lib/restock-help";
 
 export type AppSettings = {
   syncEnabled: boolean;
@@ -17,6 +17,8 @@ export type AppSettings = {
   lastSyncAt: string | null;
   defaultMinMonths: number;
   defaultLeadMonths: number;
+  shipMonths: number;
+  defaultReorderTo: number;
 };
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -93,7 +95,9 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
     s.syncMinute !== initial.syncMinute ||
     s.syncTz !== initial.syncTz ||
     s.defaultMinMonths !== initial.defaultMinMonths ||
-    s.defaultLeadMonths !== initial.defaultLeadMonths;
+    s.defaultLeadMonths !== initial.defaultLeadMonths ||
+    s.shipMonths !== initial.shipMonths ||
+    s.defaultReorderTo !== initial.defaultReorderTo;
 
   function save() {
     setError(null);
@@ -105,6 +109,8 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
         syncTz: s.syncTz,
         defaultMinMonths: s.defaultMinMonths,
         defaultLeadMonths: s.defaultLeadMonths,
+        shipMonths: s.shipMonths,
+        defaultReorderTo: s.defaultReorderTo,
       });
       setSaved(true);
       router.refresh();
@@ -185,8 +191,9 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
         <div className="mb-4">
           <div className="text-[12px] font-medium uppercase tracking-wide text-muted">Restock defaults</div>
           <p className="mt-1.5 max-w-[62ch] text-[12.5px] text-muted">
-            How much cover you want to hold, and how long a production run takes. Used for every
-            product that doesn&apos;t have its own override on the Inventory page.
+            How much cover you want to hold, how long stock takes to reach the sales channel, and
+            how much an order tops you back up to. Used for every product that doesn&apos;t have its
+            own override on the Inventory page — except shipping time, which is always org-wide.
           </p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -200,13 +207,33 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
               className={`${inputCls} tabular`}
             />
           </Field>
-          <Field label="Lead time (months)" hint="Order to sellable stock." help={LEAD_HELP}>
+          <Field label="Lead time (months)" hint="Placing a run to sellable stock." help={LEAD_HELP}>
             <input
               type="number"
               step={0.5}
               min={0}
               value={s.defaultLeadMonths}
               onChange={(e) => set("defaultLeadMonths", Number(e.target.value))}
+              className={`${inputCls} tabular`}
+            />
+          </Field>
+          <Field label="Shipping time (months)" hint="Your warehouse to the channel." help={SHIP_HELP}>
+            <input
+              type="number"
+              step={0.5}
+              min={0}
+              value={s.shipMonths}
+              onChange={(e) => set("shipMonths", Number(e.target.value))}
+              className={`${inputCls} tabular`}
+            />
+          </Field>
+          <Field label="Reorder to (months)" hint="How much an order tops you up to." help={REORDER_TO_HELP}>
+            <input
+              type="number"
+              step={0.5}
+              min={0.5}
+              value={s.defaultReorderTo}
+              onChange={(e) => set("defaultReorderTo", Number(e.target.value))}
               className={`${inputCls} tabular`}
             />
           </Field>
