@@ -23,10 +23,10 @@ export function AppHeader({ onMenu }: { onMenu?: () => void }) {
           </button>
         )}
         <Image
-          src="/brand/logo-white.png"
+          src="/brand/logo-white-2.png"
           alt="SellerOps"
-          width={791}
-          height={176}
+          width={2129}
+          height={413}
           priority
           className="ml-1 h-[19px] w-auto"
         />
