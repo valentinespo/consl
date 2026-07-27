@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Pencil, Check, Plus, X, Move, Scaling, Bell, AlertTriangle, Gauge, PieChart, Layers, CheckCircle2, ShoppingCart, Zap, PackageSearch, Truck } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useMoney } from "@/components/CurrencyProvider";
-import { Card, SectionTitle } from "@/components/ui";
+import { Card, PageHeader, SectionTitle } from "@/components/ui";
 import { TotalValueCard } from "@/components/TotalValueCard";
 import { FacilityPie, BLUES, VIOLETS } from "@/components/FacilityPie";
 import { ValueStackedChart } from "@/components/ValueStackedChart";
@@ -89,7 +89,22 @@ function sanitize(raw: unknown): Item[] {
   return uniq.length ? compact(uniq) : DEFAULT_LAYOUT;
 }
 
-export function DashboardGrid({ data, initialLayout }: { data: DashboardData; initialLayout: unknown }) {
+export function DashboardGrid({
+  data,
+  initialLayout,
+  title,
+  subtitle,
+  banner,
+}: {
+  data: DashboardData;
+  initialLayout: unknown;
+  title: string;
+  subtitle?: string;
+  // Rendered between the header and the grid (the Getting Started checklist). Passed from the
+  // server page so the grid owns the whole header→banner→grid stack and the Edit button can sit
+  // inline with the title instead of in a half-empty row of its own.
+  banner?: React.ReactNode;
+}) {
   const [items, setItems] = useState<Item[]>(() => sanitize(initialLayout));
   const [editing, setEditing] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -198,39 +213,43 @@ export function DashboardGrid({ data, initialLayout }: { data: DashboardData; in
 
   return (
     <div ref={wrapRef}>
-      {/* Toolbar */}
-      <div className="mb-3 flex items-center justify-end gap-2">
-        {editing && (
-          <div ref={addRef} className="relative">
+      {/* Title, with the edit controls inline on the right — no separate toolbar row. */}
+      <PageHeader title={title} subtitle={subtitle}>
+        <div className="flex items-center gap-2">
+          {editing && (
+            <div ref={addRef} className="relative">
+              <button
+                onClick={() => setAddOpen((v) => !v)}
+                disabled={available.length === 0}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-[12.5px] font-medium text-ink-soft hover:bg-surface-2 disabled:opacity-50"
+              >
+                <Plus size={14} /> Add widget
+              </button>
+              {addOpen && available.length > 0 && (
+                <div className="absolute right-0 top-full z-40 mt-1 w-56 overflow-hidden rounded-lg border border-border bg-surface shadow-lg">
+                  {available.map((k) => (
+                    <button key={k} onClick={() => addWidget(k)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-ink-soft hover:bg-surface-2">
+                      <Plus size={13} className="text-muted" /> {WIDGETS[k].title}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {!isMobile && (
             <button
-              onClick={() => setAddOpen((v) => !v)}
-              disabled={available.length === 0}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-[12.5px] font-medium text-ink-soft hover:bg-surface-2 disabled:opacity-50"
+              onClick={() => { if (editing) persist(itemsRef.current); setEditing((v) => !v); setAddOpen(false); }}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition-colors ${
+                editing ? "bg-ink text-bg" : "border border-border bg-surface text-ink-soft hover:bg-surface-2"
+              }`}
             >
-              <Plus size={14} /> Add widget
+              {editing ? <><Check size={14} /> Done</> : <><Pencil size={14} /> Edit dashboard</>}
             </button>
-            {addOpen && available.length > 0 && (
-              <div className="absolute right-0 top-full z-40 mt-1 w-56 overflow-hidden rounded-lg border border-border bg-surface shadow-lg">
-                {available.map((k) => (
-                  <button key={k} onClick={() => addWidget(k)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-ink-soft hover:bg-surface-2">
-                    <Plus size={13} className="text-muted" /> {WIDGETS[k].title}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        {!isMobile && (
-          <button
-            onClick={() => { if (editing) persist(itemsRef.current); setEditing((v) => !v); setAddOpen(false); }}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition-colors ${
-              editing ? "bg-ink text-bg" : "border border-border bg-surface text-ink-soft hover:bg-surface-2"
-            }`}
-          >
-            {editing ? <><Check size={14} /> Done</> : <><Pencil size={14} /> Edit dashboard</>}
-          </button>
-        )}
-      </div>
+          )}
+        </div>
+      </PageHeader>
+
+      {banner}
 
       {/* Grid */}
       {isMobile ? (

@@ -3,7 +3,6 @@ import { getRestock, getInventoryValueHistory } from "@/lib/restock";
 import { getAlerts } from "@/lib/alerts";
 import { getOrgSettings } from "@/lib/settings";
 import { getCurrentOrg } from "@/lib/org";
-import { PageHeader } from "@/components/ui";
 import { DashboardGrid, type DashboardData } from "@/components/DashboardGrid";
 import { GettingStarted, type SetupStep } from "@/components/GettingStarted";
 
@@ -45,10 +44,12 @@ export default async function DashboardPage() {
   };
 
   return (
-    <>
-      <PageHeader title="Dashboard" subtitle="Production value, raw inventory and recent activity at a glance." />
-      {!setup.dismissed && <GettingStarted steps={steps} dismissKey={SETUP_DISMISS_KEY} />}
-      <DashboardGrid data={data} initialLayout={settings.dashboardLayout} />
-    </>
+    <DashboardGrid
+      data={data}
+      initialLayout={settings.dashboardLayout}
+      title="Dashboard"
+      subtitle="Production value, raw inventory and recent activity at a glance."
+      banner={!setup.dismissed && <GettingStarted steps={steps} dismissKey={SETUP_DISMISS_KEY} />}
+    />
   );
 }
