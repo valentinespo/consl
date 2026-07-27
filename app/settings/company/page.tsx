@@ -8,6 +8,7 @@ import { CompanyEditor } from "@/components/CompanyEditor";
 import { TeamCard } from "@/components/TeamCard";
 import { DeleteOrganization } from "@/components/DeleteOrganization";
 import { date as fmtDate } from "@/lib/format";
+import { fullPermissions, normalizePermissions, MEMBER_DEFAULT } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +52,13 @@ export default async function CompanySettingsPage() {
           role: m.role,
           createdAt: fmtDate(m.createdAt, cur),
           isYou: m.clerkUserId === userId,
+          // Owners are always full; a member with no stored grants sits on the default baseline.
+          permissions:
+            m.role === "owner"
+              ? fullPermissions()
+              : m.permissions != null
+                ? normalizePermissions(m.permissions)
+                : MEMBER_DEFAULT,
         }))}
         invites={invites.map((iv) => ({
           id: iv.id,

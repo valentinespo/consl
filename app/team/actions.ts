@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { prismaBase } from "@/lib/prisma-base";
 import { requireOwner } from "@/lib/membership";
 import { setActiveOrgCookie, clearActiveOrgCookie } from "@/lib/active-org";
+import { normalizePermissions, type Permissions } from "@/lib/permissions";
 
 const INVITE_DAYS = 14;
 
@@ -143,5 +144,29 @@ export async function deleteOrganization(confirmName: string) {
   await clearActiveOrgCookie();
 
   revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/**
+ * Set a member's per-resource permissions. Owners only. Owners themselves can't be restricted
+ * (they always have full access), and a member can't edit their own grants.
+ */
+export async function updateMemberPermissions(clerkUserId: string, permissions: Permissions) {
+  const gate = await requireOwner();
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  if (clerkUserId === gate.userId) return { ok: false as const, error: "You can't change your own access." };
+
+  const target = await prismaBase.membership.findFirst({
+    where: { clerkUserId, orgId: gate.orgId },
+    select: { id: true, role: true },
+  });
+  if (!target) return { ok: false as const, error: "They're not a member of this company." };
+  if (target.role === "owner") return { ok: false as const, error: "Owners always have full access." };
+
+  await prismaBase.membership.update({
+    where: { id: target.id },
+    data: { permissions: normalizePermissions(permissions) },
+  });
+  revalidatePath("/settings/company");
   return { ok: true as const };
 }

@@ -2,11 +2,19 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { UserPlus, Copy, Check, X } from "@/components/icons";
+import { UserPlus, Copy, Check, X, Lock } from "@/components/icons";
 import { Card } from "@/components/ui";
 import { createInvite, revokeInvite, removeMember } from "@/app/team/actions";
+import { PermissionsEditor } from "@/components/PermissionsEditor";
+import type { Permissions } from "@/lib/permissions";
 
-export type TeamMember = { clerkUserId: string; role: string; createdAt: string; isYou: boolean };
+export type TeamMember = {
+  clerkUserId: string;
+  role: string;
+  createdAt: string;
+  isYou: boolean;
+  permissions: Permissions;
+};
 export type PendingInvite = { id: string; email: string; role: string; token: string | null; expiresAt: string };
 
 const inputCls =
@@ -27,6 +35,7 @@ export function TeamCard({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [editing, setEditing] = useState<TeamMember | null>(null);
 
   const linkFor = (token: string) =>
     typeof window === "undefined" ? `/join/${token}` : `${window.location.origin}/join/${token}`;
@@ -71,6 +80,15 @@ export function TeamCard({
             <span className="rounded-md border border-border bg-surface px-1.5 py-0.5 text-[10.5px] font-medium text-muted">
               {m.role === "owner" ? "Owner" : "Member"}
             </span>
+            {isOwner && !m.isYou && m.role !== "owner" && (
+              <button
+                onClick={() => setEditing(m)}
+                className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[11.5px] text-ink-soft hover:bg-surface-2"
+              >
+                <Lock size={12} />
+                Access
+              </button>
+            )}
             {isOwner && !m.isYou && (
               <button
                 onClick={async () => {
@@ -164,6 +182,19 @@ export function TeamCard({
       )}
 
       {error && <div className="mt-3 text-[12px] text-negative">{error}</div>}
+
+      {editing && (
+        <PermissionsEditor
+          who={editing.isYou ? "you" : editing.clerkUserId}
+          clerkUserId={editing.clerkUserId}
+          initial={editing.permissions}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            router.refresh();
+          }}
+        />
+      )}
     </Card>
   );
 }
