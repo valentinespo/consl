@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Pencil, Check, Plus, X, Move, Scaling, Bell, AlertTriangle, FileText, Gauge, PieChart, Layers, CheckCircle2, ShoppingCart, Zap, PackageSearch, Truck } from "@/components/icons";
+import { Pencil, Check, Clock, Plus, X, Move, Scaling, Bell, AlertTriangle, FileText, Gauge, PieChart, Layers, CheckCircle2, ShoppingCart, Zap, PackageSearch, Truck } from "@/components/icons";
 import type { LucideIcon } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { Card, PageHeader, SectionTitle } from "@/components/ui";
@@ -13,6 +13,7 @@ import { ValueStackedChart } from "@/components/ValueStackedChart";
 import { RecentLots, type RecentLot } from "@/components/RecentLots";
 import type { RestockTotals, ValueHistoryPoint } from "@/lib/restock";
 import type { Alert } from "@/lib/alerts";
+import type { LeadTimes } from "@/lib/queries";
 import { saveDashboardLayout, dismissNotification } from "@/app/settings/actions";
 
 const COLS = 12;
@@ -32,6 +33,7 @@ export type DashboardData = {
   counts: { purchases: number; transactions: number; suppliers: number };
   recentLots: RecentLot[];
   alerts: Alert[];
+  leadTimes: LeadTimes & { configuredDays: number };
 };
 
 type Meta = { title: string; minW: number; minH: number; w: number; h: number };
@@ -43,6 +45,7 @@ const WIDGETS: Record<string, Meta> = {
   notifications: { title: "Notifications", minW: 3, minH: 3, w: 5, h: 4 },
   reorderAlerts: { title: "Reorder alerts", minW: 3, minH: 3, w: 4, h: 3 },
   daysCover: { title: "Months of cover", minW: 2, minH: 2, w: 3, h: 2 },
+  leadTime: { title: "Production lead time", minW: 3, minH: 3, w: 4, h: 4 },
 };
 
 const DEFAULT_LAYOUT: Item[] = [
@@ -52,7 +55,8 @@ const DEFAULT_LAYOUT: Item[] = [
   { id: "daysCover", x: 9, y: 4, w: 3, h: 2 },
   { id: "facility", x: 0, y: 8, w: 5, h: 6 },
   { id: "recentLots", x: 5, y: 8, w: 7, h: 6 },
-  { id: "valueByBucket", x: 0, y: 14, w: 12, h: 4 },
+  { id: "valueByBucket", x: 0, y: 14, w: 8, h: 4 },
+  { id: "leadTime", x: 8, y: 14, w: 4, h: 4 },
 ];
 
 const overlap = (a: Item, b: Item) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
@@ -338,6 +342,8 @@ function renderContent(id: string, d: DashboardData) {
       return <ReorderAlertsWidget alerts={d.alerts} />;
     case "daysCover":
       return <CoverWidget months={d.totals.coverMonths} />;
+    case "leadTime":
+      return <LeadTimeWidget lt={d.leadTimes} />;
     default:
       return null;
   }
@@ -499,6 +505,66 @@ function NotificationsWidget({ alerts }: { alerts: Alert[] }) {
           })}
         </div>
       )}
+    </Card>
+  );
+}
+
+/** Measured production lead time: the blended account average against the configured setting,
+ *  then each producing facility on its own bar. Bars are relative to the slowest facility. */
+function LeadTimeWidget({ lt }: { lt: DashboardData["leadTimes"] }) {
+  const mo = (d: number) => (d / 30.44).toFixed(1);
+  if (lt.blendedDays == null) {
+    return (
+      <Card className="flex h-full flex-col">
+        <WidgetHead icon={Clock} title="Production lead time" tint="accent" />
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted">
+          <Clock size={24} />
+          <span className="text-[12.5px]">Finish a lot to start measuring</span>
+        </div>
+      </Card>
+    );
+  }
+  const diff = lt.blendedDays - lt.configuredDays;
+  const maxAvg = Math.max(...lt.perFacility.map((f) => f.avgDays), 1);
+  return (
+    <Card className="flex h-full flex-col">
+      <WidgetHead
+        icon={Clock}
+        title="Production lead time"
+        tint="accent"
+        right={<span className="text-[11px] text-muted">{lt.lots} finished lots</span>}
+      />
+      <div className="flex items-end gap-2">
+        <span className="text-[30px] font-semibold leading-none tracking-tight text-ink tabular">{mo(lt.blendedDays)}</span>
+        <span className="mb-0.5 text-[13px] text-muted">mo avg · {lt.blendedDays}d</span>
+      </div>
+      <div className="mt-1.5 text-[11.5px]">
+        {Math.abs(diff) < 4 ? (
+          <span className="text-muted">matches your {mo(lt.configuredDays)}mo lead time setting</span>
+        ) : diff < 0 ? (
+          <span className="font-medium text-positive">{Math.abs(diff)}d faster than your {mo(lt.configuredDays)}mo setting</span>
+        ) : (
+          <span className="font-medium text-warn">{diff}d slower than your {mo(lt.configuredDays)}mo setting</span>
+        )}
+      </div>
+      <div className="mt-3.5 min-h-0 flex-1 space-y-2 overflow-y-auto">
+        {lt.perFacility.map((f, i) => (
+          <div key={f.code} className="text-[12px]">
+            <div className="mb-1 flex items-baseline justify-between">
+              <span className="font-medium text-ink-soft">{f.code}</span>
+              <span className="tabular text-muted">
+                <span className="font-medium text-ink">{mo(f.avgDays)} mo</span> · {f.lots} {f.lots === 1 ? "lot" : "lots"}
+              </span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
+              <div
+                className="h-full rounded-full"
+                style={{ width: `${(f.avgDays / maxAvg) * 100}%`, background: BLUES[i % BLUES.length] }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
     </Card>
   );
 }

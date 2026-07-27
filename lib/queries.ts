@@ -739,3 +739,38 @@ export async function getSuppliers() {
     totalSpend: (txMap.get(s.id) ?? 0) + (pMap.get(s.id) ?? 0),
   }));
 }
+
+export type LeadTimes = {
+  blendedDays: number | null; // null until at least one lot qualifies
+  lots: number; // how many finished lots the averages stand on
+  perFacility: { code: string; avgDays: number; lots: number }[]; // slowest first
+};
+
+/**
+ * Average production lead time, measured from real lots: PO date → finished date, per producing
+ * facility and blended across all of them. Only positive spans count — a lot missing either date,
+ * or finishing "same day" (an artifact of backfilled finish dates), proves nothing about lead
+ * time and is left out rather than dragging the average toward zero.
+ */
+export async function getLeadTimes(): Promise<LeadTimes> {
+  const lots = await prisma.lot.findMany({
+    where: { finishedAt: { not: null }, poDate: { not: null } },
+    select: { poDate: true, finishedAt: true, facility: { select: { code: true } } },
+  });
+  const DAY = 86_400_000;
+  const spans = lots
+    .map((l) => ({ code: l.facility.code, days: Math.round((l.finishedAt!.getTime() - l.poDate!.getTime()) / DAY) }))
+    .filter((s) => s.days > 0);
+  if (spans.length === 0) return { blendedDays: null, lots: 0, perFacility: [] };
+
+  const avg = (a: { days: number }[]) => Math.round(a.reduce((s, x) => s + x.days, 0) / a.length);
+  const byCode = new Map<string, { days: number }[]>();
+  for (const s of spans) (byCode.get(s.code) ?? byCode.set(s.code, []).get(s.code)!).push(s);
+  return {
+    blendedDays: avg(spans),
+    lots: spans.length,
+    perFacility: [...byCode.entries()]
+      .map(([code, g]) => ({ code, avgDays: avg(g), lots: g.length }))
+      .sort((a, b) => b.avgDays - a.avgDays),
+  };
+}

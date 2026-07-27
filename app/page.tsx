@@ -1,4 +1,4 @@
-import { getDashboard, getLots, getSetupProgress, SETUP_DISMISS_KEY } from "@/lib/queries";
+import { getDashboard, getLeadTimes, getLots, getSetupProgress, SETUP_DISMISS_KEY } from "@/lib/queries";
 import { getRestock, getInventoryValueHistory } from "@/lib/restock";
 import { getAlerts } from "@/lib/alerts";
 import { getOrgSettings } from "@/lib/settings";
@@ -9,7 +9,7 @@ import { GettingStarted, type SetupStep } from "@/components/GettingStarted";
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const [d, lots, restock, history, settings, setup, org] = await Promise.all([
+  const [d, lots, restock, history, settings, setup, org, leadTimes] = await Promise.all([
     getDashboard(),
     getLots(),
     getRestock(),
@@ -17,6 +17,7 @@ export default async function DashboardPage() {
     getOrgSettings(),
     getSetupProgress(),
     getCurrentOrg(),
+    getLeadTimes(),
   ]);
   const alerts = await getAlerts(restock.rows);
 
@@ -41,6 +42,7 @@ export default async function DashboardPage() {
     counts: { purchases: d.counts.purchases, transactions: d.counts.transactions, suppliers: d.counts.suppliers },
     recentLots: lots.slice(0, 6),
     alerts,
+    leadTimes: { ...leadTimes, configuredDays: Math.round(settings.defaultLeadMonths * 30.44) },
   };
 
   return (
