@@ -271,7 +271,7 @@ export function PoForm({
                   <input
                     value={l.description}
                     onChange={(e) => patch(l.key, { description: e.target.value, descAuto: false })}
-                    placeholder={isSku ? "e.g. Calm Stress Anxiety Blend | 15-Count Pyramid Sachet Pouches" : "e.g. COAs Supplement Testing"}
+                    placeholder={isSku ? "e.g. Product name | pack size" : "e.g. testing, freight, samples"}
                     className={inputCls}
                   />
                 </MiniField>

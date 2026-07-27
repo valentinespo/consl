@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getInventory } from "@/lib/queries";
 import { getOrgSettings } from "@/lib/settings";
+import { localDay } from "@/lib/tz";
 import {
   runFinishedGoodsEngine,
   valueChannelStock,
@@ -246,7 +247,7 @@ export async function getRestock(): Promise<{
     coverMonths: monthlyCOGS > 0 ? grandTotal / monthlyCOGS : 0,
   };
 
-  await recordDailyInventoryValue(totals);
+  await recordDailyInventoryValue(totals, settings.syncTz);
 
   return {
     rows,
@@ -282,9 +283,12 @@ export async function getInventoryValueHistory(): Promise<ValueHistoryPoint[]> {
   });
 }
 
-/** Record today's inventory-value point (one row per calendar day, per org). Non-fatal. */
-async function recordDailyInventoryValue(t: RestockTotals) {
-  const day = new Date().toISOString().slice(0, 10);
+/** Record today's inventory-value point (one row per calendar day, per org). Non-fatal.
+ *  "Today" is the org's local calendar day (syncTz), not UTC — otherwise an org far from UTC
+ *  records under tomorrow's date and its chart, month-to-date boundary and calendar read a day
+ *  ahead of its own clock. */
+async function recordDailyInventoryValue(t: RestockTotals, tz: string) {
+  const day = localDay(tz);
   const values = { raw: t.raw, inProduction: t.inProduction, fba: t.fba, awd: t.awd, atLocations: t.atLocations, total: t.total };
   try {
     const existing = await prisma.inventoryValueSnapshot.findFirst({ where: { day } }); // auto-scoped to org

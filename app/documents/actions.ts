@@ -29,7 +29,7 @@ type Fail = { ok: false; error: string };
 
 function validate(file: File | null): Fail | { ok: true; ext: string } {
   if (!file || file.size === 0) return { ok: false, error: "No file" };
-  if (file.size > MAX_BYTES) return { ok: false, error: "File too large (max 25MB)" };
+  if (file.size > MAX_BYTES) return { ok: false, error: "File too large (max 10MB)" };
   const ext = (file.name.split(".").pop() ?? "").toLowerCase();
   if (!OK_EXT.has(ext)) return { ok: false, error: "Only PDF or image files" };
   return { ok: true, ext };

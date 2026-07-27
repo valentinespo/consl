@@ -276,7 +276,7 @@ export function TransactionInvoicesTable({
             {filtered.length === 0 && (
               <tr>
                 <td colSpan={colSpan} className="px-4 py-10 text-center text-[13px] text-muted">
-                  No transactions match your filters.
+                  {invoices.length === 0 ? "No transactions yet." : "No transactions match your filters."}
                 </td>
               </tr>
             )}

@@ -9,6 +9,8 @@ export type Range = { key: RangeKey; from: string; to: string };
 
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const PANEL_W = 604;
+// On a narrow phone the fixed panel would overflow; cap it to the viewport with a small margin.
+const panelW = () => (typeof window !== "undefined" ? Math.min(PANEL_W, window.innerWidth - 16) : PANEL_W);
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -79,7 +81,7 @@ export function DateRangePicker({
       setBox({
         top: Math.min(r.bottom + 6, window.innerHeight - 380),
         // Right-aligned to the trigger, then pulled back inside the viewport.
-        left: Math.max(8, Math.min(r.right - PANEL_W, window.innerWidth - PANEL_W - 8)),
+        left: Math.max(8, Math.min(r.right - panelW(), window.innerWidth - panelW() - 8)),
       });
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setBox(null);
@@ -109,7 +111,7 @@ export function DateRangePicker({
     setMonth({ y, m: m - 1 });
     setBox({
       top: Math.min(r.bottom + 6, window.innerHeight - 380),
-      left: Math.max(8, Math.min(r.right - PANEL_W, window.innerWidth - PANEL_W - 8)),
+      left: Math.max(8, Math.min(r.right - panelW(), window.innerWidth - panelW() - 8)),
     });
   }
 
@@ -210,7 +212,7 @@ export function DateRangePicker({
             ref={panel}
             role="dialog"
             aria-label="Choose a date range"
-            style={{ position: "fixed", top: box.top, left: box.left, width: PANEL_W }}
+            style={{ position: "fixed", top: box.top, left: box.left, width: panelW() }}
             className="z-[300] flex overflow-hidden rounded-xl border border-border bg-surface shadow-2xl"
           >
             <div className="w-[150px] shrink-0 border-r border-border py-1.5">

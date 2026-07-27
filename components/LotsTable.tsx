@@ -146,7 +146,9 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
             {filtered.length === 0 && (
               <tr>
                 <td colSpan={10} className="px-4 py-10 text-center text-[13px] text-muted">
-                  No lots match your filters.
+                  {lots.length === 0
+                    ? "No production lots yet — create one to start tracking cost and stock."
+                    : "No lots match your filters."}
                 </td>
               </tr>
             )}

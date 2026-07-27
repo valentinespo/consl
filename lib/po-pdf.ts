@@ -192,21 +192,36 @@ export async function generatePoPdf(data: PoPdfData): Promise<Buffer> {
   const QTY_R = 483;
   const AMT_R = IR;
 
+  // LETTER is 792pt tall; leave room for the footer/total so a row never runs off the page.
+  const PAGE_BOTTOM = 792 - 90;
+
+  // Draws the column header at the current y and advances past it. Called once here and again at
+  // the top of every continuation page, so a long PO paginates instead of overflowing.
+  const drawTableHeader = () => {
+    doc.font("Bold").fontSize(9).fillColor(INK);
+    doc.text("SKU", SKU_X, y, { characterSpacing: 0.4 });
+    doc.text("ITEM DESCRIPTION", DESC_X, y, { characterSpacing: 0.4 });
+    doc.text("UNIT COST", UNIT_R - 90, y, { width: 90, align: "right", characterSpacing: 0.4 });
+    doc.text("QTY", QTY_R - 55, y, { width: 55, align: "right", characterSpacing: 0.4 });
+    doc.text("AMOUNT", AMT_R - 90, y, { width: 90, align: "right", characterSpacing: 0.4 });
+    y += 17;
+    doc.moveTo(SKU_X, y).lineTo(IR, y).lineWidth(1).strokeColor(INK).stroke();
+    y += 5;
+  };
+
   let y = barY + barH + 34;
-  doc.font("Bold").fontSize(9).fillColor(INK);
-  doc.text("SKU", SKU_X, y, { characterSpacing: 0.4 });
-  doc.text("ITEM DESCRIPTION", DESC_X, y, { characterSpacing: 0.4 });
-  doc.text("UNIT COST", UNIT_R - 90, y, { width: 90, align: "right", characterSpacing: 0.4 });
-  doc.text("QTY", QTY_R - 55, y, { width: 55, align: "right", characterSpacing: 0.4 });
-  doc.text("AMOUNT", AMT_R - 90, y, { width: 90, align: "right", characterSpacing: 0.4 });
-  y += 17;
-  doc.moveTo(SKU_X, y).lineTo(IR, y).lineWidth(1).strokeColor(INK).stroke();
-  y += 5;
+  drawTableHeader();
 
   for (const line of data.lines) {
     doc.font("Body").fontSize(9.5).fillColor(BODY);
     const descH = doc.heightOfString(line.description, { width: DESC_W, lineGap: 2 });
     const rowH = Math.max(32, descH + 18);
+    // Break to a fresh page before a row that wouldn't fit, and repeat the header there.
+    if (y + rowH + 5 > PAGE_BOTTOM) {
+      doc.addPage();
+      y = 62;
+      drawTableHeader();
+    }
     const textY = y + (rowH - descH) / 2;
     doc.font("Med").text(line.sku ?? "—", SKU_X, y + (rowH - 11) / 2, { width: SKU_W });
     doc.font("Body").text(line.description, DESC_X, textY, { width: DESC_W, lineGap: 2 });
@@ -225,7 +240,11 @@ export async function generatePoPdf(data: PoPdfData): Promise<Buffer> {
     y += 5;
   }
 
-  // ---- Total ----
+  // ---- Total ---- (keep it with the last rows; break if it would overflow)
+  if (y + 40 > PAGE_BOTTOM) {
+    doc.addPage();
+    y = 62;
+  }
   y += 20;
   doc.moveTo(UNIT_R - 90, y).lineTo(IR, y).lineWidth(0.6).strokeColor(ROW_RULE).stroke();
   y += 14;
