@@ -65,7 +65,9 @@ export function normalizePermissions(raw: unknown): Permissions {
     const v = (raw as Record<string, unknown>)[r];
     if (Array.isArray(v)) {
       const allowed = actionsOf(r);
-      const acts = v.filter((a): a is Action => typeof a === "string" && (allowed as readonly string[]).includes(a));
+      const acts = [
+        ...new Set(v.filter((a): a is Action => typeof a === "string" && (allowed as readonly string[]).includes(a))),
+      ];
       if (acts.length) out[r] = acts;
     }
   }
