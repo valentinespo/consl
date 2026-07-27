@@ -117,6 +117,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
             poDateISO: lot.poDate ? lot.poDate.toISOString().slice(0, 10) : null,
             facilityId: lot.facilityId,
             status: lot.status,
+            finishedAtISO: lot.finishedAt ? lot.finishedAt.toISOString().slice(0, 10) : null,
             notes: lot.notes,
           }}
           initialLines={initialLines}

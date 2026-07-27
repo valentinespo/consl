@@ -754,7 +754,7 @@ export type LeadTimes = {
  */
 export async function getLeadTimes(): Promise<LeadTimes> {
   const lots = await prisma.lot.findMany({
-    where: { finishedAt: { not: null }, poDate: { not: null } },
+    where: { status: "FINISHED", finishedAt: { not: null }, poDate: { not: null } },
     select: { poDate: true, finishedAt: true, facility: { select: { code: true } } },
   });
   const DAY = 86_400_000;

@@ -68,7 +68,14 @@ export function LotEditor({
   skuTxnCounts,
 }: {
   lotId: string;
-  initial: { poNumber: string | null; poDateISO: string | null; facilityId: string; status: "IN_PRODUCTION" | "FINISHED"; notes: string | null };
+  initial: {
+    poNumber: string | null;
+    poDateISO: string | null;
+    facilityId: string;
+    status: "IN_PRODUCTION" | "FINISHED";
+    finishedAtISO: string | null;
+    notes: string | null;
+  };
   initialLines: EditorLine[];
   facilities: Facility[];
   products: Product[];
@@ -96,6 +103,7 @@ export function LotEditor({
   const [poDateISO, setPoDateISO] = useState(initial.poDateISO ?? "");
   const [facilityId, setFacilityId] = useState(initial.facilityId);
   const [status, setStatus] = useState(initial.status);
+  const [finishedAtISO, setFinishedAtISO] = useState(initial.finishedAtISO ?? "");
   const [notes, setNotes] = useState(initial.notes ?? "");
   const [lines, setLines] = useState<StateLine[]>(seed.lines);
   const [shared, setShared] = useState<Mat[]>(seed.shared);
@@ -112,19 +120,19 @@ export function LotEditor({
 
   // ---- Dirty tracking ----
   const snapshot = (
-    pn: string, pd: string, fac: string, st: string, nt: string, ls: StateLine[], sh: Mat[], ov: Record<string, Mat[]>,
+    pn: string, pd: string, fac: string, st: string, fin: string, nt: string, ls: StateLine[], sh: Mat[], ov: Record<string, Mat[]>,
   ) => {
     const keys = new Set(ls.map((l) => l.key));
     const cleanOv = Object.fromEntries(Object.entries(ov).filter(([k]) => keys.has(k)).map(([k, v]) => [k, matSig(v)]));
     return JSON.stringify({
-      pn: pn.trim(), pd, fac, st, nt: nt.trim(),
+      pn: pn.trim(), pd, fac, st, fin: st === "FINISHED" ? fin : "", nt: nt.trim(),
       l: ls.map((l) => `${l.id ?? "NEW"}|${l.productId}|${Number(l.units) || 0}`),
       sh: matSig(sh), ov: cleanOv,
     });
   };
-  const current = snapshot(poNumber, poDateISO, facilityId, status, notes, lines, shared, overrides);
+  const current = snapshot(poNumber, poDateISO, facilityId, status, finishedAtISO, notes, lines, shared, overrides);
   const original = useMemo(
-    () => snapshot(initial.poNumber ?? "", initial.poDateISO ?? "", initial.facilityId, initial.status, initial.notes ?? "", seed.lines, seed.shared, seed.overrides),
+    () => snapshot(initial.poNumber ?? "", initial.poDateISO ?? "", initial.facilityId, initial.status, initial.finishedAtISO ?? "", initial.notes ?? "", seed.lines, seed.shared, seed.overrides),
     [initial, seed],
   );
   const dirty = current !== original;
@@ -156,6 +164,7 @@ export function LotEditor({
     setPoDateISO(initial.poDateISO ?? "");
     setFacilityId(initial.facilityId);
     setStatus(initial.status);
+    setFinishedAtISO(initial.finishedAtISO ?? "");
     setNotes(initial.notes ?? "");
     setLines(seed.lines);
     setShared(seed.shared);
@@ -174,6 +183,7 @@ export function LotEditor({
       poDateISO: poDateISO || null,
       facilityId,
       status,
+      finishedAtISO: status === "FINISHED" ? finishedAtISO || new Date().toLocaleDateString("en-CA") : null,
       notes: notes.trim() || null,
       lines: lines.map((l) => ({ id: l.id, productId: l.productId, units: Number(l.units) || 0, materials: bomFor(l.key) })),
     });
@@ -199,11 +209,26 @@ export function LotEditor({
           </select>
         </Field>
         <Field label="Status">
-          <select value={status} onChange={(e) => setStatus(e.target.value as "IN_PRODUCTION" | "FINISHED")} className={inputCls}>
+          <select
+            value={status}
+            onChange={(e) => {
+              const next = e.target.value as "IN_PRODUCTION" | "FINISHED";
+              setStatus(next);
+              // Flipping to Finished proposes today; the field stays fully editable and is the
+              // lot's single source of truth — flipping back to production erases it on save.
+              if (next === "FINISHED" && !finishedAtISO) setFinishedAtISO(new Date().toLocaleDateString("en-CA"));
+            }}
+            className={inputCls}
+          >
             <option value="IN_PRODUCTION">In production</option>
             <option value="FINISHED">Finished</option>
           </select>
         </Field>
+        {status === "FINISHED" && (
+          <Field label="Finished date">
+            <input type="date" value={finishedAtISO} onChange={(e) => setFinishedAtISO(e.target.value)} className={inputCls} />
+          </Field>
+        )}
       </div>
 
       {/* Cost breakdown + units + add/remove SKU */}

@@ -129,6 +129,7 @@ export type LotEditPayload = {
   poDateISO: string | null;
   facilityId: string;
   status: "IN_PRODUCTION" | "FINISHED";
+  finishedAtISO: string | null; // required when FINISHED (defaults to today); ignored otherwise
   notes: string | null;
   lines: {
     id: string | null; // null = newly added SKU
@@ -147,9 +148,13 @@ export async function updateLot(payload: LotEditPayload) {
   const keptIds = new Set(lines.filter((l) => l.id).map((l) => l.id!));
   const toRemove = existing.filter((e) => !keptIds.has(e.id));
 
-  // Stamp finishedAt only on the transition into FINISHED (latest wins; left intact if unmarked later).
-  const currentLot = await prisma.lot.findUnique({ where: { id: payload.lotId }, select: { status: true } });
-  const justFinished = payload.status === "FINISHED" && currentLot?.status !== "FINISHED";
+  // The finished date lives and dies with the status: FINISHED carries exactly the date the form
+  // shows (defaulting to today), anything else carries none. Keeping a stale date after a lot was
+  // flipped back to production made "finished" lots that weren't.
+  const finishedAt =
+    payload.status === "FINISHED"
+      ? new Date(payload.finishedAtISO && !isNaN(Date.parse(payload.finishedAtISO)) ? payload.finishedAtISO : Date.now())
+      : null;
 
   const defaults = await defaultMaterialsFor(payload.facilityId);
   // Per-product materials carry the SKU so they draw the right per-SKU FIFO pool.
@@ -164,7 +169,7 @@ export async function updateLot(payload: LotEditPayload) {
         poDate: payload.poDateISO ? new Date(payload.poDateISO) : null,
         facilityId: payload.facilityId,
         status: payload.status,
-        ...(justFinished ? { finishedAt: new Date() } : {}),
+        finishedAt,
         notes: payload.notes?.trim() || null,
       },
     });
