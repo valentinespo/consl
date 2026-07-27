@@ -58,7 +58,7 @@ export function Sidebar({
               key={item.href}
               href={item.href}
               onClick={onNavigate}
-              className={`mb-0.5 flex items-center gap-3 rounded-lg px-3 py-2 text-[13.5px] font-medium transition-colors ${
+              className={`mb-0.5 flex items-center gap-3 rounded-lg px-3 py-1.5 text-[13.5px] font-medium transition-colors ${
                 active ? "bg-nav-active text-ink" : "text-muted hover:bg-surface-2 hover:text-ink-soft"
               }`}
             >
