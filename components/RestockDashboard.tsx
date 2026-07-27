@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Settings, Check, GripVertical } from "@/components/icons";
+import { Settings, Check, ChevronDown, GripVertical } from "@/components/icons";
 import { HoverHint } from "@/components/HoverHint";
 import { BATCH_HELP, BUFFER_HELP, FLOOR_HELP, LEAD_HELP, REORDER_TO_HELP, SHIP_HELP } from "@/lib/restock-help";
 import { SkuAvatar } from "@/components/ui";
@@ -291,7 +291,12 @@ export function RestockDashboard({
                         </>
                       )}
                     </div>
-                    <button onClick={() => setWinSku(winSku === r.id ? null : r.id)} className={`mt-0.5 text-[10px] hover:underline ${r.override ? "text-accent" : "text-muted"}`}>
+                    <button
+                      onClick={() => setWinSku(winSku === r.id ? null : r.id)}
+                      aria-expanded={winSku === r.id}
+                      className={`mt-0.5 inline-flex items-center gap-1 text-[10px] hover:underline ${r.override ? "text-accent" : "text-muted"}`}
+                    >
+                      <ChevronDown size={10} className={`transition-transform ${winSku === r.id ? "rotate-180" : ""}`} />
                       {r.override ? "Custom window" : "Override window"}
                     </button>
                   </div>
@@ -492,6 +497,9 @@ function SkuPolicyEditor({
   const [rt, setRt] = useState(row.rawReorderToMonths != null ? String(row.rawReorderToMonths) : "");
   const [b, setB] = useState(row.rawBatchSize != null ? String(row.rawBatchSize) : "");
   const opt = (v: string) => (v.trim() === "" ? null : parseFloat(v));
+  // Nothing typed in any box means there is nothing to save — reverting to the defaults is what
+  // the "Use defaults" button next door is for.
+  const hasOverride = [f, l, sh, rt, b].some((v) => v.trim() !== "");
   return (
     <div className={`flex flex-wrap items-end gap-3 bg-surface-2 px-4 py-3 ${bordered ? "border-b border-line" : ""}`}>
       <NumField label="Floor (months)" value={f} onChange={setF} placeholder={String(defaults.minMonths)} help={FLOOR_HELP} />
@@ -509,7 +517,7 @@ function SkuPolicyEditor({
         onClick={() =>
           onSave({ minMonths: opt(f), leadMonths: opt(l), shipDays: opt(sh), reorderToMonths: opt(rt), batchSize: opt(b) })
         }
-        disabled={pending}
+        disabled={pending || !hasOverride}
         className="inline-flex items-center gap-1 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-bg disabled:opacity-60"
       >
         <Check size={13} /> Save

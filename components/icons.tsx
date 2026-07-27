@@ -23,11 +23,17 @@ export type IconProps = Omit<SVGProps<SVGSVGElement>, "ref"> & {
 /** The component type call sites reference (named for compatibility with the old imports). */
 export type LucideIcon = ComponentType<IconProps>;
 
-function duotone(Glyph: PhosphorIcon): LucideIcon {
+function wrap(Glyph: PhosphorIcon, weight: "duotone" | "regular"): LucideIcon {
   return function Icon({ size = 20, strokeWidth: _ignored, ...rest }: IconProps) {
-    return <Glyph size={size} weight="duotone" color="currentColor" aria-hidden focusable="false" {...rest} />;
+    return <Glyph size={size} weight={weight} color="currentColor" aria-hidden focusable="false" {...rest} />;
   };
 }
+
+/** Duotone: the expressive weight, for icons that *depict* something — nav glyphs, objects. */
+const duotone = (g: PhosphorIcon) => wrap(g, "duotone");
+/** Regular outline: for functional marks — arrows, chevrons, crosses, ticks. These live inside
+ *  buttons and controls, where the duotone tint layer reads as smudge, not style. */
+const regular = (g: PhosphorIcon) => wrap(g, "regular");
 
 /* ---- Navigation ---- */
 export const LayoutDashboard = duotone(P.SquaresFour);
@@ -61,22 +67,22 @@ export const Moon = duotone(P.Moon);
 export const Monitor = duotone(P.Monitor);
 
 /* ---- Actions ---- */
-export const X = duotone(P.X);
-export const Plus = duotone(P.Plus);
-export const Check = duotone(P.Check);
+export const X = regular(P.X);
+export const Plus = regular(P.Plus);
+export const Check = regular(P.Check);
 export const CheckCircle2 = duotone(P.CheckCircle);
 export const Pencil = duotone(P.PencilSimple);
 export const Trash2 = duotone(P.Trash);
 export const Copy = duotone(P.Copy);
-export const Upload = duotone(P.UploadSimple);
+export const Upload = regular(P.UploadSimple);
 export const Paperclip = duotone(P.Paperclip);
 export const Camera = duotone(P.Camera);
 export const Lock = duotone(P.Lock);
-export const ExternalLink = duotone(P.ArrowSquareOut);
-export const Undo2 = duotone(P.ArrowUUpLeft);
-export const CornerDownLeft = duotone(P.KeyReturn);
+export const ExternalLink = regular(P.ArrowSquareOut);
+export const Undo2 = regular(P.ArrowUUpLeft);
+export const CornerDownLeft = regular(P.KeyReturn);
 export const UserPlus = duotone(P.UserPlus);
-export const RefreshCw = duotone(P.ArrowsClockwise);
+export const RefreshCw = regular(P.ArrowsClockwise);
 
 /* ---- Communication & places ---- */
 export const Mail = duotone(P.Envelope);
@@ -98,13 +104,13 @@ export const Package = duotone(P.Package);
 export const PackageSearch = duotone(P.ListMagnifyingGlass);
 
 /* ---- Layout & movement ---- */
-export const GripVertical = duotone(P.DotsSixVertical);
-export const Move = duotone(P.ArrowsOutCardinal);
-export const Scaling = duotone(P.ArrowsOutSimple);
-export const ChevronDown = duotone(P.CaretDown);
-export const ChevronLeft = duotone(P.CaretLeft);
-export const ChevronRight = duotone(P.CaretRight);
-export const ChevronUp = duotone(P.CaretUp);
-export const ChevronsUpDown = duotone(P.CaretUpDown);
-export const ArrowUpDown = duotone(P.ArrowsDownUp);
-export const ArrowRight = duotone(P.ArrowRight);
+export const GripVertical = regular(P.DotsSixVertical);
+export const Move = regular(P.ArrowsOutCardinal);
+export const Scaling = regular(P.ArrowsOutSimple);
+export const ChevronDown = regular(P.CaretDown);
+export const ChevronLeft = regular(P.CaretLeft);
+export const ChevronRight = regular(P.CaretRight);
+export const ChevronUp = regular(P.CaretUp);
+export const ChevronsUpDown = regular(P.CaretUpDown);
+export const ArrowUpDown = regular(P.ArrowsDownUp);
+export const ArrowRight = regular(P.ArrowRight);
