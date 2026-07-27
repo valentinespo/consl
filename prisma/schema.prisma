@@ -67,6 +67,9 @@ model Membership {
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   orgId        String
   role         String       @default("owner") // owner | member
+  // Per-resource action grants for a member, e.g. { "lots": ["view","create"], ... }. Null = the
+  // default member baseline (see lib/permissions.ts). Owners ignore this and always have full access.
+  permissions  Json?
   createdAt    DateTime     @default(now())
 
   @@unique([clerkUserId, orgId])
