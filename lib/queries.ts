@@ -748,9 +748,9 @@ export type LeadTimes = {
 
 /**
  * Average production lead time, measured from real lots: PO date → finished date, per producing
- * facility and blended across all of them. Only positive spans count — a lot missing either date,
- * or finishing "same day" (an artifact of backfilled finish dates), proves nothing about lead
- * time and is left out rather than dragging the average toward zero.
+ * facility and blended across all of them. Every finished lot carrying both dates counts, exactly
+ * as recorded — no exclusions, no cleverness. The dates are hand-correctable on the lot, so the
+ * cure for an odd-looking span is fixing the record, not code quietly dropping it.
  */
 export async function getLeadTimes(): Promise<LeadTimes> {
   const lots = await prisma.lot.findMany({
@@ -758,9 +758,10 @@ export async function getLeadTimes(): Promise<LeadTimes> {
     select: { poDate: true, finishedAt: true, facility: { select: { code: true } } },
   });
   const DAY = 86_400_000;
-  const spans = lots
-    .map((l) => ({ code: l.facility.code, days: Math.round((l.finishedAt!.getTime() - l.poDate!.getTime()) / DAY) }))
-    .filter((s) => s.days > 0);
+  const spans = lots.map((l) => ({
+    code: l.facility.code,
+    days: Math.round((l.finishedAt!.getTime() - l.poDate!.getTime()) / DAY),
+  }));
   if (spans.length === 0) return { blendedDays: null, lots: 0, perFacility: [] };
 
   const avg = (a: { days: number }[]) => Math.round(a.reduce((s, x) => s + x.days, 0) / a.length);

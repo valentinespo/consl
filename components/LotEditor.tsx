@@ -183,7 +183,7 @@ export function LotEditor({
       poDateISO: poDateISO || null,
       facilityId,
       status,
-      finishedAtISO: status === "FINISHED" ? finishedAtISO || new Date().toLocaleDateString("en-CA") : null,
+      finishedAtISO: status === "FINISHED" ? finishedAtISO || null : null,
       notes: notes.trim() || null,
       lines: lines.map((l) => ({ id: l.id, productId: l.productId, units: Number(l.units) || 0, materials: bomFor(l.key) })),
     });

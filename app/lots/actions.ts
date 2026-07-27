@@ -148,12 +148,13 @@ export async function updateLot(payload: LotEditPayload) {
   const keptIds = new Set(lines.filter((l) => l.id).map((l) => l.id!));
   const toRemove = existing.filter((e) => !keptIds.has(e.id));
 
-  // The finished date lives and dies with the status: FINISHED carries exactly the date the form
-  // shows (defaulting to today), anything else carries none. Keeping a stale date after a lot was
-  // flipped back to production made "finished" lots that weren't.
+  // The finished date is exactly what the form shows: FINISHED carries the typed date, or none at
+  // all if it was cleared — an empty field must stay empty, not spring back to today. Any other
+  // status carries none; keeping a stale date after a lot was flipped back to production made
+  // "finished" lots that weren't.
   const finishedAt =
-    payload.status === "FINISHED"
-      ? new Date(payload.finishedAtISO && !isNaN(Date.parse(payload.finishedAtISO)) ? payload.finishedAtISO : Date.now())
+    payload.status === "FINISHED" && payload.finishedAtISO && !isNaN(Date.parse(payload.finishedAtISO))
+      ? new Date(payload.finishedAtISO)
       : null;
 
   const defaults = await defaultMaterialsFor(payload.facilityId);
