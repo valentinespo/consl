@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X } from "@/components/icons";
 import { createSupplier } from "@/app/suppliers/actions";
+import { useCan } from "@/components/AccessProvider";
 
 const inputCls = "h-9 w-full rounded-lg border border-border bg-surface px-2.5 text-[13px] text-ink outline-none focus:border-accent-strong";
 
@@ -13,6 +14,7 @@ export function NewSupplierButton() {
   const [name, setName] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const canCreate = useCan("suppliers", "create");
 
   async function save() {
     setPending(true);
@@ -28,6 +30,8 @@ export function NewSupplierButton() {
     router.push(`/suppliers/${r.id}`);
     router.refresh();
   }
+
+  if (!canCreate) return null;
 
   return (
     <>

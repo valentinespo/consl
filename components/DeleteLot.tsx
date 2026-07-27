@@ -3,11 +3,13 @@
 import { useState } from "react";
 import { Trash2, X } from "@/components/icons";
 import { deleteLot } from "@/app/lots/actions";
+import { useCan } from "@/components/AccessProvider";
 
 export function DeleteLot({ lotId, lotNr }: { lotId: string; lotNr: number }) {
   const [step, setStep] = useState<0 | 1 | 2>(0);
   const [text, setText] = useState("");
   const [pending, setPending] = useState(false);
+  const canDelete = useCan("lots", "delete");
 
   function close() {
     setStep(0);
@@ -20,6 +22,8 @@ export function DeleteLot({ lotId, lotNr }: { lotId: string; lotNr: number }) {
     fd.set("lotId", lotId);
     await deleteLot(fd); // redirects to /lots on success
   }
+
+  if (!canDelete) return null;
 
   return (
     <div className="mt-8 flex items-center justify-between rounded-[var(--radius-card)] border border-[#e7cfc8] bg-[#fcf4f1] px-5 py-4">

@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2, X, Lock } from "@/components/icons";
+import { useCan } from "@/components/AccessProvider";
+import type { Resource } from "@/lib/permissions";
 
 export type DeleteResult = { ok: boolean; error?: string };
 
@@ -16,6 +18,7 @@ export function DeleteEntity({
   onDelete,
   redirectTo,
   description,
+  resource,
 }: {
   kind: string;
   name: string;
@@ -23,12 +26,16 @@ export function DeleteEntity({
   onDelete: () => Promise<DeleteResult>;
   redirectTo: string;
   description?: string;
+  resource: Resource;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const canDelete = useCan(resource, "delete");
+
+  if (!canDelete) return null;
 
   const blockers = Object.entries(usedBy);
   const inUse = blockers.length > 0;

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X } from "@/components/icons";
 import { createProduct, createMaterial } from "@/app/catalog/actions";
+import { useCan } from "@/components/AccessProvider";
 
 const inputCls = "h-9 w-full rounded-lg border border-border bg-surface px-2.5 text-[13px] text-ink outline-none focus:border-accent-strong";
 
@@ -47,6 +48,7 @@ export function NewProductButton() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const canCreate = useCan("catalog", "create");
 
   async function save() {
     setPending(true);
@@ -62,6 +64,8 @@ export function NewProductButton() {
     setName("");
     router.refresh();
   }
+
+  if (!canCreate) return null;
 
   return (
     <>
@@ -100,6 +104,7 @@ export function NewMaterialButton() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const canCreate = useCan("catalog", "create");
 
   async function save() {
     setPending(true);
@@ -117,6 +122,8 @@ export function NewMaterialButton() {
     setSkuSpecific(false);
     router.refresh();
   }
+
+  if (!canCreate) return null;
 
   return (
     <>

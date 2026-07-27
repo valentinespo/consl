@@ -134,6 +134,7 @@ export default async function FacilityDetailPage({ params }: { params: Promise<{
         usedBy={usedBy}
         onDelete={deleteFacility.bind(null, facility.id)}
         redirectTo="/facilities"
+        resource="facilities"
       />
     </>
   );

@@ -6,6 +6,7 @@ import { X } from "@/components/icons";
 import { Sidebar } from "@/components/Sidebar";
 import { AppHeader } from "@/components/AppHeader";
 import { CurrencyProvider } from "@/components/CurrencyProvider";
+import { AccessProvider } from "@/components/AccessProvider";
 import type { MyOrg } from "@/lib/orgs";
 
 /**
@@ -19,6 +20,7 @@ export function AppShell({
   orgName,
   orgs = [],
   allowed = null,
+  caps = null,
   currencySymbol = "$",
   locale = "en-US",
   currencyCode = "USD",
@@ -27,6 +29,7 @@ export function AppShell({
   orgName?: string | null;
   orgs?: MyOrg[];
   allowed?: string[] | null;
+  caps?: Record<string, string[]> | null;
   currencySymbol?: string;
   locale?: string;
   currencyCode?: string;
@@ -45,6 +48,7 @@ export function AppShell({
 
   return (
     <CurrencyProvider symbol={currencySymbol} locale={locale} code={currencyCode}>
+      <AccessProvider caps={caps}>
       <div className="flex h-dvh flex-col bg-header">
         <AppHeader onMenu={() => setOpen(true)} />
 
@@ -75,6 +79,7 @@ export function AppShell({
           </main>
         </div>
       </div>
+      </AccessProvider>
     </CurrencyProvider>
   );
 }

@@ -47,6 +47,7 @@ export default async function MaterialDetailPage({ params }: { params: Promise<{
         usedBy={usedBy}
         onDelete={deleteMaterial.bind(null, material.id)}
         redirectTo="/catalog"
+        resource="catalog"
       />
     </>
   );

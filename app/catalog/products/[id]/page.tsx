@@ -71,6 +71,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         usedBy={usedBy}
         onDelete={deleteProduct.bind(null, product.id)}
         redirectTo="/catalog"
+        resource="catalog"
       />
     </>
   );

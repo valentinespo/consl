@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, X, Trash2 } from "@/components/icons";
 import { createLot } from "@/app/lots/actions";
 import { SelectOrCreate, type Opt } from "@/components/SelectOrCreate";
+import { useCan } from "@/components/AccessProvider";
 
 const inputCls = "h-9 w-full rounded-lg border border-border bg-surface px-2.5 text-[13px] text-ink outline-none focus:border-accent-strong";
 
@@ -24,6 +25,7 @@ export function NewLotButton({ facilities, products }: { facilities: Facility[];
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const canCreate = useCan("lots", "create");
 
   const opts = productOpts(products);
 
@@ -55,6 +57,8 @@ export function NewLotButton({ facilities, products }: { facilities: Facility[];
     reset();
     router.push(`/lots/${r.lotId}`);
   }
+
+  if (!canCreate) return null;
 
   return (
     <>

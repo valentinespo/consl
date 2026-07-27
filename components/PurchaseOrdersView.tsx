@@ -9,6 +9,7 @@ import { PoForm, type PoFacility, type PoProduct, type PoRow } from "@/component
 import { setPoStatus, deletePurchaseOrder } from "@/app/purchase-orders/actions";
 import { useRouter } from "next/navigation";
 import { TwoStepDelete } from "@/components/TwoStepDelete";
+import { useCan } from "@/components/AccessProvider";
 
 export type PoListRow = Omit<PoRow, "lines"> & {
   status: string;
@@ -39,6 +40,7 @@ export function PurchaseOrdersView({
   const { money, date } = useMoney();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const router = useRouter();
+  const canCreate = useCan("purchaseOrders", "create");
   const toggle = (id: string) =>
     setExpanded((prev) => {
       const n = new Set(prev);
@@ -48,10 +50,13 @@ export function PurchaseOrdersView({
 
   return (
     <div>
-      {/* Create form, then every PO underneath it — no sub-tabs to hunt through. */}
-      <div className="rounded-[var(--radius-card)] border border-border bg-surface p-5">
-        <PoForm facilities={facilities} products={products} descSeeds={descSeeds} nextLotNr={nextLotNr} todayISO={todayISO} onDone={() => router.refresh()} />
-      </div>
+      {/* Create form, then every PO underneath it — no sub-tabs to hunt through. Hidden for members
+          who can't create POs; they still see the list below (read-only). */}
+      {canCreate && (
+        <div className="rounded-[var(--radius-card)] border border-border bg-surface p-5">
+          <PoForm facilities={facilities} products={products} descSeeds={descSeeds} nextLotNr={nextLotNr} todayISO={todayISO} onDone={() => router.refresh()} />
+        </div>
+      )}
 
       <div className="mt-8">
         <div className="mb-3 flex items-center gap-2">

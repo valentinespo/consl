@@ -47,6 +47,7 @@ export default async function SupplierDetailPage({ params }: { params: Promise<{
         usedBy={usedBy}
         onDelete={deleteSupplier.bind(null, supplier.id)}
         redirectTo="/suppliers"
+        resource="suppliers"
       />
     </>
   );

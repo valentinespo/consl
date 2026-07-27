@@ -7,6 +7,7 @@ import { Card, FacilityTag, SkuAvatar, SupplierAvatar } from "@/components/ui";
 import { PurchaseInvoiceForm, type PurchaseInvoiceRow, type PurchaseOptions, type PurchaseMaterial } from "@/components/PurchaseInvoiceForm";
 import { DocumentList } from "@/components/DocumentList";
 import { Paperclip } from "@/components/icons";
+import { useCan } from "@/components/AccessProvider";
 
 type Group = {
   material: PurchaseMaterial & { code: string; imageUrl: string | null };
@@ -19,6 +20,7 @@ const LIMIT = 3;
 
 export function MaterialPurchaseInvoices({ group, options }: { group: Group; options: PurchaseOptions }) {
   const { money, qty, date } = useMoney();
+  const canCreate = useCan("purchases", "create");
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -53,9 +55,11 @@ export function MaterialPurchaseInvoices({ group, options }: { group: Group; opt
           <span className="text-[12.5px] text-muted">
             {qty(group.totalQty)} {material.unitLabel}s · {money(group.totalSpend)} spent
           </span>
-          <button onClick={() => setAdding((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-bg hover:opacity-90">
-            <Plus size={15} /> Add purchase
-          </button>
+          {canCreate && (
+            <button onClick={() => setAdding((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-bg hover:opacity-90">
+              <Plus size={15} /> Add purchase
+            </button>
+          )}
         </div>
       </div>
 

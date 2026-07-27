@@ -8,6 +8,7 @@ import { useMoney } from "@/components/CurrencyProvider";
 import { TransactionInvoiceForm, type InvoiceRow, type LotOption } from "@/components/TransactionInvoiceForm";
 import { DocumentList } from "@/components/DocumentList";
 import { Paperclip } from "@/components/icons";
+import { useCan } from "@/components/AccessProvider";
 
 type SortKey = "date" | "applicable";
 
@@ -34,6 +35,7 @@ export function TransactionInvoicesTable({
   defaultLotId?: string;
 }) {
   const { money, date } = useMoney();
+  const canCreate = useCan("transactions", "create");
   const [q, setQ] = useState("");
   const [category, setCategory] = useState("ALL");
   // Filter offers every category actually present in the data.
@@ -133,12 +135,14 @@ export function TransactionInvoicesTable({
             Clear
           </button>
         )}
-        <button
-          onClick={() => setAdding((v) => !v)}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-2 text-[12.5px] font-medium text-bg hover:opacity-90"
-        >
-          <Plus size={15} /> Add transaction
-        </button>
+        {canCreate && (
+          <button
+            onClick={() => setAdding((v) => !v)}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-2 text-[12.5px] font-medium text-bg hover:opacity-90"
+          >
+            <Plus size={15} /> Add transaction
+          </button>
+        )}
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-3 text-[12.5px]">
