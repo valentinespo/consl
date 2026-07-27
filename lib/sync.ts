@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
+import { prismaBase } from "@/lib/prisma-base";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { getFbaInventory, getAwdInventory, getAllOrders } from "@/lib/spapi";
 
@@ -8,12 +9,27 @@ import { getFbaInventory, getAwdInventory, getAllOrders } from "@/lib/spapi";
  *
  * SP-API keys currently come from server-wide env vars, so every org's sync would pull from the
  * SAME Amazon seller account. Since ASINs are public, another tenant could map one of ours and
- * receive our FBA quantities and 90 days of sales in their own snapshots. While the credentials
- * are global, only the org named by SPAPI_ORG_ID may sync. Unset = single-tenant, no restriction.
+ * receive our FBA quantities and 90 days of sales in their own snapshots. Only one org may sync
+ * against the shared account:
+ *   - SPAPI_ORG_ID set  → exactly that org (explicit, correct).
+ *   - SPAPI_ORG_ID unset → fall back to the OLDEST org (the original seller). This fails safe: a
+ *     forgotten env var restricts sync to the founding account instead of opening it to everyone,
+ *     so a newly-created company still can't pull the seller's data. The fallback is cached for
+ *     the process so it isn't a query per sync.
  */
+let cachedOwnerOrgId: string | null | undefined;
+async function syncOwnerOrgId(): Promise<string | null> {
+  const explicit = process.env.SPAPI_ORG_ID;
+  if (explicit) return explicit;
+  if (cachedOwnerOrgId === undefined) {
+    const first = await prismaBase.organization.findFirst({ orderBy: { createdAt: "asc" }, select: { id: true } });
+    cachedOwnerOrgId = first?.id ?? null;
+  }
+  return cachedOwnerOrgId;
+}
 async function orgMaySync(): Promise<boolean> {
-  const owner = process.env.SPAPI_ORG_ID;
-  if (!owner) return true;
+  const owner = await syncOwnerOrgId();
+  if (!owner) return false; // no orgs at all — nothing may sync
   return (await getCurrentOrgId()) === owner;
 }
 
