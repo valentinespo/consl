@@ -5,9 +5,12 @@ import { saveOrgSettings } from "@/lib/settings";
 import { syncAmazonCore } from "@/lib/sync";
 import { getRestock } from "@/lib/restock";
 import { revalidatePath } from "next/cache";
+import { requirePermission } from "@/lib/membership";
 
 /** Manual "Sync Amazon" button: pull fresh Amazon data, record the value snapshot, revalidate. */
 export async function syncAmazon() {
+  const gate = await requirePermission("inventory", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const r = await syncAmazonCore();
   if (r.ok) await getRestock(); // records today's inventory-value snapshot with fresh numbers
   revalidatePath("/inventory");
@@ -24,6 +27,8 @@ export async function updateGlobalDefaults(d: {
   reorderTo: number;
   batchSize: number;
 }) {
+  const gate = await requirePermission("inventory", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   await saveOrgSettings({
     defaultMinMonths: clamp(d.minMonths, 0, 120),
     defaultLeadMonths: clamp(d.leadMonths, 0, 120),
@@ -48,6 +53,8 @@ export async function updateSkuPolicy(
     batchSize: number | null;
   },
 ) {
+  const gate = await requirePermission("inventory", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   await prisma.product.update({
     where: { id: productId },
     data: {
@@ -69,6 +76,8 @@ function clamp(v: number, lo: number, hi: number) {
 
 /** Set (or clear) a per-SKU velocity window override + OOS-day exclusion. Pass nulls to clear. */
 export async function setSkuWindow(productId: string, windowDays: number | null, excludeDays: number | null) {
+  const gate = await requirePermission("inventory", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   await prisma.product.update({ where: { id: productId }, data: { windowDays, excludeDays } });
   revalidatePath("/inventory");
   return { ok: true as const };
@@ -76,6 +85,8 @@ export async function setSkuWindow(productId: string, windowDays: number | null,
 
 /** Set the inventory dashboard sort mode: "sales" | "available" | "manual". */
 export async function setSortMode(mode: string) {
+  const gate = await requirePermission("inventory", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   await saveOrgSettings({ sortMode: mode });
   revalidatePath("/inventory");
   return { ok: true as const };
@@ -83,6 +94,8 @@ export async function setSortMode(mode: string) {
 
 /** Save a manual SKU order (array of product ids, top to bottom) and switch to manual sort. */
 export async function saveManualOrder(orderedIds: string[]) {
+  const gate = await requirePermission("inventory", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   await prisma.$transaction(orderedIds.map((id, i) => prisma.product.update({ where: { id }, data: { sortIndex: i } })));
   await saveOrgSettings({ sortMode: "manual" });
   revalidatePath("/inventory");

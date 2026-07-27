@@ -6,6 +6,7 @@ import { recomputeAll } from "@/lib/recompute";
 import { isExcludedCategory } from "@/lib/categories";
 import { resolveSupplierId, cleanupSupplierIfOrphan } from "@/lib/suppliers";
 import { checkOwned, type OwnedModel } from "@/lib/ownership";
+import { requirePermission } from "@/lib/membership";
 
 export type InvoiceLineInput = {
   category: string; // TEA | OTHER | NOT_APPLICABLE
@@ -24,6 +25,8 @@ export type InvoicePayload = {
 
 /** Create/update a transaction invoice + its allocation lines. Lines must sum to the total. */
 export async function upsertTransactionInvoice(payload: InvoicePayload) {
+  const gate = await requirePermission("transactions", payload.id ? "edit" : "create");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const lines = payload.lines.filter((l) => l.category || l.amount);
   if (lines.length === 0) return { ok: false as const, error: "Add at least one line." };
 
@@ -84,6 +87,8 @@ export async function upsertTransactionInvoice(payload: InvoicePayload) {
 }
 
 export async function deleteTransactionInvoice(id: string) {
+  const gate = await requirePermission("transactions", "delete");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const lines = await prisma.transaction.findMany({ where: { invoiceId: id }, select: { supplierId: true } });
   const inv = await prisma.transactionInvoice.findUnique({ where: { id }, select: { supplierId: true } });
   await prisma.transactionInvoice.delete({ where: { id } }); // cascades to lines

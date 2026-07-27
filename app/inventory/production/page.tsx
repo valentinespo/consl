@@ -3,10 +3,12 @@ import { prisma } from "@/lib/prisma";
 import { getFmt } from "@/lib/fmt-server";
 import { PageHeader, StatCard, SkuAvatar, FacilityTag } from "@/components/ui";
 import { InventoryNav } from "@/components/InventoryNav";
+import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProductionPage() {
+  await requireView("inventory");
   const lots = await prisma.lot.findMany({
     where: { status: "IN_PRODUCTION" },
     include: { facility: true, lines: { include: { product: true } } },

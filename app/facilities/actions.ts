@@ -5,9 +5,12 @@ import { prisma } from "@/lib/prisma";
 import { computeFinishedGoods, getInventory } from "@/lib/queries";
 import { allowedDestinations } from "@/lib/destinations";
 import { checkOwned } from "@/lib/ownership";
+import { requirePermission } from "@/lib/membership";
 
 /** Create a facility — a co-packer, warehouse, 3PL or anywhere else stock lives. */
 export async function createFacility(input: { code: string; name: string; type: string }) {
+  const gate = await requirePermission("facilities", "create");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const code = input.code.trim().toUpperCase().replace(/\s+/g, "");
   const name = input.name.trim();
   if (!code) return { ok: false as const, error: "Short code required" };
@@ -34,6 +37,8 @@ export async function updateFacility(input: {
   notes: string;
   supplierId?: string | null;
 }) {
+  const gate = await requirePermission("facilities", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const code = input.code.trim().toUpperCase().replace(/\s+/g, "");
   const name = input.name.trim();
   if (!code) return { ok: false as const, error: "Short code required" };
@@ -76,6 +81,8 @@ export async function updateFacility(input: {
 /** Delete a facility — refused while any lot, purchase, PO or stock movement still points at it.
  *  A supplier profile linked to it is simply unlinked (the FK is set-null). */
 export async function deleteFacility(id: string) {
+  const gate = await requirePermission("facilities", "delete");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const facility = await prisma.facility.findFirst({ where: { id } });
   if (!facility) return { ok: false as const, error: "Facility not found" };
 
@@ -113,6 +120,8 @@ export type MovementInput = {
 
 /** Record stock leaving one of your locations — finished goods or raw materials. */
 export async function createMovement(input: MovementInput) {
+  const gate = await requirePermission("facilities", "create");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   if (input.itemType !== "RAW" && input.itemType !== "FINISHED") {
     return { ok: false as const, error: "Unknown item type" };
   }
@@ -195,6 +204,8 @@ export async function createMovement(input: MovementInput) {
 
 /** Remove a movement (nothing depends on it — the engine just replays without it). */
 export async function deleteMovement(id: string) {
+  const gate = await requirePermission("facilities", "delete");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   await prisma.stockMovement.delete({ where: { id } });
   revalidatePath("/", "layout");
   return { ok: true as const };

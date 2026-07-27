@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { recomputeAll } from "@/lib/recompute";
 import { cleanupSupplierIfOrphan } from "@/lib/suppliers";
 import { checkOwned, type OwnedModel } from "@/lib/ownership";
+import { requirePermission } from "@/lib/membership";
 
 async function resolveSupplierId(name: string | null): Promise<string | null> {
   if (!name) return null;
@@ -29,6 +30,8 @@ export type PurchaseInvoicePayload = {
 
 /** Create/update a purchase invoice (one material) + its lines. Lines must sum to the total. */
 export async function upsertPurchaseInvoice(payload: PurchaseInvoicePayload) {
+  const gate = await requirePermission("purchases", payload.id ? "edit" : "create");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const lines = payload.lines.filter((l) => l.facilityId);
   if (lines.length === 0) return { ok: false as const, error: "Add at least one line." };
 
@@ -113,6 +116,8 @@ export async function upsertPurchaseInvoice(payload: PurchaseInvoicePayload) {
 }
 
 export async function deletePurchaseInvoice(id: string) {
+  const gate = await requirePermission("purchases", "delete");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const lines = await prisma.purchase.findMany({ where: { invoiceId: id }, select: { supplierId: true } });
   const inv = await prisma.purchaseInvoice.findUnique({ where: { id }, select: { supplierId: true } });
   await prisma.purchaseInvoice.delete({ where: { id } }); // cascades to lines

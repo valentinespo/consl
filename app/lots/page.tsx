@@ -2,10 +2,12 @@ import { getLots, getPurchaseFormOptions } from "@/lib/queries";
 import { PageHeader } from "@/components/ui";
 import { LotsTable, type LotRow } from "@/components/LotsTable";
 import { NewLotButton } from "@/components/NewLotButton";
+import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
 
 export default async function LotsPage() {
+  await requireView("lots");
   const [lots, options] = await Promise.all([getLots(), getPurchaseFormOptions()]);
   const rows: LotRow[] = lots.map((l) => ({
     id: l.id,

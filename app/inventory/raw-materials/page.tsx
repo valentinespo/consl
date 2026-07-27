@@ -5,6 +5,7 @@ import { getCurrentOrg } from "@/lib/org";
 import { Card, StatCard, PageHeader, SectionTitle, FacilityTag, SkuAvatar } from "@/components/ui";
 import { InventoryNav } from "@/components/InventoryNav";
 import { EmptyState } from "@/components/EmptyState";
+import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,7 @@ function FacilityRow({ pool, unitLabel, cur }: { pool: InventoryPool; unitLabel:
 type Group = { key: string; sku: string | null; productName: string | null; imageUrl: string | null; pools: InventoryPool[]; totalQty: number; totalValue: number };
 
 export default async function RawMaterialsPage() {
+  await requireView("inventory");
   const [{ pools, totalValue }, materials] = await Promise.all([getInventory(), getMaterialTypes()]);
   const meta = new Map(materials.map((m) => [m.code, m]));
   const live = pools.filter((p) => p.quantityRemaining > 0.5);

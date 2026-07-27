@@ -7,10 +7,12 @@ import { ProductEditor } from "@/components/ProductEditor";
 import { ChannelMapping } from "@/components/ChannelMapping";
 import { DeleteEntity } from "@/components/DeleteEntity";
 import { deleteProduct } from "@/app/catalog/actions";
+import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireView("catalog");
   const { id } = await params;
   const [detail, products] = await Promise.all([getProductDetail(id), getProducts()]);
   if (!detail) notFound();

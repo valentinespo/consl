@@ -1,10 +1,12 @@
 import { getPurchaseOrders, getPoFormOptions } from "@/lib/queries";
 import { PageHeader } from "@/components/ui";
 import { PurchaseOrdersView } from "@/components/PurchaseOrdersView";
+import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
 
 export default async function PurchaseOrdersPage() {
+  await requireView("purchaseOrders");
   const [pos, options] = await Promise.all([getPurchaseOrders(), getPoFormOptions()]);
   const todayISO = new Date().toISOString().slice(0, 10);
 

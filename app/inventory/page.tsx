@@ -5,10 +5,12 @@ import { PageHeader } from "@/components/ui";
 import { InventoryNav } from "@/components/InventoryNav";
 import { RestockDashboard } from "@/components/RestockDashboard";
 import { SyncAmazonButton } from "@/components/SyncAmazonButton";
+import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
 
 export default async function InventoryPage() {
+  await requireView("inventory");
   const [{ rows, totals, lastSync, defaults, sortMode }, settings, org] = await Promise.all([
     getRestock(),
     getOrgSettings(),

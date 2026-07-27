@@ -5,9 +5,13 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { recomputeAll } from "@/lib/recompute";
 import { checkOwned, type OwnedModel } from "@/lib/ownership";
+import { requirePermission } from "@/lib/membership";
+import { createLotCore, defaultMaterialsFor } from "@/lib/lot-core";
 
 /** Permanently delete a lot (cascades its SKU lines, bill of materials and transactions). */
 export async function deleteLot(formData: FormData) {
+  const gate = await requirePermission("lots", "delete");
+  if (!gate.ok) redirect("/lots"); // fail closed; the control is hidden from members who can't delete
   const lotId = String(formData.get("lotId"));
   const lot = await prisma.lot.findFirst({ where: { id: lotId }, select: { id: true } });
   if (!lot) redirect("/lots");
@@ -42,42 +46,8 @@ export async function deleteLot(formData: FormData) {
   redirect("/lots");
 }
 
-/** The default recipe for a new lot line: every material this facility actually stocks, at its
- *  default rate. Stock counts however it arrived — bought here, or transferred in from another
- *  facility. Deriving this from purchases alone gave a site fed only by transfers an empty bill
- *  of materials, so its lots recorded $0.00 material cost with nothing to raise a shortfall on. */
-async function defaultMaterialsFor(facilityId: string) {
-  const [purchased, movedIn] = await Promise.all([
-    prisma.purchase.findMany({
-      where: { facilityId },
-      select: { materialTypeId: true },
-      distinct: ["materialTypeId"],
-    }),
-    prisma.stockMovement.findMany({
-      where: { itemType: "RAW", toFacilityId: facilityId, materialTypeId: { not: null } },
-      select: { materialTypeId: true },
-      distinct: ["materialTypeId"],
-    }),
-  ]);
-  const ids = [
-    ...new Set([
-      ...purchased.map((p) => p.materialTypeId),
-      ...movedIn.map((m) => m.materialTypeId).filter((id): id is string => !!id),
-    ]),
-  ];
-  if (ids.length === 0) return [];
-  return prisma.materialType.findMany({ where: { id: { in: ids } } });
-}
-
-/** Smallest positive lot number not in use — deleted numbers get reused (e.g. a scrapped PO #21). */
-async function nextFreeLotNr(): Promise<number> {
-  const used = new Set((await prisma.lot.findMany({ select: { lotNr: true } })).map((l) => l.lotNr));
-  let n = 1;
-  while (used.has(n)) n++;
-  return n;
-}
-
-/** Create a new production lot with its SKU lines and default bill of materials. */
+/** Create a new production lot with its SKU lines and default bill of materials. The heavy lifting
+ *  lives in createLotCore so PO creation can reuse it; this entry point adds the permission gate. */
 export async function createLot(input: {
   poNumber: string | null;
   poDateISO: string | null;
@@ -85,51 +55,9 @@ export async function createLot(input: {
   status: "IN_PRODUCTION" | "FINISHED";
   lines: { productId: string; units: number }[];
 }) {
-  const lines = input.lines.filter((l) => l.productId && l.units > 0);
-  if (!input.facilityId || lines.length === 0) return { ok: false as const, error: "Pick a facility and at least one SKU with units" };
-
-  // Every id the browser sent must belong to the caller's org — a foreign facility or product id
-  // otherwise lands on the new lot and leaks that org's data back through nested reads.
-  const bad = await checkOwned([
-    ["facility", input.facilityId],
-    ...lines.map((l) => ["product", l.productId] as [OwnedModel, string]),
-  ]);
-  if (bad) return bad;
-
-  const lotNr = await nextFreeLotNr();
-
-  const defaults = await defaultMaterialsFor(input.facilityId);
-
-  const lot = await prisma.lot.create({
-    data: {
-      lotNr,
-      poNumber: input.poNumber?.trim() || `#${lotNr}`,
-      poDate: input.poDateISO ? new Date(input.poDateISO) : new Date(),
-      facilityId: input.facilityId,
-      status: input.status,
-      finishedAt: input.status === "FINISHED" ? new Date() : null,
-      lines: { create: lines.map((l, i) => ({ productId: l.productId, units: l.units, seq: i })) },
-    },
-    include: { lines: true },
-  });
-
-  for (const line of lot.lines) {
-    for (const m of defaults) {
-      await prisma.lotMaterial.create({
-        data: {
-          lotLineId: line.id,
-          materialTypeId: m.id,
-          perUnit: m.defaultPerUnit || 1,
-          // Materials pooled per product (e.g. printed packaging) must carry the SKU.
-          productId: m.skuSpecific ? line.productId : null,
-        },
-      });
-    }
-  }
-
-  await recomputeAll();
-  revalidatePath("/", "layout");
-  return { ok: true as const, lotId: lot.id };
+  const gate = await requirePermission("lots", "create");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  return createLotCore(input);
 }
 
 export type LotEditPayload = {
@@ -150,6 +78,8 @@ export type LotEditPayload = {
 
 /** One batched save for the whole lot: details, status, notes, SKU lines (add/remove/units) + BOM. */
 export async function updateLot(payload: LotEditPayload) {
+  const gate = await requirePermission("lots", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const lines = payload.lines.filter((l) => l.productId);
   if (lines.length === 0) return { ok: false as const, error: "A lot needs at least one SKU." };
 

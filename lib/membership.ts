@@ -1,4 +1,6 @@
 import "server-only";
+import { cache } from "react";
+import { notFound } from "next/navigation";
 import { currentUserId, devAuthBypass } from "@/lib/current-user";
 import { prismaBase } from "@/lib/prisma-base";
 import { getCurrentOrgId } from "@/lib/tenant";
@@ -42,15 +44,21 @@ export async function requireOwner(): Promise<{ ok: true; orgId: string; userId:
 }
 
 /**
- * The signed-in member's role + effective permissions in the current org, resolved once per
+ * The signed-in member's role + effective permissions in the current org. Wrapped in cache() so
+ * the one membership read is shared across the layout, the page, and any server action in a single
  * request. Owners get full access; members get their stored grants (or the default baseline).
  */
-export type MyAccess = { role: Role; can: (r: Resource, a: Action) => boolean };
+export type MyAccess = {
+  role: Role;
+  orgId: string;
+  userId: string;
+  can: (r: Resource, a: Action) => boolean;
+};
 
-export async function getMyAccess(): Promise<MyAccess | null> {
+export const getMyAccess = cache(async (): Promise<MyAccess | null> => {
   const userId = await currentUserId();
   const orgId = await getCurrentOrgId();
-  if (devAuthBypass && orgId) return { role: "owner", can: () => true };
+  if (devAuthBypass && orgId) return { role: "owner", orgId, userId: userId ?? "dev-user", can: () => true };
   if (!userId || !orgId) return null;
   const m = await prismaBase.membership.findFirst({
     where: { clerkUserId: userId, orgId },
@@ -59,8 +67,8 @@ export async function getMyAccess(): Promise<MyAccess | null> {
   if (!m) return null;
   const role: Role = m.role === "owner" ? "owner" : "member";
   const perms = role === "owner" ? null : normalizePermissions(m.permissions);
-  return { role, can: (r, a) => can(role, perms, r, a) };
-}
+  return { role, orgId, userId, can: (r, a) => can(role, perms, r, a) };
+});
 
 /**
  * Guard for a mutating server action: returns ok only when the caller may take `action` on
@@ -70,19 +78,18 @@ export async function requirePermission(
   resource: Resource,
   action: Action,
 ): Promise<{ ok: true; orgId: string; userId: string } | { ok: false; error: string }> {
-  const userId = await currentUserId();
-  const orgId = await getCurrentOrgId();
-  if (devAuthBypass && orgId) return { ok: true, orgId, userId: userId ?? "dev-user" };
-  if (!userId || !orgId) return { ok: false, error: "You're not signed in to a company." };
-  const m = await prismaBase.membership.findFirst({
-    where: { clerkUserId: userId, orgId },
-    select: { role: true, permissions: true },
-  });
-  if (!m) return { ok: false, error: "You're not a member of this company." };
-  const role: Role = m.role === "owner" ? "owner" : "member";
-  const perms = role === "owner" ? null : normalizePermissions(m.permissions);
-  if (!can(role, perms, resource, action)) {
-    return { ok: false, error: "You don't have permission to do that." };
-  }
-  return { ok: true, orgId, userId };
+  const access = await getMyAccess();
+  if (!access) return { ok: false, error: "You're not signed in to a company." };
+  if (!access.can(resource, action)) return { ok: false, error: "You don't have permission to do that." };
+  return { ok: true, orgId: access.orgId, userId: access.userId };
+}
+
+/**
+ * Page guard: a member who can't view a section shouldn't be able to reach its URL directly. Fails
+ * closed to a 404 (rather than leaking that the page exists). The sidebar already hides the link;
+ * this is the enforcement behind it.
+ */
+export async function requireView(resource: Resource): Promise<void> {
+  const access = await getMyAccess();
+  if (!access || !access.can(resource, "view")) notFound();
 }

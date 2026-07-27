@@ -5,9 +5,10 @@ import { prisma } from "@/lib/prisma";
 import { generatePoPdf, poTotal, type PoPdfLine } from "@/lib/po-pdf";
 import { getCurrentOrg, orgAddressLines, orgDocumentName } from "@/lib/org";
 import { saveImage, readStored } from "@/lib/storage";
-import { createLot } from "@/app/lots/actions";
+import { createLotCore } from "@/lib/lot-core";
 import { recomputeAll } from "@/lib/recompute";
 import { checkOwned, type OwnedModel } from "@/lib/ownership";
+import { requirePermission } from "@/lib/membership";
 
 export type PoLineInput = {
   kind: "SKU" | "FEE";
@@ -87,6 +88,8 @@ async function renderAndStorePdf(poId: string): Promise<string> {
 
 /** Create a PO: creates the matching production lot, the PO record, and its PDF. */
 export async function createPurchaseOrder(payload: PoPayload) {
+  const gate = await requirePermission("purchaseOrders", "create");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const err = validate(payload);
   if (err) return { ok: false as const, error: err };
   const lines = payload.lines.filter((l) => l.description.trim() || l.quantity);
@@ -94,9 +97,10 @@ export async function createPurchaseOrder(payload: PoPayload) {
   const facility = await prisma.facility.findUnique({ where: { id: payload.facilityId } });
   if (!facility) return { ok: false as const, error: "Vendor not found." };
 
-  // 1. Create the production lot from the SKU lines.
+  // 1. Create the production lot from the SKU lines. Uses the core directly: this action already
+  // gates on purchaseOrders:create, and shouldn't additionally demand the lots grant.
   const skuLines = lines.filter((l) => l.kind === "SKU");
-  const lotRes = await createLot({
+  const lotRes = await createLotCore({
     poNumber: null, // set below once the lot number is known
     poDateISO: payload.dateISO,
     facilityId: payload.facilityId,
@@ -140,6 +144,8 @@ export async function createPurchaseOrder(payload: PoPayload) {
 
 /** Edit a PO's header/lines and regenerate its PDF. Does NOT modify the linked lot. */
 export async function updatePurchaseOrder(payload: PoPayload) {
+  const gate = await requirePermission("purchaseOrders", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   if (!payload.id) return { ok: false as const, error: "Missing PO id." };
   const current = await prisma.purchaseOrder.findUnique({ where: { id: payload.id }, select: { status: true } });
   if (current?.status === "SENT") return { ok: false as const, error: "This PO is marked as Sent and locked. Switch it to Draft first." };
@@ -180,6 +186,8 @@ export async function updatePurchaseOrder(payload: PoPayload) {
 }
 
 export async function setPoStatus(id: string, status: "DRAFT" | "SENT") {
+  const gate = await requirePermission("purchaseOrders", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   await prisma.purchaseOrder.update({ where: { id }, data: { status } });
   revalidatePath("/", "layout");
   return { ok: true as const };
@@ -191,6 +199,8 @@ export async function setPoStatus(id: string, status: "DRAFT" | "SENT") {
  * remove the archive record — their lots predate the PO and are kept.
  */
 export async function deletePurchaseOrder(id: string) {
+  const gate = await requirePermission("purchaseOrders", "delete");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const po = await prisma.purchaseOrder.findUnique({ where: { id } });
   if (!po) return { ok: true as const };
   if (po.status === "SENT") {

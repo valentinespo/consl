@@ -19,10 +19,12 @@ import { TransactionInvoicesTable } from "@/components/TransactionInvoicesTable"
 import { LotEditor, type EditorLine } from "@/components/LotEditor";
 import { DocumentList } from "@/components/DocumentList";
 import { DeleteLot } from "@/components/DeleteLot";
+import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
 
 export default async function LotDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireView("lots");
   const { id } = await params;
   const [lot, lotOptions, suppliers, materialTypes, facilities, invoices, skuImages, products, categories] = await Promise.all([
     getLot(id),

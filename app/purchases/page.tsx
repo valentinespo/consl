@@ -4,10 +4,12 @@ import { EmptyState } from "@/components/EmptyState";
 import { Package } from "@/components/icons";
 import Link from "next/link";
 import { MaterialPurchaseInvoices } from "@/components/MaterialPurchaseInvoices";
+import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
 
 export default async function PurchasesPage() {
+  await requireView("purchases");
   const [groups, options] = await Promise.all([getPurchaseInvoicesByMaterial(), getPurchaseFormOptions()]);
   const purchaseOptions = { facilities: options.facilities, products: options.products, suppliers: options.suppliers };
 

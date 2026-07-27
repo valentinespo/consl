@@ -6,10 +6,12 @@ import { PrevNextNav, neighbours } from "@/components/PrevNextNav";
 import { MaterialEditor } from "@/components/MaterialEditor";
 import { DeleteEntity } from "@/components/DeleteEntity";
 import { deleteMaterial } from "@/app/catalog/actions";
+import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
 
 export default async function MaterialDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireView("catalog");
   const { id } = await params;
   const [detail, materials] = await Promise.all([getMaterialDetail(id), getMaterialTypes()]);
   if (!detail) notFound();

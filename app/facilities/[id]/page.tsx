@@ -9,10 +9,12 @@ import { FacilityEditor } from "@/components/FacilityEditor";
 import { DeleteEntity } from "@/components/DeleteEntity";
 import { deleteFacility } from "@/app/facilities/actions";
 import { facilityTypeLabel } from "@/lib/facility-types";
+import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
 
 export default async function FacilityDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireView("facilities");
   const { id } = await params;
   const [detail, facilities, stock, rawByFacilityCode, materials, suppliers, { money, qty }] = await Promise.all([
     getFacilityDetail(id),

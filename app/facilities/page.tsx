@@ -17,10 +17,12 @@ import { NewMovementPanel, type OnHandRow } from "@/components/MovementForm";
 import { MovementsLedger } from "@/components/MovementsLedger";
 import { StockSection } from "@/components/StockSection";
 import { facilityTypeLabel, isProductionSite } from "@/lib/facility-types";
+import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
 
 export default async function FacilitiesPage() {
+  await requireView("facilities");
   const [facilities, stock, rawByFacilityCode, movements, products, materials, facilityOptions, { money, qty, date }] = await Promise.all([
     getFacilitiesDetailed(),
     getFinishedStock(),

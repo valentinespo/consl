@@ -4,10 +4,12 @@ import { PageHeader } from "@/components/ui";
 import { SupplierCard } from "@/components/SupplierCard";
 import { NewSupplierButton } from "@/components/NewSupplierButton";
 import { EmptyState } from "@/components/EmptyState";
+import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
 
 export default async function SuppliersPage() {
+  await requireView("suppliers");
   const suppliers = await getSuppliers();
 
   return (

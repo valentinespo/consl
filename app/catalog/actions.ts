@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { recomputeAll } from "@/lib/recompute";
 import { saveImage, deleteStored, safeKeySegment } from "@/lib/storage";
 import { checkOwned, type OwnedModel } from "@/lib/ownership";
+import { requirePermission } from "@/lib/membership";
 
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB
 const OK_EXT = new Set(["png", "jpg", "jpeg", "webp", "gif", "avif"]);
@@ -18,6 +19,8 @@ const IMAGE_MODEL: Record<ImageKind, OwnedModel> = Object.assign(Object.create(n
 
 /** Upload an image for a product, material, or supplier and store its URL. */
 export async function uploadEntityImage(formData: FormData) {
+  const gate = await requirePermission("catalog", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const kind = String(formData.get("kind")) as ImageKind;
   const id = String(formData.get("id"));
   const file = formData.get("file") as File | null;
@@ -51,6 +54,8 @@ function slugCode(name: string, max = 10): string {
 
 /** Create a product (SKU). Returns the created (or existing) product. */
 export async function createProduct(input: { code: string; name?: string }) {
+  const gate = await requirePermission("catalog", "create");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const code = input.code.trim().toUpperCase().replace(/\s+/g, "");
   if (!code) return { ok: false as const, error: "SKU code required" };
   const name = (input.name ?? "").trim() || code;
@@ -68,6 +73,8 @@ export async function createMaterial(input: {
   defaultPerUnit?: number;
   skuSpecific?: boolean;
 }) {
+  const gate = await requirePermission("catalog", "create");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const name = input.name.trim();
   if (!name) return { ok: false as const, error: "Material name required" };
   let code = slugCode(name);
@@ -90,6 +97,8 @@ export async function createMaterial(input: {
 
 /** Edit an existing SKU's code &/or name. A code rename cascades to transaction allocation tags. */
 export async function updateProduct(input: { id: string; code: string; name: string; notes?: string }) {
+  const gate = await requirePermission("catalog", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const code = input.code.trim().toUpperCase().replace(/\s+/g, "");
   const name = input.name.trim();
   if (!code) return { ok: false as const, error: "SKU code required" };
@@ -125,6 +134,8 @@ export async function updateMaterial(input: {
   lowStockThreshold: number | null;
   skuSpecific?: boolean;
 }) {
+  const gate = await requirePermission("catalog", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const name = input.name.trim();
   if (!name) return { ok: false as const, error: "Name required" };
 
@@ -183,6 +194,8 @@ export async function updateProductChannels(input: {
   tiktokProductId: string;
   tiktokSku: string;
 }) {
+  const gate = await requirePermission("catalog", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const clean = (s: string) => {
     const t = s.trim();
     return t === "" ? null : t;
@@ -207,6 +220,8 @@ export async function updateProductChannels(input: {
 
 /** Delete a product — refused while anything still references it (checked here, not just in the UI). */
 export async function deleteProduct(id: string) {
+  const gate = await requirePermission("catalog", "delete");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const product = await prisma.product.findFirst({ where: { id } });
   if (!product) return { ok: false as const, error: "Product not found" };
 
@@ -230,6 +245,8 @@ export async function deleteProduct(id: string) {
 
 /** Delete a raw material — refused while any purchase, invoice or lot recipe still references it. */
 export async function deleteMaterial(id: string) {
+  const gate = await requirePermission("catalog", "delete");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const material = await prisma.materialType.findFirst({ where: { id } });
   if (!material) return { ok: false as const, error: "Material not found" };
 
@@ -251,6 +268,8 @@ export async function deleteMaterial(id: string) {
 }
 
 export async function removeEntityImage(formData: FormData) {
+  const gate = await requirePermission("catalog", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const kind = String(formData.get("kind")) as ImageKind;
   const id = String(formData.get("id"));
   if (!IMAGE_MODEL[kind]) return;

@@ -7,7 +7,7 @@ import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
 import { syncAmazonCore } from "@/lib/sync";
 import { getRestock } from "@/lib/restock";
 import { revalidatePath } from "next/cache";
-import { requireOwner } from "@/lib/membership";
+import { requireOwner, requirePermission } from "@/lib/membership";
 import { saveImage, deleteStored, safeKeySegment } from "@/lib/storage";
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(n)));
@@ -110,6 +110,8 @@ export async function saveSettings(input: {
   defaultReorderTo: number;
   defaultBatchSize: number;
 }) {
+  const gate = await requirePermission("settings", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const data = {
     syncEnabled: !!input.syncEnabled,
     syncHour: clamp(input.syncHour, 0, 23),
@@ -155,6 +157,8 @@ export async function saveDashboardLayout(layout: { id: string; x: number; y: nu
 
 /** Manual "Run now" from the settings panel: sync Amazon + record the value snapshot immediately. */
 export async function runSyncNow() {
+  const gate = await requirePermission("settings", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   try {
     const r = await syncAmazonCore();
     if (r.ok) {

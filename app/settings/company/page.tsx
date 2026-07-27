@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { currentUserId } from "@/lib/current-user";
 import { getCurrentOrg } from "@/lib/org";
-import { currentRole } from "@/lib/membership";
+import { currentRole , requireView } from "@/lib/membership";
 import { prisma } from "@/lib/prisma";
 import { prismaBase } from "@/lib/prisma-base";
 import { CompanyEditor } from "@/components/CompanyEditor";
@@ -13,6 +13,7 @@ import { fullPermissions, normalizePermissions, MEMBER_DEFAULT } from "@/lib/per
 export const dynamic = "force-dynamic";
 
 export default async function CompanySettingsPage() {
+  await requireView("settings");
   const org = await getCurrentOrg();
   if (!org) notFound();
 

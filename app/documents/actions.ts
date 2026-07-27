@@ -4,6 +4,15 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { saveImage, deleteStored, safeKeySegment } from "@/lib/storage";
 import { checkOwned, type OwnedModel } from "@/lib/ownership";
+import { requirePermission } from "@/lib/membership";
+import type { Resource } from "@/lib/permissions";
+
+// A document is an edit to the thing it hangs off, so its permission mirrors that parent.
+const PARENT_RES: Record<DocParent, Resource> = Object.assign(Object.create(null), {
+  lot: "lots",
+  transaction: "transactions",
+  purchase: "purchases",
+});
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB — matches serverActions.bodySizeLimit in next.config
 const OK_EXT = new Set(["pdf", "png", "jpg", "jpeg", "webp", "gif", "avif"]);
@@ -45,6 +54,8 @@ export async function uploadDocument(formData: FormData) {
   // Validate everything before a single byte is written — the key is built from `parent` and
   // `parentId`, so an unchecked value here becomes an attacker-chosen path on disk.
   if (!FIELD[parent]) return { ok: false as const, error: "Bad parent" };
+  const gate = await requirePermission(PARENT_RES[parent], "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const owned = await checkOwned([[PARENT_MODEL[parent], parentId]]);
   if (owned) return owned;
   const v = validate(file);
@@ -73,8 +84,14 @@ export async function uploadDocument(formData: FormData) {
 export async function deleteDocument(id: string) {
   // Read the row first (scoped, so another org's id finds nothing) and drop the stored object
   // too — otherwise the file stays fetchable at its original URL after the user "deletes" it.
-  const doc = await prisma.document.findFirst({ where: { id }, select: { id: true, fileUrl: true } });
+  const doc = await prisma.document.findFirst({
+    where: { id },
+    select: { id: true, fileUrl: true, lotId: true, transactionInvoiceId: true, purchaseInvoiceId: true },
+  });
   if (!doc) return { ok: false as const, error: "Document not found" };
+  const res: Resource = doc.lotId ? "lots" : doc.transactionInvoiceId ? "transactions" : "purchases";
+  const gate = await requirePermission(res, "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   await prisma.document.delete({ where: { id: doc.id } });
   await deleteStored(doc.fileUrl);
   revalidatePath("/", "layout");

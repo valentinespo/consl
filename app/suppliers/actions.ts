@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { checkOwned } from "@/lib/ownership";
+import { requirePermission } from "@/lib/membership";
 
 /** Edit a supplier's name, contact details and optional facility link. */
 export async function updateSupplier(input: {
@@ -14,6 +15,8 @@ export async function updateSupplier(input: {
   notes?: string;
   facilityId: string | null; // this supplier IS one of our facilities
 }) {
+  const gate = await requirePermission("suppliers", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   // The facility must be one of ours — otherwise a supplier could link to another org's
   // unclaimed facility id and surface its address through the supplier detail page.
   const badRef = await checkOwned([["facility", input.facilityId]]);
@@ -56,6 +59,8 @@ export async function updateSupplier(input: {
 /** Add a supplier directly. Until now they only appeared as a side effect of logging an invoice,
  *  which left a new account with no way to set one up in advance. */
 export async function createSupplier(input: { name: string }) {
+  const gate = await requirePermission("suppliers", "create");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const name = input.name.trim();
   if (!name) return { ok: false as const, error: "Name required" };
 
@@ -69,6 +74,8 @@ export async function createSupplier(input: { name: string }) {
 
 /** Delete a supplier — refused while any purchase, transaction or invoice still references it. */
 export async function deleteSupplier(id: string) {
+  const gate = await requirePermission("suppliers", "delete");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
   const supplier = await prisma.supplier.findFirst({ where: { id } });
   if (!supplier) return { ok: false as const, error: "Supplier not found" };
 

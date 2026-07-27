@@ -5,10 +5,12 @@ import { getOrgSettings } from "@/lib/settings";
 import { getCurrentOrg } from "@/lib/org";
 import { DashboardGrid, type DashboardData } from "@/components/DashboardGrid";
 import { GettingStarted, type SetupStep } from "@/components/GettingStarted";
+import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
+  await requireView("dashboard");
   const [d, lots, restock, history, settings, setup, org, leadTimes] = await Promise.all([
     getDashboard(),
     getLots(),

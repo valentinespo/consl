@@ -4,10 +4,12 @@ import { PageHeader, SectionTitle } from "@/components/ui";
 import { NewProductButton, NewMaterialButton } from "@/components/CreateButtons";
 import { ProductCard, MaterialCard } from "@/components/CatalogCards";
 import { EmptyState } from "@/components/EmptyState";
+import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
 
 export default async function CatalogPage() {
+  await requireView("catalog");
   const [products, materials] = await Promise.all([getProducts(), getMaterialTypes()]);
 
   return (

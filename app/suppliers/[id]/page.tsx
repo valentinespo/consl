@@ -6,10 +6,12 @@ import { PrevNextNav, neighbours } from "@/components/PrevNextNav";
 import { SupplierEditor } from "@/components/SupplierEditor";
 import { DeleteEntity } from "@/components/DeleteEntity";
 import { deleteSupplier } from "@/app/suppliers/actions";
+import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
 
 export default async function SupplierDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireView("suppliers");
   const { id } = await params;
   const [detail, suppliers, facilities] = await Promise.all([getSupplierDetail(id), getSuppliers(), getFacilities()]);
   if (!detail) notFound();

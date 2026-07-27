@@ -9,6 +9,8 @@ import { getCurrentOrgId } from "@/lib/tenant";
 import { currentUserId } from "@/lib/current-user";
 import { getCurrentOrg } from "@/lib/org";
 import { listMyOrgs } from "@/lib/orgs";
+import { getMyAccess } from "@/lib/membership";
+import { RESOURCE_KEYS } from "@/lib/permissions";
 
 /** Pages that must stay reachable before you belong to a company. */
 const NO_ORG_OK = ["/sign-in", "/sign-up", "/welcome", "/join"];
@@ -32,6 +34,11 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   }
   const org = await getCurrentOrg().catch(() => null);
   const orgs = await listMyOrgs().catch(() => []);
+  // Which sections this member may see, so the sidebar only shows what they can open. Owners get
+  // everything; a resolution failure leaves this null and the nav falls open (page guards still
+  // enforce). Serialisable string[] so it can cross into the client shell.
+  const access = await getMyAccess().catch(() => null);
+  const allowed = access ? RESOURCE_KEYS.filter((r) => access.can(r, "view")) : null;
   return (
     <ClerkProvider signInUrl="/sign-in" signUpUrl="/sign-up" afterSignOutUrl="/sign-in">
       <html
@@ -53,6 +60,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           <AppShell
             orgName={org?.name ?? null}
             orgs={orgs}
+            allowed={allowed}
             currencySymbol={org?.currencySymbol ?? "$"}
             locale={org?.locale ?? "en-US"}
             currencyCode={org?.currencyCode ?? "USD"}
