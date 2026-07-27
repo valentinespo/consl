@@ -5,11 +5,13 @@
  * the stock bar on every inventory row. They were three separate colour lists, which meant
  * recolouring one bucket was a hunt across three files and easy to leave half-done.
  */
+// The four channel buckets are shades of one green, listed darkest first — that's the order they
+// are drawn in on the row bar, so the bar reads as a single gradient rather than a jumble.
 export const SEG = {
+  awd: "#066629", // Amazon's upstream warehouse
   available: "#16a34a", // sellable at the channel
   inbound: "#4ade80", // on its way to the channel
   reserved: "#bbf7d0", // at the channel but spoken for
-  awd: "#1a2f18", // Amazon's upstream warehouse
   locations: "#8b5cf6", // finished stock at your own facilities
   production: "#f59e0b", // being made
   raw: "#94a3b8", // materials, not yet a product

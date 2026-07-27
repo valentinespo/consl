@@ -193,10 +193,10 @@ export function RestockDashboard({
           </button>
         </div>
         <div className="flex flex-wrap gap-2.5 text-[11px] text-muted">
+          <Legend color={SEG.awd} label="AWD" />
           <Legend color={SEG.available} label="Available" />
           <Legend color={SEG.inbound} label="Inbound" />
           <Legend color={SEG.reserved} label="Reserved" />
-          <Legend color={SEG.awd} label="AWD" />
           <Legend color={SEG.locations} label="At my locations" />
           <Legend color={SEG.production} label="Production" />
         </div>
@@ -218,10 +218,11 @@ export function RestockDashboard({
           const totalUnits = r.onHand + r.atLocations + r.inProduction;
           const seg = (v: number, c: string) => (v > 0 ? <div key={c} style={{ width: `${(v / (totalUnits || 1)) * 100}%`, background: c }} /> : null);
           const parts = [
+            // Same order as the bar above it, or the two read as contradicting each other.
+            r.awdTotal && `${n(r.awdTotal)} AWD`,
             r.fbaAvailable && `${n(r.fbaAvailable)} Available`,
             r.fbaInbound && `${n(r.fbaInbound)} Inbound`,
             r.fbaReserved && `${n(r.fbaReserved)} Reserved`,
-            r.awdTotal && `${n(r.awdTotal)} AWD`,
             r.atLocations && `${n(r.atLocations)} At ${r.atLocationsBy.map((x) => x.code).join("/")}`,
             r.inProduction && `${n(r.inProduction)} In production`,
           ].filter(Boolean);
@@ -269,10 +270,11 @@ export function RestockDashboard({
                 {/* Pipeline bar */}
                 <div className="min-w-0">
                   <div className="flex h-2.5 overflow-hidden rounded-full bg-surface-2">
+                    {/* Greens run darkest → lightest, so the channel's stock reads as one ramp. */}
+                    {seg(r.awdTotal, SEG.awd)}
                     {seg(r.fbaAvailable, SEG.available)}
                     {seg(r.fbaInbound, SEG.inbound)}
                     {seg(r.fbaReserved, SEG.reserved)}
-                    {seg(r.awdTotal, SEG.awd)}
                     {seg(r.atLocations, SEG.locations)}
                     {seg(r.inProduction, SEG.production)}
                   </div>
