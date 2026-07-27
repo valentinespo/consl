@@ -33,7 +33,7 @@ function duotone(Glyph: PhosphorIcon): LucideIcon {
 export const LayoutDashboard = duotone(P.SquaresFour);
 export const Boxes = duotone(P.Cube);
 export const FlaskConical = duotone(P.Flask); // the flask is back — Phosphor has one
-export const ArrowLeftRight = duotone(P.ArrowsLeftRight);
+export const ArrowLeftRight = duotone(P.Invoice); // Transactions are invoices here
 export const ShoppingCart = duotone(P.ShoppingCart);
 export const FileText = duotone(P.Receipt);
 export const Building2 = duotone(P.Storefront);

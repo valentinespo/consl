@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Pencil, Check, Plus, X, Move, Scaling, Bell, AlertTriangle, Gauge, PieChart, Layers, CheckCircle2, ShoppingCart, Zap, PackageSearch, Truck } from "@/components/icons";
+import { Pencil, Check, Plus, X, Move, Scaling, Bell, AlertTriangle, FileText, Gauge, PieChart, Layers, CheckCircle2, ShoppingCart, Zap, PackageSearch, Truck } from "@/components/icons";
 import type { LucideIcon } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { Card, PageHeader, SectionTitle } from "@/components/ui";
@@ -503,11 +503,15 @@ function NotificationsWidget({ alerts }: { alerts: Alert[] }) {
   );
 }
 
-function MetricTile({ value, label, tint, icon: Icon }: { value: number; label: string; tint: "amber" | "red"; icon: LucideIcon }) {
+const TILE_TINTS = {
+  amber: { color: "#ea580c", bg: "#fff7ed", border: "#fed7aa" },
+  red: { color: "#dc2626", bg: "#fef2f2", border: "#fecaca" },
+  violet: { color: "#7c3aed", bg: "#f5f3ff", border: "#ddd6fe" },
+} as const;
+
+function MetricTile({ value, label, tint, icon: Icon }: { value: number; label: string; tint: keyof typeof TILE_TINTS; icon: LucideIcon }) {
   const active = value > 0;
-  const color = tint === "red" ? "#dc2626" : "#ea580c";
-  const bg = tint === "red" ? "#fef2f2" : "#fff7ed";
-  const border = tint === "red" ? "#fecaca" : "#fed7aa";
+  const { color, bg, border } = TILE_TINTS[tint];
   return (
     <div className="rounded-xl border p-3" style={active ? { background: bg, borderColor: border } : { borderColor: "var(--color-border)" }}>
       <div className="flex items-center justify-between">
@@ -521,20 +525,28 @@ function MetricTile({ value, label, tint, icon: Icon }: { value: number; label: 
 
 function ReorderAlertsWidget({ alerts }: { alerts: Alert[] }) {
   const reorder = alerts.filter((a) => a.kind === "reorder");
+  const ship = alerts.filter((a) => a.kind === "ship");
   const expedite = alerts.filter((a) => a.kind === "expedite");
-  const list = [...reorder, ...expedite].slice(0, 8);
+  // Same order as the inventory KPI row, so the two screens read identically.
+  const list = [...reorder, ...ship, ...expedite].slice(0, 8);
   return (
     <Card className="flex h-full flex-col">
       <WidgetHead icon={AlertTriangle} title="Reorder alerts" tint="amber" />
-      <div className="mb-3 grid grid-cols-2 gap-2.5">
-        <MetricTile value={reorder.length} label="Need a PO" tint="amber" icon={ShoppingCart} />
-        <MetricTile value={expedite.length} label="To expedite" tint="red" icon={Zap} />
+      <div className="mb-3 grid grid-cols-3 gap-2.5">
+        <MetricTile value={reorder.length} label="Need a PO" tint="amber" icon={FileText} />
+        <MetricTile value={ship.length} label="To ship" tint="violet" icon={Truck} />
+        <MetricTile value={expedite.length} label="Expedite" tint="red" icon={Zap} />
       </div>
       <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto">
         {list.map((a) => (
           <div key={a.key} className="flex items-center gap-2 text-[12px]">
-            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: a.kind === "reorder" ? "#ea580c" : "#dc2626" }} />
-            <span className="truncate text-ink-soft">{a.title.replace(" needs a PO", "").replace(" — expedite incoming lot", "")}</span>
+            <span
+              className="h-1.5 w-1.5 shrink-0 rounded-full"
+              style={{ background: a.kind === "reorder" ? "#ea580c" : a.kind === "ship" ? "#8b5cf6" : "#dc2626" }}
+            />
+            <span className="truncate text-ink-soft">
+              {a.title.replace(" needs a PO", "").replace(" — expedite incoming lot", "").replace(" — ship stock you already have", "")}
+            </span>
             <span className="ml-auto shrink-0 text-[11px] text-muted">{a.detail}</span>
           </div>
         ))}
