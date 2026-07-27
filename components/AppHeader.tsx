@@ -22,14 +22,13 @@ export function AppHeader({ onMenu }: { onMenu?: () => void }) {
             <Menu size={19} />
           </button>
         )}
-        <ThemeToggle />
         <Image
           src="/brand/logo-white.png"
           alt="SellerOps"
           width={791}
           height={176}
           priority
-          className="ml-1.5 h-[19px] w-auto"
+          className="ml-1 h-[19px] w-auto"
         />
       </div>
 
@@ -43,8 +42,9 @@ export function AppHeader({ onMenu }: { onMenu?: () => void }) {
         />
       </div>
 
-      {/* Right cell of the grid — reserved for future header actions. */}
-      <div className="hidden sm:block" />
+      <div className="flex items-center justify-end">
+        <ThemeToggle />
+      </div>
     </header>
   );
 }

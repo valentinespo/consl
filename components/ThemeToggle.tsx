@@ -47,11 +47,19 @@ export function ThemeToggle() {
   return (
     <button
       onClick={cycle}
-      title={pref ? `Theme: ${LABEL[pref]} — click to change` : "Theme"}
-      aria-label={pref ? `Theme: ${LABEL[pref]}` : "Theme"}
-      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-white/75 transition-colors hover:bg-white/10 hover:text-white"
+      title="Switch between light, dark and system theme"
+      aria-label={pref ? `Theme: ${LABEL[pref]} — click to change` : "Theme"}
+      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-white/15 bg-white/10 px-2.5 text-[12px] font-medium text-white/85 transition-colors hover:bg-white/15 hover:text-white"
     >
-      {pref && <Icon size={16} />}
+      {/* min-width keeps the pill from jumping while the saved preference loads */}
+      <span className="inline-flex min-w-[86px] items-center justify-center gap-1.5">
+        {pref && (
+          <>
+            <Icon size={14} />
+            {LABEL[pref]} theme
+          </>
+        )}
+      </span>
     </button>
   );
 }
