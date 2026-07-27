@@ -4,7 +4,7 @@ export const MONTH = 30.44;
 export const MONTH_MS = MONTH * 86_400_000;
 const DAY = 86_400_000;
 
-export type ReorderStatus = "ok" | "reordered" | "channelLow" | "belowFloor" | "oos";
+export type ReorderStatus = "nosales" | "ok" | "reordered" | "channelLow" | "belowFloor" | "oos";
 export type Win = 10 | 30 | 90;
 
 export type ReorderResult = {
@@ -88,8 +88,11 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
     Tc = Math.max(0, t);
   }
 
-  let status: ReorderStatus = "ok";
-  let statusLabel = "Healthy";
+  // No sales in the window is its own situation, not a healthy one: there's nothing to project
+  // cover from, so a green "Healthy" here would be a false all-clear on a SKU that might have zero
+  // stock. Every brand-new company sits here until its first sync brings sales in.
+  let status: ReorderStatus = monthly > 0 ? "ok" : "nosales";
+  let statusLabel = monthly > 0 ? "Healthy" : "No sales";
   let note: string | undefined;
   let recommendedQty = 0;
   let ship = false;

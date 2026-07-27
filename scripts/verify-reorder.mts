@@ -117,7 +117,10 @@ for (const shipBufferX of GRID.shipBufferX) {
   if (r.status === "reordered" && inProduction === 0) fail("Reordered without a lot in production");
   if ((r.recommendedQty > 0) !== r.order) fail("order flag disagrees with quantity");
   if (!r.ship && r.shipWithinDays !== 0) fail("ship-within shown without a shipment");
-  if (units30d === 0 && (r.status !== "ok" || r.ship || r.expedite || r.order)) fail("no sales but not plain Healthy");
+  // No sales in the window → the "nosales" situation, never green Healthy, never any action.
+  if (units30d === 0 && (r.status !== "nosales" || r.ship || r.expedite || r.order || r.recommendedQty > 0))
+    fail("no sales but not the No-sales state");
+  if (r.status === "nosales" && (r.ship || r.expedite || r.order)) fail("No-sales row carries an action");
   if (r.order) {
     const minQty = Math.ceil(8 * r.monthly);
     if (r.recommendedQty < minQty) fail("order smaller than order-size months of sales");

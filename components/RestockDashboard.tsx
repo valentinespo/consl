@@ -33,8 +33,9 @@ export type Defaults = {
 /** Where the SKU stands. Five situations and no instructions — what to do about it lives in the
  *  Action column, because a row can need shipping, expediting and a PO at once. A green pill
  *  guarantees the action column is empty. */
-type Status = "ok" | "reordered" | "channelLow" | "belowFloor" | "oos";
+type Status = "nosales" | "ok" | "reordered" | "channelLow" | "belowFloor" | "oos";
 const STATUS: Record<Status, { bg: string; fg: string; dot: string }> = {
+  nosales: { bg: "#f3f4f6", fg: "#6b7280", dot: "#9ca3af" },
   ok: { bg: "#dcfce7", fg: "#166534", dot: "#16a34a" },
   reordered: { bg: "#dcfce7", fg: "#166534", dot: "#16a34a" },
   channelLow: { bg: "#ede9fe", fg: "#5b21b6", dot: "#8b5cf6" },
@@ -45,6 +46,10 @@ const STATUS: Record<Status, { bg: string; fg: string; dot: string }> = {
 /** What each status means, in the terms the person reading it thinks in. Kept next to the colours
  *  so the two can't drift apart, and kept short — it's a tooltip, not a manual. */
 const STATUS_HELP: Record<Status, { title: string; body: string }> = {
+  nosales: {
+    title: "No sales",
+    body: "Nothing has sold in the chosen window, so there's no rate to project cover from. New products sit here until sales come in — or until the first Amazon sync. Not a problem, just no signal yet.",
+  },
   ok: {
     title: "Healthy",
     body: "You hold at least your floor, and the channel won't run dry before more stock can reach it.",
