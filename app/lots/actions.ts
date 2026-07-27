@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { recomputeAll } from "@/lib/recompute";
+import { checkOwned, type OwnedModel } from "@/lib/ownership";
 
 /** Permanently delete a lot (cascades its SKU lines, bill of materials and transactions). */
 export async function deleteLot(formData: FormData) {
@@ -87,6 +88,14 @@ export async function createLot(input: {
   const lines = input.lines.filter((l) => l.productId && l.units > 0);
   if (!input.facilityId || lines.length === 0) return { ok: false as const, error: "Pick a facility and at least one SKU with units" };
 
+  // Every id the browser sent must belong to the caller's org — a foreign facility or product id
+  // otherwise lands on the new lot and leaks that org's data back through nested reads.
+  const bad = await checkOwned([
+    ["facility", input.facilityId],
+    ...lines.map((l) => ["product", l.productId] as [OwnedModel, string]),
+  ]);
+  if (bad) return bad;
+
   const lotNr = await nextFreeLotNr();
 
   const defaults = await defaultMaterialsFor(input.facilityId);
@@ -156,6 +165,13 @@ export async function updateLot(payload: LotEditPayload) {
     payload.status === "FINISHED" && payload.finishedAtISO && !isNaN(Date.parse(payload.finishedAtISO))
       ? new Date(payload.finishedAtISO)
       : null;
+
+  const badRef = await checkOwned([
+    ["facility", payload.facilityId],
+    ...lines.map((l) => ["product", l.productId] as [OwnedModel, string]),
+    ...lines.flatMap((l) => l.materials.map((m) => ["material", m.materialTypeId] as [OwnedModel, string])),
+  ]);
+  if (badRef) return badRef;
 
   const defaults = await defaultMaterialsFor(payload.facilityId);
   // Per-product materials carry the SKU so they draw the right per-SKU FIFO pool.

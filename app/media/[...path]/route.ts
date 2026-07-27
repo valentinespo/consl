@@ -8,6 +8,12 @@ import { getCurrentOrg } from "@/lib/org";
 // enough on its own: the requested file must also belong to the caller's organization.
 const UPLOAD_DIR = process.env.UPLOAD_DIR;
 
+// Historical files were committed under public/uploads and served statically with no auth — a real
+// exposure. They've been moved here, out of the statically-served folder; middleware rewrites the
+// old /uploads/* URLs to this route so they now pass the same ownership check as everything else.
+// Their DB rows still hold "/uploads/..." URLs, so ownership is matched against that form too.
+const LEGACY_DIR = path.join(process.cwd(), "legacy-uploads");
+
 const TYPES: Record<string, string> = {
   png: "image/png",
   jpg: "image/jpeg",
@@ -30,21 +36,24 @@ const TYPES: Record<string, string> = {
  * found. The organization itself is cross-tenant, so its branding is compared against the caller's
  * current company instead.
  */
-async function callerOwns(url: string): Promise<boolean> {
+async function callerOwns(rel: string): Promise<boolean> {
+  // A file may be referenced as "/media/<rel>" (current) or "/uploads/<rel>" (legacy rows) — a
+  // match on either form, owned by the caller's org, grants access.
+  const urls = [`/media/${rel}`, `/uploads/${rel}`];
+  const inCol = { in: urls };
   const [org, doc, product, material, supplier, po] = await Promise.all([
     getCurrentOrg().catch(() => null),
-    prisma.document.findFirst({ where: { fileUrl: url }, select: { id: true } }),
-    prisma.product.findFirst({ where: { imageUrl: url }, select: { id: true } }),
-    prisma.materialType.findFirst({ where: { imageUrl: url }, select: { id: true } }),
-    prisma.supplier.findFirst({ where: { photoUrl: url }, select: { id: true } }),
-    prisma.purchaseOrder.findFirst({ where: { pdfUrl: url }, select: { id: true } }),
+    prisma.document.findFirst({ where: { fileUrl: inCol }, select: { id: true } }),
+    prisma.product.findFirst({ where: { imageUrl: inCol }, select: { id: true } }),
+    prisma.materialType.findFirst({ where: { imageUrl: inCol }, select: { id: true } }),
+    prisma.supplier.findFirst({ where: { photoUrl: inCol }, select: { id: true } }),
+    prisma.purchaseOrder.findFirst({ where: { pdfUrl: inCol }, select: { id: true } }),
   ]);
-  const isOwnBranding = !!org && (org.logoUrl === url || org.iconUrl === url);
+  const isOwnBranding = !!org && (urls.includes(org.logoUrl ?? "") || urls.includes(org.iconUrl ?? ""));
   return isOwnBranding || Boolean(doc || product || material || supplier || po);
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ path: string[] }> }) {
-  if (!UPLOAD_DIR) return new Response("Not configured", { status: 404 });
   const { path: parts } = await params;
   const rel = parts.join("/");
   if (rel.includes("..") || rel.startsWith("/") || path.normalize(rel) !== rel) {
@@ -54,24 +63,29 @@ export async function GET(_req: Request, { params }: { params: Promise<{ path: s
   // Same 404 for "doesn't exist" and "not yours" — never confirm another org's files exist.
   let owned = false;
   try {
-    owned = await callerOwns(`/media/${rel}`);
+    owned = await callerOwns(rel);
   } catch {
     return new Response("Not found", { status: 404 });
   }
   if (!owned) return new Response("Not found", { status: 404 });
 
-  try {
-    const buf = await readFile(path.join(UPLOAD_DIR, rel));
-    const ext = rel.split(".").pop()?.toLowerCase() ?? "";
-    return new Response(new Uint8Array(buf), {
-      headers: {
-        "Content-Type": TYPES[ext] ?? "application/octet-stream",
-        "X-Content-Type-Options": "nosniff",
-        // Private: these are per-tenant documents, so no shared/CDN caching.
-        "Cache-Control": "private, max-age=31536000, immutable",
-      },
-    });
-  } catch {
-    return new Response("Not found", { status: 404 });
+  // Current uploads live on the volume; historical ones under legacy-uploads. Try both.
+  const dirs = [UPLOAD_DIR, LEGACY_DIR].filter((d): d is string => !!d);
+  for (const dir of dirs) {
+    try {
+      const buf = await readFile(path.join(dir, rel));
+      const ext = rel.split(".").pop()?.toLowerCase() ?? "";
+      return new Response(new Uint8Array(buf), {
+        headers: {
+          "Content-Type": TYPES[ext] ?? "application/octet-stream",
+          "X-Content-Type-Options": "nosniff",
+          // Private: these are per-tenant documents, so no shared/CDN caching.
+          "Cache-Control": "private, max-age=31536000, immutable",
+        },
+      });
+    } catch {
+      // try the next directory
+    }
   }
+  return new Response("Not found", { status: 404 });
 }

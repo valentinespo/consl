@@ -4,8 +4,21 @@ import { NextResponse } from "next/server";
 // Only the auth screens are public; everything else requires a signed-in user.
 const isPublic = createRouteMatcher(["/sign-in(.*)", "/sign-up(.*)"]);
 
+// Legacy files used to sit in public/uploads and were served statically with no auth. They've been
+// moved out of public/; this sends any surviving "/uploads/..." URL (still stored in old DB rows)
+// through the authenticated, ownership-checked /media route instead. Runs in both branches below.
+function rewriteLegacyUploads(req: Request & { nextUrl: URL }): URL | null {
+  const { pathname } = req.nextUrl;
+  if (!pathname.startsWith("/uploads/")) return null;
+  const to = new URL(req.nextUrl);
+  to.pathname = "/media/" + pathname.slice("/uploads/".length);
+  return to;
+}
+
 const enforced = clerkMiddleware(async (auth, req) => {
   if (!isPublic(req)) await auth.protect();
+  const legacy = rewriteLegacyUploads(req);
+  if (legacy) return NextResponse.rewrite(legacy);
   // Pass the path through as a request header so the root layout can tell whether the user is
   // already on the onboarding pages before deciding to redirect them there.
   const headers = new Headers(req.headers);
@@ -18,13 +31,21 @@ const enforced = clerkMiddleware(async (auth, req) => {
 // be able to turn authentication off by accident.
 const devBypass = process.env.NODE_ENV === "development" && process.env.ALLOW_DEV_AUTH_BYPASS === "1";
 
-export default devBypass ? () => NextResponse.next() : enforced;
+export default devBypass
+  ? (req: Request & { nextUrl: URL }) => {
+      const legacy = rewriteLegacyUploads(req);
+      return legacy ? NextResponse.rewrite(legacy) : NextResponse.next();
+    }
+  : enforced;
 
 export const config = {
   matcher: [
     // Run on every route except Next internals and static assets.
-    "/((?!_next|uploads|favicon.ico|[^?]*\\.(?:png|jpg|jpeg|svg|webp|gif|ico|avif|css|js|map|woff2?|ttf)).*)",
+    "/((?!_next|favicon.ico|[^?]*\\.(?:png|jpg|jpeg|svg|webp|gif|ico|avif|css|js|map|woff2?|ttf)).*)",
     "/(api|trpc)(.*)",
+    // Legacy upload URLs (any extension) must reach middleware to be rewritten to /media — the
+    // pattern above skips image extensions, so give /uploads its own entry like /media has.
+    "/uploads/:path*",
     // /media serves user-uploaded files — invoices, BOLs, product photos, company marks — and
     // must require a signed-in user so the route can check the file belongs to their company.
     // It needs its own entry: the pattern above skips anything ending in an image extension, so

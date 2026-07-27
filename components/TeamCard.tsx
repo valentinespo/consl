@@ -7,7 +7,7 @@ import { Card } from "@/components/ui";
 import { createInvite, revokeInvite, removeMember } from "@/app/team/actions";
 
 export type TeamMember = { clerkUserId: string; role: string; createdAt: string; isYou: boolean };
-export type PendingInvite = { id: string; email: string; role: string; token: string; expiresAt: string };
+export type PendingInvite = { id: string; email: string; role: string; token: string | null; expiresAt: string };
 
 const inputCls =
   "h-9 w-full rounded-lg border border-border bg-surface px-2.5 text-[13px] text-ink outline-none focus:border-accent-strong";
@@ -100,13 +100,15 @@ export function TeamCard({
                     {iv.role === "owner" ? "Owner" : "Member"} · expires {iv.expiresAt}
                   </div>
                 </div>
-                <button
-                  onClick={() => copy(iv.token)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-[12px] text-ink-soft hover:bg-surface-2"
-                >
-                  {copied === iv.token ? <Check size={13} /> : <Copy size={13} />}
-                  {copied === iv.token ? "Copied" : "Copy link"}
-                </button>
+                {iv.token && (
+                  <button
+                    onClick={() => copy(iv.token!)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-[12px] text-ink-soft hover:bg-surface-2"
+                  >
+                    {copied === iv.token ? <Check size={13} /> : <Copy size={13} />}
+                    {copied === iv.token ? "Copied" : "Copy link"}
+                  </button>
+                )}
                 {isOwner && (
                   <button
                     onClick={async () => {

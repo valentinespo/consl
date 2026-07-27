@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { checkOwned } from "@/lib/ownership";
 
 /** Edit a supplier's name, contact details and optional facility link. */
 export async function updateSupplier(input: {
@@ -13,6 +14,11 @@ export async function updateSupplier(input: {
   notes?: string;
   facilityId: string | null; // this supplier IS one of our facilities
 }) {
+  // The facility must be one of ours — otherwise a supplier could link to another org's
+  // unclaimed facility id and surface its address through the supplier detail page.
+  const badRef = await checkOwned([["facility", input.facilityId]]);
+  if (badRef) return badRef;
+
   // A facility can only be claimed by one supplier profile.
   if (input.facilityId) {
     const clash = await prisma.supplier.findFirst({

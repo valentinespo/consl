@@ -7,6 +7,7 @@ import { getCurrentOrg, orgAddressLines, orgDocumentName } from "@/lib/org";
 import { saveImage, readStored } from "@/lib/storage";
 import { createLot } from "@/app/lots/actions";
 import { recomputeAll } from "@/lib/recompute";
+import { checkOwned, type OwnedModel } from "@/lib/ownership";
 
 export type PoLineInput = {
   kind: "SKU" | "FEE";
@@ -145,6 +146,11 @@ export async function updatePurchaseOrder(payload: PoPayload) {
   const err = validate(payload);
   if (err) return { ok: false as const, error: err };
   const lines = payload.lines.filter((l) => l.description.trim() || l.quantity);
+
+  const badRef = await checkOwned(
+    lines.filter((l) => l.kind === "SKU" && l.productId).map((l) => ["product", l.productId] as [OwnedModel, string]),
+  );
+  if (badRef) return badRef;
 
   await prisma.$transaction(async (tx) => {
     await tx.purchaseOrderLine.deleteMany({ where: { poId: payload.id! } });

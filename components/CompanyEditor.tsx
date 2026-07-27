@@ -187,7 +187,13 @@ export function CompanyEditor({ company, isOwner }: { company: CompanyForEdit; i
         isOwner={isOwner}
       />
 
-      <SaveBar dirty={dirty} pending={pending} error={error} saved={saved} onSave={save} onReset={reset} />
+      {isOwner ? (
+        <SaveBar dirty={dirty} pending={pending} error={error} saved={saved} onSave={save} onReset={reset} />
+      ) : (
+        dirty && (
+          <p className="mt-4 text-[12.5px] text-muted">Only an owner can change the company profile.</p>
+        )
+      )}
     </>
   );
 }

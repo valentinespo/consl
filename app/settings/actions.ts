@@ -43,8 +43,11 @@ export async function updateCompanyProfile(input: {
   brandInk: string;
   brandBand: string;
 }) {
-  const orgId = await getCurrentOrgId();
-  if (!orgId) return { ok: false as const, error: "No company in context" };
+  // The company profile is the sender identity printed on every purchase order and drives the
+  // currency every figure is shown in — owner-only, like the brand images beside it.
+  const gate = await requireOwner();
+  if (!gate.ok) return gate;
+  const orgId = gate.orgId;
   const name = input.name.trim();
   if (!name) return { ok: false as const, error: "Company name required" };
 

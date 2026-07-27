@@ -11,6 +11,16 @@ const H = 150;
 /** Stacked area of inventory value split by bucket over time. */
 export function ValueStackedChart({ data }: { data: ValueHistoryPoint[] }) {
   const { money } = useMoney();
+  // A brand-new org has no history yet (the first snapshot is written at the end of the day's
+  // first sync), so the widget must survive an empty array — the value-per-bucket legend below
+  // reads the last point and would otherwise crash the whole dashboard on a company's first load.
+  if (data.length === 0) {
+    return (
+      <div className="flex h-full min-h-[64px] items-center justify-center text-[12px] text-muted">
+        No history yet — this fills in daily.
+      </div>
+    );
+  }
   // Need ≥2 points to form a band; duplicate a lone point so it renders as a flat stack.
   const pts = data.length === 1 ? [data[0], data[0]] : data;
   const n = pts.length;

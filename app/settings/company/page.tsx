@@ -56,7 +56,10 @@ export default async function CompanySettingsPage() {
           id: iv.id,
           email: iv.email,
           role: iv.role,
-          token: iv.token,
+          // The token IS the credential to join at that role. Only ever ship it to an owner — a
+          // member who could read a pending owner-invite token from the page payload could accept
+          // it from a second account and promote themselves.
+          token: role === "owner" ? iv.token : null,
           expiresAt: fmtDate(iv.expiresAt, cur),
         }))}
       />
