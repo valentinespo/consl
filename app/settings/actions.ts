@@ -92,6 +92,12 @@ export async function getAppSettings() {
 }
 
 /** Save the automatic-sync schedule + restock defaults from the settings panel. */
+/** Clamp to [lo,hi]; fall back to `fallback` only when the input isn't a finite number (a real 0
+ *  is kept). Mirrors the Inventory gear's clamp so the two settings surfaces agree. */
+function clampNum(v: number, lo: number, hi: number, fallback: number): number {
+  return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback;
+}
+
 export async function saveSettings(input: {
   syncEnabled: boolean;
   syncHour: number;
@@ -109,11 +115,14 @@ export async function saveSettings(input: {
     syncHour: clamp(input.syncHour, 0, 23),
     syncMinute: clamp(input.syncMinute, 0, 59),
     syncTz: input.syncTz.trim() || "America/Argentina/Buenos_Aires",
-    defaultMinMonths: Math.max(0, input.defaultMinMonths) || 5,
-    defaultLeadMonths: Math.max(0, input.defaultLeadMonths) || 4.5,
-    shipDays: Math.round(Math.max(0, input.shipDays)) || 30,
-    shipBufferX: Math.max(0, input.shipBufferX) || 3,
-    defaultReorderTo: Math.max(0.5, input.defaultReorderTo) || 8,
+    // Clamp to sane ranges but honour a real 0 where it's meaningful (floor/lead/ship can be 0);
+    // only fall back to a default when the value is missing/NaN, matching the Inventory gear so the
+    // two editors don't disagree. reorderTo must stay positive (it's a divisor of the order).
+    defaultMinMonths: clampNum(input.defaultMinMonths, 0, 120, 5),
+    defaultLeadMonths: clampNum(input.defaultLeadMonths, 0, 120, 4.5),
+    shipDays: Math.round(clampNum(input.shipDays, 0, 3650, 30)),
+    shipBufferX: clampNum(input.shipBufferX, 0, 100, 3),
+    defaultReorderTo: clampNum(input.defaultReorderTo, 0.1, 120, 8),
     defaultBatchSize: Math.max(0, Math.round(input.defaultBatchSize)) || 0,
   };
   await saveOrgSettings(data);
@@ -131,7 +140,16 @@ export async function dismissNotification(key: string) {
 
 /** Persist the dashboard widget layout (array of { id, x, y, w, h }). */
 export async function saveDashboardLayout(layout: { id: string; x: number; y: number; w: number; h: number }[]) {
-  await saveOrgSettings({ dashboardLayout: layout });
+  // The client already sanitizes, but this action is directly callable — bound every field so a
+  // hand-crafted payload (e.g. y = 1e15) can't wedge the compaction loop for the whole org.
+  const clean = (Array.isArray(layout) ? layout : []).slice(0, 50).map((it) => ({
+    id: String(it?.id ?? "").slice(0, 40),
+    x: Math.min(50, Math.max(0, Math.round(Number(it?.x) || 0))),
+    y: Math.min(500, Math.max(0, Math.round(Number(it?.y) || 0))),
+    w: Math.min(12, Math.max(1, Math.round(Number(it?.w) || 1))),
+    h: Math.min(50, Math.max(1, Math.round(Number(it?.h) || 1))),
+  }));
+  await saveOrgSettings({ dashboardLayout: clean });
   return { ok: true as const };
 }
 

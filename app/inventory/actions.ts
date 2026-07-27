@@ -15,7 +15,7 @@ export async function syncAmazon() {
   return r;
 }
 
-/** Update the org-wide restock defaults. Shipping time is global only — it isn't per SKU. */
+/** Update the org-wide restock defaults (each is a per-SKU-overridable fallback). */
 export async function updateGlobalDefaults(d: {
   minMonths: number;
   leadMonths: number;

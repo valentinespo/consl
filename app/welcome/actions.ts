@@ -47,7 +47,15 @@ export async function createCompany(input: NewCompany) {
 
   const currencyCode = /^[A-Za-z]{3}$/.test(input.currencyCode) ? input.currencyCode.toUpperCase() : "USD";
   const currencySymbol = input.currencySymbol.trim().slice(0, 4) || "$";
-  const locale = input.locale.trim().slice(0, 20) || "en-US";
+  // An invalid locale (the classic "de_DE" with an underscore) makes every number/date format
+  // throw once stored, so validate here exactly as the settings page does rather than trust it.
+  const localeIn = input.locale.trim().slice(0, 20);
+  let locale = "en-US";
+  try {
+    if (localeIn && Intl.NumberFormat.supportedLocalesOf([localeIn]).length > 0) locale = localeIn;
+  } catch {
+    /* keep en-US */
+  }
   const slug = await uniqueSlug(name);
 
   const org = await prismaBase.$transaction(async (tx) => {

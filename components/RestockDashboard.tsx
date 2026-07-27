@@ -418,8 +418,7 @@ export function RestockDashboard({
 
 
 
-/** Org-wide restock settings. Shipping time is here only — it's a property of how you move stock,
- *  not of any one product, so there's deliberately no per-SKU override for it. */
+/** Org-wide restock defaults every SKU falls back to when it has no override of its own. */
 function GlobalDefaultsEditor({
   defaults,
   pending,

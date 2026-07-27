@@ -4,7 +4,7 @@
 
 export const FLOOR_HELP = {
   title: "Floor",
-  body: "The least cover you want at the sales channel, in months. Drop below it and the product gets flagged to order.",
+  body: "The least total cover you want, in months — counting stock at the channel, at your locations, and in production. Fall below it and the product is flagged to order.",
 };
 
 export const LEAD_HELP = {

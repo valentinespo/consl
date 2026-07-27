@@ -410,8 +410,9 @@ export async function getMaterialTypes() {
 /** Which first-run setup steps a company has completed. Drives the Getting Started checklist,
  *  so a brand-new account always knows what to do next. */
 export async function getSetupProgress() {
-  const [products, facilities, suppliers, purchases, lots, mapped, dismissed] = await Promise.all([
+  const [products, materials, facilities, suppliers, purchases, lots, mapped, dismissed] = await Promise.all([
     prisma.product.count(),
+    prisma.materialType.count(),
     prisma.facility.count(),
     prisma.supplier.count(),
     prisma.purchase.count(),
@@ -428,7 +429,7 @@ export async function getSetupProgress() {
     }),
     prisma.dismissedNotification.findFirst({ where: { key: SETUP_DISMISS_KEY } }),
   ]);
-  return { products, facilities, suppliers, purchases, lots, mapped, dismissed: !!dismissed };
+  return { products, materials, facilities, suppliers, purchases, lots, mapped, dismissed: !!dismissed };
 }
 
 export const SETUP_DISMISS_KEY = "getting-started";

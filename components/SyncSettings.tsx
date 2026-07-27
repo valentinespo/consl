@@ -199,7 +199,7 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
           <p className="mt-1.5 max-w-[62ch] text-[12.5px] text-muted">
             How much cover you want to hold, how long stock takes to make and to move, and
             how big a production run is. Used for every product that doesn&apos;t have its
-            own override on the Inventory page — except shipping time, which is always org-wide.
+            own override on the Inventory page.
           </p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">

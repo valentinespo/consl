@@ -25,6 +25,7 @@ export default async function DashboardPage() {
   const steps: SetupStep[] = [
     { label: "Add your company details", body: "used on purchase orders", href: "/settings/company", cta: "Set up", done: !!org?.address },
     { label: "Add your first product", body: "what you sell", href: "/catalog", cta: "Add", done: setup.products > 0 },
+    { label: "Add raw materials", body: "what products are made from", href: "/catalog", cta: "Add", done: setup.materials > 0 },
     { label: "Add a facility", body: "where stock is made or stored", href: "/facilities", cta: "Add", done: setup.facilities > 0 },
     { label: "Add a supplier", body: "who you buy from", href: "/suppliers", cta: "Add", done: setup.suppliers > 0 },
     { label: "Link a sales channel", body: "Amazon, Shopify or TikTok IDs", href: "/catalog", cta: "Map", done: setup.mapped > 0 },
