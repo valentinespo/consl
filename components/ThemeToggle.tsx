@@ -7,12 +7,19 @@ type Pref = "light" | "dark" | "system";
 const ORDER: Pref[] = ["light", "dark", "system"];
 const LABEL: Record<Pref, string> = { light: "Light", dark: "Dark", system: "System" };
 
+let fadeTimer: ReturnType<typeof setTimeout> | undefined;
+
 /** Resolve the preference to an actual theme and stamp it on <html>. Mirrors the inline script in
  *  the root layout — the script wins the first paint, this keeps later changes in sync. */
 function apply(pref: Pref) {
   const dark =
     pref === "dark" || (pref === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   const el = document.documentElement;
+  // Cross-fade the switch: the class turns on colour transitions everywhere for just long enough
+  // for the token flip to glide. First paint never fades — only apply() is ever this path.
+  el.classList.add("theme-fade");
+  clearTimeout(fadeTimer);
+  fadeTimer = setTimeout(() => el.classList.remove("theme-fade"), 400);
   el.dataset.theme = dark ? "dark" : "light";
   el.style.colorScheme = dark ? "dark" : "light"; // native controls (date pickers, selects) follow
 }

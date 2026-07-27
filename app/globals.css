@@ -69,6 +69,51 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Theme cross-fade. The class is stamped on <html> by the theme toggle just before the tokens
+   flip and removed ~0.4s later, so switching themes glides instead of snapping — while normal
+   hovers and page loads keep their own (fast or absent) transitions. */
+html.theme-fade,
+html.theme-fade *,
+html.theme-fade *::before,
+html.theme-fade *::after {
+  transition:
+    background-color 350ms ease,
+    border-color 350ms ease,
+    color 350ms ease,
+    fill 350ms ease,
+    stroke 350ms ease,
+    box-shadow 350ms ease !important;
+}
+
+/* Skeleton shimmer for loading states: a soft band sweeping across placeholder bars. Base and
+   highlight both come from theme tokens, so the same class works in light and dark. */
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.skeleton {
+  border-radius: 8px;
+  background: linear-gradient(
+    100deg,
+    var(--color-surface-2) 36%,
+    var(--color-border) 50%,
+    var(--color-surface-2) 64%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
 /* Thin, neutral scrollbars */
 * {
   scrollbar-width: thin;
