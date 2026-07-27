@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Building2 } from "lucide-react";
+import { Building2 } from "@/components/icons";
 import { createCompany } from "@/app/welcome/actions";
 
 /** Common presets so most people never touch the currency fields. "Other" reveals them. */

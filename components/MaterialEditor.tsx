@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Package } from "lucide-react";
+import { Package } from "@/components/icons";
 import { Card } from "@/components/ui";
 import { ImageUpload } from "@/components/ImageUpload";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";

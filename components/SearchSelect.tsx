@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Check, Plus, CornerDownLeft } from "lucide-react";
+import { ChevronDown, Check, Plus, CornerDownLeft } from "@/components/icons";
 
 /**
  * Searchable, optionally creatable select over string values. Mirrors value to a hidden input.

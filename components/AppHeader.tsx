@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { Menu, Search } from "lucide-react";
+import { Menu, Search } from "@/components/icons";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 /**

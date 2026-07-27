@@ -1,4 +1,4 @@
-import { Building2 } from "lucide-react";
+import { Building2 } from "@/components/icons";
 import { getSuppliers } from "@/lib/queries";
 import { PageHeader } from "@/components/ui";
 import { SupplierCard } from "@/components/SupplierCard";

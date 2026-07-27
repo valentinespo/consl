@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Pencil, Check, Plus, X, Move, Scaling, Bell, AlertTriangle, Gauge, PieChart, Layers, CheckCircle2, ShoppingCart, Zap, PackageSearch, Truck } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { Pencil, Check, Plus, X, Move, Scaling, Bell, AlertTriangle, Gauge, PieChart, Layers, CheckCircle2, ShoppingCart, Zap, PackageSearch, Truck } from "@/components/icons";
+import type { LucideIcon } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { Card, PageHeader, SectionTitle } from "@/components/ui";
 import { TotalValueCard } from "@/components/TotalValueCard";

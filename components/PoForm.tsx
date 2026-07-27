@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, X } from "lucide-react";
+import { Plus, X } from "@/components/icons";
 import { createPurchaseOrder, updatePurchaseOrder, deletePurchaseOrder, type PoLineInput } from "@/app/purchase-orders/actions";
 import { TwoStepDelete } from "@/components/TwoStepDelete";
 import { SkuAvatar } from "@/components/ui";

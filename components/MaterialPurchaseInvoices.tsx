@@ -1,13 +1,13 @@
 "use client";
 
 import { Fragment, useState } from "react";
-import { Plus, ChevronRight } from "lucide-react";
+import { Plus, ChevronRight } from "@/components/icons";
 import { qty, date } from "@/lib/format";
 import { useMoney } from "@/components/CurrencyProvider";
 import { Card, FacilityTag, SkuAvatar, SupplierAvatar } from "@/components/ui";
 import { PurchaseInvoiceForm, type PurchaseInvoiceRow, type PurchaseOptions, type PurchaseMaterial } from "@/components/PurchaseInvoiceForm";
 import { DocumentList } from "@/components/DocumentList";
-import { Paperclip } from "lucide-react";
+import { Paperclip } from "@/components/icons";
 
 type Group = {
   material: PurchaseMaterial & { code: string; imageUrl: string | null };

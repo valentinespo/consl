@@ -1,4 +1,4 @@
-import { MapPin } from "lucide-react";
+import { MapPin } from "@/components/icons";
 
 const boxCls =
   "w-full rounded-lg border border-border bg-surface pl-9 pr-3 py-2 text-[13px] leading-relaxed text-ink outline-none transition-colors focus:border-accent-strong";

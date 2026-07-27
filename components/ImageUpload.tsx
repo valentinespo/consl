@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Camera, X } from "lucide-react";
+import { Camera, X } from "@/components/icons";
 import { uploadEntityImage, removeEntityImage } from "@/app/catalog/actions";
 
 export function ImageUpload({

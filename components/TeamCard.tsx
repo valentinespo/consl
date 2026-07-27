@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { UserPlus, Copy, Check, X } from "lucide-react";
+import { UserPlus, Copy, Check, X } from "@/components/icons";
 import { Card } from "@/components/ui";
 import { createInvite, revokeInvite, removeMember } from "@/app/team/actions";
 

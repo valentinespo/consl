@@ -1,4 +1,4 @@
-import { Package } from "lucide-react";
+import { Package } from "@/components/icons";
 import { getInventory, getMaterialTypes, type InventoryPool } from "@/lib/queries";
 import { money, qty, perUnit, costFine, type Currency } from "@/lib/format";
 import { getCurrentOrg } from "@/lib/org";

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight } from "@/components/icons";
 import { RANGES, rangeBounds, type RangeKey } from "@/lib/chart";
 
 export type Range = { key: RangeKey; from: string; to: string };

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ChevronsUpDown, Plus, Building2 } from "lucide-react";
+import { Check, ChevronsUpDown, Plus, Building2 } from "@/components/icons";
 import type { MyOrg } from "@/lib/orgs";
 import { switchOrg } from "@/app/org/actions";
 

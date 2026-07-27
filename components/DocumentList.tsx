@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Trash2, Upload, Paperclip } from "lucide-react";
+import { Trash2, Upload, Paperclip } from "@/components/icons";
 import { DocPreview } from "@/components/DocPreview";
 import { uploadDocument, deleteDocument, type DocParent } from "@/app/documents/actions";
 

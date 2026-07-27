@@ -1,6 +1,6 @@
 "use client";
 
-import { X, Undo2 } from "lucide-react";
+import { X, Undo2 } from "@/components/icons";
 import { SkuAvatar } from "@/components/ui";
 import { qty, plural } from "@/lib/format";
 

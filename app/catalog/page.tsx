@@ -1,4 +1,4 @@
-import { Boxes, Package } from "lucide-react";
+import { Boxes, Package } from "@/components/icons";
 import { getProducts, getMaterialTypes } from "@/lib/queries";
 import { PageHeader, SectionTitle } from "@/components/ui";
 import { NewProductButton, NewMaterialButton } from "@/components/CreateButtons";

@@ -14,7 +14,7 @@ import {
   Warehouse,
   Images,
   Settings,
-} from "lucide-react";
+} from "@/components/icons";
 import { UserButton } from "@clerk/nextjs";
 import { OrgSwitcher } from "@/components/OrgSwitcher";
 import type { MyOrg } from "@/lib/orgs";

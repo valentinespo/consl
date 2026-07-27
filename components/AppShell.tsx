@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
-import { X } from "lucide-react";
+import { X } from "@/components/icons";
 import { Sidebar } from "@/components/Sidebar";
 import { AppHeader } from "@/components/AppHeader";
 import { CurrencyProvider } from "@/components/CurrencyProvider";

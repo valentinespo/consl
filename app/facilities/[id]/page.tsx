@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { getFacilityDetail, getFacilitiesDetailed, getFinishedStock, getRawStockByFacility, getMaterialTypes, getSupplierOptions } from "@/lib/queries";
 import { getFmt } from "@/lib/fmt-server";
 import { qty } from "@/lib/format";
-import { Package } from "lucide-react";
+import { Package } from "@/components/icons";
 import { PageHeader, Card, SkuAvatar } from "@/components/ui";
 import { PrevNextNav, neighbours } from "@/components/PrevNextNav";
 import { FacilityEditor } from "@/components/FacilityEditor";

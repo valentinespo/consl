@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Moon, Monitor, Sun } from "lucide-react";
+import { Moon, Monitor, Sun } from "@/components/icons";
 
 type Pref = "light" | "dark" | "system";
 const ORDER: Pref[] = ["light", "dark", "system"];

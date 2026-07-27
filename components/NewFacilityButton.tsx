@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, X } from "lucide-react";
+import { Plus, X } from "@/components/icons";
 import { FACILITY_TYPES } from "@/lib/facility-types";
 import { createFacility } from "@/app/facilities/actions";
 

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronRight, Warehouse, Truck, Package } from "lucide-react";
+import { ChevronRight, Warehouse, Truck, Package } from "@/components/icons";
 import {
   getFacilitiesDetailed,
   getFinishedStock,

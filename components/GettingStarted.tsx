@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check, X, ArrowRight } from "lucide-react";
+import { Check, X, ArrowRight } from "@/components/icons";
 import { dismissNotification } from "@/app/settings/actions";
 
 export type SetupStep = { label: string; body: string; href: string; cta: string; done: boolean };

@@ -2,7 +2,7 @@
 
 import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "@/components/icons";
 import { Pill, FacilityTag, SkuAvatar } from "@/components/ui";
 import { LotLineCards, type LotLineSummary } from "@/components/LotLineCards";
 import { qty, date } from "@/lib/format";

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Trash2, X, Lock } from "lucide-react";
+import { Trash2, X, Lock } from "@/components/icons";
 
 export type DeleteResult = { ok: boolean; error?: string };
 

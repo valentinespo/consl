@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronUp, ChevronDown } from "lucide-react";
+import { ChevronUp, ChevronDown } from "@/components/icons";
 
 const BTN = "inline-flex h-8 w-8 items-center justify-center border border-border bg-surface text-ink-soft";
 

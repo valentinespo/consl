@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, X } from "lucide-react";
+import { Plus, X } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { upsertPurchaseInvoice, deletePurchaseInvoice, type PurchaseLineInput } from "@/app/purchases/actions";
 import { SelectOrCreate, type Opt } from "@/components/SelectOrCreate";

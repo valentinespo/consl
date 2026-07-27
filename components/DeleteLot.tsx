@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Trash2, X } from "lucide-react";
+import { Trash2, X } from "@/components/icons";
 import { deleteLot } from "@/app/lots/actions";
 
 export function DeleteLot({ lotId, lotNr }: { lotId: string; lotNr: number }) {

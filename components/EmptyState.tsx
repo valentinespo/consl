@@ -1,4 +1,4 @@
-import type { LucideIcon } from "lucide-react";
+import type { LucideIcon } from "@/components/icons";
 
 /** Shown wherever a list has no rows yet, so a brand-new account never faces a blank screen.
  *  `children` is the primary call-to-action. */

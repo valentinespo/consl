@@ -2,7 +2,7 @@
 
 import { Fragment, useState } from "react";
 import Link from "next/link";
-import { ChevronRight, FileText } from "lucide-react";
+import { ChevronRight, FileText } from "@/components/icons";
 import { Pill, SkuAvatar } from "@/components/ui";
 import { date } from "@/lib/format";
 import { useMoney } from "@/components/CurrencyProvider";

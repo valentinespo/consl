@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw } from "@/components/icons";
 import { syncAmazon } from "@/app/inventory/actions";
 
 /** Pull Amazon stock and sales on demand. Lives beside the Inventory tabs so the value card

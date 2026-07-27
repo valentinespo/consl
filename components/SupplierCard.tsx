@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Mail, Phone, MapPin, ChevronRight, Info, type LucideIcon } from "lucide-react";
+import { Mail, Phone, MapPin, ChevronRight, Info, type LucideIcon } from "@/components/icons";
 import { Card, FacilityTag } from "@/components/ui";
 import { getFmt } from "@/lib/fmt-server";
 import { initials } from "@/lib/initials";

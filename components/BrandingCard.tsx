@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Upload, Trash2 } from "lucide-react";
+import { Upload, Trash2 } from "@/components/icons";
 import { Card } from "@/components/ui";
 import { uploadBrandImage, removeBrandImage, type BrandImageKind } from "@/app/settings/actions";
 

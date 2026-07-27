@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, X } from "lucide-react";
+import { Plus, X } from "@/components/icons";
 import { Card, SkuAvatar, SectionTitle } from "@/components/ui";
 import { qty } from "@/lib/format";
 import { useMoney } from "@/components/CurrencyProvider";

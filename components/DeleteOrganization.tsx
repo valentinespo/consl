@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "@/components/icons";
 import { Card } from "@/components/ui";
 import { deleteOrganization } from "@/app/team/actions";
 

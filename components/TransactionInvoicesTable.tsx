@@ -2,13 +2,13 @@
 
 import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, ArrowUpDown, ChevronRight } from "lucide-react";
+import { Plus, ArrowUpDown, ChevronRight } from "@/components/icons";
 import { Pill, SupplierAvatar, SkuAvatar } from "@/components/ui";
 import { date } from "@/lib/format";
 import { useMoney } from "@/components/CurrencyProvider";
 import { TransactionInvoiceForm, type InvoiceRow, type LotOption } from "@/components/TransactionInvoiceForm";
 import { DocumentList } from "@/components/DocumentList";
-import { Paperclip } from "lucide-react";
+import { Paperclip } from "@/components/icons";
 
 type SortKey = "date" | "applicable";
 

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, X, Trash2 } from "lucide-react";
+import { Plus, X, Trash2 } from "@/components/icons";
 import { createLot } from "@/app/lots/actions";
 import { SelectOrCreate, type Opt } from "@/components/SelectOrCreate";
 

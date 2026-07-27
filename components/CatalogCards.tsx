@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronRight, Package } from "lucide-react";
+import { ChevronRight, Package } from "@/components/icons";
 import { Card, SkuAvatar } from "@/components/ui";
 
 const CARD = "flex items-center gap-3 transition-colors hover:border-accent-strong hover:bg-accent-soft/30";

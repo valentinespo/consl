@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Info } from "lucide-react";
+import { Info } from "@/components/icons";
 
 type Box = { top: number; left: number; below: boolean };
 

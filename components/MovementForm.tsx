@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { X } from "lucide-react";
+import { X } from "@/components/icons";
 import { Field, inputCls } from "@/components/FormKit";
 import { DESTINATIONS, RAW_DESTINATIONS } from "@/lib/destinations";
 import { createMovement } from "@/app/facilities/actions";

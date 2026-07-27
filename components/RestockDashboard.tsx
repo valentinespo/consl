@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Settings, Check, GripVertical } from "lucide-react";
+import { Settings, Check, GripVertical } from "@/components/icons";
 import { HoverHint } from "@/components/HoverHint";
 import { BATCH_HELP, BUFFER_HELP, FLOOR_HELP, LEAD_HELP, REORDER_TO_HELP, SHIP_HELP } from "@/lib/restock-help";
 import { SkuAvatar } from "@/components/ui";

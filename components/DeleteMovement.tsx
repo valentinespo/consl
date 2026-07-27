@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { X } from "lucide-react";
+import { X } from "@/components/icons";
 import { deleteMovement } from "@/app/facilities/actions";
 
 /** Two-click removal for a movement. Nothing depends on it — the engine just replays without it. */

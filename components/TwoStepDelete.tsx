@@ -1,6 +1,6 @@
 "use client";
 
-import { Trash2 } from "lucide-react";
+import { Trash2 } from "@/components/icons";
 
 /**
  * A delete control that asks twice before firing — guards important, irreversible deletions.

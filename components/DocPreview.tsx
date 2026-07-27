@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { X, FileText, ExternalLink } from "lucide-react";
+import { X, FileText, ExternalLink } from "@/components/icons";
 
 /** A clickable trigger that opens an in-app modal preview (iframe) of a PDF or image — no re-download. */
 export function DocPreview({

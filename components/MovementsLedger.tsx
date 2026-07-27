@@ -1,4 +1,4 @@
-import { Package } from "lucide-react";
+import { Package } from "@/components/icons";
 import { SkuAvatar, FacilityTag } from "@/components/ui";
 import { DeleteMovement } from "@/components/DeleteMovement";
 import { destinationLabel } from "@/lib/destinations";
