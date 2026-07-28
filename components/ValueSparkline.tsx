@@ -73,21 +73,15 @@ export function ValueSparkline({ pts }: { pts: { day: string; total: number }[] 
     [pts, axis],
   );
 
-  // Axis labels at perfectly even positions, each naming the nearest day. Binding labels to raw
-  // point indices made the rhythm lumpy on short windows (8 days ÷ 5 labels rounds unevenly);
-  // a label is a scale marker, not a data dot, so even spacing wins.
+  // Axis labels every `step` days: gaps are identical AND every label sits at its day's true
+  // position — so the hover rule, dot and pill land exactly on the label they name. (Even pixel
+  // slots looked tidy but disagreed with the data positions; a constant day-step gives both.)
   const xTicks = useMemo(() => {
     if (n <= 1) return [{ frac: 0.5, i: 0 }];
     const want = Math.min(n, 5);
+    const step = Math.max(1, Math.ceil((n - 1) / (want - 1)));
     const out: { frac: number; i: number }[] = [];
-    let last = -1;
-    for (let k = 0; k < want; k++) {
-      const frac = k / (want - 1);
-      const i = Math.round(frac * (n - 1));
-      if (i === last) continue;
-      last = i;
-      out.push({ frac, i });
-    }
+    for (let i = 0; i < n; i += step) out.push({ frac: i / (n - 1), i });
     return out;
   }, [n]);
 
@@ -116,8 +110,10 @@ export function ValueSparkline({ pts }: { pts: { day: string; total: number }[] 
   const hp = hover != null ? pts[hover] : null;
   const hx = hover != null && plot.w ? (px(hover) / W) * plot.w : 0;
   const hy = hp && plot.h ? (py(hp.total) / H) * plot.h : 0;
-  // The readout sits beside the rule near the top of the plot, flipping sides at the right edge.
-  const tipLeft = hx + 14 + TIP_W > plot.w ? Math.max(0, hx - 14 - TIP_W) : hx + 14;
+  // The readout floats beside the dot, vertically centred on it, flipping sides at the right
+  // edge — overlapping the line and fill so the frosted blur has something to smear.
+  const tipLeft = hx + 16 + TIP_W > plot.w ? Math.max(0, hx - 16 - TIP_W) : hx + 16;
+  const tipTop = Math.max(2, Math.min(hy - 34, (plot.h || 999) - 76));
   const sess = sessRef.current;
 
   // The glow window: about three point-spacings wide, gradient-edged so the full-strength
@@ -311,8 +307,8 @@ export function ValueSparkline({ pts }: { pts: { day: string; total: number }[] 
               )}
               <div
                 key={`tip${sess}`}
-                className="tip-frost pointer-events-none absolute left-0 top-1 z-20 rounded-2xl px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.14)]"
-                style={{ transform: `translateX(${tipLeft}px)`, transition: GLIDE }}
+                className="tip-frost pointer-events-none absolute left-0 top-0 z-20 rounded-2xl px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.14)]"
+                style={{ transform: `translate(${tipLeft}px, ${tipTop}px)`, transition: GLIDE }}
               >
                 <div className="whitespace-nowrap text-[13px] font-semibold text-ink">{dayLabel(hp.day, true)}</div>
                 <div className="mt-1.5 flex items-center whitespace-nowrap">
@@ -336,9 +332,6 @@ export function ValueSparkline({ pts }: { pts: { day: string; total: number }[] 
             style={{
               left: `${frac * 100}%`,
               transform: frac === 0 ? "none" : frac === 1 ? "translateX(-100%)" : "translateX(-50%)",
-              // Static labels duck out of the pill's way instead of doubling up beside it.
-              opacity: hp && plot.w > 0 && Math.abs(frac * plot.w - hx) < 46 ? 0 : 1,
-              transition: "opacity 0.15s ease",
             }}
           >
             {dayLabel(pts[i].day)}
