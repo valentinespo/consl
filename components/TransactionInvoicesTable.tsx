@@ -147,7 +147,7 @@ export function TransactionInvoicesTable({
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-3 text-[12.5px]">
-        <span className="rounded-lg border border-accent-strong bg-accent-soft px-3 py-1.5 font-medium text-ink">
+        <span className="rounded-lg border border-border bg-surface-2 px-3 py-1.5 font-medium text-ink">
           COG-applicable total: {money(applicableTotal, 2)}
           {unassignedTotal > 0.005 && <span className="ml-1.5 font-normal text-negative">({money(unassignedTotal, 2)} unassigned)</span>}
         </span>

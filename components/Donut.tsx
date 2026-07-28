@@ -106,7 +106,7 @@ export function Donut({
             y={C + labelRad * Math.sin(s.mid)}
             textAnchor="middle"
             dominantBaseline="central"
-            style={{ fontSize: 11, fontWeight: 600, fill: "#fff", pointerEvents: "none", opacity: dim(s.i) }}
+            style={{ fontSize: 10, fontWeight: 500, fill: "#fff", pointerEvents: "none", opacity: dim(s.i) }}
           >
             {Math.round(s.pct)}%
           </text>

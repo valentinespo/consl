@@ -150,6 +150,23 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Native <select> chevron. The browser's own arrow sits hard against the right edge with uneven
+ * spacing; this replaces it with our own chevron placed the same distance from the right as the
+ * text is from the left, so every dropdown reads balanced. Unlayered, so `padding-inline-end`
+ * wins over Tailwind's px-* utilities (which would otherwise leave no room for the arrow). */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23737373' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.65rem center;
+  background-size: 15px;
+  padding-inline-end: 1.9rem;
+}
+html[data-theme="dark"] select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238e8e94' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
 /* Theme cross-fade. The class is stamped on <html> by the theme toggle just before the tokens
    flip and removed ~0.4s later, so switching themes glides instead of snapping — while normal
    hovers and page loads keep their own (fast or absent) transitions. */
