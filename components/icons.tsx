@@ -45,26 +45,28 @@ export const FileText = duotone(P.Receipt);
 export const Building2 = duotone(P.Storefront);
 export const Warehouse = duotone(P.Warehouse);
 export const Images = duotone(P.Tag);
-export const Settings = duotone(P.Gear);
+export const Settings = regular(P.Gear); // lives in the chrome (sidebar foot) — outline weight
 
-/* ---- Sidebar nav aliases. One duotone style across the app now, so these simply point at the
-   same drawings — kept so the sidebar can diverge again later without touching call sites. ---- */
-export const LayoutDashboardFilled = LayoutDashboard;
-export const BoxesFilled = Boxes;
-export const FlaskConicalFilled = FlaskConical;
-export const ArrowLeftRightFilled = ArrowLeftRight;
-export const ShoppingCartFilled = ShoppingCart;
-export const FileTextFilled = FileText;
-export const Building2Filled = Building2;
-export const WarehouseFilled = Warehouse;
-export const ImagesFilled = Images;
+/* ---- Sidebar nav aliases. The chrome (sidebar + header) runs outline-weight while page content
+   keeps duotone — same drawings, regular stroke, and call sites never change. ---- */
+export const LayoutDashboardFilled = regular(P.SquaresFour);
+export const BoxesFilled = regular(P.Cube);
+export const FlaskConicalFilled = regular(P.Flask);
+export const ArrowLeftRightFilled = regular(P.Invoice);
+export const ShoppingCartFilled = regular(P.ShoppingCart);
+export const FileTextFilled = regular(P.Receipt);
+export const Building2Filled = regular(P.Storefront);
+export const WarehouseFilled = regular(P.Warehouse);
+export const ImagesFilled = regular(P.Tag);
+/** Outline storefront for the header's org-mark fallback (chrome runs outline weight). */
+export const Building2Outline = regular(P.Storefront);
 
-/* ---- Header & theme ---- */
-export const Menu = duotone(P.List);
-export const Search = duotone(P.MagnifyingGlass);
-export const Sun = duotone(P.Sun);
-export const Moon = duotone(P.Moon);
-export const Monitor = duotone(P.Monitor);
+/* ---- Header & theme — chrome icons, outline weight ---- */
+export const Menu = regular(P.List);
+export const Search = regular(P.MagnifyingGlass);
+export const Sun = regular(P.Sun);
+export const Moon = regular(P.Moon);
+export const Monitor = regular(P.Monitor);
 
 /* ---- Actions ---- */
 export const X = regular(P.X);
@@ -90,7 +92,7 @@ export const Phone = duotone(P.Phone);
 export const MapPin = duotone(P.MapPin);
 
 /* ---- Status & data ---- */
-export const Bell = duotone(P.Bell);
+export const Bell = regular(P.Bell); // header chrome — outline weight
 export const AlertTriangle = duotone(P.Warning);
 export const Info = duotone(P.Info);
 export const CalendarDays = duotone(P.Calendar);

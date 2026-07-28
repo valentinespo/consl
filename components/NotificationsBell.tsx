@@ -72,8 +72,8 @@ export function NotificationsBell() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={count > 0 ? `Notifications (${count})` : "Notifications"}
-        className={`relative inline-flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-          open ? "bg-surface text-ink" : "text-ink-soft hover:bg-surface hover:text-ink"
+        className={`relative inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface transition-colors ${
+          open ? "text-ink" : "text-ink-soft hover:bg-surface-2 hover:text-ink"
         }`}
       >
         <Bell size={18} />

@@ -45,8 +45,8 @@ export function AppHeader({ onMenu, orgs = [] }: { onMenu?: () => void; orgs?: M
         <Image
           src="/brand/iso-black.png"
           alt="SellerOps"
-          width={402}
-          height={497}
+          width={1260}
+          height={1524}
           priority
           className="iso-invert ml-1 h-7 w-auto shrink-0"
         />
@@ -68,9 +68,10 @@ export function AppHeader({ onMenu, orgs = [] }: { onMenu?: () => void; orgs?: M
         </kbd>
       </div>
 
-      <div className="flex items-center justify-end gap-1.5">
+      <div className="flex items-center justify-end gap-2.5">
         <NotificationsBell />
-        <span className="ml-1 flex items-center">
+        <span aria-hidden className="h-5 w-px shrink-0 bg-border" />
+        <span className="flex items-center">
           <UserButton appearance={{ elements: { avatarBox: "h-8 w-8" } }} />
         </span>
       </div>
