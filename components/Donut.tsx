@@ -51,21 +51,36 @@ export function Donut({
   onHover: (i: number | null) => void;
 }) {
   const total = data.reduce((s, d) => s + d.value, 0) || 1;
+  const TWO_PI = Math.PI * 2;
+
+  // Give every non-zero slice a minimum drawable span so a near-zero one (e.g. $50 of $300k)
+  // still renders as a clean rounded nub with a gap on each side, instead of collapsing to
+  // nothing or being swallowed by a huge neighbour's rounding. The extra angle is borrowed
+  // proportionally from the big slices; the printed % labels keep each slice's TRUE share.
+  const MIN = 0.12; // ~7°: a nub plus its two seams
+  const raw = data.map((d) => (d.value / total) * TWO_PI);
+  let deficit = 0;
+  let big = 0;
+  raw.forEach((s) => {
+    if (s > 0 && s < MIN) deficit += MIN - s;
+    else if (s >= MIN) big += s;
+  });
+  const scale = big > 0 ? Math.max(0, big - deficit) / big : 1;
+  const spans = raw.map((s) => (s <= 0 ? 0 : s < MIN ? MIN : s * scale));
 
   let angle = -Math.PI / 2;
   const segs = data.map((d, i) => {
-    const frac = d.value / total;
     const a0 = angle;
-    // A full-circle slice can't be one arc; shave a hair off so the path stays drawable.
-    const a1 = angle + Math.min(frac, 0.9999) * Math.PI * 2;
-    angle = a0 + frac * Math.PI * 2;
-    // Corner rounding shrinks for sliver slices: the fat stroke that rounds a big wedge would
-    // balloon a tiny one past its real share, so it scales down until the slice (plus its seam)
-    // fits inside its own angle — a hairline sliver stays a hairline.
-    const span = a1 - a0;
+    // A lone full-circle slice can't be one arc; shave a hair off so the path stays drawable.
+    const span = Math.min(spans[i], TWO_PI * 0.9999);
+    const a1 = a0 + span;
+    angle = a1;
+    // Corner rounding shrinks for narrow slices: the fat stroke that rounds a big wedge would
+    // balloon a thin one past its share, so it scales down until the slice (plus its seams)
+    // fits inside its own angle — a nub stays a nub.
     const cr = Math.max(0.6, Math.min(CR, (span * (IR + CR) - GAP) / 2 - 0.2));
     const mid = (a0 + a1) / 2;
-    return { ...d, i, color: palette[i % palette.length], d: sector(a0, a1, cr), cr, pct: frac * 100, mid };
+    return { ...d, i, color: palette[i % palette.length], d: sector(a0, a1, cr), cr, pct: (d.value / total) * 100, mid };
   });
   const dim = (i: number) => (hover == null || hover === i ? 1 : 0.35);
   const labelRad = (R + IR) / 2;

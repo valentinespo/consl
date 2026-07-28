@@ -42,7 +42,7 @@ const WIDGETS: Record<string, Meta> = {
   valueByBucket: { title: "Value by bucket", minW: 4, minH: 3, w: 6, h: 4 },
   reorderAlerts: { title: "Reorder alerts", minW: 3, minH: 3, w: 4, h: 3 },
   daysCover: { title: "Months of cover", minW: 2, minH: 2, w: 3, h: 2 },
-  leadTime: { title: "Production lead time", minW: 3, minH: 3, w: 4, h: 4 },
+  leadTime: { title: "Production lead time", minW: 4, minH: 4, w: 4, h: 5 },
 };
 
 const DEFAULT_LAYOUT: Item[] = [
@@ -407,12 +407,19 @@ function CoverWidget({ months }: { months: number }) {
   );
 }
 
-/** One wheel with a labelled breakdown below and the grand total pinned to the bottom. Used for
- *  both "Produced value" (by facility) and "Amount spent" (by supplier) — same blue ring. */
-/** Donut + breakdown, orientation-aware: a tall widget stacks the donut over the rows (donut
- *  soaking up all spare height, rows pushed down to the grand-total line); a wide widget slides
- *  the donut to the left with the rows beside it. Follows the card's live size, so it holds up
- *  however the user drags or resizes it. */
+// The donut is a FIXED size — the diameter it has in the default 4×5-point widget — and never
+// grows with the card. Extra room goes to the breakdown, which shows at least MIN_ROWS slots
+// (padding with "awaiting data" placeholders when there's less) and scrolls once the rows
+// outrun the space: 3 fit under the donut in a portrait card, more when it's widened or made
+// taller. So the widget reads the same at any size the user drags it to.
+const DONUT_PX = 190;
+const MIN_ROWS = 3;
+const ROW_PX = 30; // one breakdown row's height — sets the portrait scroll threshold
+
+/** One wheel with a labelled breakdown and the grand total pinned to the bottom. Used for both
+ *  "Produced value" (by facility) and "Amount spent" (by supplier) — same violet ring. Portrait
+ *  cards stack the donut over the rows; wide cards sit the donut on the left with the rows
+ *  filling the height beside it. */
 function RingWidget({ title, subtitle, data, total }: { title: string; subtitle: string; data: Slice[]; total: number }) {
   const { money } = useMoney();
   const [hover, setHover] = useState<number | null>(null);
@@ -424,50 +431,69 @@ function RingWidget({ title, subtitle, data, total }: { title: string; subtitle:
     const ro = new ResizeObserver(([e]) => setBox({ w: e.contentRect.width, h: e.contentRect.height }));
     ro.observe(el);
     return () => ro.disconnect();
-  }, [data.length]);
-  const wide = box.w > box.h * 1.25;
-  // In the side-by-side layout the donut takes the row height, but never more than ~42% of the
-  // width — the breakdown must keep room to breathe (a starved row swallows its own labels).
-  const donutSide = wide ? Math.max(80, Math.min(box.h - 8, box.w * 0.42)) : 0;
+  }, []);
+  const wide = box.w > box.h * 1.2;
+  // Fixed diameter, only ever shrinking if the card is genuinely smaller than it (so it can't
+  // overflow a min-size widget) — never growing past the 4×5 size.
+  const donutPx = Math.max(120, Math.min(DONUT_PX, box.w || DONUT_PX, wide ? box.h || DONUT_PX : Infinity));
+
+  const slots = Math.max(MIN_ROWS, data.length);
+  const rows = Array.from({ length: slots }, (_, i) => data[i] ?? null);
+
+  const legend = (
+    <>
+      {rows.map((s, i) =>
+        s ? (
+          <div
+            key={s.label}
+            className="flex cursor-pointer items-center gap-2.5 rounded-md px-1.5 py-1 text-[12.5px] transition-colors"
+            style={{ background: hover === i ? "var(--color-surface-2)" : "transparent" }}
+            onMouseEnter={() => setHover(i)}
+            onMouseLeave={() => setHover(null)}
+          >
+            <span className="h-4 w-1.5 shrink-0 rounded-full" style={{ background: RAMP[i % RAMP.length] }} />
+            <span className="truncate font-medium text-ink-soft">{s.label}</span>
+            <span className="ml-auto shrink-0 tabular text-ink">{money(s.value)}</span>
+            <span className="w-9 shrink-0 text-right tabular text-[11px] text-muted">{total > 0 ? Math.round((s.value / total) * 100) : 0}%</span>
+          </div>
+        ) : (
+          <div key={`empty-${i}`} className="flex items-center gap-2.5 px-1.5 py-1 text-[12.5px]">
+            <span className="h-4 w-1.5 shrink-0 rounded-full bg-border" />
+            <span className="text-muted/70">Awaiting data</span>
+          </div>
+        ),
+      )}
+    </>
+  );
+
   return (
     <Card className="flex h-full flex-col">
       <div className="text-[15px] font-semibold text-ink">{title}</div>
       <div className="mt-0.5 text-[12.5px] text-muted">{subtitle}</div>
-      {data.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center text-[12.5px] text-muted">Nothing to show yet</div>
-      ) : (
-        <>
-          <div ref={boxRef} className={`mt-2 min-h-0 flex-1 ${wide ? "flex items-stretch gap-6" : "flex flex-col"}`}>
-            <div
-              className={wide ? "shrink-0 self-center" : "min-h-0 w-full flex-1 py-1"}
-              style={wide ? { width: donutSide, height: donutSide } : undefined}
-            >
-              <Donut data={data} hover={hover} onHover={setHover} />
-            </div>
-            <div className={`space-y-1 ${wide ? "my-auto min-w-0 flex-1" : "shrink-0"}`}>
-              {data.map((s, i) => (
-                <div
-                  key={s.label}
-                  className="flex cursor-pointer items-center gap-2.5 rounded-md px-1.5 py-1 text-[12.5px] transition-colors"
-                  style={{ background: hover === i ? "var(--color-surface-2)" : "transparent" }}
-                  onMouseEnter={() => setHover(i)}
-                  onMouseLeave={() => setHover(null)}
-                >
-                  <span className="h-4 w-1.5 shrink-0 rounded-full" style={{ background: RAMP[i % RAMP.length] }} />
-                  <span className="truncate font-medium text-ink-soft">{s.label}</span>
-                  <span className="ml-auto shrink-0 tabular text-ink">{money(s.value)}</span>
-                  <span className="w-9 shrink-0 text-right tabular text-[11px] text-muted">{total > 0 ? Math.round((s.value / total) * 100) : 0}%</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="mt-3 flex items-center justify-between border-t border-line pt-3">
-            <span className="text-[12.5px] text-muted">Grand total</span>
-            <span className="text-[15px] font-semibold tabular text-ink">{money(total)}</span>
-          </div>
-        </>
-      )}
+      <div ref={boxRef} className={`mt-2 min-h-0 flex-1 ${wide ? "flex items-center gap-5" : "flex flex-col items-center justify-center gap-1"}`}>
+        <div className="shrink-0" style={{ width: donutPx, height: donutPx }}>
+          {data.length ? <Donut data={data} hover={hover} onHover={setHover} /> : <EmptyRing />}
+        </div>
+        {wide ? (
+          <div className="min-w-0 flex-1 space-y-1 self-stretch overflow-y-auto py-1">{legend}</div>
+        ) : (
+          <div className="w-full space-y-1 overflow-y-auto" style={{ maxHeight: MIN_ROWS * ROW_PX }}>{legend}</div>
+        )}
+      </div>
+      <div className="mt-3 flex items-center justify-between border-t border-line pt-3">
+        <span className="text-[12.5px] text-muted">Grand total</span>
+        <span className="text-[15px] font-semibold tabular text-ink">{money(total)}</span>
+      </div>
     </Card>
+  );
+}
+
+/** A faint, empty donut ring shown while a widget is still waiting for its first data. */
+function EmptyRing() {
+  return (
+    <svg viewBox="0 0 140 140" className="h-full w-full" role="img" aria-label="Awaiting data">
+      <circle cx="70" cy="70" r="48.5" fill="none" stroke="var(--color-line)" strokeWidth="35" />
+    </svg>
   );
 }
 
@@ -525,28 +551,36 @@ function LeadTimeWidget({ lt }: { lt: DashboardData["leadTimes"] }) {
         <span className="mb-0.5 text-[13px] text-muted">mo avg · {lt.blendedDays}d</span>
       </div>
       <div className="mt-3.5 min-h-0 flex-1 space-y-2 overflow-y-auto">
-        {lt.perFacility.map((f) => (
-          <div key={f.code} className="flex items-center gap-3">
-            <div className="relative flex h-8 min-w-0 flex-1 items-center">
-              <div
-                className="absolute inset-y-0 left-0"
-                style={{
-                  width: `${Math.max(8, (f.avgDays / maxAvg) * 100)}%`,
-                  background:
-                    "linear-gradient(90deg, color-mix(in srgb, var(--color-chart) 3%, transparent), color-mix(in srgb, var(--color-chart) 24%, transparent))",
-                }}
-              >
-                <span className="absolute inset-y-0 right-0 w-[3px]" style={{ background: "var(--color-chart)" }} />
+        {Array.from({ length: Math.max(3, lt.perFacility.length) }, (_, i) => lt.perFacility[i] ?? null).map((f, i) =>
+          f ? (
+            <div key={f.code} className="flex items-center gap-3">
+              <div className="relative flex h-8 min-w-0 flex-1 items-center">
+                <div
+                  className="absolute inset-y-0 left-0"
+                  style={{
+                    width: `${Math.max(8, (f.avgDays / maxAvg) * 100)}%`,
+                    background:
+                      "linear-gradient(90deg, color-mix(in srgb, var(--color-chart) 3%, transparent), color-mix(in srgb, var(--color-chart) 24%, transparent))",
+                  }}
+                >
+                  <span className="absolute inset-y-0 right-0 w-[3px]" style={{ background: "var(--color-chart)" }} />
+                </div>
+                {/* The label rides over the bar, not inside it — a tiny bar can't clip its own name. */}
+                <span className="relative z-10 pl-1.5 text-[12.5px] font-medium text-ink">{f.code}</span>
               </div>
-              {/* The label rides over the bar, not inside it — a tiny bar can't clip its own name. */}
-              <span className="relative z-10 pl-1.5 text-[12.5px] font-medium text-ink">{f.code}</span>
+              <span className="shrink-0 text-[12.5px] tabular">
+                <span className="font-semibold text-ink">{mo(f.avgDays)} mo</span>
+                <span className="text-muted"> · {f.lots} {f.lots === 1 ? "lot" : "lots"}</span>
+              </span>
             </div>
-            <span className="shrink-0 text-[12.5px] tabular">
-              <span className="font-semibold text-ink">{mo(f.avgDays)} mo</span>
-              <span className="text-muted"> · {f.lots} {f.lots === 1 ? "lot" : "lots"}</span>
-            </span>
-          </div>
-        ))}
+          ) : (
+            <div key={`empty-${i}`} className="flex items-center gap-3">
+              <div className="relative flex h-8 min-w-0 flex-1 items-center rounded-[3px]" style={{ background: "color-mix(in srgb, var(--color-chart) 4%, transparent)" }}>
+                <span className="relative z-10 pl-1.5 text-[12.5px] text-muted/70">Awaiting data</span>
+              </div>
+            </div>
+          ),
+        )}
       </div>
     </Card>
   );
