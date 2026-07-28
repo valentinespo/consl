@@ -48,8 +48,12 @@ export function AppShell({
   return (
     <CurrencyProvider symbol={currencySymbol} locale={locale} code={currencyCode}>
       <AccessProvider caps={caps}>
-      <div className="flex h-dvh flex-col bg-header">
-        <AppHeader onMenu={() => setOpen(true)} orgs={orgs} />
+      <div className="relative flex h-dvh flex-col bg-header">
+        {/* The header floats over the page as a frosted overlay — content scrolling in the panel
+            below passes beneath it and blurs. Over the static sidebar it reads as solid gray. */}
+        <div className="absolute inset-x-0 top-0 z-30">
+          <AppHeader onMenu={() => setOpen(true)} orgs={orgs} />
+        </div>
 
         {/* Mobile drawer */}
         {open && (
@@ -69,11 +73,15 @@ export function AppShell({
         )}
 
         <div className="flex min-h-0 flex-1">
-          <div className="hidden h-full shrink-0 lg:block">
+          {/* Sidebar content starts below the header; the gray beneath the frosted bar is the
+              same canvas, so the left half of the header still reads as one merged surface. */}
+          <div className="hidden h-full shrink-0 pt-14 lg:block">
             <Sidebar orgName={orgName} allowed={allowed} />
           </div>
-          {/* The open page: white, its own hairline edge, curved top corners over the gray. */}
-          <main className="min-w-0 flex-1 overflow-y-auto rounded-t-[14px] border border-border bg-bg">
+          {/* The open page: white, its own hairline edge, curved top corners over the gray. It
+              reaches the top of the viewport, tucked under the frosted header — pt-14 keeps
+              resting content clear of the bar, and scrolled content blurs beneath it. */}
+          <main className="min-w-0 flex-1 overflow-y-auto rounded-t-[14px] border border-border bg-bg pt-14">
             <div className="mx-auto max-w-[1180px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</div>
           </main>
         </div>

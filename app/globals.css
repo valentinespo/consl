@@ -58,6 +58,15 @@ html[data-theme="dark"] .iso-invert {
   filter: invert(1);
 }
 
+/* Frosted chrome: the header is a translucent wash of the chrome gray with a backdrop blur, so
+ * page content scrolling beneath it smears softly instead of clipping. Over the sidebar (flat,
+ * static) it renders indistinguishable from the solid gray, keeping the merged-surface look. */
+.chrome-blur {
+  background: color-mix(in srgb, var(--color-header) 62%, transparent);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  backdrop-filter: blur(10px) saturate(1.1);
+}
+
 html[data-theme="dark"] * {
   scrollbar-color: #3d3d43 transparent;
 }

@@ -31,7 +31,7 @@ export function AppHeader({ onMenu, orgs = [] }: { onMenu?: () => void; orgs?: M
   }, []);
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 bg-header px-3 sm:grid sm:grid-cols-[1fr_minmax(0,560px)_1fr] sm:gap-4">
+    <header className="chrome-blur flex h-14 shrink-0 items-center gap-3 px-3 sm:grid sm:grid-cols-[1fr_minmax(0,560px)_1fr] sm:gap-4">
       <div className="flex min-w-0 items-center gap-2">
         {onMenu && (
           <button
