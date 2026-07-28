@@ -10,17 +10,27 @@ const C = 70; // centre
 const R = 66; // outer radius
 const IR = 31; // inner radius — a small hole, the reference's thick ring
 const CR = 3; // corner rounding — drawn inset, then a fat round-joined stroke restores the size
-const PAD = 0.13; // angular seam between slices (at the outer edge, net of the stroke expansion)
+const GAP = 2.6; // seam between slices, in viewBox px — constant width from hole to rim
 
 const pt = (rad: number, a: number) => `${C + rad * Math.cos(a)} ${C + rad * Math.sin(a)}`;
 
-/** An annular wedge from a0 to a1, inset by CR — the same-colour round-joined stroke that wraps
- *  it grows it back to full size with every corner softly rounded, like the reference. */
-function sector(a0: number, a1: number) {
-  const ro = R - CR;
-  const ri = IR + CR;
-  const large = a1 - a0 > Math.PI ? 1 : 0;
-  return `M ${pt(ro, a0)} A ${ro} ${ro} 0 ${large} 1 ${pt(ro, a1)} L ${pt(ri, a1)} A ${ri} ${ri} 0 ${large} 0 ${pt(ri, a0)} Z`;
+/** An annular wedge from a0 to a1, inset by `cr` on every side plus half the seam — the
+ *  same-colour round-joined stroke that wraps it grows it back so every corner rounds softly
+ *  and the visible edge lands exactly GAP/2 from the slice boundary. The seam is a constant
+ *  pixel width, so each arc gets its own angular inset (wider near the hole than at the rim);
+ *  that keeps neighbouring edges parallel instead of pinching shut at the centre. */
+function sector(a0: number, a1: number, cr: number) {
+  const ro = R - cr;
+  const ri = IR + cr;
+  const io = (GAP / 2 + cr) / ro;
+  const ii = (GAP / 2 + cr) / ri;
+  const o0 = a0 + io;
+  const o1 = Math.max(o0 + 0.01, a1 - io);
+  const i0 = a0 + ii;
+  const i1 = Math.max(i0 + 0.01, a1 - ii);
+  const lo = o1 - o0 > Math.PI ? 1 : 0;
+  const li = i1 - i0 > Math.PI ? 1 : 0;
+  return `M ${pt(ro, o0)} A ${ro} ${ro} 0 ${lo} 1 ${pt(ro, o1)} L ${pt(ri, i1)} A ${ri} ${ri} 0 ${li} 0 ${pt(ri, i0)} Z`;
 }
 
 /**
@@ -49,12 +59,13 @@ export function Donut({
     // A full-circle slice can't be one arc; shave a hair off so the path stays drawable.
     const a1 = angle + Math.min(frac, 0.9999) * Math.PI * 2;
     angle = a0 + frac * Math.PI * 2;
-    // Seam between slices — clamped so a sliver of a slice still draws as a dot, not nothing.
-    const pad = Math.min(PAD, (a1 - a0) * 0.4);
-    const s0 = a0 + pad / 2;
-    const s1 = Math.max(s0 + 0.02, a1 - pad / 2);
+    // Corner rounding shrinks for sliver slices: the fat stroke that rounds a big wedge would
+    // balloon a tiny one past its real share, so it scales down until the slice (plus its seam)
+    // fits inside its own angle — a hairline sliver stays a hairline.
+    const span = a1 - a0;
+    const cr = Math.max(0.6, Math.min(CR, (span * (IR + CR) - GAP) / 2 - 0.2));
     const mid = (a0 + a1) / 2;
-    return { ...d, i, color: palette[i % palette.length], d: sector(s0, s1), pct: frac * 100, mid };
+    return { ...d, i, color: palette[i % palette.length], d: sector(a0, a1, cr), cr, pct: frac * 100, mid };
   });
   const dim = (i: number) => (hover == null || hover === i ? 1 : 0.35);
   const labelRad = (R + IR) / 2;
@@ -67,7 +78,7 @@ export function Donut({
           d={s.d}
           fill={s.color}
           stroke={s.color}
-          strokeWidth={CR * 2}
+          strokeWidth={s.cr * 2}
           strokeLinejoin="round"
           style={{ opacity: dim(s.i), transition: "opacity .15s", cursor: "pointer" }}
           onMouseEnter={() => onHover(s.i)}
