@@ -54,10 +54,12 @@ export function Donut({
   const TWO_PI = Math.PI * 2;
 
   // Give every non-zero slice a minimum drawable span so a near-zero one (e.g. $50 of $300k)
-  // still renders as a clean rounded nub with a gap on each side, instead of collapsing to
-  // nothing or being swallowed by a huge neighbour's rounding. The extra angle is borrowed
-  // proportionally from the big slices; the printed % labels keep each slice's TRUE share.
-  const MIN = 0.12; // ~7°: a nub plus its two seams
+  // still shows, with a gap on each side, instead of collapsing to nothing or being swallowed
+  // by a huge neighbour's rounding. The extra angle is borrowed proportionally from the big
+  // slices; the printed % labels keep each slice's TRUE share. A slice this small is drawn as a
+  // fully round-ended pill (see NUB) rather than a wedge — a squared-off sliver looks broken.
+  const MIN = 0.2; // ~11°: room for the pill plus a gap each side
+  const NUB = 6; // pill width for a sub-MIN slice, in viewBox px — round caps top and bottom
   const raw = data.map((d) => (d.value / total) * TWO_PI);
   let deficit = 0;
   let big = 0;
@@ -75,31 +77,53 @@ export function Donut({
     const span = Math.min(spans[i], TWO_PI * 0.9999);
     const a1 = a0 + span;
     angle = a1;
-    // Corner rounding shrinks for narrow slices: the fat stroke that rounds a big wedge would
-    // balloon a thin one past its share, so it scales down until the slice (plus its seams)
-    // fits inside its own angle — a nub stays a nub.
-    const cr = Math.max(0.6, Math.min(CR, (span * (IR + CR) - GAP) / 2 - 0.2));
     const mid = (a0 + a1) / 2;
-    return { ...d, i, color: palette[i % palette.length], d: sector(a0, a1, cr), cr, pct: (d.value / total) * 100, mid };
+    // Sub-MIN slices had to be bumped to the floor: draw them as a round-capped radial pill
+    // (a capsule spanning the ring) so both ends are fully rounded, not a straight-topped sliver.
+    const tiny = raw[i] > 0 && raw[i] < MIN;
+    const r0 = IR + NUB / 2;
+    const r1 = R - NUB / 2;
+    const pill = tiny
+      ? { x1: C + r0 * Math.cos(mid), y1: C + r0 * Math.sin(mid), x2: C + r1 * Math.cos(mid), y2: C + r1 * Math.sin(mid) }
+      : null;
+    // Corner rounding shrinks for narrow wedges so a thin one can't balloon past its share.
+    const cr = Math.max(0.6, Math.min(CR, (span * (IR + CR) - GAP) / 2 - 0.2));
+    return { ...d, i, color: palette[i % palette.length], pct: (d.value / total) * 100, mid, pill, d: tiny ? "" : sector(a0, a1, cr), cr };
   });
   const dim = (i: number) => (hover == null || hover === i ? 1 : 0.35);
   const labelRad = (R + IR) / 2;
 
   return (
     <svg viewBox="0 0 140 140" preserveAspectRatio="xMidYMid meet" className="h-full w-full" role="img">
-      {segs.map((s) => (
-        <path
-          key={s.label}
-          d={s.d}
-          fill={s.color}
-          stroke={s.color}
-          strokeWidth={s.cr * 2}
-          strokeLinejoin="round"
-          style={{ opacity: dim(s.i), transition: "opacity .15s", cursor: "pointer" }}
-          onMouseEnter={() => onHover(s.i)}
-          onMouseLeave={() => onHover(null)}
-        />
-      ))}
+      {segs.map((s) =>
+        s.pill ? (
+          <line
+            key={s.label}
+            x1={s.pill.x1}
+            y1={s.pill.y1}
+            x2={s.pill.x2}
+            y2={s.pill.y2}
+            stroke={s.color}
+            strokeWidth={NUB}
+            strokeLinecap="round"
+            style={{ opacity: dim(s.i), transition: "opacity .15s", cursor: "pointer" }}
+            onMouseEnter={() => onHover(s.i)}
+            onMouseLeave={() => onHover(null)}
+          />
+        ) : (
+          <path
+            key={s.label}
+            d={s.d}
+            fill={s.color}
+            stroke={s.color}
+            strokeWidth={s.cr * 2}
+            strokeLinejoin="round"
+            style={{ opacity: dim(s.i), transition: "opacity .15s", cursor: "pointer" }}
+            onMouseEnter={() => onHover(s.i)}
+            onMouseLeave={() => onHover(null)}
+          />
+        ),
+      )}
       {/* Share printed on slices with room for it — bold, white, reference-sized. */}
       {segs
         .filter((s) => s.pct >= 6)

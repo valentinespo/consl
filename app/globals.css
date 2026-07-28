@@ -195,6 +195,34 @@ html.theme-fade *::after {
   scrollbar-color: #d4d4d4 transparent;
 }
 
+/* An always-present, violet scrollbar for panels that scroll (dashboard breakdowns, bar lists),
+ * so it reads as scrollable at a glance instead of hiding as an overlay bar. Styling the WebKit
+ * scrollbar switches it from overlay to a persistent bar, which only appears when content
+ * actually overflows. `scrollbar-gutter: stable` reserves its lane so the thumb never sits on
+ * top of the values. */
+.scroll-visible {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-chart) 45%, transparent) transparent;
+  scrollbar-gutter: stable;
+}
+.scroll-visible::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-visible::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-chart) 45%, transparent);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.scroll-visible:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-chart) 70%, transparent);
+  background-clip: padding-box;
+}
+.scroll-visible::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 /* Hover explanations (HoverHint): fade in on mount, since they're portalled and can't use
    a CSS group-hover the way the in-place popovers do. */
 @keyframes hint-in {

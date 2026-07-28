@@ -42,7 +42,7 @@ const WIDGETS: Record<string, Meta> = {
   valueByBucket: { title: "Value by bucket", minW: 4, minH: 3, w: 6, h: 4 },
   reorderAlerts: { title: "Reorder alerts", minW: 3, minH: 3, w: 4, h: 3 },
   daysCover: { title: "Months of cover", minW: 2, minH: 2, w: 3, h: 2 },
-  leadTime: { title: "Production lead time", minW: 4, minH: 4, w: 4, h: 5 },
+  leadTime: { title: "Production lead time", minW: 4, minH: 3, w: 4, h: 5 },
 };
 
 const DEFAULT_LAYOUT: Item[] = [
@@ -128,6 +128,9 @@ export function DashboardGrid({
   const addRef = useRef<HTMLDivElement>(null);
   const itemsRef = useRef(items);
   itemsRef.current = items;
+  // Snapshot of the layout as it was when editing began, so Cancel can restore it — drags
+  // autosave as they happen, so reverting means writing the snapshot back, not just closing.
+  const preEdit = useRef<Item[]>(items);
   const [, startSave] = useTransition();
 
   useEffect(() => {
@@ -220,7 +223,7 @@ export function DashboardGrid({
 
   const dots = editing
     ? {
-        backgroundImage: "radial-gradient(circle, rgba(37,99,235,0.30) 2px, transparent 2px)",
+        backgroundImage: "radial-gradient(circle, color-mix(in srgb, var(--color-chart) 40%, transparent) 2px, transparent 2px)",
         backgroundSize: `${cellW + GAP}px ${ROW_H + GAP}px`,
         backgroundPosition: "0 0",
       }
@@ -251,9 +254,21 @@ export function DashboardGrid({
               )}
             </div>
           )}
+          {!isMobile && editing && (
+            <button
+              onClick={() => { setItems(preEdit.current); persist(preEdit.current); setEditing(false); setAddOpen(false); }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-[12.5px] font-medium text-ink-soft transition-colors hover:bg-surface-2"
+            >
+              <X size={14} /> Cancel
+            </button>
+          )}
           {!isMobile && (
             <button
-              onClick={() => { if (editing) persist(itemsRef.current); setEditing((v) => !v); setAddOpen(false); }}
+              onClick={() => {
+                if (editing) { persist(itemsRef.current); setEditing(false); }
+                else { preEdit.current = itemsRef.current; setEditing(true); }
+                setAddOpen(false);
+              }}
               className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition-colors ${
                 editing ? "bg-ink text-bg" : "border border-border bg-surface text-ink-soft hover:bg-surface-2"
               }`}
@@ -274,7 +289,7 @@ export function DashboardGrid({
           ))}
         </div>
       ) : (
-        <div className={`relative rounded-xl transition-colors duration-200 ${editing ? "bg-accent-soft/30" : ""}`} style={{ height: gridH, ...dots }}>
+        <div className={`relative rounded-xl transition-colors duration-200 ${editing ? "bg-chart-soft/40" : ""}`} style={{ height: gridH, ...dots }}>
           {items.map((it) => {
             const p = pxOf(it);
             return (
@@ -285,7 +300,7 @@ export function DashboardGrid({
               >
                 <div
                   onPointerDown={(e) => onPointerDown(e, it.id, "move")}
-                  className={`relative h-full ${editing ? "cursor-grab rounded-xl ring-1 ring-accent-strong/40 ring-offset-2 ring-offset-[var(--color-bg,#fff)] active:cursor-grabbing" : ""}`}
+                  className={`relative h-full ${editing ? "cursor-grab rounded-xl ring-1 ring-chart/50 ring-offset-2 ring-offset-[var(--color-bg,#fff)] active:cursor-grabbing" : ""}`}
                 >
                   <div className={`h-full overflow-hidden rounded-[var(--radius-card)] ${editing ? "pointer-events-none select-none" : ""}`}>{renderContent(it.id, data)}</div>
 
@@ -475,9 +490,11 @@ function RingWidget({ title, subtitle, data, total }: { title: string; subtitle:
           {data.length ? <Donut data={data} hover={hover} onHover={setHover} /> : <EmptyRing />}
         </div>
         {wide ? (
-          <div className="min-w-0 flex-1 space-y-1 self-stretch overflow-y-auto py-1">{legend}</div>
+          // Vertically centred beside the donut (max-h-full + the row's items-center), scrolling
+          // only once the rows outgrow the card's height.
+          <div className="min-w-0 max-h-full flex-1 space-y-1 overflow-y-auto scroll-visible">{legend}</div>
         ) : (
-          <div className="w-full space-y-1 overflow-y-auto" style={{ maxHeight: MIN_ROWS * ROW_PX }}>{legend}</div>
+          <div className="w-full space-y-1 overflow-y-auto scroll-visible" style={{ maxHeight: MIN_ROWS * ROW_PX }}>{legend}</div>
         )}
       </div>
       <div className="mt-3 flex items-center justify-between border-t border-line pt-3">
@@ -550,7 +567,7 @@ function LeadTimeWidget({ lt }: { lt: DashboardData["leadTimes"] }) {
         <span className="text-[30px] font-semibold leading-none tracking-tight text-ink tabular">{mo(lt.blendedDays)}</span>
         <span className="mb-0.5 text-[13px] text-muted">mo avg · {lt.blendedDays}d</span>
       </div>
-      <div className="mt-3.5 min-h-0 flex-1 space-y-2 overflow-y-auto">
+      <div className="mt-3.5 min-h-0 flex-1 space-y-2 overflow-y-auto scroll-visible">
         {Array.from({ length: Math.max(3, lt.perFacility.length) }, (_, i) => lt.perFacility[i] ?? null).map((f, i) =>
           f ? (
             <div key={f.code} className="flex items-center gap-3">
