@@ -207,7 +207,7 @@ export function DateRangePicker({
         onClick={toggle}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="inline-flex h-9 items-stretch overflow-hidden rounded-[10px] border border-border bg-surface text-[12.5px] outline-none transition-colors hover:border-chart focus-visible:border-chart"
+        className="inline-flex h-9 items-stretch overflow-hidden rounded-[10px] border border-border bg-surface text-[12.5px] outline-none transition-colors hover:border-ink/25 focus-visible:border-ink/40"
       >
         <span className="flex items-center gap-1.5 px-3 font-medium text-ink">
           {presetLabel}
@@ -261,8 +261,8 @@ export function DateRangePicker({
                       onClick={() => setPicking(end)}
                       className={`h-9 min-w-0 flex-1 truncate rounded-lg border px-2.5 text-left text-[12.5px] transition-colors ${
                         picking === end
-                          ? "border-chart text-ink"
-                          : "border-border text-ink-soft hover:border-chart"
+                          ? "border-ink/40 text-ink"
+                          : "border-border text-ink-soft hover:border-ink/30"
                       }`}
                     >
                       {longDay(end === "from" ? draft.from : draft.to, locale)}

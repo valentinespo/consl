@@ -71,6 +71,13 @@ html[data-theme="dark"] .iso-invert {
   backdrop-filter: blur(10px) saturate(1.1);
 }
 
+/* Frosted readout card for chart hovers — explicit prefixes so the blur is guaranteed. */
+.tip-frost {
+  background: color-mix(in srgb, var(--color-surface) 66%, transparent);
+  -webkit-backdrop-filter: blur(10px) saturate(1.15);
+  backdrop-filter: blur(10px) saturate(1.15);
+}
+
 /* The chart hover pill's rolling date: the old label exits upward as the new one rises in. */
 @keyframes roll-in-up {
   from {

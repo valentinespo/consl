@@ -9,17 +9,17 @@ const H = 150;
 const TIP_W = 235; // estimate for edge-flipping; the card itself sizes to its content
 const LINE = "#8b5cf6"; // violet — the chart's own voice, distinct from the app's blue accent
 // Ease-in-AND-out (cubic): the markers accelerate away gently and settle softly onto the next
-// point instead of snapping — paired with a longer clock so the landing reads.
+// point instead of snapping.
 const EASE = "cubic-bezier(0.65, 0, 0.35, 1)";
-const GLIDE = "transform 0.45s " + EASE;
+const GLIDE = "transform 0.32s " + EASE;
 
-/** Smooth (cardinal-spline) line + area path through points already in 0..W / 0..H space. */
-function spline(pts: [number, number][]) {
+/** Smooth (cardinal-spline) line + area path through points in 0..w / 0..h space. */
+function spline(pts: [number, number][], w = W, h = H) {
   const n = pts.length;
   if (n === 0) return { line: "", area: "" };
   if (n === 1) {
     const [, y] = pts[0];
-    return { line: `M 0 ${y} L ${W} ${y}`, area: `M 0 ${y} L ${W} ${y} L ${W} ${H} L 0 ${H} Z` };
+    return { line: `M 0 ${y} L ${w} ${y}`, area: `M 0 ${y} L ${w} ${y} L ${w} ${h} L 0 ${h} Z` };
   }
   let line = `M ${pts[0][0]} ${pts[0][1]}`;
   for (let i = 0; i < n - 1; i++) {
@@ -33,7 +33,7 @@ function spline(pts: [number, number][]) {
     const c2y = p2[1] - (p3[1] - p1[1]) / 6;
     line += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2[0]} ${p2[1]}`;
   }
-  return { line, area: `${line} L ${pts[n - 1][0]} ${H} L ${pts[0][0]} ${H} Z` };
+  return { line, area: `${line} L ${pts[n - 1][0]} ${h} L ${pts[0][0]} ${h} Z` };
 }
 
 /**
@@ -125,6 +125,29 @@ export function ValueSparkline({ pts }: { pts: { day: string; total: number }[] 
   const spacingPx = n > 1 && plot.w ? plot.w / (n - 1) : 0;
   const hlW = Math.max(90, Math.min(300, spacingPx * 3));
   const hlLeft = hx - hlW / 2;
+
+  // The dot rides the actual curve between points (CSS motion path), so a fast sweep can't cut
+  // the corner across a bend the way a straight x/y transition does. Chord-length positions are
+  // indistinguishable from true arc length on a spline this smooth.
+  const pxPath = useMemo(() => {
+    if (n < 2 || !plot.w || !plot.h) return null;
+    const p2 = pts.map((p, i) => [(px(i) / W) * plot.w, (py(p.total) / H) * plot.h] as [number, number]);
+    let total = 0;
+    const cum = [0];
+    for (let i = 1; i < p2.length; i++) {
+      total += Math.hypot(p2[i][0] - p2[i - 1][0], p2[i][1] - p2[i - 1][1]);
+      cum.push(total);
+    }
+    return { d: spline(p2, plot.w, plot.h).line, fracs: cum.map((c) => (total ? c / total : 0)) };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pts, axis, plot.w, plot.h]);
+  const supportsOffset = useMemo(
+    () =>
+      typeof CSS !== "undefined" &&
+      typeof CSS.supports === "function" &&
+      CSS.supports("offset-path", "path('M 0 0 L 1 1')"),
+    [],
+  );
 
   // Rolling pill label: remember the previous date while the new one animates in.
   const [roll, setRoll] = useState<{ cur: string | null; prev: string | null; tick: number }>({
@@ -240,7 +263,7 @@ export function ValueSparkline({ pts }: { pts: { day: string; total: number }[] 
                 maskRepeat: "no-repeat",
                 WebkitMaskPosition: `${hlLeft}px 0`,
                 maskPosition: `${hlLeft}px 0`,
-                transition: `mask-position 0.45s ${EASE}, -webkit-mask-position 0.45s ${EASE}`,
+                transition: `mask-position 0.32s ${EASE}, -webkit-mask-position 0.32s ${EASE}`,
               }}
             >
               <path
@@ -263,18 +286,32 @@ export function ValueSparkline({ pts }: { pts: { day: string; total: number }[] 
                 className="pointer-events-none absolute bottom-0 top-0 w-px"
                 style={{ left: 0, transform: `translateX(${hx}px)`, transition: GLIDE, background: LINE, opacity: 0.85 }}
               />
-              <div
-                key={`dot${sess}`}
-                className="pointer-events-none absolute left-0 top-0 h-[10px] w-[10px] rounded-full border-2 border-white"
-                style={{
-                  background: LINE,
-                  transform: `translate(calc(${hx}px - 50%), calc(${hy}px - 50%))`,
-                  transition: GLIDE,
-                }}
-              />
+              {pxPath && supportsOffset && hover != null ? (
+                <div
+                  key={`dot${sess}`}
+                  className="pointer-events-none absolute left-0 top-0 h-[10px] w-[10px] rounded-full border-2 border-white"
+                  style={{
+                    background: LINE,
+                    offsetPath: `path("${pxPath.d}")`,
+                    offsetRotate: "0deg",
+                    offsetDistance: `${(pxPath.fracs[hover] * 100).toFixed(3)}%`,
+                    transition: `offset-distance 0.32s ${EASE}`,
+                  }}
+                />
+              ) : (
+                <div
+                  key={`dot${sess}`}
+                  className="pointer-events-none absolute left-0 top-0 h-[10px] w-[10px] rounded-full border-2 border-white"
+                  style={{
+                    background: LINE,
+                    transform: `translate(calc(${hx}px - 50%), calc(${hy}px - 50%))`,
+                    transition: GLIDE,
+                  }}
+                />
+              )}
               <div
                 key={`tip${sess}`}
-                className="pointer-events-none absolute left-0 top-1 z-20 rounded-2xl bg-surface/70 px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.14)] backdrop-blur-[6px]"
+                className="tip-frost pointer-events-none absolute left-0 top-1 z-20 rounded-2xl px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.14)]"
                 style={{ transform: `translateX(${tipLeft}px)`, transition: GLIDE }}
               >
                 <div className="whitespace-nowrap text-[13px] font-semibold text-ink">{dayLabel(hp.day, true)}</div>
@@ -299,6 +336,9 @@ export function ValueSparkline({ pts }: { pts: { day: string; total: number }[] 
             style={{
               left: `${frac * 100}%`,
               transform: frac === 0 ? "none" : frac === 1 ? "translateX(-100%)" : "translateX(-50%)",
+              // Static labels duck out of the pill's way instead of doubling up beside it.
+              opacity: hp && plot.w > 0 && Math.abs(frac * plot.w - hx) < 46 ? 0 : 1,
+              transition: "opacity 0.15s ease",
             }}
           >
             {dayLabel(pts[i].day)}
@@ -309,7 +349,8 @@ export function ValueSparkline({ pts }: { pts: { day: string; total: number }[] 
             key={`pill${sess}`}
             className="absolute left-0 top-0 z-10 inline-flex rounded-full bg-ink px-2.5 py-[4px] text-[10.5px] font-medium text-bg"
             style={{
-              transform: `translateX(calc(${Math.max(28, Math.min(hx, plot.w - 28))}px - 50%))`,
+              // Centred exactly on the rule — the pill and the line always agree.
+              transform: `translateX(calc(${hx}px - 50%))`,
               transition: GLIDE,
             }}
           >

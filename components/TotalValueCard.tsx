@@ -43,7 +43,7 @@ export function TotalValueCard({
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div>
           <div className="text-[36px] font-semibold leading-none tracking-tight text-ink tabular">{money(totals.total)}</div>
-          <div className="mt-1.5 text-[13px] text-muted">Total inventory value</div>
+          <div className="mt-1.5 text-[13px] text-muted">Today&apos;s total inventory value</div>
         </div>
         {history && history.length > 0 && (
           <div className="flex flex-col items-end gap-1.5">
@@ -74,7 +74,7 @@ export function TotalValueCard({
 
       <div className="mt-3.5 flex flex-wrap gap-2">
         {BUCKETS.map((p) => (
-          <span key={p.label} className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-[13px]">
+          <span key={p.label} className="inline-flex items-center gap-2 rounded-[10px] border border-border bg-surface px-3 py-1 text-[13px]">
             <span className="h-1.5 w-1.5 rounded-full" style={{ background: p.color }} />
             {p.label} <span className="font-medium tabular text-ink">{money(totals[p.key])}</span>
           </span>
