@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { Pencil, Check, Clock, Plus, X, Move, Scaling, AlertTriangle, FileText, Gauge, PieChart, Layers, CheckCircle2, ShoppingCart, Zap, Truck } from "@/components/icons";
+import { Pencil, Check, Plus, X, Move, Scaling, AlertTriangle, FileText, Gauge, PieChart, Layers, CheckCircle2, ShoppingCart, Zap, Truck } from "@/components/icons";
 import type { LucideIcon } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { Card, PageHeader, SectionTitle } from "@/components/ui";
@@ -476,59 +476,69 @@ function RecentLotsWidget({ lots }: { lots: RecentLot[] }) {
   );
 }
 
-/** Measured production lead time: the blended account average against the configured setting,
- *  then each producing facility on its own bar. Bars are relative to the slowest facility. */
+/** Measured production lead time, in the reference language: a bold title with a delta chip
+ *  against the configured setting, a quiet subtitle, the blended average as the headline stat,
+ *  then each producing facility as a violet gradient bar — label riding inside the bar, a strong
+ *  cap at its end, the value out right. Bars are relative to the slowest facility. */
 function LeadTimeWidget({ lt }: { lt: DashboardData["leadTimes"] }) {
   const mo = (d: number) => (d / 30.44).toFixed(1);
   if (lt.blendedDays == null) {
     return (
       <Card className="flex h-full flex-col">
-        <WidgetHead icon={Clock} title="Production lead time" tint="accent" />
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted">
-          <Clock size={24} />
-          <span className="text-[12.5px]">Finish a lot to start measuring</span>
+        <div className="text-[15px] font-semibold text-ink">Production lead time</div>
+        <div className="flex flex-1 items-center justify-center text-[12.5px] text-muted">
+          Finish a lot to start measuring
         </div>
       </Card>
     );
   }
   const diff = lt.blendedDays - lt.configuredDays;
+  const onTarget = Math.abs(diff) < 4;
   const maxAvg = Math.max(...lt.perFacility.map((f) => f.avgDays), 1);
+  const chip = onTarget
+    ? { text: "on target", bg: "var(--color-surface-2)", fg: "var(--color-muted)" }
+    : diff < 0
+      ? { text: `↓ ${Math.abs(diff)}d faster`, bg: "#dcfce7", fg: "#16a34a" }
+      : { text: `↑ ${diff}d slower`, bg: "#fef3c7", fg: "#b45309" };
   return (
     <Card className="flex h-full flex-col">
-      <WidgetHead
-        icon={Clock}
-        title="Production lead time"
-        tint="accent"
-        right={<span className="text-[11px] text-muted">{lt.lots} finished lots</span>}
-      />
-      <div className="flex items-end gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[15px] font-semibold text-ink">Production lead time</span>
+        <span
+          className="rounded-full px-2 py-0.5 text-[11px] font-semibold leading-none"
+          style={{ background: chip.bg, color: chip.fg, paddingTop: 4, paddingBottom: 4 }}
+        >
+          {chip.text}
+        </span>
+      </div>
+      <div className="mt-1 truncate text-[12.5px] text-muted">
+        PO to finished · {lt.lots} lots · vs {mo(lt.configuredDays)} mo
+      </div>
+      <div className="mt-2.5 flex items-end gap-2">
         <span className="text-[30px] font-semibold leading-none tracking-tight text-ink tabular">{mo(lt.blendedDays)}</span>
         <span className="mb-0.5 text-[13px] text-muted">mo avg · {lt.blendedDays}d</span>
       </div>
-      <div className="mt-1.5 text-[11.5px]">
-        {Math.abs(diff) < 4 ? (
-          <span className="text-muted">matches your {mo(lt.configuredDays)}mo lead time setting</span>
-        ) : diff < 0 ? (
-          <span className="font-medium text-positive">{Math.abs(diff)}d faster than your {mo(lt.configuredDays)}mo setting</span>
-        ) : (
-          <span className="font-medium text-warn">{diff}d slower than your {mo(lt.configuredDays)}mo setting</span>
-        )}
-      </div>
       <div className="mt-3.5 min-h-0 flex-1 space-y-2 overflow-y-auto">
-        {lt.perFacility.map((f, i) => (
-          <div key={f.code} className="text-[12px]">
-            <div className="mb-1 flex items-baseline justify-between">
-              <span className="font-medium text-ink-soft">{f.code}</span>
-              <span className="tabular text-muted">
-                <span className="font-medium text-ink">{mo(f.avgDays)} mo</span> · {f.lots} {f.lots === 1 ? "lot" : "lots"}
-              </span>
-            </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
+        {lt.perFacility.map((f) => (
+          <div key={f.code} className="flex items-center gap-3">
+            <div className="relative flex h-8 min-w-0 flex-1 items-center">
               <div
-                className="h-full rounded-full"
-                style={{ width: `${(f.avgDays / maxAvg) * 100}%`, background: BLUES[i % BLUES.length] }}
-              />
+                className="absolute inset-y-0 left-0"
+                style={{
+                  width: `${Math.max(8, (f.avgDays / maxAvg) * 100)}%`,
+                  background:
+                    "linear-gradient(90deg, color-mix(in srgb, var(--color-chart) 3%, transparent), color-mix(in srgb, var(--color-chart) 24%, transparent))",
+                }}
+              >
+                <span className="absolute inset-y-0 right-0 w-[3px]" style={{ background: "var(--color-chart)" }} />
+              </div>
+              {/* The label rides over the bar, not inside it — a tiny bar can't clip its own name. */}
+              <span className="relative z-10 pl-1.5 text-[12.5px] font-medium text-ink">{f.code}</span>
             </div>
+            <span className="shrink-0 text-[12.5px] tabular">
+              <span className="font-semibold text-ink">{mo(f.avgDays)} mo</span>
+              <span className="text-muted"> · {f.lots} {f.lots === 1 ? "lot" : "lots"}</span>
+            </span>
           </div>
         ))}
       </div>
