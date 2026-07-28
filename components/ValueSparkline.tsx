@@ -6,7 +6,7 @@ import { compactMoney, niceTicks } from "@/lib/chart";
 
 const W = 1000;
 const H = 150;
-const TIP_W = 210; // estimate for edge-flipping; the card itself sizes to its content
+const TIP_W = 235; // estimate for edge-flipping; the card itself sizes to its content
 const LINE = "#8b5cf6"; // violet — the chart's own voice, distinct from the app's blue accent
 const EASE = "cubic-bezier(0.16, 0.84, 0.44, 1)"; // ease-out glide for everything that follows the cursor
 const GLIDE = "transform 0.3s " + EASE;
@@ -71,11 +71,22 @@ export function ValueSparkline({ pts }: { pts: { day: string; total: number }[] 
     [pts, axis],
   );
 
-  // Enough labels to read the axis, few enough not to collide on a narrow widget.
-  const xLabelIdx = useMemo(() => {
-    if (n <= 1) return [0];
+  // Axis labels at perfectly even positions, each naming the nearest day. Binding labels to raw
+  // point indices made the rhythm lumpy on short windows (8 days ÷ 5 labels rounds unevenly);
+  // a label is a scale marker, not a data dot, so even spacing wins.
+  const xTicks = useMemo(() => {
+    if (n <= 1) return [{ frac: 0.5, i: 0 }];
     const want = Math.min(n, 5);
-    return Array.from({ length: want }, (_, k) => Math.round((k / (want - 1)) * (n - 1)));
+    const out: { frac: number; i: number }[] = [];
+    let last = -1;
+    for (let k = 0; k < want; k++) {
+      const frac = k / (want - 1);
+      const i = Math.round(frac * (n - 1));
+      if (i === last) continue;
+      last = i;
+      out.push({ frac, i });
+    }
+    return out;
   }, [n]);
 
   const dayLabel = (iso: string, withWeekday = false) =>
@@ -166,20 +177,34 @@ export function ValueSparkline({ pts }: { pts: { day: string; total: number }[] 
               <mask id="spark-edge-mask" maskUnits="userSpaceOnUse" x="0" y="-10" width={W} height={H + 20}>
                 <rect x="0" y="-10" width={W} height={H + 20} fill="url(#spark-edge)" />
               </mask>
+              {/* Vertical fade for the gridlines — dashes thin out toward the bottom like the fill. */}
+              <linearGradient id="spark-grid-v" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stopColor="#fff" stopOpacity="0.9" />
+                <stop offset="0.7" stopColor="#fff" stopOpacity="0.45" />
+                <stop offset="1" stopColor="#fff" stopOpacity="0.12" />
+              </linearGradient>
+              <mask id="spark-grid-v-mask" maskUnits="userSpaceOnUse" x="0" y="-10" width={W} height={H + 20}>
+                <rect x="0" y="-10" width={W} height={H + 20} fill="url(#spark-grid-v)" />
+              </mask>
             </defs>
-            {axis.ticks.map((t) => (
-              <line
-                key={t}
-                x1={0}
-                x2={W}
-                y1={py(t)}
-                y2={py(t)}
-                stroke="var(--color-border)"
-                strokeWidth={1}
-                strokeDasharray="3 6"
-                vectorEffect="non-scaling-stroke"
-              />
-            ))}
+            {/* Nested masks multiply: each dash row fades at the side edges AND toward the floor. */}
+            <g mask="url(#spark-edge-mask)">
+              <g mask="url(#spark-grid-v-mask)">
+                {axis.ticks.map((t) => (
+                  <line
+                    key={t}
+                    x1={0}
+                    x2={W}
+                    y1={py(t)}
+                    y2={py(t)}
+                    stroke="var(--color-border)"
+                    strokeWidth={1}
+                    strokeDasharray="3 6"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ))}
+              </g>
+            </g>
             <g mask="url(#spark-edge-mask)">
               <path d={area} fill="url(#spark-fill)" />
               <path
@@ -195,39 +220,37 @@ export function ValueSparkline({ pts }: { pts: { day: string; total: number }[] 
             </g>
           </svg>
 
-          {/* The gliding glow: a gradient-masked window that slides to the cursor while the copy
-              of the line inside counter-slides, so the full-strength segment travels along a line
-              that never moves. Both transforms share one clock, cancelling exactly. */}
+          {/* The gliding glow: a full-strength copy of the line that NEVER moves, revealed through
+              a gradient mask window that slides to the cursor. One animated property on one static
+              element — the glow physically cannot drift off the line, however fast the cursor. */}
           {hp && plot.w > 0 && (
-            <div
+            <svg
               key={`hl${sess}`}
-              className="pointer-events-none absolute inset-y-0 overflow-hidden"
+              viewBox={`0 0 ${W} ${H}`}
+              preserveAspectRatio="none"
+              className="pointer-events-none absolute inset-0 h-full w-full"
               style={{
-                width: hlW,
-                left: 0,
-                transform: `translateX(${hlLeft}px)`,
-                transition: GLIDE,
                 WebkitMaskImage: maskCss,
                 maskImage: maskCss,
+                WebkitMaskSize: `${hlW}px 100%`,
+                maskSize: `${hlW}px 100%`,
+                WebkitMaskRepeat: "no-repeat",
+                maskRepeat: "no-repeat",
+                WebkitMaskPosition: `${hlLeft}px 0`,
+                maskPosition: `${hlLeft}px 0`,
+                transition: `mask-position 0.3s ${EASE}, -webkit-mask-position 0.3s ${EASE}`,
               }}
             >
-              <svg
-                viewBox={`0 0 ${W} ${H}`}
-                preserveAspectRatio="none"
-                className="absolute inset-y-0 h-full"
-                style={{ width: plot.w, left: 0, transform: `translateX(${-hlLeft}px)`, transition: GLIDE }}
-              >
-                <path
-                  d={line}
-                  fill="none"
-                  stroke={LINE}
-                  strokeWidth={2.5}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  vectorEffect="non-scaling-stroke"
-                />
-              </svg>
-            </div>
+              <path
+                d={line}
+                fill="none"
+                stroke={LINE}
+                strokeWidth={2.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            </svg>
           )}
 
           {/* Marker and readout in pixels rather than SVG units, so the stretch can't skew them. */}
@@ -249,14 +272,14 @@ export function ValueSparkline({ pts }: { pts: { day: string; total: number }[] 
               />
               <div
                 key={`tip${sess}`}
-                className="pointer-events-none absolute left-0 top-1 z-20 rounded-2xl border border-border bg-surface px-3.5 py-2.5 shadow-xl"
+                className="pointer-events-none absolute left-0 top-1 z-20 rounded-2xl bg-surface/70 px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.14)] backdrop-blur-[6px]"
                 style={{ transform: `translateX(${tipLeft}px)`, transition: GLIDE }}
               >
-                <div className="whitespace-nowrap text-[12.5px] font-semibold text-ink">{dayLabel(hp.day, true)}</div>
-                <div className="mt-1 flex items-center whitespace-nowrap text-[12px]">
-                  <span className="mr-2 h-2 w-2 rounded-full" style={{ background: LINE }} />
-                  <span className="text-muted">Total</span>
-                  <span className="ml-4 tabular font-semibold text-ink">{money(hp.total)}</span>
+                <div className="whitespace-nowrap text-[13px] font-semibold text-ink">{dayLabel(hp.day, true)}</div>
+                <div className="mt-1.5 flex items-center whitespace-nowrap">
+                  <span className="mr-2.5 h-2.5 w-2.5 rounded-full" style={{ background: LINE }} />
+                  <span className="text-[12.5px] text-ink-soft">Total</span>
+                  <span className="ml-5 text-[14px] tabular font-semibold text-ink">{money(hp.total)}</span>
                 </div>
               </div>
             </>
@@ -267,13 +290,13 @@ export function ValueSparkline({ pts }: { pts: { day: string; total: number }[] 
       {/* X axis, offset to start where the plot starts so ticks sit under the points they name.
           The hovered day gets the dark pill; its label rolls as the date changes. */}
       <div className="relative ml-[52px] mt-2 h-[20px] text-[10.5px] leading-none text-ink-soft">
-        {xLabelIdx.map((i) => (
+        {xTicks.map(({ frac, i }) => (
           <span
             key={i}
             className="absolute top-[5px] whitespace-nowrap"
             style={{
-              left: `${(px(i) / W) * 100}%`,
-              transform: i === 0 ? "none" : i === n - 1 ? "translateX(-100%)" : "translateX(-50%)",
+              left: `${frac * 100}%`,
+              transform: frac === 0 ? "none" : frac === 1 ? "translateX(-100%)" : "translateX(-50%)",
             }}
           >
             {dayLabel(pts[i].day)}
