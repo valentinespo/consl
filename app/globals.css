@@ -67,6 +67,26 @@ html[data-theme="dark"] .iso-invert {
   backdrop-filter: blur(10px) saturate(1.1);
 }
 
+/* The chart hover pill's rolling date: the old label exits upward as the new one rises in. */
+@keyframes roll-in-up {
+  from {
+    transform: translateY(115%);
+    opacity: 0;
+  }
+}
+@keyframes roll-out-up {
+  to {
+    transform: translateY(-115%);
+    opacity: 0;
+  }
+}
+.roll-in {
+  animation: roll-in-up 0.2s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.roll-out {
+  animation: roll-out-up 0.2s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+
 html[data-theme="dark"] * {
   scrollbar-color: #3d3d43 transparent;
 }
