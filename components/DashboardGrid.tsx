@@ -378,15 +378,7 @@ function CoverWidget({ months }: { months: number }) {
     <Card className="flex h-full flex-col justify-between">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-[15px] font-semibold text-ink">Months of cover</span>
-        <span
-          className="rounded-full px-2 text-[11px] font-semibold leading-none"
-          style={{
-            paddingTop: 4,
-            paddingBottom: 4,
-            background: low ? "rgba(234,88,12,0.10)" : "color-mix(in srgb, var(--color-chart) 10%, transparent)",
-            color: low ? "#c2410c" : "var(--color-chart)",
-          }}
-        >
+        <span className={`inline-flex items-center rounded-full px-2 py-[4px] text-[11px] font-semibold leading-none ${low ? "pill-amber" : "pill-chart"}`}>
           {Math.round(frac * 100)}% of target
         </span>
       </div>
@@ -491,18 +483,15 @@ function LeadTimeWidget({ lt }: { lt: DashboardData["leadTimes"] }) {
   const onTarget = Math.abs(diff) < 4;
   const maxAvg = Math.max(...lt.perFacility.map((f) => f.avgDays), 1);
   const chip = onTarget
-    ? { text: "on target", bg: "var(--color-surface-2)", fg: "var(--color-muted)" }
+    ? { text: "on target", cls: "pill-neutral" }
     : diff < 0
-      ? { text: `↓ ${Math.abs(diff)}d faster`, bg: "#dcfce7", fg: "#16a34a" }
-      : { text: `↑ ${diff}d slower`, bg: "#fef3c7", fg: "#b45309" };
+      ? { text: `↓ ${Math.abs(diff)}d faster`, cls: "pill-green" }
+      : { text: `↑ ${diff}d slower`, cls: "pill-amber" };
   return (
     <Card className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[15px] font-semibold text-ink">Production lead time</span>
-        <span
-          className="rounded-full px-2 py-0.5 text-[11px] font-semibold leading-none"
-          style={{ background: chip.bg, color: chip.fg, paddingTop: 4, paddingBottom: 4 }}
-        >
+        <span className={`inline-flex items-center rounded-full px-2 py-[4px] text-[11px] font-semibold leading-none ${chip.cls}`}>
           {chip.text}
         </span>
       </div>
@@ -560,15 +549,7 @@ function ReorderAlertsWidget({ alerts }: { alerts: Alert[] }) {
     <Card className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[15px] font-semibold text-ink">Reorder alerts</span>
-        <span
-          className="rounded-full px-2 text-[11px] font-semibold leading-none"
-          style={{
-            paddingTop: 4,
-            paddingBottom: 4,
-            background: total ? "rgba(234,88,12,0.10)" : "rgba(22,163,74,0.10)",
-            color: total ? "#c2410c" : "#16a34a",
-          }}
-        >
+        <span className={`inline-flex items-center rounded-full px-2 py-[4px] text-[11px] font-semibold leading-none ${total ? "pill-red" : "pill-green"}`}>
           {total ? `${total} need action` : "all clear"}
         </span>
       </div>

@@ -71,6 +71,31 @@ html[data-theme="dark"] .iso-invert {
   backdrop-filter: blur(10px) saturate(1.1);
 }
 
+/* Unified status-pill palette. EVERY chip/pill in the app draws from these five — no ad-hoc
+ * tints. Solid soft backgrounds (the Production-lead-time chip is the canon), identical in both
+ * themes. green = good, amber = needs attention, red = critical, neutral = informational,
+ * chart = violet accents tied to chart-owned controls. */
+.pill-green {
+  background: #dcfce7;
+  color: #16a34a;
+}
+.pill-amber {
+  background: #fef3c7;
+  color: #b45309;
+}
+.pill-red {
+  background: #fee2e2;
+  color: #dc2626;
+}
+.pill-neutral {
+  background: var(--color-surface-2);
+  color: var(--color-muted);
+}
+.pill-chart {
+  background: color-mix(in srgb, var(--color-chart) 10%, transparent);
+  color: var(--color-chart);
+}
+
 /* Frosted readout card for chart hovers — explicit prefixes so the blur is guaranteed. */
 .tip-frost {
   background: color-mix(in srgb, var(--color-surface) 44%, transparent);
