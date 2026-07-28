@@ -1,25 +1,28 @@
 "use client";
 
-import { useMoney } from "@/components/CurrencyProvider";
-
 // One violet ramp, deepest → lightest — the reference's donut language. Biggest slice (sorted
 // first) gets the deepest purple; the tail fades toward lavender.
 export const RAMP = ["#6d28d9", "#7c3aed", "#8b5cf6", "#a78bfa", "#c4b5fd", "#ddd6fe", "#ede9fe"];
 
 export type Slice = { label: string; value: number };
 
-function arc(cx: number, cy: number, r: number, a0: number, a1: number) {
-  const p = (a: number) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
-  const [x0, y0] = p(a0);
-  const [x1, y1] = p(a1);
+const C = 70; // centre
+const R = 66; // outer radius
+const IR = 31; // inner radius — a small hole, the reference's thick ring
+
+const pt = (rad: number, a: number) => `${C + rad * Math.cos(a)} ${C + rad * Math.sin(a)}`;
+
+/** A filled annular wedge from a0 to a1 — flat edges, like the reference. */
+function sector(a0: number, a1: number) {
   const large = a1 - a0 > Math.PI ? 1 : 0;
-  return `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1}`;
+  return `M ${pt(R, a0)} A ${R} ${R} 0 ${large} 1 ${pt(R, a1)} L ${pt(IR, a1)} A ${IR} ${IR} 0 ${large} 0 ${pt(IR, a0)} Z`;
 }
 
 /**
- * A donut of value slices: separated, round-capped segments with the share printed on the larger
- * ones, and a live centre that shows the total (or the focused slice on hover). Sync `hover` with a
- * legend outside so hovering either highlights both.
+ * The reference donut: thick filled wedges separated by crisp surface-coloured seams, a small
+ * open hole (no centre text — totals live in the widget), and bold white share labels riding
+ * the slices. Scales to whatever box its parent gives it (preserveAspectRatio keeps it round).
+ * Sync `hover` with a legend outside so hovering either highlights both.
  */
 export function Donut({
   data,
@@ -32,69 +35,50 @@ export function Donut({
   hover: number | null;
   onHover: (i: number | null) => void;
 }) {
-  const { money } = useMoney();
   const total = data.reduce((s, d) => s + d.value, 0) || 1;
-  const C = 65;
-  const R = 46;
-  const SW = 17;
-  // Gap between slices — larger when there are fewer of them, so the ring always looks intentional.
-  const GAP = data.length > 1 ? Math.min(0.13, 0.55 / data.length) : 0;
 
   let angle = -Math.PI / 2;
   const segs = data.map((d, i) => {
     const frac = d.value / total;
     const a0 = angle;
-    const a1 = angle + frac * Math.PI * 2;
-    angle = a1;
-    const g = Math.min(GAP, (a1 - a0) * 0.4); // never eat a thin slice entirely
-    const s1 = Math.max(a0 + g + 0.0001, a1 - g);
+    // A full-circle slice can't be one arc; shave a hair off so the path stays drawable.
+    const a1 = angle + Math.min(frac, 0.9999) * Math.PI * 2;
+    angle = a0 + frac * Math.PI * 2;
     const mid = (a0 + a1) / 2;
-    return { ...d, i, color: palette[i % palette.length], d: arc(C, C, R, a0 + g, s1), pct: frac * 100, mid };
+    return { ...d, i, color: palette[i % palette.length], d: sector(a0, a1), pct: frac * 100, mid };
   });
-  const focus = hover != null ? segs[hover] : null;
-  const dim = (i: number) => (hover == null || hover === i ? 1 : 0.3);
+  const dim = (i: number) => (hover == null || hover === i ? 1 : 0.35);
+  const labelRad = (R + IR) / 2;
 
   return (
-    <svg viewBox="0 0 130 130" className="mx-auto h-[132px] w-[132px]" role="img">
+    <svg viewBox="0 0 140 140" preserveAspectRatio="xMidYMid meet" className="h-full w-full" role="img">
       {segs.map((s) => (
         <path
           key={s.label}
           d={s.d}
-          fill="none"
-          stroke={s.color}
-          strokeWidth={hover === s.i ? SW + 4 : SW}
-          strokeLinecap="round"
-          style={{ opacity: dim(s.i), transition: "opacity .15s, stroke-width .15s", cursor: "pointer" }}
+          fill={s.color}
+          stroke="var(--color-surface)"
+          strokeWidth={3}
+          style={{ opacity: dim(s.i), transition: "opacity .15s", cursor: "pointer" }}
           onMouseEnter={() => onHover(s.i)}
           onMouseLeave={() => onHover(null)}
         />
       ))}
-      {/* Share printed on slices with room for it. */}
+      {/* Share printed on slices with room for it — bold, white, reference-sized. */}
       {segs
-        .filter((s) => s.pct >= 8)
+        .filter((s) => s.pct >= 6)
         .map((s) => (
           <text
             key={`t-${s.label}`}
-            x={C + R * Math.cos(s.mid)}
-            y={C + R * Math.sin(s.mid)}
+            x={C + labelRad * Math.cos(s.mid)}
+            y={C + labelRad * Math.sin(s.mid)}
             textAnchor="middle"
             dominantBaseline="central"
-            style={{ fontSize: 7.5, fontWeight: 700, fill: "#fff", pointerEvents: "none", opacity: dim(s.i) }}
+            style={{ fontSize: 11, fontWeight: 700, fill: "#fff", pointerEvents: "none", opacity: dim(s.i) }}
           >
             {Math.round(s.pct)}%
           </text>
         ))}
-      <text x={C} y={C - 5} textAnchor="middle" className="fill-muted" style={{ fontSize: 7.5, letterSpacing: 0.5, pointerEvents: "none" }}>
-        {focus ? focus.label.toUpperCase().slice(0, 14) : "TOTAL"}
-      </text>
-      <text x={C} y={C + 8} textAnchor="middle" className="fill-ink" style={{ fontSize: 13, fontWeight: 600, pointerEvents: "none" }}>
-        {money(focus ? focus.value : total).replace(/\.\d+$/, "")}
-      </text>
-      {focus && (
-        <text x={C} y={C + 20} textAnchor="middle" className="fill-muted" style={{ fontSize: 8.5, pointerEvents: "none" }}>
-          {focus.pct.toFixed(1)}%
-        </text>
-      )}
     </svg>
   );
 }

@@ -409,9 +409,26 @@ function CoverWidget({ months }: { months: number }) {
 
 /** One wheel with a labelled breakdown below and the grand total pinned to the bottom. Used for
  *  both "Produced value" (by facility) and "Amount spent" (by supplier) — same blue ring. */
+/** Donut + breakdown, orientation-aware: a tall widget stacks the donut over the rows (donut
+ *  soaking up all spare height, rows pushed down to the grand-total line); a wide widget slides
+ *  the donut to the left with the rows beside it. Follows the card's live size, so it holds up
+ *  however the user drags or resizes it. */
 function RingWidget({ title, subtitle, data, total }: { title: string; subtitle: string; data: Slice[]; total: number }) {
   const { money } = useMoney();
   const [hover, setHover] = useState<number | null>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => setBox({ w: e.contentRect.width, h: e.contentRect.height }));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [data.length]);
+  const wide = box.w > box.h * 1.25;
+  // In the side-by-side layout the donut takes the row height, but never more than ~42% of the
+  // width — the breakdown must keep room to breathe (a starved row swallows its own labels).
+  const donutSide = wide ? Math.max(80, Math.min(box.h - 8, box.w * 0.42)) : 0;
   return (
     <Card className="flex h-full flex-col">
       <div className="text-[15px] font-semibold text-ink">{title}</div>
@@ -420,24 +437,29 @@ function RingWidget({ title, subtitle, data, total }: { title: string; subtitle:
         <div className="flex flex-1 items-center justify-center text-[12.5px] text-muted">Nothing to show yet</div>
       ) : (
         <>
-          <div className="mt-1">
-            <Donut data={data} hover={hover} onHover={setHover} />
-          </div>
-          <div className="mt-3 min-h-0 flex-1 space-y-1 overflow-y-auto">
-            {data.map((s, i) => (
-              <div
-                key={s.label}
-                className="flex cursor-pointer items-center gap-2.5 rounded-md px-1.5 py-1 text-[12.5px] transition-colors"
-                style={{ background: hover === i ? "var(--color-surface-2)" : "transparent" }}
-                onMouseEnter={() => setHover(i)}
-                onMouseLeave={() => setHover(null)}
-              >
-                <span className="h-4 w-1.5 shrink-0 rounded-full" style={{ background: RAMP[i % RAMP.length] }} />
-                <span className="truncate font-medium text-ink-soft">{s.label}</span>
-                <span className="ml-auto shrink-0 tabular text-ink">{money(s.value)}</span>
-                <span className="w-9 shrink-0 text-right tabular text-[11px] text-muted">{total > 0 ? Math.round((s.value / total) * 100) : 0}%</span>
-              </div>
-            ))}
+          <div ref={boxRef} className={`mt-2 min-h-0 flex-1 ${wide ? "flex items-stretch gap-6" : "flex flex-col"}`}>
+            <div
+              className={wide ? "shrink-0 self-center" : "min-h-0 w-full flex-1 py-1"}
+              style={wide ? { width: donutSide, height: donutSide } : undefined}
+            >
+              <Donut data={data} hover={hover} onHover={setHover} />
+            </div>
+            <div className={`space-y-1 ${wide ? "my-auto min-w-0 flex-1" : "shrink-0"}`}>
+              {data.map((s, i) => (
+                <div
+                  key={s.label}
+                  className="flex cursor-pointer items-center gap-2.5 rounded-md px-1.5 py-1 text-[12.5px] transition-colors"
+                  style={{ background: hover === i ? "var(--color-surface-2)" : "transparent" }}
+                  onMouseEnter={() => setHover(i)}
+                  onMouseLeave={() => setHover(null)}
+                >
+                  <span className="h-4 w-1.5 shrink-0 rounded-full" style={{ background: RAMP[i % RAMP.length] }} />
+                  <span className="truncate font-medium text-ink-soft">{s.label}</span>
+                  <span className="ml-auto shrink-0 tabular text-ink">{money(s.value)}</span>
+                  <span className="w-9 shrink-0 text-right tabular text-[11px] text-muted">{total > 0 ? Math.round((s.value / total) * 100) : 0}%</span>
+                </div>
+              ))}
+            </div>
           </div>
           <div className="mt-3 flex items-center justify-between border-t border-line pt-3">
             <span className="text-[12.5px] text-muted">Grand total</span>
