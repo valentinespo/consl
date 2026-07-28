@@ -53,6 +53,20 @@ export function AppShell({
             below passes beneath it and blurs. Over the static sidebar it reads as solid gray. */}
         <div className="absolute inset-x-0 top-0 z-30">
           <AppHeader onMenu={() => setOpen(true)} orgs={orgs} />
+          {/* The page frame's top edge, persistent beneath the frosted bar: two inverted-radius
+              gray shoulders recreate the curved corners, joined by the frame's hairline. Content
+              scrolls under the frost and disappears beneath this edge — the frame never moves. */}
+          <div aria-hidden className="pointer-events-none absolute inset-x-0 top-14">
+            <span
+              className="absolute left-0 top-0 h-3.5 w-3.5 lg:left-[230px]"
+              style={{ background: "radial-gradient(circle at 100% 100%, transparent 13px, var(--color-border) 13px 14px, var(--color-header) 14px)" }}
+            />
+            <span
+              className="absolute right-0 top-0 h-3.5 w-3.5"
+              style={{ background: "radial-gradient(circle at 0% 100%, transparent 13px, var(--color-border) 13px 14px, var(--color-header) 14px)" }}
+            />
+            <span className="absolute left-3.5 right-3.5 top-0 h-px bg-border lg:left-[244px]" />
+          </div>
         </div>
 
         {/* Mobile drawer */}
@@ -81,7 +95,11 @@ export function AppShell({
           {/* The open page: white, its own hairline edge, curved top corners over the gray. It
               reaches the top of the viewport, tucked under the frosted header — pt-14 keeps
               resting content clear of the bar, and scrolled content blurs beneath it. */}
-          <main className="min-w-0 flex-1 overflow-y-auto rounded-t-[14px] border border-border bg-bg pt-14">
+          <main className="min-w-0 flex-1 overflow-y-auto rounded-t-[14px] border border-border bg-bg">
+            {/* In-flow gray spacer, not padding: at rest it fills the band under the frosted bar
+                with the chrome gray (so the header reads as one surface edge to edge, exactly the
+                pre-blur look), and it scrolls away with the content so the blur takes over. */}
+            <div aria-hidden className="h-14 bg-header" />
             <div className="mx-auto max-w-[1180px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</div>
           </main>
         </div>
