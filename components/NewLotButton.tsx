@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X, Trash2 } from "@/components/icons";
+import { DatePicker } from "@/components/DatePicker";
 import { createLot } from "@/app/lots/actions";
 import { SelectOrCreate, type Opt } from "@/components/SelectOrCreate";
 import { useCan } from "@/components/AccessProvider";
@@ -99,7 +100,7 @@ export function NewLotButton({ facilities, products }: { facilities: Facility[];
                   <input value={poNumber} onChange={(e) => setPoNumber(e.target.value)} className={inputCls} placeholder="auto" />
                 </Field>
                 <Field label="PO date">
-                  <input type="date" value={poDate} onChange={(e) => setPoDate(e.target.value)} className={inputCls} />
+                  <DatePicker value={poDate} onChange={setPoDate} />
                 </Field>
               </div>
 

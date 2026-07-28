@@ -37,7 +37,7 @@ const STATUS: Record<Status, { bg: string; fg: string; dot: string }> = {
   nosales: { bg: "#f3f4f6", fg: "#6b7280", dot: "#9ca3af" },
   ok: { bg: "#dcfce7", fg: "#166534", dot: "#16a34a" },
   reordered: { bg: "#dcfce7", fg: "#166534", dot: "#16a34a" },
-  channelLow: { bg: "#ede9fe", fg: "#5b21b6", dot: "#8b5cf6" },
+  channelLow: { bg: "#dbeafe", fg: "#1d4ed8", dot: "#2563eb" }, // "ship what you have" — blue, matching At my locations
   belowFloor: { bg: "#ffedd5", fg: "#9a3412", dot: "#ea580c" },
   oos: { bg: "#fee2e2", fg: "#b91c1c", dot: "#dc2626" },
 };

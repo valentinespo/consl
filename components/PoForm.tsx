@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X } from "@/components/icons";
+import { DatePicker } from "@/components/DatePicker";
 import { createPurchaseOrder, updatePurchaseOrder, deletePurchaseOrder, type PoLineInput } from "@/app/purchase-orders/actions";
 import { TwoStepDelete } from "@/components/TwoStepDelete";
 import { SkuAvatar } from "@/components/ui";
@@ -226,7 +227,7 @@ export function PoForm({
           </select>
         </Field>
         <Field label="PO date">
-          <input type="date" value={dateISO} onChange={(e) => setDateISO(e.target.value)} className={inputCls} />
+          <DatePicker value={dateISO} onChange={setDateISO} />
         </Field>
         <Field label="PO number">
           <div className="flex h-9 items-center rounded-lg border border-line bg-surface-2 px-2.5 text-[13px] font-semibold tabular text-ink">{number}</div>

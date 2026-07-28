@@ -117,7 +117,7 @@ export function SearchSelect({
                 type="button"
                 onClick={commitNew}
                 disabled={!q || exists}
-                className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[13px] font-medium text-positive hover:bg-surface-2 disabled:opacity-45 disabled:hover:bg-transparent"
+                className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[13px] font-medium text-accent hover:bg-surface-2 disabled:opacity-45 disabled:hover:bg-transparent"
               >
                 <Plus size={14} />
                 {q ? `Create “${q}”` : "Type a name above"}
@@ -144,7 +144,7 @@ export function SearchSelect({
                   className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[13px] text-ink hover:bg-surface-2"
                 >
                   {o}
-                  {o === value && <Check size={14} className="text-positive" />}
+                  {o === value && <Check size={14} className="text-accent" />}
                 </button>
               ))}
               {filtered.length === 0 && (
@@ -159,7 +159,7 @@ export function SearchSelect({
                   <button
                     type="button"
                     onClick={startCreating}
-                    className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[13px] font-medium text-positive hover:bg-surface-2"
+                    className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[13px] font-medium text-accent hover:bg-surface-2"
                   >
                     <Plus size={14} />
                     {q && !exists ? `Create “${q}”` : createLabel}

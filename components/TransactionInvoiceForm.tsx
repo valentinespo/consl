@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X } from "@/components/icons";
+import { DatePicker } from "@/components/DatePicker";
 import { upsertTransactionInvoice, deleteTransactionInvoice, type InvoiceLineInput } from "@/app/transactions/actions";
 import { SearchSelect } from "@/components/SearchSelect";
 import { TwoStepDelete } from "@/components/TwoStepDelete";
@@ -200,7 +201,7 @@ export function TransactionInvoiceForm({
           />
         </Field>
         <Field label="Date">
-          <input type="date" value={dateISO} onChange={(e) => setDateISO(e.target.value)} className={inputCls} />
+          <DatePicker value={dateISO} onChange={setDateISO} />
         </Field>
         <Field label="Invoice total ($)">
           <input

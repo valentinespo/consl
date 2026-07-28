@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X } from "@/components/icons";
+import { DatePicker } from "@/components/DatePicker";
 import { useMoney } from "@/components/CurrencyProvider";
 import { upsertPurchaseInvoice, deletePurchaseInvoice, type PurchaseLineInput } from "@/app/purchases/actions";
 import { SelectOrCreate, type Opt } from "@/components/SelectOrCreate";
@@ -179,7 +180,7 @@ export function PurchaseInvoiceForm({
           />
         </Field>
         <Field label="Date">
-          <input type="date" value={dateISO} onChange={(e) => setDateISO(e.target.value)} className={inputCls} />
+          <DatePicker value={dateISO} onChange={setDateISO} />
         </Field>
         <Field label="Invoice total ($)">
           <input type="number" step="0.01" value={total} onChange={(e) => setTotal(e.target.value)} placeholder="0.00" className={`${inputCls} font-semibold tabular`} />

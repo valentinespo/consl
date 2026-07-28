@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X } from "@/components/icons";
+import { DatePicker } from "@/components/DatePicker";
 import { Card, SkuAvatar, SectionTitle } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
 import { updateLot } from "@/app/lots/actions";
@@ -201,7 +202,7 @@ export function LotEditor({
       {/* Details */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
         <Field label="PO number"><input value={poNumber} onChange={(e) => setPoNumber(e.target.value)} placeholder="#7-CCP" className={inputCls} /></Field>
-        <Field label="PO date"><input type="date" value={poDateISO} onChange={(e) => setPoDateISO(e.target.value)} className={inputCls} /></Field>
+        <Field label="PO date"><DatePicker value={poDateISO} onChange={setPoDateISO} /></Field>
         <Field label="Facility">
           <select value={facilityId} onChange={(e) => setFacilityId(e.target.value)} className={inputCls}>
             {facilities.map((f) => (<option key={f.id} value={f.id}>{f.code} — {f.name}</option>))}
@@ -225,7 +226,7 @@ export function LotEditor({
         </Field>
         {status === "FINISHED" && (
           <Field label="Finished date">
-            <input type="date" value={finishedAtISO} onChange={(e) => setFinishedAtISO(e.target.value)} className={inputCls} />
+            <DatePicker value={finishedAtISO} onChange={setFinishedAtISO} clearable />
           </Field>
         )}
       </div>

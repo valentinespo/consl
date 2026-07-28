@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "@/components/icons";
+import { DatePicker } from "@/components/DatePicker";
 import { Field, inputCls } from "@/components/FormKit";
 import { DESTINATIONS, RAW_DESTINATIONS } from "@/lib/destinations";
 import { createMovement } from "@/app/facilities/actions";
@@ -177,7 +178,7 @@ export function MovementForm({
         </Field>
 
         <Field label="Date">
-          <input type="date" value={dateISO} onChange={(e) => setDateISO(e.target.value)} className={inputCls} />
+          <DatePicker value={dateISO} onChange={setDateISO} />
         </Field>
       </div>
 

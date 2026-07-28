@@ -3,6 +3,7 @@
 import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
 import { Plus, ArrowUpDown, ChevronRight } from "@/components/icons";
+import { DatePicker } from "@/components/DatePicker";
 import { Pill, SupplierAvatar, SkuAvatar } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
 import { TransactionInvoiceForm, type InvoiceRow, type LotOption } from "@/components/TransactionInvoiceForm";
@@ -307,15 +308,7 @@ function Select({ value, onChange, options, label }: { value: string; onChange: 
 }
 
 function DateInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
-  return (
-    <input
-      type="date"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      title={placeholder}
-      className={`h-9 rounded-lg border border-border bg-surface px-2 text-[13px] outline-none focus:border-accent-strong ${value ? "text-ink-soft" : "text-muted"}`}
-    />
-  );
+  return <DatePicker value={value} onChange={onChange} placeholder={placeholder} clearable fullWidth={false} className="w-[150px]" />;
 }
 
 function SortTh({ label, onClick, active, dir, className = "", right = false }: { label: string; onClick: () => void; active: boolean; dir: "asc" | "desc"; className?: string; right?: boolean }) {
