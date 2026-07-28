@@ -30,8 +30,18 @@ function OrgMark({ org, size }: { org: MyOrg | null; size: number }) {
 }
 
 /** Which company you're working in. A person can belong to several — their own businesses, or a
- *  client's they were invited into — so this is a picker, not a label. */
-export function OrgSwitcher({ orgs, onNavigate }: { orgs: MyOrg[]; onNavigate?: () => void }) {
+ *  client's they were invited into — so this is a picker, not a label.
+ *  `variant="header"` renders the compact trigger that sits beside the iso mark in the top strip;
+ *  the default fills the sidebar (still used in the mobile drawer). */
+export function OrgSwitcher({
+  orgs,
+  onNavigate,
+  variant = "sidebar",
+}: {
+  orgs: MyOrg[];
+  onNavigate?: () => void;
+  variant?: "sidebar" | "header";
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -74,15 +84,20 @@ export function OrgSwitcher({ orgs, onNavigate }: { orgs: MyOrg[]; onNavigate?: 
     window.location.href = "/";
   }
 
+  const header = variant === "header";
   return (
-    <div ref={wrap} className="relative px-3">
+    <div ref={wrap} className={header ? "relative" : "relative px-3"}>
       <button
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface-2"
+        className={
+          header
+            ? "flex max-w-[220px] items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface"
+            : "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface-2"
+        }
       >
-        <OrgMark org={current} size={24} />
+        <OrgMark org={current} size={header ? 22 : 24} />
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">
           {current?.name ?? "No company"}
         </span>
@@ -92,7 +107,9 @@ export function OrgSwitcher({ orgs, onNavigate }: { orgs: MyOrg[]; onNavigate?: 
       {open && (
         <div
           role="menu"
-          className="absolute inset-x-3 top-full z-50 mt-1 overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-xl"
+          className={`absolute top-full z-50 mt-1 overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-xl ${
+            header ? "left-0 w-72" : "inset-x-3"
+          }`}
         >
           {orgs.length > 1 && (
             <div className="px-3 pb-1 pt-1.5 text-[10.5px] font-medium uppercase tracking-wide text-muted">

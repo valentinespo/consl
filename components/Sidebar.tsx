@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -15,9 +14,7 @@ import {
   ImagesFilled,
   Settings,
 } from "@/components/icons";
-import { UserButton } from "@clerk/nextjs";
-import { OrgSwitcher } from "@/components/OrgSwitcher";
-import type { MyOrg } from "@/lib/orgs";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboardFilled, exact: true, resource: "dashboard" },
@@ -31,14 +28,15 @@ const NAV = [
   { href: "/catalog", label: "Catalog", icon: ImagesFilled, resource: "catalog" },
 ];
 
+/** The nav column. Same gray as the top strip — no border, the two are one merged chrome surface;
+ *  the white page beside it carries its own edge. The company switcher and account avatar live in
+ *  the top strip now; this keeps the theme switch up top and settings at the foot. */
 export function Sidebar({
   orgName,
-  orgs = [],
   allowed = null,
   onNavigate,
 }: {
   orgName?: string | null;
-  orgs?: MyOrg[];
   allowed?: string[] | null;
   onNavigate?: () => void;
 }) {
@@ -47,13 +45,13 @@ export function Sidebar({
   // section only appears when the member may view it.
   const canView = (resource: string) => allowed === null || allowed.includes(resource);
   const nav = NAV.filter((item) => canView(item.resource));
+
   return (
-    <aside className="flex h-full w-[230px] shrink-0 flex-col overflow-y-auto border-r border-border bg-sidebar">
-      {/* The product's mark lives in the header now; the sidebar leads with which company you're in. */}
-      <div className="pt-3">
-        <OrgSwitcher orgs={orgs} onNavigate={onNavigate} />
+    <aside className="flex h-full w-[230px] shrink-0 flex-col overflow-y-auto bg-sidebar">
+      {/* Theme switch sits where a sidebar search would — a full-width control, not a pill. */}
+      <div className="px-3 pb-1 pt-3">
+        <ThemeToggle />
       </div>
-      <div className="mt-3 border-t border-border" />
 
       <nav className="flex-1 px-3 py-2">
         {nav.map((item) => {
@@ -75,13 +73,10 @@ export function Sidebar({
         })}
       </nav>
 
-      <div className="flex items-center justify-between border-t border-border px-4 py-4">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <UserButton appearance={{ elements: { avatarBox: "h-8 w-8" } }} />
-          <div className="min-w-0">
-            <div className="truncate text-[12px] font-medium text-ink-soft">{orgName ?? "Your company"}</div>
-            <div className="text-[11px] text-muted">Production &amp; Inventory</div>
-          </div>
+      <div className="flex items-center justify-between px-4 py-4">
+        <div className="min-w-0">
+          <div className="truncate text-[12px] font-medium text-ink-soft">{orgName ?? "Your company"}</div>
+          <div className="text-[11px] text-muted">Production &amp; Inventory</div>
         </div>
         {canView("settings") && (
           <Link
@@ -95,7 +90,6 @@ export function Sidebar({
           </Link>
         )}
       </div>
-
     </aside>
   );
 }

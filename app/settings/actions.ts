@@ -7,8 +7,9 @@ import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
 import { syncAmazonCore } from "@/lib/sync";
 import { getRestock } from "@/lib/restock";
 import { revalidatePath } from "next/cache";
-import { requireOwner, requirePermission } from "@/lib/membership";
+import { requireOwner, requirePermission, getMyAccess } from "@/lib/membership";
 import { saveImage, deleteStored, safeKeySegment } from "@/lib/storage";
+import { getAlerts, type Alert } from "@/lib/alerts";
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(n)));
 
@@ -130,6 +131,20 @@ export async function saveSettings(input: {
   await saveOrgSettings(data);
   revalidatePath("/", "layout");
   return { ok: true as const };
+}
+
+/** The header bell's feed — the same alerts the dashboard computes, fetched lazily by the client
+ *  so every page doesn't pay the restock computation on load. */
+export async function getHeaderNotifications(): Promise<Alert[]> {
+  try {
+    const access = await getMyAccess();
+    if (!access || !access.can("dashboard", "view")) return [];
+    const restock = await getRestock();
+    return await getAlerts(restock.rows);
+  } catch {
+    // Signed-out edge or a transient read failure — an empty bell, never a crash.
+    return [];
+  }
 }
 
 /** Dismiss a dashboard notification (re-appears if the condition recurs after resolving). */

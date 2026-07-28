@@ -2,10 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { Moon, Monitor, Sun } from "@/components/icons";
+import type { LucideIcon } from "@/components/icons";
 
 type Pref = "light" | "dark" | "system";
 const ORDER: Pref[] = ["light", "dark", "system"];
-const LABEL: Record<Pref, string> = { light: "Light", dark: "Dark", system: "System" };
+const SEGMENTS: { pref: Pref; label: string; icon: LucideIcon }[] = [
+  { pref: "light", label: "Light", icon: Sun },
+  { pref: "dark", label: "Dark", icon: Moon },
+  { pref: "system", label: "System", icon: Monitor },
+];
 
 let fadeTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -24,10 +29,11 @@ function apply(pref: Pref) {
   el.style.colorScheme = dark ? "dark" : "light"; // native controls (date pickers, selects) follow
 }
 
-/** Cycles Light → Dark → System. System tracks the OS setting live, so flipping the computer's
- *  appearance flips the app without a reload. */
+/** Three-way Light / Dark / System switch, sized like a search bar — lives at the top of the
+ *  sidebar. System tracks the OS setting live, so flipping the computer's appearance flips the
+ *  app without a reload. */
 export function ThemeToggle() {
-  // Starts null so the server and the first client render agree; the icon appears after mount.
+  // Starts null so the server and the first client render agree; the active segment lights after mount.
   const [pref, setPref] = useState<Pref | null>(null);
 
   useEffect(() => {
@@ -43,30 +49,35 @@ export function ThemeToggle() {
     return () => mq.removeEventListener("change", follow);
   }, [pref]);
 
-  function cycle() {
-    const next = ORDER[(ORDER.indexOf(pref ?? "system") + 1) % ORDER.length];
+  function choose(next: Pref) {
     setPref(next);
     localStorage.setItem("so-theme", next);
     apply(next);
   }
 
-  const Icon = pref === "dark" ? Moon : pref === "light" ? Sun : Monitor;
   return (
-    <button
-      onClick={cycle}
-      title="Switch between light, dark and system theme"
-      aria-label={pref ? `Theme: ${LABEL[pref]} — click to change` : "Theme"}
-      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-white/15 bg-white/10 px-2.5 text-[12px] font-medium text-white/85 transition-colors hover:bg-white/15 hover:text-white"
+    <div
+      role="radiogroup"
+      aria-label="Theme"
+      className="flex h-9 w-full items-center gap-0.5 rounded-lg border border-border bg-surface p-0.5"
     >
-      {/* min-width keeps the pill from jumping while the saved preference loads */}
-      <span className="inline-flex min-w-[86px] items-center justify-center gap-1.5">
-        {pref && (
-          <>
-            <Icon size={14} />
-            {LABEL[pref]} theme
-          </>
-        )}
-      </span>
-    </button>
+      {SEGMENTS.map(({ pref: p, label, icon: Icon }) => {
+        const active = pref === p;
+        return (
+          <button
+            key={p}
+            role="radio"
+            aria-checked={active}
+            onClick={() => choose(p)}
+            className={`flex h-full flex-1 items-center justify-center gap-1 rounded-md text-[11.5px] transition-colors ${
+              active ? "bg-surface-2 font-medium text-ink" : "text-muted hover:text-ink-soft"
+            }`}
+          >
+            <Icon size={13} />
+            {label}
+          </button>
+        );
+      })}
+    </div>
   );
 }

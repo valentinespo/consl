@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Pencil, Check, Clock, Plus, X, Move, Scaling, Bell, AlertTriangle, FileText, Gauge, PieChart, Layers, CheckCircle2, ShoppingCart, Zap, PackageSearch, Truck } from "@/components/icons";
+import { Pencil, Check, Clock, Plus, X, Move, Scaling, AlertTriangle, FileText, Gauge, PieChart, Layers, CheckCircle2, ShoppingCart, Zap, Truck } from "@/components/icons";
 import type { LucideIcon } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { Card, PageHeader, SectionTitle } from "@/components/ui";
@@ -14,7 +13,7 @@ import { RecentLots, type RecentLot } from "@/components/RecentLots";
 import type { RestockTotals, ValueHistoryPoint } from "@/lib/restock";
 import type { Alert } from "@/lib/alerts";
 import type { LeadTimes } from "@/lib/queries";
-import { saveDashboardLayout, dismissNotification } from "@/app/settings/actions";
+import { saveDashboardLayout } from "@/app/settings/actions";
 
 const COLS = 12;
 const ROW_H = 80;
@@ -42,7 +41,6 @@ const WIDGETS: Record<string, Meta> = {
   amountSpent: { title: "Amount spent", minW: 3, minH: 5, w: 4, h: 6 },
   recentLots: { title: "Recent production lots", minW: 4, minH: 4, w: 7, h: 6 },
   valueByBucket: { title: "Value by bucket", minW: 4, minH: 3, w: 6, h: 4 },
-  notifications: { title: "Notifications", minW: 3, minH: 3, w: 5, h: 4 },
   reorderAlerts: { title: "Reorder alerts", minW: 3, minH: 3, w: 4, h: 3 },
   daysCover: { title: "Months of cover", minW: 2, minH: 2, w: 3, h: 2 },
   leadTime: { title: "Production lead time", minW: 3, minH: 3, w: 4, h: 4 },
@@ -50,14 +48,13 @@ const WIDGETS: Record<string, Meta> = {
 
 const DEFAULT_LAYOUT: Item[] = [
   { id: "totalValue", x: 0, y: 0, w: 12, h: 4 },
-  { id: "notifications", x: 0, y: 4, w: 5, h: 4 },
-  { id: "reorderAlerts", x: 5, y: 4, w: 4, h: 4 },
-  { id: "daysCover", x: 9, y: 4, w: 3, h: 2 },
+  { id: "reorderAlerts", x: 0, y: 4, w: 5, h: 4 },
+  { id: "daysCover", x: 5, y: 4, w: 3, h: 2 },
+  { id: "leadTime", x: 8, y: 4, w: 4, h: 4 },
   { id: "producedValue", x: 0, y: 8, w: 4, h: 6 },
   { id: "amountSpent", x: 4, y: 8, w: 4, h: 6 },
   { id: "recentLots", x: 8, y: 8, w: 4, h: 6 },
   { id: "valueByBucket", x: 0, y: 14, w: 8, h: 4 },
-  { id: "leadTime", x: 8, y: 14, w: 4, h: 4 },
 ];
 
 const overlap = (a: Item, b: Item) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
@@ -353,8 +350,6 @@ function renderContent(id: string, d: DashboardData) {
           </div>
         </Card>
       );
-    case "notifications":
-      return <NotificationsWidget alerts={d.alerts} />;
     case "reorderAlerts":
       return <ReorderAlertsWidget alerts={d.alerts} />;
     case "daysCover":
@@ -477,59 +472,6 @@ function RecentLotsWidget({ lots }: { lots: RecentLot[] }) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <RecentLots lots={lots} />
       </div>
-    </Card>
-  );
-}
-
-const SEV: Record<Alert["severity"], { bg: string; dot: string }> = {
-  critical: { bg: "#fef2f2", dot: "#dc2626" },
-  warn: { bg: "#fff7ed", dot: "#ea580c" },
-};
-const KIND_ICON: Record<Alert["kind"], LucideIcon> = { material: PackageSearch, reorder: ShoppingCart, expedite: Zap, ship: Truck };
-
-function NotificationsWidget({ alerts }: { alerts: Alert[] }) {
-  const router = useRouter();
-  const [, start] = useTransition();
-  const [busy, setBusy] = useState<string | null>(null);
-  function dismiss(key: string) {
-    setBusy(key);
-    start(async () => { await dismissNotification(key); router.refresh(); });
-  }
-  return (
-    <Card className="flex h-full flex-col">
-      <WidgetHead
-        icon={Bell}
-        title="Notifications"
-        tint={alerts.length ? "red" : "green"}
-        right={alerts.length > 0 ? <span className="rounded-full bg-negative px-2 py-0.5 text-[11px] font-semibold text-white">{alerts.length}</span> : null}
-      />
-      {alerts.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted">
-          <CheckCircle2 size={26} className="text-positive" />
-          <span className="text-[12.5px]">All clear — nothing needs attention</span>
-        </div>
-      ) : (
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
-          {alerts.map((a) => {
-            const s = SEV[a.severity];
-            const Icon = KIND_ICON[a.kind];
-            return (
-              <div key={a.key} className="flex items-start gap-2.5 rounded-lg border-l-[3px] bg-surface-2/60 py-2 pl-2.5 pr-2" style={{ borderColor: s.dot }}>
-                <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md" style={{ background: s.bg, color: s.dot }}>
-                  <Icon size={13} />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[12.5px] font-medium text-ink">{a.title}</div>
-                  <div className="text-[11px] text-muted">{a.detail}</div>
-                </div>
-                <button onClick={() => dismiss(a.key)} disabled={busy === a.key} title="Dismiss" className="shrink-0 rounded-md p-1 text-muted hover:bg-black/5 hover:text-ink-soft disabled:opacity-40">
-                  <X size={13} />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
     </Card>
   );
 }
