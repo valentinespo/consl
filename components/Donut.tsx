@@ -2,8 +2,9 @@
 
 import { useMoney } from "@/components/CurrencyProvider";
 
-// One blue ramp, darkest → lightest. Biggest slice (sorted first) gets the darkest, deepest blue.
-export const BLUES = ["#1e3a8a", "#1d4ed8", "#2563eb", "#3b82f6", "#60a5fa", "#93c5fd", "#bfdbfe"];
+// One violet ramp, deepest → lightest — the reference's donut language. Biggest slice (sorted
+// first) gets the deepest purple; the tail fades toward lavender.
+export const RAMP = ["#6d28d9", "#7c3aed", "#8b5cf6", "#a78bfa", "#c4b5fd", "#ddd6fe", "#ede9fe"];
 
 export type Slice = { label: string; value: number };
 
@@ -22,7 +23,7 @@ function arc(cx: number, cy: number, r: number, a0: number, a1: number) {
  */
 export function Donut({
   data,
-  palette = BLUES,
+  palette = RAMP,
   hover,
   onHover,
 }: {

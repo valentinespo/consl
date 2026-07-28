@@ -2,12 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { Pencil, Check, Plus, X, Move, Scaling, AlertTriangle, FileText, Gauge, PieChart, Layers, CheckCircle2, ShoppingCart, Zap, Truck } from "@/components/icons";
-import type { LucideIcon } from "@/components/icons";
+import { Pencil, Check, Plus, X, Move, Scaling, CheckCircle2 } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { Card, PageHeader, SectionTitle } from "@/components/ui";
 import { TotalValueCard } from "@/components/TotalValueCard";
-import { Donut, BLUES, type Slice } from "@/components/Donut";
+import { Donut, RAMP, type Slice } from "@/components/Donut";
 import { ValueStackedChart } from "@/components/ValueStackedChart";
 import { RecentLots, type RecentLot } from "@/components/RecentLots";
 import type { RestockTotals, ValueHistoryPoint } from "@/lib/restock";
@@ -331,20 +330,25 @@ function renderContent(id: string, d: DashboardData) {
     case "totalValue":
       return <TotalValueCard totals={d.totals} history={d.history} className="h-full" />;
     case "producedValue":
-      return <RingWidget title="Produced value" icon={PieChart} data={d.facility.map((f) => ({ label: f.code, value: f.value }))} total={d.prodTotal} />;
+      return (
+        <RingWidget
+          title="Produced value"
+          subtitle="Lot value by producing facility"
+          data={d.facility.map((f) => ({ label: f.code, value: f.value }))}
+          total={d.prodTotal}
+        />
+      );
     case "amountSpent":
-      return <RingWidget title="Amount spent" icon={ShoppingCart} data={d.spentBySupplier} total={d.spentTotal} />;
+      return <RingWidget title="Amount spent" subtitle="Purchases and production costs by supplier" data={d.spentBySupplier} total={d.spentTotal} />;
     case "recentLots":
       return <RecentLotsWidget lots={d.recentLots} />;
     case "valueByBucket":
       return (
         <Card className="flex h-full flex-col">
-          <WidgetHead
-            icon={Layers}
-            title="Value by bucket"
-            tint="accent"
-            right={<span className="text-[11px] text-muted">{d.history.length >= 2 ? `${d.history.length}d` : "grows daily"}</span>}
-          />
+          <div className="mb-3 flex items-center justify-between">
+            <span className="text-[15px] font-semibold text-ink">Value by bucket</span>
+            <span className="text-[11px] text-muted">{d.history.length >= 2 ? `${d.history.length}d` : "grows daily"}</span>
+          </div>
           <div className="min-h-0 flex-1">
             <ValueStackedChart data={d.history} />
           </div>
@@ -361,24 +365,46 @@ function renderContent(id: string, d: DashboardData) {
   }
 }
 
+/** Months of cover as the reference's tick-bar meter: a row of violet ticks filled to the target
+ *  fraction, the boundary carrying the percentage. Low cover turns the ticks amber. */
 function CoverWidget({ months }: { months: number }) {
   const target = 12;
-  const frac = Math.max(0.03, Math.min(1, months / target));
-  const healthy = months >= 6;
-  const bar = healthy ? "linear-gradient(90deg,#2563eb,#60a5fa)" : "linear-gradient(90deg,#ea580c,#f59e0b)";
+  const frac = Math.max(0, Math.min(1, months / target));
+  const low = months < 3;
+  const TICKS = 36;
+  const filled = Math.max(months > 0 ? 1 : 0, Math.round(frac * TICKS));
+  const tickColor = low ? "#ea580c" : "var(--color-chart)";
   return (
-    <Card className="flex h-full flex-col justify-between overflow-hidden bg-gradient-to-br from-accent-soft/70 to-surface">
-      <div className="flex items-center justify-between">
-        <span className="text-[12px] font-medium text-ink-soft">Months of cover</span>
-        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent-soft text-accent"><Gauge size={15} /></span>
+    <Card className="flex h-full flex-col justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[15px] font-semibold text-ink">Months of cover</span>
+        <span
+          className="rounded-full px-2 text-[11px] font-semibold leading-none"
+          style={{
+            paddingTop: 4,
+            paddingBottom: 4,
+            background: low ? "rgba(234,88,12,0.10)" : "color-mix(in srgb, var(--color-chart) 10%, transparent)",
+            color: low ? "#c2410c" : "var(--color-chart)",
+          }}
+        >
+          {Math.round(frac * 100)}% of target
+        </span>
       </div>
-      <div className="flex items-end gap-1">
-        <span className="text-[34px] font-semibold leading-none tabular text-ink">{months.toFixed(1)}</span>
-        <span className="mb-1 text-[13px] font-medium text-muted">mo</span>
+      <div className="flex items-end gap-1.5">
+        <span className="text-[30px] font-semibold leading-none tracking-tight tabular text-ink">{months.toFixed(1)}</span>
+        <span className="mb-0.5 text-[13px] text-muted">mo</span>
       </div>
       <div>
-        <div className="h-2 overflow-hidden rounded-full bg-line">
-          <div className="h-full rounded-full transition-all" style={{ width: `${frac * 100}%`, background: bar }} />
+        <div className="flex h-6 items-stretch gap-[3px]">
+          {Array.from({ length: TICKS }, (_, i) => (
+            <span
+              key={i}
+              className="min-w-0 flex-1 rounded-full"
+              style={{
+                background: i < filled ? tickColor : "color-mix(in srgb, var(--color-chart) 14%, transparent)",
+              }}
+            />
+          ))}
         </div>
         <div className="mt-1.5 flex justify-between text-[10.5px] text-muted">
           <span>At today’s sell-through</span>
@@ -389,76 +415,45 @@ function CoverWidget({ months }: { months: number }) {
   );
 }
 
-const TINTS: Record<string, string> = {
-  accent: "bg-accent-soft text-accent",
-  amber: "bg-[#fff7ed] text-warn",
-  red: "bg-[#fef2f2] text-negative",
-  green: "bg-[#dcfce7] text-positive",
-};
-
-function WidgetHead({ icon: Icon, title, tint = "accent", right }: { icon: LucideIcon; title: string; tint?: string; right?: React.ReactNode }) {
-  return (
-    <div className="mb-3 flex items-center gap-2.5">
-      <span className={`flex h-7 w-7 items-center justify-center rounded-lg ${TINTS[tint]}`}>
-        <Icon size={15} strokeWidth={2.2} />
-      </span>
-      <span className="text-[14px] font-semibold text-ink">{title}</span>
-      {right && <span className="ml-auto flex items-center">{right}</span>}
-    </div>
-  );
-}
-
 /** One wheel with a labelled breakdown below and the grand total pinned to the bottom. Used for
  *  both "Produced value" (by facility) and "Amount spent" (by supplier) — same blue ring. */
-function RingWidget({ title, icon, data, total }: { title: string; icon: LucideIcon; data: Slice[]; total: number }) {
+function RingWidget({ title, subtitle, data, total }: { title: string; subtitle: string; data: Slice[]; total: number }) {
   const { money } = useMoney();
   const [hover, setHover] = useState<number | null>(null);
   return (
     <Card className="flex h-full flex-col">
-      <WidgetHead icon={icon} title={title} tint="accent" />
+      <div className="text-[15px] font-semibold text-ink">{title}</div>
+      <div className="mt-0.5 text-[12.5px] text-muted">{subtitle}</div>
       {data.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted">
-          <PieChart size={24} />
-          <span className="text-[12.5px]">Nothing to show yet</span>
-        </div>
+        <div className="flex flex-1 items-center justify-center text-[12.5px] text-muted">Nothing to show yet</div>
       ) : (
         <>
-          <Donut data={data} hover={hover} onHover={setHover} />
+          <div className="mt-1">
+            <Donut data={data} hover={hover} onHover={setHover} />
+          </div>
           <div className="mt-3 min-h-0 flex-1 space-y-1 overflow-y-auto">
             {data.map((s, i) => (
               <div
                 key={s.label}
-                className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-[12px] transition-colors"
+                className="flex cursor-pointer items-center gap-2.5 rounded-md px-1.5 py-1 text-[12.5px] transition-colors"
                 style={{ background: hover === i ? "var(--color-surface-2)" : "transparent" }}
                 onMouseEnter={() => setHover(i)}
                 onMouseLeave={() => setHover(null)}
               >
-                <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: BLUES[i % BLUES.length] }} />
+                <span className="h-4 w-1.5 shrink-0 rounded-full" style={{ background: RAMP[i % RAMP.length] }} />
                 <span className="truncate font-medium text-ink-soft">{s.label}</span>
                 <span className="ml-auto shrink-0 tabular text-ink">{money(s.value)}</span>
-                <span className="w-9 shrink-0 text-right tabular text-[10.5px] text-muted">{total > 0 ? Math.round((s.value / total) * 100) : 0}%</span>
+                <span className="w-9 shrink-0 text-right tabular text-[11px] text-muted">{total > 0 ? Math.round((s.value / total) * 100) : 0}%</span>
               </div>
             ))}
           </div>
-          <div className="mt-3">
-            <MoneyChip label="Grand total" value={total} dot="#1e3a8a" />
+          <div className="mt-3 flex items-center justify-between border-t border-line pt-3">
+            <span className="text-[12.5px] text-muted">Grand total</span>
+            <span className="text-[15px] font-semibold tabular text-ink">{money(total)}</span>
           </div>
         </>
       )}
     </Card>
-  );
-}
-
-function MoneyChip({ label, value, dot }: { label: string; value: number; dot: string }) {
-  const { money } = useMoney();
-  return (
-    <div className="rounded-lg border border-border bg-surface-2/60 px-3 py-2">
-      <div className="flex items-center gap-1.5">
-        <span className="h-2 w-2 rounded-sm" style={{ background: dot }} />
-        <span className="text-[10.5px] text-muted">{label}</span>
-      </div>
-      <div className="mt-0.5 text-[15px] font-semibold tabular text-ink">{money(value)}</div>
-    </div>
   );
 }
 
@@ -546,41 +541,51 @@ function LeadTimeWidget({ lt }: { lt: DashboardData["leadTimes"] }) {
   );
 }
 
-const TILE_TINTS = {
-  amber: { color: "#ea580c", bg: "#fff7ed", border: "#fed7aa" },
-  red: { color: "#dc2626", bg: "#fef2f2", border: "#fecaca" },
-  violet: { color: "#7c3aed", bg: "#f5f3ff", border: "#ddd6fe" },
-} as const;
-
-function MetricTile({ value, label, tint, icon: Icon }: { value: number; label: string; tint: keyof typeof TILE_TINTS; icon: LucideIcon }) {
-  const active = value > 0;
-  const { color, bg, border } = TILE_TINTS[tint];
-  return (
-    <div className="rounded-xl border p-3" style={active ? { background: bg, borderColor: border } : { borderColor: "var(--color-border)" }}>
-      <div className="flex items-center justify-between">
-        <span className="text-[24px] font-semibold leading-none tabular" style={active ? { color } : { color: "var(--color-muted)" }}>{value}</span>
-        <Icon size={15} style={{ color: active ? color : "var(--color-muted)" }} />
-      </div>
-      <div className="mt-1 text-[11px] text-muted">{label}</div>
-    </div>
-  );
-}
-
+/** Reorder alerts in the reference language: a bold title with a need-action chip, three quiet
+ *  stat columns split by hairlines — the number carries its signal colour only when non-zero —
+ *  and the alert rows beneath a hairline. */
 function ReorderAlertsWidget({ alerts }: { alerts: Alert[] }) {
   const reorder = alerts.filter((a) => a.kind === "reorder");
   const ship = alerts.filter((a) => a.kind === "ship");
   const expedite = alerts.filter((a) => a.kind === "expedite");
   // Same order as the inventory KPI row, so the two screens read identically.
   const list = [...reorder, ...ship, ...expedite].slice(0, 8);
+  const total = list.length === 0 ? 0 : reorder.length + ship.length + expedite.length;
+  const cols = [
+    { label: "Need a PO", n: reorder.length, color: "#ea580c" },
+    { label: "To ship", n: ship.length, color: "#8b5cf6" },
+    { label: "Expedite", n: expedite.length, color: "#dc2626" },
+  ];
   return (
     <Card className="flex h-full flex-col">
-      <WidgetHead icon={AlertTriangle} title="Reorder alerts" tint="amber" />
-      <div className="mb-3 grid grid-cols-3 gap-2.5">
-        <MetricTile value={reorder.length} label="Need a PO" tint="amber" icon={FileText} />
-        <MetricTile value={ship.length} label="To ship" tint="violet" icon={Truck} />
-        <MetricTile value={expedite.length} label="Expedite" tint="red" icon={Zap} />
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[15px] font-semibold text-ink">Reorder alerts</span>
+        <span
+          className="rounded-full px-2 text-[11px] font-semibold leading-none"
+          style={{
+            paddingTop: 4,
+            paddingBottom: 4,
+            background: total ? "rgba(234,88,12,0.10)" : "rgba(22,163,74,0.10)",
+            color: total ? "#c2410c" : "#16a34a",
+          }}
+        >
+          {total ? `${total} need action` : "all clear"}
+        </span>
       </div>
-      <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto">
+      <div className="mt-3 grid grid-cols-3">
+        {cols.map((c, i) => (
+          <div key={c.label} className={i > 0 ? "border-l border-line pl-4" : ""}>
+            <div className="text-[11.5px] text-muted">{c.label}</div>
+            <div
+              className="mt-1 text-[22px] font-semibold leading-none tabular"
+              style={{ color: c.n > 0 ? c.color : "var(--color-muted)" }}
+            >
+              {c.n}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3.5 min-h-0 flex-1 space-y-1.5 overflow-y-auto border-t border-line pt-3">
         {list.map((a) => (
           <div key={a.key} className="flex items-center gap-2 text-[12px]">
             <span
