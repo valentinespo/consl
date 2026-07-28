@@ -22,17 +22,22 @@ export function NewFacilityButton() {
   async function save() {
     setPending(true);
     setError(null);
-    const r = await createFacility({ code, name, type });
-    setPending(false);
-    if (!r.ok) {
-      setError(r.error);
-      return;
+    try {
+      const r = await createFacility({ code, name, type });
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      setOpen(false);
+      setCode("");
+      setName("");
+      router.push(`/facilities/${r.id}`);
+      router.refresh();
+    } catch {
+      setError("Couldn't reach the server — reload to check whether it was created.");
+    } finally {
+      setPending(false);
     }
-    setOpen(false);
-    setCode("");
-    setName("");
-    router.push(`/facilities/${r.id}`);
-    router.refresh();
   }
 
   if (!canCreate) return null;

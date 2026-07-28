@@ -19,16 +19,21 @@ export function NewSupplierButton() {
   async function save() {
     setPending(true);
     setError(null);
-    const r = await createSupplier({ name });
-    setPending(false);
-    if (!r.ok) {
-      setError(r.error);
-      return;
+    try {
+      const r = await createSupplier({ name });
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      setOpen(false);
+      setName("");
+      router.push(`/suppliers/${r.id}`);
+      router.refresh();
+    } catch {
+      setError("Couldn't reach the server — reload to check whether it was created.");
+    } finally {
+      setPending(false);
     }
-    setOpen(false);
-    setName("");
-    router.push(`/suppliers/${r.id}`);
-    router.refresh();
   }
 
   if (!canCreate) return null;

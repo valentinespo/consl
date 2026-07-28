@@ -37,14 +37,19 @@ export function ProductEditor({ product }: { product: ProductForEdit }) {
   async function save() {
     setError(null);
     setPending(true);
-    const res = await updateProduct({ id: product.id, code, name, notes });
-    setPending(false);
-    if (!res.ok) {
-      setError(res.error);
-      return;
+    try {
+      const res = await updateProduct({ id: product.id, code, name, notes });
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setSaved(true);
+      router.refresh();
+    } catch {
+      setError("Couldn't reach the server — reload to check whether it saved.");
+    } finally {
+      setPending(false);
     }
-    setSaved(true);
-    router.refresh();
   }
 
   return (

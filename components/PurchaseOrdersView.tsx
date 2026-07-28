@@ -155,14 +155,20 @@ function ImportedPo({ po }: { po: PoListRow }) {
   const router = useRouter();
   async function remove() {
     setPending(true);
-    const res = await deletePurchaseOrder(po.id);
-    if (!res.ok) {
-      setError(res.error);
-      setPending(false);
+    try {
+      const res = await deletePurchaseOrder(po.id);
+      if (!res.ok) {
+        setError(res.error);
+        setDelStep(0);
+        return;
+      }
+      router.refresh();
+    } catch {
+      setError("Couldn't reach the server — reload to check whether it was deleted.");
       setDelStep(0);
-      return;
+    } finally {
+      setPending(false);
     }
-    router.refresh();
   }
   return (
     <div className="space-y-3">
@@ -217,10 +223,14 @@ function StatusSelect({ id, status }: { id: string; status: string }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   async function change(e: React.ChangeEvent<HTMLSelectElement>) {
+    const next = e.target.value === "SENT" ? "SENT" : "DRAFT";
     setPending(true);
-    await setPoStatus(id, e.target.value === "SENT" ? "SENT" : "DRAFT");
-    setPending(false);
-    router.refresh();
+    try {
+      await setPoStatus(id, next);
+      router.refresh();
+    } finally {
+      setPending(false); // always recover the control, even if the action rejects after saving
+    }
   }
   return (
     <select

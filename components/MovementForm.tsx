@@ -81,24 +81,29 @@ export function MovementForm({
     setError(null);
     setPending(true);
     const isTransfer = effectiveTarget.startsWith("facility:");
-    const res = await createMovement({
-      itemType: kind,
-      productId: isRaw ? (needsSku ? poolSku || null : null) : itemId,
-      materialTypeId: isRaw ? itemId : null,
-      quantity: q,
-      dateISO,
-      fromFacilityId,
-      toFacilityId: isTransfer ? effectiveTarget.slice("facility:".length) : null,
-      toDestination: isTransfer ? null : effectiveTarget,
-      notes,
-    });
-    setPending(false);
-    if (!res.ok) {
-      setError(res.error);
-      return;
+    try {
+      const res = await createMovement({
+        itemType: kind,
+        productId: isRaw ? (needsSku ? poolSku || null : null) : itemId,
+        materialTypeId: isRaw ? itemId : null,
+        quantity: q,
+        dateISO,
+        fromFacilityId,
+        toFacilityId: isTransfer ? effectiveTarget.slice("facility:".length) : null,
+        toDestination: isTransfer ? null : effectiveTarget,
+        notes,
+      });
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      onDone();
+      router.refresh();
+    } catch {
+      setError("Couldn't reach the server — reload to check whether it recorded.");
+    } finally {
+      setPending(false);
     }
-    onDone();
-    router.refresh();
   }
 
   const canSave = q > 0 && !!fromFacilityId && !!itemId && (!needsSku || !!poolSku);

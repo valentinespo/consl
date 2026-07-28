@@ -49,15 +49,20 @@ export function DeleteEntity({
   async function confirm() {
     setPending(true);
     setError(null);
-    const res = await onDelete();
-    setPending(false);
-    if (!res.ok) {
-      setError(res.error ?? "Could not delete.");
-      return;
+    try {
+      const res = await onDelete();
+      if (!res.ok) {
+        setError(res.error ?? "Could not delete.");
+        return;
+      }
+      close();
+      router.push(redirectTo);
+      router.refresh();
+    } catch {
+      setError("Couldn't reach the server — reload to check whether it was deleted.");
+    } finally {
+      setPending(false);
     }
-    close();
-    router.push(redirectTo);
-    router.refresh();
   }
 
   if (inUse) {

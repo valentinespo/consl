@@ -54,22 +54,27 @@ export function MaterialEditor({ material, locked }: { material: MaterialForEdit
   async function save() {
     setError(null);
     setPending(true);
-    const res = await updateMaterial({
-      id: material.id,
-      code,
-      name,
-      unitLabel,
-      defaultPerUnit: Number(perUnit) || 1,
-      lowStockThreshold: thresholdValue,
-      skuSpecific,
-    });
-    setPending(false);
-    if (!res.ok) {
-      setError(res.error);
-      return;
+    try {
+      const res = await updateMaterial({
+        id: material.id,
+        code,
+        name,
+        unitLabel,
+        defaultPerUnit: Number(perUnit) || 1,
+        lowStockThreshold: thresholdValue,
+        skuSpecific,
+      });
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setSaved(true);
+      router.refresh();
+    } catch {
+      setError("Couldn't reach the server — reload to check whether it saved.");
+    } finally {
+      setPending(false);
     }
-    setSaved(true);
-    router.refresh();
   }
 
   return (

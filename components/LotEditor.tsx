@@ -177,22 +177,31 @@ export function LotEditor({
   async function save() {
     setError(null);
     setPending(true);
-    const res = await updateLot({
-      lotId,
-      poNumber: poNumber.trim() || null,
-      poDateISO: poDateISO || null,
-      facilityId,
-      status,
-      finishedAtISO: status === "FINISHED" ? finishedAtISO || null : null,
-      notes: notes.trim() || null,
-      lines: lines.map((l) => ({ id: l.id, productId: l.productId, units: Number(l.units) || 0, materials: bomFor(l.key) })),
-    });
-    if (!res.ok) {
-      setError(res.error ?? "Could not save.");
-      setPending(false);
-      return;
+    try {
+      const res = await updateLot({
+        lotId,
+        poNumber: poNumber.trim() || null,
+        poDateISO: poDateISO || null,
+        facilityId,
+        status,
+        finishedAtISO: status === "FINISHED" ? finishedAtISO || null : null,
+        notes: notes.trim() || null,
+        lines: lines.map((l) => ({ id: l.id, productId: l.productId, units: Number(l.units) || 0, materials: bomFor(l.key) })),
+      });
+      if (!res.ok) {
+        setError(res.error ?? "Could not save.");
+        return;
+      }
+      router.refresh(); // lot.updatedAt changes → the page remounts this editor with fresh data
+    } catch {
+      // The lot commits before the cost recompute + revalidate run, so a hiccup there (or a slow
+      // response) can reject here with the change already saved. Refresh to show reality and let the
+      // button recover, instead of hanging on "Saving" until a manual reload.
+      router.refresh();
+      setError("Saved — the page was just slow to refresh. If your change isn't shown, reload.");
+    } finally {
+      setPending(false); // never rely on the remount alone to clear this
     }
-    router.refresh(); // lot.updatedAt changes → the page remounts this editor with fresh data
   }
 
   const bomLines = lines.map((l) => ({ key: l.key, sku: l.code, productName: l.name, imageUrl: l.imageUrl, units: Number(l.units) || 0 }));
