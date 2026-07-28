@@ -1,5 +1,14 @@
 // Herbl Management App — data model
 // Docs: https://pris.ly/d/prisma-schema
+//
+// ⚠️ orgId is `String?` (nullable) here ON PURPOSE, but every tenant table's orgId column is
+// NOT NULL at the database level (locked by migration 20260727000000_orgid_notnull_drop_dead_cols).
+// The field stays nullable in this schema so the auto-stamping client (lib/db.ts stampData) can
+// omit orgId from create() inputs — making it required here would force orgId into every create
+// call site, including nested ones. Production only ever runs `prisma migrate deploy`, which applies
+// migration files and never diffs against this schema, so the DB constraint is safe permanently.
+// CAVEAT for whoever generates the NEXT migration: `prisma migrate diff`/`migrate dev` will see this
+// divergence and emit spurious `ALTER COLUMN "orgId" DROP NOT NULL` lines — delete those hunks.
 
 generator client {
   provider = "prisma-client"
@@ -501,13 +510,6 @@ model LotLine {
   materials LotMaterial[]
 
   // ---- Engine-computed cost snapshot (per unit). Recomputed on data change. ----
-  // DEPRECATED: fixed tea-shaped cost columns. Nothing reads them and nothing writes them any
-  // more — materialCostsJson / transactionCostsJson carry every material and category instead.
-  // Kept until the migration pass can drop them properly (the deploy's `db push` cannot).
-  teaCostPerUnit    Float  @default(0)
-  otherCostPerUnit  Float  @default(0)
-  teabagCostPerUnit Float  @default(0)
-  pouchCostPerUnit  Float  @default(0)
   cogPerUnit        Float  @default(0)
   // JSON map of materialCode -> per-unit cost (the authoritative material breakdown).
   materialCostsJson String @default("{}")
