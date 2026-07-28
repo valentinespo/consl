@@ -53,7 +53,7 @@ export function SectionTitle({ children, action }: { children: React.ReactNode; 
 }
 
 const PILL: Record<string, string> = {
-  IN_PRODUCTION: "bg-[#eff6ff] text-[#1d4ed8] border-[#dbeafe]",
+  IN_PRODUCTION: "bg-accent-soft text-accent border-accent/25",
   FINISHED: "bg-[#dcfce7] text-[#166534] border-[#bbf7d0]",
   TEA: "bg-[#f5f5f5] text-[#404040] border-[#e5e5e5]",
   OTHER: "bg-[#f5f5f5] text-[#737373] border-[#e5e5e5]",
@@ -119,7 +119,7 @@ export function SupplierAvatar({
       ) : (
         <span
           style={{ width: size, height: size, fontSize: size * 0.4 }}
-          className="inline-flex shrink-0 items-center justify-center rounded-full bg-[#eff6ff] font-medium text-[#2563eb]"
+          className="inline-flex shrink-0 items-center justify-center rounded-full bg-accent-soft font-medium text-accent"
         >
           {init}
         </span>

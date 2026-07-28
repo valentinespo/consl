@@ -13,8 +13,8 @@ export function StockSection({
 }) {
   return (
     <div className="group/stock relative border-t border-line">
-      <div className="-mx-1 flex items-baseline justify-between rounded-lg px-2 py-2 transition-colors group-hover/stock:bg-[#eff6ff]">
-        <span className="text-[11px] uppercase tracking-wide text-muted transition-colors group-hover/stock:text-[#1d4ed8]">
+      <div className="-mx-1 flex items-baseline justify-between rounded-lg px-2 py-2 transition-colors group-hover/stock:bg-accent-soft">
+        <span className="text-[11px] uppercase tracking-wide text-muted transition-colors group-hover/stock:text-accent">
           {label}
         </span>
         {total ? (

@@ -8,9 +8,15 @@
   --color-ink: #171717; /* charcoal — primary text, dark CTA fills */
   --color-ink-soft: #404040; /* slate — secondary text/headings */
   --color-muted: #737373; /* fog — muted/helper text, placeholders */
-  --color-accent: #2563eb; /* electric blue — links, active states, key metrics */
-  --color-accent-soft: #eff6ff; /* light blue wash — active nav, highlights */
-  --color-accent-strong: #1e40af; /* deep sapphire — committed CTA fill (used sparingly) */
+  /* Accent = the app's ONE highlight colour: links, active states, selected borders, key metrics.
+     It is deliberately the SAME violet family the dashboard charts use — accent and chart are one
+     purple, so recolouring the app is a change to these three tokens (and their dark twins) and
+     nowhere else. accent == RAMP[1] (#7c3aed), accent-soft == --color-chart-soft. Every highlight
+     in the app should reference these tokens (text-accent / bg-accent-soft / border-accent-strong),
+     never a raw hex, so this stays a single lever. */
+  --color-accent: #7c3aed; /* violet-600 — a touch deeper than the chart line so small text/links stay legible */
+  --color-accent-soft: #f3effe; /* violet wash — active nav, highlights (identical to --color-chart-soft) */
+  --color-accent-strong: #6d28d9; /* violet-700 — committed CTA fills, selected borders */
   --color-border: #e5e5e5; /* ash — the structural hairline */
   --color-line: #ededed; /* slightly lighter divider */
   --color-positive: #16a34a; /* vivid green — supporting accent */
@@ -42,9 +48,9 @@ html[data-theme="dark"] {
   --color-ink: #f2f2f2;
   --color-ink-soft: #cfcfd3;
   --color-muted: #8e8e94;
-  --color-accent: #60a5fa;
-  --color-accent-soft: #1b2545;
-  --color-accent-strong: #3b82f6;
+  --color-accent: #a78bfa; /* violet-400 — matches --color-chart on dark surfaces */
+  --color-accent-soft: #292347; /* identical to --color-chart-soft (dark) */
+  --color-accent-strong: #8b5cf6;
   --color-border: #2b2b30;
   --color-line: #232327;
   --color-positive: #22c55e;
