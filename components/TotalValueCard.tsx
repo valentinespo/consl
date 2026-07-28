@@ -1,13 +1,17 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { useMoney } from "@/components/CurrencyProvider";
 import type { RestockTotals } from "@/lib/restock";
 import { ValueSparkline } from "@/components/ValueSparkline";
+import { DateRangePicker, type Range } from "@/components/DateRangePicker";
+import { RANGES, sliceRange } from "@/lib/chart";
 import { BUCKETS } from "@/lib/segments";
 
-
 /** The headline inventory-value card: total across FBA + AWD + production + raw materials.
- *  Pass `history` (dashboard only) to render the value-over-time sparkline inside the card. */
+ *  Pass `history` (dashboard only) to render the value-over-time chart inside the card.
+ *  Layout follows the reference: big number + quiet subtitle on the left, the range picker
+ *  stacked over the %-delta on the right, bucket pills, then the chart. */
 export function TotalValueCard({
   totals,
   history,
@@ -17,11 +21,57 @@ export function TotalValueCard({
   history?: { day: string; total: number }[];
   className?: string;
 }) {
-  const { money } = useMoney();
+  const { money, locale } = useMoney();
+  const [range, setRange] = useState<Range>({ key: "30", from: "", to: "" });
+
+  const pts = useMemo(
+    () => (history?.length ? sliceRange(history, range.key, range.from || undefined, range.to || undefined) : []),
+    [history, range],
+  );
+  const first = pts[0]?.total ?? 0;
+  const last = pts[pts.length - 1]?.total ?? 0;
+  const delta = last - first;
+  const pct = first > 0 ? (delta / first) * 100 : 0;
+  const up = delta >= 0;
+  const windowLabel =
+    range.key === "custom"
+      ? "over this range"
+      : `over ${(RANGES.find((r) => r.key === range.key)?.label ?? "this range").toLowerCase()}`;
+
   return (
-    <div className={`flex flex-col overflow-hidden rounded-[var(--radius-card)] border border-accent-strong bg-accent-soft p-5 ${className}`}>
-      <div className="text-[11px] font-medium uppercase tracking-wide text-accent">Total inventory value</div>
-      <div className="mt-1 text-[38px] font-medium leading-none tracking-tight text-ink tabular">{money(totals.total)}</div>
+    <div className={`flex flex-col overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface p-5 ${className}`}>
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div>
+          <div className="text-[36px] font-semibold leading-none tracking-tight text-ink tabular">{money(totals.total)}</div>
+          <div className="mt-1.5 text-[13px] text-muted">Total inventory value</div>
+        </div>
+        {history && history.length > 0 && (
+          <div className="flex flex-col items-end gap-1.5">
+            <DateRangePicker
+              value={range}
+              onChange={setRange}
+              oldest={history[0].day}
+              newest={history[history.length - 1].day}
+              locale={locale}
+            />
+            {pts.length >= 2 && (
+              <span className="flex items-center gap-1.5 text-[12.5px]">
+                <span
+                  className="flex h-4 w-4 items-center justify-center rounded-full text-[9.5px] font-bold leading-none"
+                  style={{ background: up ? "#dcfce7" : "#fee2e2", color: up ? "#16a34a" : "#dc2626" }}
+                >
+                  {up ? "↑" : "↓"}
+                </span>
+                <span className="font-semibold tabular" style={{ color: up ? "#16a34a" : "#dc2626" }}>
+                  {Math.abs(pct).toFixed(1)}%
+                </span>
+                <span className="text-muted">{windowLabel}</span>
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="mt-3.5 flex flex-wrap gap-2">
         {BUCKETS.map((p) => (
           <span key={p.label} className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-[13px]">
@@ -30,7 +80,8 @@ export function TotalValueCard({
           </span>
         ))}
       </div>
-      {history && history.length > 0 && <ValueSparkline data={history} />}
+
+      {history && history.length > 0 && <ValueSparkline pts={pts} />}
     </div>
   );
 }
