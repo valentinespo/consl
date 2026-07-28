@@ -97,7 +97,11 @@ function stampData(data: any, orgId: string): any {
           : one(coc as Record<string, unknown>);
       } else if (verb === "upsert") {
         const up = nested.upsert;
-        const one = (u: Record<string, unknown>) => ({ ...u, create: stampData(u.create, orgId) });
+        const one = (u: Record<string, unknown>) => ({
+          ...u,
+          create: stampData(u.create, orgId),
+          update: stampData(u.update, orgId),
+        });
         rewritten.upsert = Array.isArray(up)
           ? up.map((u) => one(u as Record<string, unknown>))
           : one(up as Record<string, unknown>);
@@ -124,8 +128,14 @@ export function scopeArgs(operation: string, args: any, orgId: string) {
   } else if (operation === "upsert") {
     a.where = { ...(a.where ?? {}), orgId };
     a.create = stampData(a.create ?? {}, orgId);
+    a.update = stampData(a.update ?? {}, orgId);
   } else if (WHERE_OPS.has(operation)) {
     a.where = { ...(a.where ?? {}), orgId };
+    // An update's payload can carry nested relation writes (`lines: { create: [...] }`), and those
+    // children need the stamp too. This was the one unstamped write path — it quietly produced
+    // orphan rows with a NULL orgId (invisible to every scoped read) until the DB-level NOT NULL
+    // constraint turned it into a hard error on PO edits.
+    if (operation === "update" && a.data) a.data = stampData(a.data, orgId);
   } else if (!NO_SCOPE_OPS.has(operation)) {
     throw new Error(
       `Tenant scoping has no rule for Prisma operation "${operation}". Add it to lib/db.ts before using it — ` +
