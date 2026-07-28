@@ -5,6 +5,7 @@ import { useMoney } from "@/components/CurrencyProvider";
 import type { RestockTotals } from "@/lib/restock";
 import { ValueSparkline } from "@/components/ValueSparkline";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
+import { TrendingUp, TrendingDown } from "@/components/icons";
 import { RANGES, sliceRange } from "@/lib/chart";
 import { BUCKETS } from "@/lib/segments";
 
@@ -55,17 +56,16 @@ export function TotalValueCard({
               locale={locale}
             />
             {pts.length >= 2 && (
-              <span className="flex items-center gap-1.5 text-[12.5px]">
-                <span
-                  className="flex h-4 w-4 items-center justify-center rounded-full text-[9.5px] font-bold leading-none"
-                  style={{ background: up ? "#dcfce7" : "#fee2e2", color: up ? "#16a34a" : "#dc2626" }}
-                >
-                  {up ? "↑" : "↓"}
-                </span>
-                <span className="font-semibold tabular" style={{ color: up ? "#16a34a" : "#dc2626" }}>
-                  {Math.abs(pct).toFixed(1)}%
-                </span>
-                <span className="text-muted">{windowLabel}</span>
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] leading-none"
+                style={{
+                  background: up ? "rgba(22,163,74,0.10)" : "rgba(220,38,38,0.09)",
+                  color: up ? "#16a34a" : "#dc2626",
+                }}
+              >
+                {up ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                <span className="font-semibold tabular">{Math.abs(pct).toFixed(1)}%</span>
+                <span>{windowLabel}</span>
               </span>
             )}
           </div>

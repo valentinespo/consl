@@ -112,3 +112,5 @@ export const ChevronUp = regular(P.CaretUp);
 export const ChevronsUpDown = regular(P.CaretUpDown);
 export const ArrowUpDown = regular(P.ArrowsDownUp);
 export const ArrowRight = regular(P.ArrowRight);
+export const TrendingUp = regular(P.TrendUp);
+export const TrendingDown = regular(P.TrendDown);
