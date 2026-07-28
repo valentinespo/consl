@@ -87,7 +87,23 @@ export function keyFromUrl(url: string): string | null {
 export async function readStored(url: string | null | undefined): Promise<Buffer | null> {
   if (!url) return null;
   const key = keyFromUrl(url);
-  if (!key) return null;
+  if (!key) {
+    // Not an uploaded file — but it may be a bundled public asset (e.g. an org seeded with
+    // logoUrl "/brand/logo.png"). The browser can render those, so documents must too:
+    // resolve inside /public only, with the normalized path checked against escapes.
+    if (url.startsWith("/") && !url.startsWith("//")) {
+      const pub = path.join(process.cwd(), "public");
+      const full = path.normalize(path.join(pub, url.split("?")[0]));
+      if (full.startsWith(pub + path.sep)) {
+        try {
+          return await readFile(full);
+        } catch {
+          return null;
+        }
+      }
+    }
+    return null;
+  }
   try {
     if (r2Configured) {
       const { S3Client, GetObjectCommand } = await import("@aws-sdk/client-s3");

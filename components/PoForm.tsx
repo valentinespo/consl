@@ -160,31 +160,43 @@ export function PoForm({
   async function submit() {
     setError(null);
     setPending(true);
-    const payload = {
-      id: po?.id ?? null,
-      facilityId,
-      dateISO,
-      lines: lines
-        .filter((l) => l.description.trim() || Number(l.quantity))
-        .map(
-          (l): PoLineInput => ({
-            kind: l.kind,
-            productId: l.kind === "SKU" ? l.productId || null : null,
-            description: l.description,
-            unitCost: l.unitCost.trim() === "" ? null : Number(l.unitCost) || 0,
-            quantity: Number(l.quantity) || 0,
-            lotUnits: l.kind === "SKU" ? Number(l.lotUnits || l.quantity) || 0 : null,
-          }),
-        ),
-    };
-    const res = editing ? await updatePurchaseOrder(payload) : await createPurchaseOrder(payload);
-    if (!res.ok) {
-      setError(res.error);
+    try {
+      const payload = {
+        id: po?.id ?? null,
+        facilityId,
+        dateISO,
+        lines: lines
+          .filter((l) => l.description.trim() || Number(l.quantity))
+          .map(
+            (l): PoLineInput => ({
+              kind: l.kind,
+              productId: l.kind === "SKU" ? l.productId || null : null,
+              description: l.description,
+              unitCost: l.unitCost.trim() === "" ? null : Number(l.unitCost) || 0,
+              quantity: Number(l.quantity) || 0,
+              lotUnits: l.kind === "SKU" ? Number(l.lotUnits || l.quantity) || 0 : null,
+            }),
+          ),
+      };
+      const res = editing ? await updatePurchaseOrder(payload) : await createPurchaseOrder(payload);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      // The create form stays mounted after a successful save (the edit form unmounts when its
+      // row collapses) — clear it back to a blank slate so it's ready for the next PO. Without
+      // this the button sat on "Creating…" forever even though the PO had been created.
+      if (!editing) {
+        setLines([{ key: newKey(), kind: "SKU", productId: "", description: "", unitCost: "", quantity: "", lotUnits: "" }]);
+        setDateISO(todayISO);
+      }
+      onDone();
+      router.refresh();
+    } catch {
+      setError("Couldn't reach the server — the PO may still have been created. Refresh the page to check before retrying.");
+    } finally {
       setPending(false);
-      return;
     }
-    onDone();
-    router.refresh();
   }
   async function remove() {
     if (!po) return;
