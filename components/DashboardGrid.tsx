@@ -431,6 +431,38 @@ const DONUT_PX = 190;
 const MIN_ROWS = 3;
 const ROW_PX = 30; // one breakdown row's height — sets the portrait scroll threshold
 
+/** A scroll container that fades its content at whichever edge has more beyond it — a reliable,
+ *  browser-independent "there's more below/above" signal (native overlay scrollbars auto-hide and
+ *  `scrollbar-gutter` isn't honoured everywhere, so we don't depend on them). Keeps the styled
+ *  scrollbar too, for browsers that show it. `center` vertically centres the rows when they don't
+ *  fill the height (the wide layout) yet still scrolls from the top once they overflow. */
+function ScrollFade({ children, wrapClassName = "", scrollStyle, center = false, contentClassName = "space-y-1" }: { children: React.ReactNode; wrapClassName?: string; scrollStyle?: React.CSSProperties; center?: boolean; contentClassName?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [edge, setEdge] = useState({ top: false, bottom: false });
+  const update = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    setEdge({ top: el.scrollTop > 2, bottom: el.scrollTop + el.clientHeight < el.scrollHeight - 2 });
+  }, []);
+  useEffect(() => {
+    update();
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [update, children]);
+  return (
+    <div className={`relative ${wrapClassName}`}>
+      <div ref={ref} onScroll={update} className="h-full overflow-y-auto scroll-visible" style={scrollStyle}>
+        <div className={`${contentClassName} ${center ? "flex min-h-full flex-col justify-center" : ""}`}>{children}</div>
+      </div>
+      <div className={`pointer-events-none absolute inset-x-0 top-0 h-5 bg-gradient-to-b from-surface to-transparent transition-opacity duration-150 ${edge.top ? "opacity-100" : "opacity-0"}`} />
+      <div className={`pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-surface to-transparent transition-opacity duration-150 ${edge.bottom ? "opacity-100" : "opacity-0"}`} />
+    </div>
+  );
+}
+
 /** One wheel with a labelled breakdown and the grand total pinned to the bottom. Used for both
  *  "Produced value" (by facility) and "Amount spent" (by supplier) — same violet ring. Portrait
  *  cards stack the donut over the rows; wide cards sit the donut on the left with the rows
@@ -485,16 +517,16 @@ function RingWidget({ title, subtitle, data, total }: { title: string; subtitle:
     <Card className="flex h-full flex-col">
       <div className="text-[15px] font-semibold text-ink">{title}</div>
       <div className="mt-0.5 text-[12.5px] text-muted">{subtitle}</div>
-      <div ref={boxRef} className={`mt-2 min-h-0 flex-1 ${wide ? "flex items-center gap-5" : "flex flex-col items-center justify-center gap-1"}`}>
-        <div className="shrink-0" style={{ width: donutPx, height: donutPx }}>
+      <div ref={boxRef} className={`mt-2 min-h-0 flex-1 ${wide ? "flex gap-5" : "flex flex-col items-center justify-center gap-1"}`}>
+        <div className="shrink-0 self-center" style={{ width: donutPx, height: donutPx }}>
           {data.length ? <Donut data={data} hover={hover} onHover={setHover} /> : <EmptyRing />}
         </div>
         {wide ? (
-          // Vertically centred beside the donut (max-h-full + the row's items-center), scrolling
-          // only once the rows outgrow the card's height.
-          <div className="min-w-0 max-h-full flex-1 space-y-1 overflow-y-auto scroll-visible">{legend}</div>
+          // Fills the height beside the donut and centres its rows, scrolling only once they
+          // outgrow the card.
+          <ScrollFade wrapClassName="min-w-0 min-h-0 flex-1" center>{legend}</ScrollFade>
         ) : (
-          <div className="w-full space-y-1 overflow-y-auto scroll-visible" style={{ maxHeight: MIN_ROWS * ROW_PX }}>{legend}</div>
+          <ScrollFade wrapClassName="w-full" scrollStyle={{ maxHeight: MIN_ROWS * ROW_PX }}>{legend}</ScrollFade>
         )}
       </div>
       <div className="mt-3 flex items-center justify-between border-t border-line pt-3">
@@ -567,11 +599,11 @@ function LeadTimeWidget({ lt }: { lt: DashboardData["leadTimes"] }) {
         <span className="text-[30px] font-semibold leading-none tracking-tight text-ink tabular">{mo(lt.blendedDays)}</span>
         <span className="mb-0.5 text-[13px] text-muted">mo avg · {lt.blendedDays}d</span>
       </div>
-      <div className="mt-3.5 min-h-0 flex-1 space-y-2 overflow-y-auto scroll-visible">
+      <ScrollFade wrapClassName="mt-3.5 min-h-0 flex-1" contentClassName="space-y-2">
         {Array.from({ length: Math.max(3, lt.perFacility.length) }, (_, i) => lt.perFacility[i] ?? null).map((f, i) =>
           f ? (
             <div key={f.code} className="flex items-center gap-3">
-              <div className="relative flex h-8 min-w-0 flex-1 items-center">
+              <div className="relative flex h-7 min-w-0 flex-1 items-center">
                 <div
                   className="absolute inset-y-0 left-0"
                   style={{
@@ -592,13 +624,13 @@ function LeadTimeWidget({ lt }: { lt: DashboardData["leadTimes"] }) {
             </div>
           ) : (
             <div key={`empty-${i}`} className="flex items-center gap-3">
-              <div className="relative flex h-8 min-w-0 flex-1 items-center rounded-[3px]" style={{ background: "color-mix(in srgb, var(--color-chart) 4%, transparent)" }}>
+              <div className="relative flex h-7 min-w-0 flex-1 items-center rounded-[3px]" style={{ background: "color-mix(in srgb, var(--color-chart) 4%, transparent)" }}>
                 <span className="relative z-10 pl-1.5 text-[12.5px] text-muted/70">Awaiting data</span>
               </div>
             </div>
           ),
         )}
-      </div>
+      </ScrollFade>
     </Card>
   );
 }
