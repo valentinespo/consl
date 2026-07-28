@@ -135,16 +135,25 @@ export function DateRangePicker({
     }
   }
 
-  const label = useMemo(() => {
-    if (value.key !== "custom") return RANGES.find((r) => r.key === value.key)?.label ?? "";
-    const short = (d: string) =>
-      new Date(`${d}T00:00:00Z`).toLocaleDateString(locale, {
-        month: "short",
-        day: "numeric",
-        timeZone: "UTC",
-      });
-    return `${short(value.from)} – ${short(value.to)}`;
-  }, [value, locale]);
+  // The trigger names the preset on the left and spells out the dates it resolves to on the
+  // right — "Last 30 days | 📅 Jun 29 - Jul 28, 2026" — so the window is never ambiguous.
+  const presetLabel = value.key === "custom" ? "Custom" : (RANGES.find((r) => r.key === value.key)?.label ?? "");
+  const rangeText = useMemo(() => {
+    const b = rangeBounds(value.key, newest, value.from, value.to);
+    const from = b.from ?? oldest;
+    const to = b.to ?? newest;
+    const f = new Date(`${from}T00:00:00Z`);
+    const t = new Date(`${to}T00:00:00Z`);
+    const sameYear = f.getUTCFullYear() === t.getUTCFullYear();
+    const start = f.toLocaleDateString(locale, {
+      month: "short",
+      day: "numeric",
+      ...(sameYear ? {} : { year: "numeric" }),
+      timeZone: "UTC",
+    });
+    const end = t.toLocaleDateString(locale, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+    return `${start} - ${end}`;
+  }, [value, newest, oldest, locale]);
 
   const prevMonth = { y: month.m === 0 ? month.y - 1 : month.y, m: month.m === 0 ? 11 : month.m - 1 };
 
@@ -175,9 +184,9 @@ export function DateRangePicker({
                   disabled
                     ? "cursor-default text-muted/40"
                     : isEnd
-                      ? "bg-accent-strong font-medium text-white"
+                      ? "bg-chart font-medium text-white"
                       : inRange
-                        ? "bg-accent-soft text-ink"
+                        ? "bg-chart-soft text-ink"
                         : "text-ink-soft hover:bg-surface-2"
                 }`}
               >
@@ -198,11 +207,17 @@ export function DateRangePicker({
         onClick={toggle}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1 text-[11px] text-ink-soft outline-none transition-colors hover:border-accent-strong focus-visible:border-accent-strong"
+        className="inline-flex h-9 items-stretch overflow-hidden rounded-[10px] border border-border bg-surface text-[12.5px] outline-none transition-colors hover:border-chart focus-visible:border-chart"
       >
-        <CalendarDays size={12} className="text-accent" />
-        {label}
-        <ChevronDown size={12} className="text-muted" />
+        <span className="flex items-center gap-1.5 px-3 font-medium text-ink">
+          {presetLabel}
+          <ChevronDown size={13} className="text-muted" />
+        </span>
+        <span aria-hidden className="w-px self-stretch bg-border" />
+        <span className="flex items-center gap-2 px-3 text-ink">
+          <CalendarDays size={14} className="text-ink-soft" />
+          {rangeText}
+        </span>
       </button>
 
       {mounted &&
@@ -226,7 +241,7 @@ export function DateRangePicker({
                     onClick={() => choosePreset(r.key)}
                     className={`block w-full px-3.5 py-1.5 text-left text-[12.5px] transition-colors ${
                       draft.key === r.key
-                        ? "bg-accent-soft font-medium text-accent"
+                        ? "bg-chart-soft font-medium text-chart"
                         : "text-ink-soft hover:bg-surface-2"
                     }`}
                   >
@@ -246,8 +261,8 @@ export function DateRangePicker({
                       onClick={() => setPicking(end)}
                       className={`h-9 min-w-0 flex-1 truncate rounded-lg border px-2.5 text-left text-[12.5px] transition-colors ${
                         picking === end
-                          ? "border-accent-strong text-ink"
-                          : "border-border text-ink-soft hover:border-accent-strong"
+                          ? "border-chart text-ink"
+                          : "border-border text-ink-soft hover:border-chart"
                       }`}
                     >
                       {longDay(end === "from" ? draft.from : draft.to, locale)}

@@ -8,8 +8,10 @@ const W = 1000;
 const H = 150;
 const TIP_W = 235; // estimate for edge-flipping; the card itself sizes to its content
 const LINE = "#8b5cf6"; // violet — the chart's own voice, distinct from the app's blue accent
-const EASE = "cubic-bezier(0.16, 0.84, 0.44, 1)"; // ease-out glide for everything that follows the cursor
-const GLIDE = "transform 0.3s " + EASE;
+// Ease-in-AND-out (cubic): the markers accelerate away gently and settle softly onto the next
+// point instead of snapping — paired with a longer clock so the landing reads.
+const EASE = "cubic-bezier(0.65, 0, 0.35, 1)";
+const GLIDE = "transform 0.45s " + EASE;
 
 /** Smooth (cardinal-spline) line + area path through points already in 0..W / 0..H space. */
 function spline(pts: [number, number][]) {
@@ -238,7 +240,7 @@ export function ValueSparkline({ pts }: { pts: { day: string; total: number }[] 
                 maskRepeat: "no-repeat",
                 WebkitMaskPosition: `${hlLeft}px 0`,
                 maskPosition: `${hlLeft}px 0`,
-                transition: `mask-position 0.3s ${EASE}, -webkit-mask-position 0.3s ${EASE}`,
+                transition: `mask-position 0.45s ${EASE}, -webkit-mask-position 0.45s ${EASE}`,
               }}
             >
               <path

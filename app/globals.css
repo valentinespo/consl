@@ -22,6 +22,8 @@
   /* Active nav item. Deliberately its own token, not accent-soft: that wash disappears against
      the tinted sidebar in light mode, and nudging it here must not brighten every other chip. */
   --color-nav-active: #f4f4f5; /* selected tab chip — neutral zinc-100, matching efferd/shadcn */
+  --color-chart: #8b5cf6; /* the charts' violet — also highlights inside chart-owned controls */
+  --color-chart-soft: #f3effe; /* soft violet wash — selected presets, in-range days */
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
@@ -51,6 +53,8 @@ html[data-theme="dark"] {
   --color-header: #18181b; /* chrome gray, dark — still identical to the sidebar */
   --color-sidebar: #18181b;
   --color-nav-active: #242428; /* selected tab chip — neutral, mirrors the light zinc-100 choice */
+  --color-chart: #a78bfa; /* the violet reads better a shade lighter on dark surfaces */
+  --color-chart-soft: #292347; /* soft violet wash, dark */
 }
 
 /* The iso mark is pure black artwork; flip it to white when the chrome goes dark. */
