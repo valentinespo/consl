@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMoney } from "@/components/CurrencyProvider";
 import { compactMoney, niceTicks } from "@/lib/chart";
 
@@ -151,6 +151,11 @@ export function ValueSparkline({ pts }: { pts: { day: string; total: number }[] 
     prev: null,
     tick: 0,
   });
+  // The pill measures itself so it can clamp flush inside the plot: left-aligned at the first
+  // day, right-aligned at the last (mirroring the edge labels' own alignment), centred between —
+  // it always fully covers the label beneath and can never crop at the card edge.
+  const pillRef = useRef<HTMLSpanElement>(null);
+  const [pillW, setPillW] = useState(56);
   const day = hp?.day ?? null;
   useEffect(() => {
     if (!day) {
@@ -159,6 +164,9 @@ export function ValueSparkline({ pts }: { pts: { day: string; total: number }[] 
     }
     setRoll((r) => (r.cur === day ? r : { cur: day, prev: r.cur, tick: r.tick + 1 }));
   }, [day]);
+  useLayoutEffect(() => {
+    if (pillRef.current) setPillW(pillRef.current.offsetWidth);
+  }, [roll.cur]);
 
   if (n === 0) {
     return (
@@ -340,10 +348,11 @@ export function ValueSparkline({ pts }: { pts: { day: string; total: number }[] 
         {roll.cur && hp && plot.w > 0 && (
           <span
             key={`pill${sess}`}
+            ref={pillRef}
             className="absolute left-0 top-0 z-10 inline-flex rounded-full bg-ink px-2.5 py-[4px] text-[10.5px] font-medium text-bg"
             style={{
-              // Centred exactly on the rule — the pill and the line always agree.
-              transform: `translateX(calc(${hx}px - 50%))`,
+              // Centred on the rule, clamped flush inside the plot at either edge.
+              transform: `translateX(${Math.max(0, Math.min(hx - pillW / 2, plot.w - pillW))}px)`,
               transition: GLIDE,
             }}
           >
