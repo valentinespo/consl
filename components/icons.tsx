@@ -54,6 +54,8 @@ export const FileTextFilled = regular(P.Receipt);
 export const Building2Filled = regular(P.Storefront);
 export const WarehouseFilled = regular(P.Warehouse);
 export const ImagesFilled = regular(P.Tag);
+/** Reorder / restock recommendations — a circular "order again" arrow. */
+export const ReorderFilled = regular(P.ArrowClockwise);
 /** Outline storefront for the header's org-mark fallback (chrome runs outline weight). */
 export const Building2Outline = regular(P.Storefront);
 
