@@ -48,9 +48,14 @@ export async function getInventory() {
 
 export async function getDashboard() {
   const inv = await getInventory();
-  const [lots, purchaseRows] = await Promise.all([
+  const [lots, purchaseRows, cogTxns] = await Promise.all([
     prisma.lot.findMany({ include: { lines: true, facility: true } }),
-    prisma.purchase.findMany({ where: { isAdjustment: false }, select: { total: true, facility: { select: { code: true } } } }),
+    prisma.purchase.findMany({
+      where: { isAdjustment: false },
+      select: { total: true, facility: { select: { code: true } }, supplier: { select: { name: true } } },
+    }),
+    // COG-contributing transaction lines only — the "Not applicable" (excluded) lines are dropped.
+    prisma.transaction.findMany({ where: { appliesToCog: true }, select: { applicableAmount: true, supplier: { select: { name: true } } } }),
   ]);
 
   let inProductionValue = 0;
@@ -76,6 +81,18 @@ export async function getDashboard() {
     purchasesTotal += p.total;
   }
 
+  // Amount spent, per supplier: real purchases + COG-contributing transaction lines. A row with no
+  // supplier lands under "Unassigned" so the wheel's total always reconciles with the grand total.
+  const spendBySupplier = new Map<string, number>();
+  let spentTotal = 0;
+  const addSpend = (name: string | null | undefined, v: number) => {
+    const key = name?.trim() || "Unassigned";
+    spendBySupplier.set(key, (spendBySupplier.get(key) ?? 0) + v);
+    spentTotal += v;
+  };
+  for (const p of purchaseRows) addSpend(p.supplier?.name, p.total);
+  for (const t of cogTxns) addSpend(t.supplier?.name, t.applicableAmount);
+
   const counts = {
     lots: lots.length,
     inProduction: lots.filter((l) => l.status === "IN_PRODUCTION").length,
@@ -94,6 +111,8 @@ export async function getDashboard() {
     byFacility: [...byFacility.entries()].map(([code, value]) => ({ code, value })).sort((a, b) => b.value - a.value),
     purchasesByFacility: [...purchByFacility.entries()].map(([code, value]) => ({ code, value })).sort((a, b) => b.value - a.value),
     purchasesTotal,
+    spentBySupplier: [...spendBySupplier.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value),
+    spentTotal,
     counts,
   };
 }

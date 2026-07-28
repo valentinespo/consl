@@ -8,7 +8,7 @@ import type { LucideIcon } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { Card, PageHeader, SectionTitle } from "@/components/ui";
 import { TotalValueCard } from "@/components/TotalValueCard";
-import { FacilityPie, BLUES, VIOLETS } from "@/components/FacilityPie";
+import { Donut, BLUES, type Slice } from "@/components/Donut";
 import { ValueStackedChart } from "@/components/ValueStackedChart";
 import { RecentLots, type RecentLot } from "@/components/RecentLots";
 import type { RestockTotals, ValueHistoryPoint } from "@/lib/restock";
@@ -26,11 +26,10 @@ type Item = { id: string; x: number; y: number; w: number; h: number };
 export type DashboardData = {
   totals: RestockTotals;
   history: ValueHistoryPoint[];
-  facility: { code: string; value: number }[];
-  facilityPurchases: { code: string; value: number }[];
+  facility: { code: string; value: number }[]; // produced (lot) value per producing facility
   prodTotal: number;
-  purchTotal: number;
-  counts: { purchases: number; transactions: number; suppliers: number };
+  spentBySupplier: Slice[]; // purchases + COG transactions per supplier
+  spentTotal: number;
   recentLots: RecentLot[];
   alerts: Alert[];
   leadTimes: LeadTimes & { configuredDays: number };
@@ -39,7 +38,8 @@ export type DashboardData = {
 type Meta = { title: string; minW: number; minH: number; w: number; h: number };
 const WIDGETS: Record<string, Meta> = {
   totalValue: { title: "Total inventory value", minW: 5, minH: 3, w: 12, h: 4 },
-  facility: { title: "Value by facility", minW: 3, minH: 5, w: 5, h: 6 },
+  producedValue: { title: "Produced value", minW: 3, minH: 5, w: 4, h: 6 },
+  amountSpent: { title: "Amount spent", minW: 3, minH: 5, w: 4, h: 6 },
   recentLots: { title: "Recent production lots", minW: 4, minH: 4, w: 7, h: 6 },
   valueByBucket: { title: "Value by bucket", minW: 4, minH: 3, w: 6, h: 4 },
   notifications: { title: "Notifications", minW: 3, minH: 3, w: 5, h: 4 },
@@ -53,8 +53,9 @@ const DEFAULT_LAYOUT: Item[] = [
   { id: "notifications", x: 0, y: 4, w: 5, h: 4 },
   { id: "reorderAlerts", x: 5, y: 4, w: 4, h: 4 },
   { id: "daysCover", x: 9, y: 4, w: 3, h: 2 },
-  { id: "facility", x: 0, y: 8, w: 5, h: 6 },
-  { id: "recentLots", x: 5, y: 8, w: 7, h: 6 },
+  { id: "producedValue", x: 0, y: 8, w: 4, h: 6 },
+  { id: "amountSpent", x: 4, y: 8, w: 4, h: 6 },
+  { id: "recentLots", x: 8, y: 8, w: 4, h: 6 },
   { id: "valueByBucket", x: 0, y: 14, w: 8, h: 4 },
   { id: "leadTime", x: 8, y: 14, w: 4, h: 4 },
 ];
@@ -76,7 +77,16 @@ function compact(items: Item[]): Item[] {
 
 function sanitize(raw: unknown): Item[] {
   if (!Array.isArray(raw)) return DEFAULT_LAYOUT;
+  // The old combined "facility" widget became "Produced value"; keep its slot on existing dashboards.
+  let migrated = false;
   const items = raw
+    .map((r) => {
+      if (r && typeof r === "object" && (r as Item).id === "facility") {
+        migrated = true;
+        return { ...(r as Item), id: "producedValue" };
+      }
+      return r;
+    })
     .filter((r): r is Item => !!r && typeof r === "object" && typeof (r as Item).id === "string" && !!WIDGETS[(r as Item).id])
     .map((r) => {
       const m = WIDGETS[r.id];
@@ -89,7 +99,12 @@ function sanitize(raw: unknown): Item[] {
       };
     });
   const seen = new Set<string>();
-  const uniq = items.filter((i) => (seen.has(i.id) ? false : (seen.add(i.id), true)));
+  let uniq = items.filter((i) => (seen.has(i.id) ? false : (seen.add(i.id), true)));
+  // On that same migration, drop the new "Amount spent" widget in beside it so both show up.
+  const pv = uniq.find((i) => i.id === "producedValue");
+  if (migrated && pv && !uniq.some((i) => i.id === "amountSpent")) {
+    uniq = [...uniq, { id: "amountSpent", x: pv.x, y: pv.y + pv.h, w: pv.w, h: pv.h }];
+  }
   return uniq.length ? compact(uniq) : DEFAULT_LAYOUT;
 }
 
@@ -318,8 +333,10 @@ function renderContent(id: string, d: DashboardData) {
   switch (id) {
     case "totalValue":
       return <TotalValueCard totals={d.totals} history={d.history} className="h-full" />;
-    case "facility":
-      return <FacilityWidget production={d.facility} purchases={d.facilityPurchases} prodTotal={d.prodTotal} purchTotal={d.purchTotal} counts={d.counts} />;
+    case "producedValue":
+      return <RingWidget title="Produced value" icon={PieChart} data={d.facility.map((f) => ({ label: f.code, value: f.value }))} total={d.prodTotal} />;
+    case "amountSpent":
+      return <RingWidget title="Amount spent" icon={ShoppingCart} data={d.spentBySupplier} total={d.spentTotal} />;
     case "recentLots":
       return <RecentLotsWidget lots={d.recentLots} />;
     case "valueByBucket":
@@ -396,35 +413,43 @@ function WidgetHead({ icon: Icon, title, tint = "accent", right }: { icon: Lucid
   );
 }
 
-function FacilityWidget({
-  production,
-  purchases,
-  prodTotal,
-  purchTotal,
-  counts,
-}: {
-  production: { code: string; value: number }[];
-  purchases: { code: string; value: number }[];
-  prodTotal: number;
-  purchTotal: number;
-  counts: { purchases: number; transactions: number; suppliers: number };
-}) {
+/** One wheel with a labelled breakdown below and the grand total pinned to the bottom. Used for
+ *  both "Produced value" (by facility) and "Amount spent" (by supplier) — same blue ring. */
+function RingWidget({ title, icon, data, total }: { title: string; icon: LucideIcon; data: Slice[]; total: number }) {
+  const { money } = useMoney();
+  const [hover, setHover] = useState<number | null>(null);
   return (
     <Card className="flex h-full flex-col">
-      <WidgetHead icon={PieChart} title="Value by facility" tint="accent" />
-      <div className="grid grid-cols-2 gap-4">
-        <FacilityPie data={production} palette={BLUES} label="Production" />
-        <FacilityPie data={purchases} palette={VIOLETS} label="Purchases" />
-      </div>
-      <div className="mt-auto pt-4">
-        {/* Only the combined figure: the two halves are already the pies directly above. */}
-        <MoneyChip label="Grand total" value={prodTotal + purchTotal} dot="#171717" />
-        <div className="mt-2 grid grid-cols-3 gap-2">
-          <Mini label="Purchases" value={counts.purchases} />
-          <Mini label="Transactions" value={counts.transactions} />
-          <Mini label="Suppliers" value={counts.suppliers} />
+      <WidgetHead icon={icon} title={title} tint="accent" />
+      {data.length === 0 ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted">
+          <PieChart size={24} />
+          <span className="text-[12.5px]">Nothing to show yet</span>
         </div>
-      </div>
+      ) : (
+        <>
+          <Donut data={data} hover={hover} onHover={setHover} />
+          <div className="mt-3 min-h-0 flex-1 space-y-1 overflow-y-auto">
+            {data.map((s, i) => (
+              <div
+                key={s.label}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-[12px] transition-colors"
+                style={{ background: hover === i ? "var(--color-surface-2)" : "transparent" }}
+                onMouseEnter={() => setHover(i)}
+                onMouseLeave={() => setHover(null)}
+              >
+                <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: BLUES[i % BLUES.length] }} />
+                <span className="truncate font-medium text-ink-soft">{s.label}</span>
+                <span className="ml-auto shrink-0 tabular text-ink">{money(s.value)}</span>
+                <span className="w-9 shrink-0 text-right tabular text-[10.5px] text-muted">{total > 0 ? Math.round((s.value / total) * 100) : 0}%</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3">
+            <MoneyChip label="Grand total" value={total} dot="#1e3a8a" />
+          </div>
+        </>
+      )}
     </Card>
   );
 }
@@ -627,11 +652,3 @@ function ReorderAlertsWidget({ alerts }: { alerts: Alert[] }) {
   );
 }
 
-function Mini({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-lg bg-surface-2 px-2 py-2 text-center">
-      <div className="text-[17px] font-semibold text-ink tabular">{value}</div>
-      <div className="text-[10.5px] text-muted">{label}</div>
-    </div>
-  );
-}
