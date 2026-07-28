@@ -12,8 +12,8 @@ export const SEG = {
   available: "#16a34a", // sellable at the channel
   inbound: "#4ade80", // on its way to the channel
   reserved: "#bbf7d0", // at the channel but spoken for
-  locations: "#8b5cf6", // finished stock at your own facilities
-  production: "#f59e0b", // being made
+  locations: "#2563eb", // finished stock at your own facilities — the old app blue, kept as its own hue
+  production: "#8b5cf6", // being made — the dashboard's violet (matches the "In production" theme)
   raw: "#94a3b8", // materials, not yet a product
 } as const;
 
