@@ -6,9 +6,8 @@ import { Settings, Check, ChevronDown, GripVertical } from "@/components/icons";
 import { HoverHint } from "@/components/HoverHint";
 import { BATCH_HELP, BUFFER_HELP, FLOOR_HELP, LEAD_HELP, REORDER_TO_HELP, SHIP_HELP } from "@/lib/restock-help";
 import { SkuAvatar } from "@/components/ui";
-import { TotalValueCard } from "@/components/TotalValueCard";
 import { updateGlobalDefaults, updateSkuPolicy, setSortMode, saveManualOrder, setSkuWindow } from "@/app/inventory/actions";
-import type { RestockRow, RestockTotals } from "@/lib/restock";
+import type { RestockRow } from "@/lib/restock";
 import { computeReorder, type ReorderResult } from "@/lib/reorder";
 import { SEG } from "@/lib/segments";
 import { useMoney } from "@/components/CurrencyProvider";
@@ -85,13 +84,11 @@ function compute(r: RestockRow, globalWin: Win, nowMs: number): Computed {
 
 export function RestockDashboard({
   rows,
-  totals,
   defaults,
   sortMode: initialSort,
   nowMs,
 }: {
   rows: RestockRow[];
-  totals: RestockTotals;
   defaults: Defaults;
   sortMode: string;
   nowMs: number;
@@ -155,11 +152,6 @@ export function RestockDashboard({
 
   return (
     <div>
-      {/* Full width — syncing moved up beside the tabs so this card isn't squeezed. */}
-      <div className="mb-3">
-        <TotalValueCard totals={totals} />
-      </div>
-
       {/* KPIs */}
       <div className="mb-5 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
         <Kpi label="Needs a PO" value={String(needsPO)} tone={needsPO > 0 ? "#ea580c" : undefined} />

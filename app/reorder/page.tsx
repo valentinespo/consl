@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  *  Inventory "Overview" tab; now its own top-level section beside Inventory. */
 export default async function ReorderPage() {
   await requireView("inventory");
-  const [{ rows, totals, lastSync, defaults, sortMode }, settings, org] = await Promise.all([
+  const [{ rows, lastSync, defaults, sortMode }, settings, org] = await Promise.all([
     getRestock(),
     getOrgSettings(),
     getCurrentOrg().catch(() => null),
@@ -33,7 +33,7 @@ export default async function ReorderPage() {
       <PageHeader title="Reorder" subtitle="Restock recommendations — what to reship to Amazon and what to reorder.">
         <SyncAmazonButton lastSync={synced} />
       </PageHeader>
-      <RestockDashboard rows={rows} totals={totals} defaults={defaults} sortMode={sortMode} nowMs={Date.now()} />
+      <RestockDashboard rows={rows} defaults={defaults} sortMode={sortMode} nowMs={Date.now()} />
     </>
   );
 }
