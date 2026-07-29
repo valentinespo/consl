@@ -599,11 +599,13 @@ function LeadTimeWidget({ lt }: { lt: DashboardData["leadTimes"] }) {
         <span className="text-[30px] font-semibold leading-none tracking-tight text-ink tabular">{mo(lt.blendedDays)}</span>
         <span className="mb-0.5 text-[13px] text-muted">mo avg · {lt.blendedDays}d</span>
       </div>
-      <ScrollFade wrapClassName="mt-3.5 min-h-0 flex-1" contentClassName="space-y-2">
+      {/* Bars grow to fill the card's height so the widget always reads full to the bottom padding;
+          each keeps a minimum height, so once there are more than fit they scroll instead. */}
+      <ScrollFade wrapClassName="mt-3.5 min-h-0 flex-1" contentClassName="flex min-h-full flex-col gap-2">
         {Array.from({ length: Math.max(3, lt.perFacility.length) }, (_, i) => lt.perFacility[i] ?? null).map((f, i) =>
           f ? (
-            <div key={f.code} className="flex items-center gap-3">
-              <div className="relative flex h-7 min-w-0 flex-1 items-center">
+            <div key={f.code} className="flex min-h-7 flex-1 items-center gap-3">
+              <div className="relative flex min-h-0 min-w-0 flex-1 items-center self-stretch">
                 <div
                   className="absolute inset-y-0 left-0"
                   style={{
@@ -623,8 +625,8 @@ function LeadTimeWidget({ lt }: { lt: DashboardData["leadTimes"] }) {
               </span>
             </div>
           ) : (
-            <div key={`empty-${i}`} className="flex items-center gap-3">
-              <div className="relative flex h-7 min-w-0 flex-1 items-center rounded-[3px]" style={{ background: "color-mix(in srgb, var(--color-chart) 4%, transparent)" }}>
+            <div key={`empty-${i}`} className="flex min-h-7 flex-1 items-center gap-3">
+              <div className="relative flex min-h-0 min-w-0 flex-1 items-center self-stretch rounded-[3px]" style={{ background: "color-mix(in srgb, var(--color-chart) 4%, transparent)" }}>
                 <span className="relative z-10 pl-1.5 text-[12.5px] text-muted/70">Awaiting data</span>
               </div>
             </div>
