@@ -281,8 +281,10 @@ export default async function InventoryPage() {
   );
 }
 
-/** One material's slice of the raw table: a quiet full-width group header, then a row per
- *  SKU-or-facility pool — image at the left like every other inventory table. */
+/** One material's slice of the raw table: ONE row per material (or per SKU for SKU-stocked
+ *  materials like printed pouches) — never per location. The facilities holding it appear as a
+ *  compact breakdown inside the row, and the unit cost blends across them. A quiet group header
+ *  sums per-SKU materials; a single-row material speaks for itself. */
 function RawMaterialRows({
   s,
   cur,
@@ -301,50 +303,59 @@ function RawMaterialRows({
 }) {
   return (
     <>
-      <tr className="border-b border-line bg-surface-2/50">
-        <td colSpan={5} className="px-4 py-2 text-[12px]">
-          <span className="font-medium text-ink">{s.name}</span>
-          <span className="ml-2 tabular text-muted">
-            {qty(s.totalQty, cur)} {s.unitLabel} · {money(s.value, 2, cur)}
-          </span>
-        </td>
-      </tr>
-      {s.groups.flatMap((g, gi) =>
-        g.pools.map((p, pi) => {
-          const last = gi === s.groups.length - 1 && pi === g.pools.length - 1;
-          const img = g.sku ? (
-            <SkuAvatar code={g.sku} size={34} imageUrl={g.imageUrl} />
-          ) : s.imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={s.imageUrl} alt={s.name} className="h-[34px] w-[34px] shrink-0 rounded-[10px] border border-border object-cover" />
-          ) : (
-            <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-[10px] border border-border bg-surface-2 text-muted">
-              <Package size={16} />
+      {s.perSku && (
+        <tr className="border-b border-line bg-surface-2/50">
+          <td colSpan={5} className="px-4 py-2 text-[12px]">
+            <span className="font-medium text-ink">{s.name}</span>
+            <span className="ml-2 tabular text-muted">
+              {qty(s.totalQty, cur)} {s.unitLabel} · {money(s.value, 2, cur)}
             </span>
-          );
-          return (
-            <tr key={`${s.code}-${g.key}-${p.facility}`} className={last ? "" : "border-b border-line"}>
-              <td className="py-2.5 pl-4 pr-3">
-                <div className="flex items-center gap-2.5">
-                  {img}
-                  <div className="min-w-0">
-                    <div className="truncate text-[13px] font-medium text-ink">{g.sku ? (g.productName ?? g.sku) : s.name}</div>
-                    <div className="truncate text-[11px] text-muted">{g.sku ? s.name : s.unitLabel}</div>
-                  </div>
-                </div>
-              </td>
-              <td className="px-3 py-2.5">
-                <FacilityTag code={p.facility} />
-              </td>
-              <td className="px-3 py-2.5 text-right tabular text-ink-soft">
-                {unitCost(p.valueRemaining, p.quantityRemaining, cur)} / {s.unitLabel}
-              </td>
-              <td className="px-3 py-2.5 text-right font-medium tabular">{qty(p.quantityRemaining, cur)}</td>
-              <td className="py-2.5 pl-3 pr-4 text-right font-medium tabular">{money(p.valueRemaining, 2, cur)}</td>
-            </tr>
-          );
-        }),
+          </td>
+        </tr>
       )}
+      {s.groups.map((g, gi) => {
+        const last = gi === s.groups.length - 1;
+        const img = g.sku ? (
+          <SkuAvatar code={g.sku} size={34} imageUrl={g.imageUrl} />
+        ) : s.imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={s.imageUrl} alt={s.name} className="h-[34px] w-[34px] shrink-0 rounded-[10px] border border-border object-cover" />
+        ) : (
+          <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-[10px] border border-border bg-surface-2 text-muted">
+            <Package size={16} />
+          </span>
+        );
+        return (
+          <tr key={`${s.code}-${g.key}`} className={last ? "" : "border-b border-line"}>
+            <td className="py-2.5 pl-4 pr-3">
+              <div className="flex items-center gap-2.5">
+                {img}
+                <div className="min-w-0">
+                  <div className="truncate text-[13px] font-medium text-ink">{g.sku ? (g.productName ?? g.sku) : s.name}</div>
+                  <div className="truncate text-[11px] text-muted">{g.sku ? s.name : s.unitLabel}</div>
+                </div>
+              </div>
+            </td>
+            <td className="px-3 py-2.5">
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                {[...g.pools]
+                  .sort((a, b) => b.valueRemaining - a.valueRemaining)
+                  .map((p) => (
+                    <span key={`${g.key}-${p.facility}`} className="inline-flex items-center gap-1.5">
+                      <FacilityTag code={p.facility} />
+                      {g.pools.length > 1 && <span className="text-[11px] tabular text-muted">{qty(p.quantityRemaining, cur)}</span>}
+                    </span>
+                  ))}
+              </div>
+            </td>
+            <td className="px-3 py-2.5 text-right tabular text-ink-soft">
+              {unitCost(g.totalValue, g.totalQty, cur)} / {s.unitLabel}
+            </td>
+            <td className="px-3 py-2.5 text-right font-medium tabular">{qty(g.totalQty, cur)}</td>
+            <td className="py-2.5 pl-3 pr-4 text-right font-medium tabular">{money(g.totalValue, 2, cur)}</td>
+          </tr>
+        );
+      })}
     </>
   );
 }
