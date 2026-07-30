@@ -345,9 +345,13 @@ export function PoForm({
                 </MiniField>
                 {isSku && (
                   <>
-                    {/* The qty → lot-units bridge: how many order units make ONE finished unit
-                        (e.g. 15 tea bags ÷ = 1 pouch). Deliberately small and quiet. */}
-                    <MiniField label="÷" className="w-[58px]" hint="Order units per ONE lot unit — qty ÷ this = lot units (e.g. 15 tea bags make 1 pouch)">
+                    {/* The qty → lot-units bridge, reading as arithmetic: qty ÷ [this] = lot units
+                        (e.g. 27,000 tea bags ÷ 15 = 1,800 pouches). Small and quiet. */}
+                    <div
+                      className="flex h-9 items-center gap-1.5 self-end"
+                      title="Order units per ONE lot unit — qty ÷ this = lot units (e.g. 15 tea bags make 1 pouch)"
+                    >
+                      <span className="text-[13px] text-muted">÷</span>
                       <input
                         type="number"
                         step="any"
@@ -355,9 +359,10 @@ export function PoForm({
                         value={l.ratio}
                         onChange={(e) => patch(l.key, { ratio: e.target.value, lotUnits: lotUnitsFrom(l.quantity, e.target.value) })}
                         placeholder="1"
-                        className={`${inputCls} px-1.5 text-center tabular`}
+                        className="h-9 w-[50px] rounded-lg border border-border bg-surface px-1 text-center text-[13px] tabular text-ink outline-none focus:border-accent-strong"
                       />
-                    </MiniField>
+                      <span className="text-[13px] text-muted">=</span>
+                    </div>
                     <MiniField label="Lot units" className="w-[90px]" hint="Finished units the lot produces — qty ÷ the divider. Type here to set it directly; the divider follows.">
                       <input
                         type="number"
