@@ -192,8 +192,8 @@ export default async function InventoryPage() {
                 </tr>
               </thead>
               <tbody>
-                {rawSections.map((s) => (
-                  <RawMaterialRows key={s.code} s={s} cur={cur} />
+                {rawSections.map((s, si) => (
+                  <RawMaterialRows key={s.code} s={s} cur={cur} lastSection={si === rawSections.length - 1} />
                 ))}
               </tbody>
             </table>
@@ -283,12 +283,14 @@ export default async function InventoryPage() {
 }
 
 /** One material's slice of the raw table: ONE row per material (or per SKU for SKU-stocked
- *  materials like printed pouches) — never per location. The facilities holding it appear as a
- *  compact breakdown inside the row, and the unit cost blends across them. A quiet group header
- *  sums per-SKU materials; a single-row material speaks for itself. */
+ *  materials like printed pouches) — never per location. Every material opens with the same
+ *  tinted group header (name + section totals), so the tint always means "a new material starts
+ *  here"; the per-facility ↳ sub-rows underneath a multi-location row stay on the plain surface,
+ *  so they read as detail of the row above, never as a new section. */
 function RawMaterialRows({
   s,
   cur,
+  lastSection,
 }: {
   s: {
     code: string;
@@ -301,23 +303,24 @@ function RawMaterialRows({
     groups: RawGroup[];
   };
   cur: Currency;
+  lastSection: boolean;
 }) {
   return (
     <>
-      {s.perSku && (
-        <tr className="border-b border-line bg-surface-2/50">
-          <td colSpan={5} className="px-4 py-2 text-[12px]">
-            <span className="font-medium text-ink">{s.name}</span>
-            <span className="ml-2 tabular text-muted">
-              {qty(s.totalQty, cur)} {s.unitLabel} · {money(s.value, 2, cur)}
-            </span>
-          </td>
-        </tr>
-      )}
+      <tr className="border-b border-line bg-surface-2/60">
+        <td colSpan={5} className="px-4 py-2 text-[12px]">
+          <span className="font-semibold text-ink">{s.name}</span>
+          <span className="ml-2 tabular text-muted">
+            {qty(s.totalQty, cur)} {s.unitLabel} · {money(s.value, 2, cur)}
+          </span>
+        </td>
+      </tr>
       {s.groups.map((g, gi) => {
-        const last = gi === s.groups.length - 1;
+        const lastGroup = gi === s.groups.length - 1;
         const multi = g.pools.length > 1;
         const sorted = [...g.pools].sort((a, b) => b.valueRemaining - a.valueRemaining);
+        // The very last line of the whole table skips its bottom border — the card edge closes it.
+        const isFinalRow = lastSection && lastGroup;
         const img = g.sku ? (
           <SkuAvatar code={g.sku} size={34} imageUrl={g.imageUrl} />
         ) : s.imageUrl ? (
@@ -330,7 +333,7 @@ function RawMaterialRows({
         );
         return (
           <React.Fragment key={`${s.code}-${g.key}`}>
-            <tr className={multi || !last ? "border-b border-line" : ""}>
+            <tr className={multi || !isFinalRow ? "border-b border-line" : ""}>
               <td className="py-2.5 pl-4 pr-3">
                 <div className="flex items-center gap-2.5">
                   {img}
@@ -359,7 +362,7 @@ function RawMaterialRows({
               sorted.map((p, pi) => (
                 <tr
                   key={`${s.code}-${g.key}-${p.facility}`}
-                  className={`bg-surface-2/30 text-[12px] ${pi === sorted.length - 1 ? (last ? "" : "border-b border-line") : "border-b border-line/60"}`}
+                  className={`text-[12px] ${pi === sorted.length - 1 ? (isFinalRow ? "" : "border-b border-line") : "border-b border-line/60"}`}
                 >
                   <td className="py-1.5 pl-4 pr-3">
                     <span className="block pl-[46px] text-muted">↳</span>

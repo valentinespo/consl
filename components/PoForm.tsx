@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X, AlertTriangle } from "@/components/icons";
 import { DatePicker } from "@/components/DatePicker";
@@ -325,13 +325,20 @@ export function PoForm({
                   </MiniField>
                 )}
                 <MiniField label="Description (as printed on the PO)" className="min-w-[200px] flex-1">
-                  <input
-                    value={l.description}
-                    onChange={(e) => patch(l.key, { description: e.target.value, descAuto: false })}
-                    placeholder={isSku ? "e.g. Product name | pack size" : "e.g. testing, freight, samples"}
-                    list={!isSku && feeDescs.length > 0 ? "po-fee-descs" : undefined}
-                    className={inputCls}
-                  />
+                  {isSku ? (
+                    <input
+                      value={l.description}
+                      onChange={(e) => patch(l.key, { description: e.target.value, descAuto: false })}
+                      placeholder="e.g. Product name | pack size"
+                      className={inputCls}
+                    />
+                  ) : (
+                    <FeeDescInput
+                      value={l.description}
+                      onChange={(v) => patch(l.key, { description: v, descAuto: false })}
+                      options={feeDescs}
+                    />
+                  )}
                 </MiniField>
                 <MiniField label="Unit cost ($)" className="w-[100px]">
                   <div className="relative">
@@ -470,12 +477,60 @@ export function PoForm({
           </button>
         </div>
       </div>
-      {feeDescs.length > 0 && (
-        <datalist id="po-fee-descs">
-          {feeDescs.map((d) => (
-            <option key={d} value={d} />
+    </div>
+  );
+}
+
+/** Fee-description input with branded suggestions: previously used fee lines drop down under the
+ *  full width of the field (theme-aware, eased slide) — the native datalist popup looked like a
+ *  different app. Typing filters; clicking fills; anything new is still free text. */
+function FeeDescInput({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: string[] }) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const q = value.trim().toLowerCase();
+  const filtered = options.filter((o) => o.toLowerCase().includes(q) && o !== value).slice(0, 8);
+
+  return (
+    <div ref={wrap} className="relative">
+      <input
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
+        placeholder="e.g. testing, freight, samples"
+        className={inputCls}
+      />
+      {open && filtered.length > 0 && (
+        <div className="dropdown-in absolute inset-x-0 top-full z-30 mt-1 overflow-hidden rounded-lg border border-border bg-surface py-1 shadow-lg">
+          {filtered.map((o) => (
+            <button
+              type="button"
+              key={o}
+              // mousedown (not click) so the input's blur can't swallow the pick
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onChange(o);
+                setOpen(false);
+              }}
+              className="block w-full px-3 py-1.5 text-left text-[13px] text-ink-soft transition-colors hover:bg-surface-2 hover:text-ink"
+            >
+              {o}
+            </button>
           ))}
-        </datalist>
+        </div>
       )}
     </div>
   );

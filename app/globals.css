@@ -109,6 +109,19 @@ html[data-theme="dark"] .iso-invert {
   backdrop-filter: blur(18px) saturate(1.3);
 }
 
+/* Suggestion dropdowns (fee descriptions etc.): slide out from under their input, eased and
+ * quick — enough motion to read as "attached to the bar", not a modal appearing. */
+@keyframes dropdown-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+.dropdown-in {
+  animation: dropdown-in 0.18s cubic-bezier(0.22, 0.61, 0.36, 1);
+  transform-origin: top;
+}
+
 /* The chart hover pill's rolling date: the old label exits upward as the new one rises in. */
 @keyframes roll-in-up {
   from {
