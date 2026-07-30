@@ -27,6 +27,7 @@ export function PurchaseOrdersView({
   facilities,
   products,
   descSeeds,
+  feeDescs,
   nextLotNr,
   todayISO,
 }: {
@@ -34,6 +35,7 @@ export function PurchaseOrdersView({
   facilities: PoFacility[];
   products: PoProduct[];
   descSeeds: Record<string, string>;
+  feeDescs: string[];
   nextLotNr: number;
   todayISO: string;
 }) {
@@ -54,7 +56,7 @@ export function PurchaseOrdersView({
           who can't create POs; they still see the list below (read-only). */}
       {canCreate && (
         <div className="rounded-[var(--radius-card)] border border-border bg-surface p-5">
-          <PoForm facilities={facilities} products={products} descSeeds={descSeeds} nextLotNr={nextLotNr} todayISO={todayISO} onDone={() => router.refresh()} />
+          <PoForm facilities={facilities} products={products} descSeeds={descSeeds} feeDescs={feeDescs} nextLotNr={nextLotNr} todayISO={todayISO} onDone={() => router.refresh()} />
         </div>
       )}
 
@@ -108,7 +110,7 @@ export function PurchaseOrdersView({
                       </td>
                       <td className="px-4 py-3 text-right">
                         {po.pdfUrl ? (
-                          <a href={po.pdfUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 text-[12.5px] font-medium text-accent hover:underline">
+                          <a href={po.pdfUrl.startsWith("/media/po/") ? `/po-preview/${encodeURIComponent(po.pdfUrl.slice("/media/po/".length))}` : po.pdfUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 text-[12.5px] font-medium text-accent hover:underline">
                             <FileText size={13} /> View
                           </a>
                         ) : (
@@ -124,7 +126,7 @@ export function PurchaseOrdersView({
                           ) : po.status === "SENT" ? (
                             <SentPo po={po} />
                           ) : (
-                            <PoForm facilities={facilities} products={products} descSeeds={descSeeds} nextLotNr={nextLotNr} po={po} todayISO={todayISO} onDone={() => toggle(po.id)} />
+                            <PoForm facilities={facilities} products={products} descSeeds={descSeeds} feeDescs={feeDescs} nextLotNr={nextLotNr} po={po} todayISO={todayISO} onDone={() => toggle(po.id)} />
                           )}
                         </td>
                       </tr>

@@ -67,6 +67,8 @@ export type LotEditPayload = {
   facilityId: string;
   status: "IN_PRODUCTION" | "FINISHED";
   finishedAtISO: string | null; // required when FINISHED (defaults to today); ignored otherwise
+  expiryISO: string | null; // finished-goods expiry; only meaningful when FINISHED
+  batchNr: string | null; // production batch number; only meaningful when FINISHED
   notes: string | null;
   lines: {
     id: string | null; // null = newly added SKU
@@ -95,6 +97,13 @@ export async function updateLot(payload: LotEditPayload) {
     payload.status === "FINISHED" && payload.finishedAtISO && !isNaN(Date.parse(payload.finishedAtISO))
       ? new Date(payload.finishedAtISO)
       : null;
+  // Expiry and batch follow the same rule as the finished date: they belong to a FINISHED lot,
+  // and flipping back to production clears them rather than leaving stale metadata behind.
+  const expiryAt =
+    payload.status === "FINISHED" && payload.expiryISO && !isNaN(Date.parse(payload.expiryISO))
+      ? new Date(payload.expiryISO)
+      : null;
+  const batchNr = payload.status === "FINISHED" ? payload.batchNr?.trim() || null : null;
 
   const badRef = await checkOwned([
     ["facility", payload.facilityId],
@@ -117,6 +126,8 @@ export async function updateLot(payload: LotEditPayload) {
         facilityId: payload.facilityId,
         status: payload.status,
         finishedAt,
+        expiryAt,
+        batchNr,
         notes: payload.notes?.trim() || null,
       },
     });

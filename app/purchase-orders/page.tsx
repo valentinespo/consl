@@ -21,6 +21,7 @@ export default async function PurchaseOrdersPage() {
         facilities={options.facilities}
         products={options.products}
         descSeeds={options.descSeeds}
+        feeDescs={options.feeDescs}
         nextLotNr={options.nextLotNr}
         todayISO={todayISO}
       />

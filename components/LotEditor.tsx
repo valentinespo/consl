@@ -74,6 +74,8 @@ export function LotEditor({
     facilityId: string;
     status: "IN_PRODUCTION" | "FINISHED";
     finishedAtISO: string | null;
+    expiryISO: string | null;
+    batchNr: string | null;
     notes: string | null;
   };
   initialLines: EditorLine[];
@@ -104,6 +106,8 @@ export function LotEditor({
   const [facilityId, setFacilityId] = useState(initial.facilityId);
   const [status, setStatus] = useState(initial.status);
   const [finishedAtISO, setFinishedAtISO] = useState(initial.finishedAtISO ?? "");
+  const [expiryISO, setExpiryISO] = useState(initial.expiryISO ?? "");
+  const [batchNr, setBatchNr] = useState(initial.batchNr ?? "");
   const [notes, setNotes] = useState(initial.notes ?? "");
   const [lines, setLines] = useState<StateLine[]>(seed.lines);
   const [shared, setShared] = useState<Mat[]>(seed.shared);
@@ -120,19 +124,19 @@ export function LotEditor({
 
   // ---- Dirty tracking ----
   const snapshot = (
-    pn: string, pd: string, fac: string, st: string, fin: string, nt: string, ls: StateLine[], sh: Mat[], ov: Record<string, Mat[]>,
+    pn: string, pd: string, fac: string, st: string, fin: string, ex: string, bn: string, nt: string, ls: StateLine[], sh: Mat[], ov: Record<string, Mat[]>,
   ) => {
     const keys = new Set(ls.map((l) => l.key));
     const cleanOv = Object.fromEntries(Object.entries(ov).filter(([k]) => keys.has(k)).map(([k, v]) => [k, matSig(v)]));
     return JSON.stringify({
-      pn: pn.trim(), pd, fac, st, fin: st === "FINISHED" ? fin : "", nt: nt.trim(),
+      pn: pn.trim(), pd, fac, st, fin: st === "FINISHED" ? fin : "", ex: st === "FINISHED" ? ex : "", bn: st === "FINISHED" ? bn.trim() : "", nt: nt.trim(),
       l: ls.map((l) => `${l.id ?? "NEW"}|${l.productId}|${Number(l.units) || 0}`),
       sh: matSig(sh), ov: cleanOv,
     });
   };
-  const current = snapshot(poNumber, poDateISO, facilityId, status, finishedAtISO, notes, lines, shared, overrides);
+  const current = snapshot(poNumber, poDateISO, facilityId, status, finishedAtISO, expiryISO, batchNr, notes, lines, shared, overrides);
   const original = useMemo(
-    () => snapshot(initial.poNumber ?? "", initial.poDateISO ?? "", initial.facilityId, initial.status, initial.finishedAtISO ?? "", initial.notes ?? "", seed.lines, seed.shared, seed.overrides),
+    () => snapshot(initial.poNumber ?? "", initial.poDateISO ?? "", initial.facilityId, initial.status, initial.finishedAtISO ?? "", initial.expiryISO ?? "", initial.batchNr ?? "", initial.notes ?? "", seed.lines, seed.shared, seed.overrides),
     [initial, seed],
   );
   const dirty = current !== original;
@@ -165,6 +169,8 @@ export function LotEditor({
     setFacilityId(initial.facilityId);
     setStatus(initial.status);
     setFinishedAtISO(initial.finishedAtISO ?? "");
+    setExpiryISO(initial.expiryISO ?? "");
+    setBatchNr(initial.batchNr ?? "");
     setNotes(initial.notes ?? "");
     setLines(seed.lines);
     setShared(seed.shared);
@@ -185,6 +191,8 @@ export function LotEditor({
         facilityId,
         status,
         finishedAtISO: status === "FINISHED" ? finishedAtISO || null : null,
+        expiryISO: status === "FINISHED" ? expiryISO || null : null,
+        batchNr: status === "FINISHED" ? batchNr.trim() || null : null,
         notes: notes.trim() || null,
         lines: lines.map((l) => ({ id: l.id, productId: l.productId, units: Number(l.units) || 0, materials: bomFor(l.key) })),
       });
@@ -234,9 +242,17 @@ export function LotEditor({
           </select>
         </Field>
         {status === "FINISHED" && (
-          <Field label="Finished date">
-            <DatePicker value={finishedAtISO} onChange={setFinishedAtISO} clearable />
-          </Field>
+          <>
+            <Field label="Finished date">
+              <DatePicker value={finishedAtISO} onChange={setFinishedAtISO} clearable />
+            </Field>
+            <Field label="Expiry date">
+              <DatePicker value={expiryISO} onChange={setExpiryISO} clearable placeholder="Optional" />
+            </Field>
+            <Field label="Batch number">
+              <input value={batchNr} onChange={(e) => setBatchNr(e.target.value)} placeholder="e.g. B-24137" className={inputCls} />
+            </Field>
+          </>
         )}
       </div>
 

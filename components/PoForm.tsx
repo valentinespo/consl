@@ -72,6 +72,7 @@ export function PoForm({
   facilities,
   products,
   descSeeds = {},
+  feeDescs = [],
   nextLotNr,
   po,
   todayISO,
@@ -80,6 +81,7 @@ export function PoForm({
   facilities: PoFacility[];
   products: PoProduct[];
   descSeeds?: Record<string, string>; // "facilityId|productId" -> description on the most recent PO
+  feeDescs?: string[]; // previously used fee descriptions, offered as suggestions
   nextLotNr: number;
   po?: PoRow | null; // present = edit mode
   todayISO: string;
@@ -88,9 +90,10 @@ export function PoForm({
   const { money } = useMoney();
   const editing = !!po;
   const router = useRouter();
-  const [facilityId, setFacilityId] = useState(po?.facilityId ?? facilities[0]?.id ?? "");
-  const [dateISO, setDateISO] = useState(po?.dateISO ?? todayISO);
-  const [lines, setLines] = useState<EditLine[]>(() =>
+  // The form's pristine state — what Discard returns to, and what dirty is measured against.
+  const initFacilityId = po?.facilityId ?? "";
+  const initDateISO = po?.dateISO ?? todayISO;
+  const initLines = (): EditLine[] =>
     po && po.lines.length
       ? po.lines.map((l) => ({
           key: newKey(),
@@ -102,12 +105,29 @@ export function PoForm({
           ratio: ratioFrom(l.quantity, l.lotUnits),
           lotUnits: l.lotUnits == null ? "" : String(l.lotUnits),
         }))
-      : [{ key: newKey(), kind: "SKU", productId: "", description: "", unitCost: "", quantity: "", ratio: "1", lotUnits: "" }],
-  );
+      : [{ key: newKey(), kind: "SKU", productId: "", description: "", unitCost: "", quantity: "", ratio: "1", lotUnits: "" }];
+  const [facilityId, setFacilityId] = useState(initFacilityId);
+  const [dateISO, setDateISO] = useState(initDateISO);
+  const [lines, setLines] = useState<EditLine[]>(initLines);
   const [pending, setPending] = useState(false);
   const [delStep, setDelStep] = useState(0);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Key-independent signature, so freshly built initial lines compare equal to untouched state.
+  const sig = (fac: string, date: string, ls: EditLine[]) =>
+    JSON.stringify([fac, date, ls.map((l) => [l.kind, l.productId, l.description, l.unitCost, l.quantity, l.ratio, l.lotUnits])]);
+  const initSig = useMemo(() => sig(initFacilityId, initDateISO, initLines()), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const dirty = sig(facilityId, dateISO, lines) !== initSig;
+
+  function discard() {
+    setFacilityId(initFacilityId);
+    setDateISO(initDateISO);
+    setLines(initLines());
+    setError(null);
+    setConfirmRemove(null);
+    setDelStep(0);
+  }
 
   const facility = facilities.find((f) => f.id === facilityId);
   const number = editing ? po!.number : `#${nextLotNr}-${facility?.code ?? "?"}`;
@@ -235,6 +255,7 @@ export function PoForm({
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Field label="Vendor (facility)">
           <select value={facilityId} onChange={(e) => changeFacility(e.target.value)} className={inputCls} disabled={editing}>
+            <option value="">Select…</option>
             {facilities.map((f) => (
               <option key={f.id} value={f.id}>
                 {f.code} — {f.legalName}
@@ -308,6 +329,7 @@ export function PoForm({
                     value={l.description}
                     onChange={(e) => patch(l.key, { description: e.target.value, descAuto: false })}
                     placeholder={isSku ? "e.g. Product name | pack size" : "e.g. testing, freight, samples"}
+                    list={!isSku && feeDescs.length > 0 ? "po-fee-descs" : undefined}
                     className={inputCls}
                   />
                 </MiniField>
@@ -428,14 +450,33 @@ export function PoForm({
           )}
         </div>
         <div className="flex gap-2">
-          <button type="button" onClick={onDone} className="rounded-lg border border-border px-3.5 py-2 text-[13px] text-ink-soft hover:bg-surface-2">
-            Cancel
+          <button
+            type="button"
+            onClick={discard}
+            disabled={!dirty || pending}
+            title={dirty ? "Throw away your edits and restore the form" : "No changes to discard"}
+            className="rounded-lg border border-border px-3.5 py-2 text-[13px] text-ink-soft hover:bg-surface-2 disabled:opacity-40 disabled:hover:bg-transparent"
+          >
+            Discard
           </button>
-          <button type="button" onClick={submit} disabled={pending} className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-bg hover:opacity-90 disabled:opacity-50">
+          <button
+            type="button"
+            onClick={submit}
+            disabled={pending || !facilityId}
+            title={!facilityId ? "Pick a vendor first" : undefined}
+            className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-bg hover:opacity-90 disabled:opacity-50"
+          >
             {pending ? "Working…" : editing ? "Save & regenerate PDF" : "Generate PO + lot"}
           </button>
         </div>
       </div>
+      {feeDescs.length > 0 && (
+        <datalist id="po-fee-descs">
+          {feeDescs.map((d) => (
+            <option key={d} value={d} />
+          ))}
+        </datalist>
+      )}
     </div>
   );
 }

@@ -685,7 +685,7 @@ export async function getPurchaseOrders() {
 
 /** Options for the PO creation form. */
 export async function getPoFormOptions() {
-  const [facilities, products, lotNrs, pricedLines] = await Promise.all([
+  const [facilities, products, lotNrs, pricedLines, feeLines] = await Promise.all([
     prisma.facility.findMany({ include: { supplierProfile: true }, orderBy: { code: "asc" } }),
     prisma.product.findMany({ orderBy: { code: "asc" } }),
     prisma.lot.findMany({ select: { lotNr: true } }),
@@ -694,7 +694,14 @@ export async function getPoFormOptions() {
       include: { po: { select: { number: true, date: true, createdAt: true, facilityId: true } } },
       orderBy: [{ po: { date: "desc" } }, { po: { createdAt: "desc" } }, { seq: "asc" }],
     }),
+    prisma.purchaseOrderLine.findMany({
+      where: { kind: "FEE" },
+      select: { description: true, po: { select: { date: true } } },
+      orderBy: [{ po: { date: "desc" } }, { seq: "asc" }],
+    }),
   ]);
+  // Previously used fee descriptions, most recent first — suggestions for new fee lines.
+  const feeDescs = [...new Set(feeLines.map((f) => f.description.trim()).filter(Boolean))];
   // Lowest free number — a deleted PO/lot's number gets reused.
   const used = new Set(lotNrs.map((l) => l.lotNr));
   let nextLotNr = 1;
@@ -725,6 +732,7 @@ export async function getPoFormOptions() {
       lastPoNumber: lastPrice.get(p.id)?.poNumber ?? null,
     })),
     descSeeds, // "facilityId|productId" -> description as printed on the most recent PO
+    feeDescs,
     nextLotNr,
   };
 }

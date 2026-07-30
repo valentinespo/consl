@@ -414,6 +414,8 @@ model Lot {
   facilityId         String
   status             LotStatus      @default(IN_PRODUCTION)
   finishedAt         DateTime? // set each time status flips to FINISHED (latest wins; kept if later unmarked)
+  expiryAt           DateTime? // expiry of the finished goods — entered when the lot is FINISHED
+  batchNr            String? // production batch number printed on the finished goods
   notes              String?
   // Informational only (NOT part of COG): what was actually paid inbound.
   inboundPaidTotal   Float?

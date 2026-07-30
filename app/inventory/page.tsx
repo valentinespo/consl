@@ -1,3 +1,4 @@
+import React from "react";
 import Link from "next/link";
 import { Package } from "@/components/icons";
 import { prisma } from "@/lib/prisma";
@@ -315,6 +316,8 @@ function RawMaterialRows({
       )}
       {s.groups.map((g, gi) => {
         const last = gi === s.groups.length - 1;
+        const multi = g.pools.length > 1;
+        const sorted = [...g.pools].sort((a, b) => b.valueRemaining - a.valueRemaining);
         const img = g.sku ? (
           <SkuAvatar code={g.sku} size={34} imageUrl={g.imageUrl} />
         ) : s.imageUrl ? (
@@ -326,34 +329,52 @@ function RawMaterialRows({
           </span>
         );
         return (
-          <tr key={`${s.code}-${g.key}`} className={last ? "" : "border-b border-line"}>
-            <td className="py-2.5 pl-4 pr-3">
-              <div className="flex items-center gap-2.5">
-                {img}
-                <div className="min-w-0">
-                  <div className="truncate text-[13px] font-medium text-ink">{g.sku ? (g.productName ?? g.sku) : s.name}</div>
-                  <div className="truncate text-[11px] text-muted">{g.sku ? s.name : s.unitLabel}</div>
+          <React.Fragment key={`${s.code}-${g.key}`}>
+            <tr className={multi || !last ? "border-b border-line" : ""}>
+              <td className="py-2.5 pl-4 pr-3">
+                <div className="flex items-center gap-2.5">
+                  {img}
+                  <div className="min-w-0">
+                    <div className="truncate text-[13px] font-medium text-ink">{g.sku ? (g.productName ?? g.sku) : s.name}</div>
+                    <div className="truncate text-[11px] text-muted">{g.sku ? s.name : s.unitLabel}</div>
+                  </div>
                 </div>
-              </div>
-            </td>
-            <td className="px-3 py-2.5">
-              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-                {[...g.pools]
-                  .sort((a, b) => b.valueRemaining - a.valueRemaining)
-                  .map((p) => (
-                    <span key={`${g.key}-${p.facility}`} className="inline-flex items-center gap-1.5">
-                      <FacilityTag code={p.facility} />
-                      {g.pools.length > 1 && <span className="text-[11px] tabular text-muted">{qty(p.quantityRemaining, cur)}</span>}
-                    </span>
-                  ))}
-              </div>
-            </td>
-            <td className="px-3 py-2.5 text-right tabular text-ink-soft">
-              {unitCost(g.totalValue, g.totalQty, cur)} / {s.unitLabel}
-            </td>
-            <td className="px-3 py-2.5 text-right font-medium tabular">{qty(g.totalQty, cur)}</td>
-            <td className="py-2.5 pl-3 pr-4 text-right font-medium tabular">{money(g.totalValue, 2, cur)}</td>
-          </tr>
+              </td>
+              <td className="px-3 py-2.5">
+                {multi ? (
+                  <span className="text-[12px] text-muted">{g.pools.length} locations</span>
+                ) : (
+                  <FacilityTag code={sorted[0].facility} />
+                )}
+              </td>
+              <td className="px-3 py-2.5 text-right tabular text-ink-soft">
+                {unitCost(g.totalValue, g.totalQty, cur)} / {s.unitLabel}
+              </td>
+              <td className="px-3 py-2.5 text-right font-medium tabular">{qty(g.totalQty, cur)}</td>
+              <td className="py-2.5 pl-3 pr-4 text-right font-medium tabular">{money(g.totalValue, 2, cur)}</td>
+            </tr>
+            {/* A multi-location material breaks down into one quiet sub-row per facility, every
+                column carrying that facility's own numbers. */}
+            {multi &&
+              sorted.map((p, pi) => (
+                <tr
+                  key={`${s.code}-${g.key}-${p.facility}`}
+                  className={`bg-surface-2/30 text-[12px] ${pi === sorted.length - 1 ? (last ? "" : "border-b border-line") : "border-b border-line/60"}`}
+                >
+                  <td className="py-1.5 pl-4 pr-3">
+                    <span className="block pl-[46px] text-muted">↳</span>
+                  </td>
+                  <td className="px-3 py-1.5">
+                    <FacilityTag code={p.facility} />
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular text-muted">
+                    {unitCost(p.valueRemaining, p.quantityRemaining, cur)} / {s.unitLabel}
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular text-ink-soft">{qty(p.quantityRemaining, cur)}</td>
+                  <td className="py-1.5 pl-3 pr-4 text-right tabular text-ink-soft">{money(p.valueRemaining, 2, cur)}</td>
+                </tr>
+              ))}
+          </React.Fragment>
         );
       })}
     </>
