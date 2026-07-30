@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, X } from "@/components/icons";
+import { Plus, X, AlertTriangle } from "@/components/icons";
 import { DatePicker } from "@/components/DatePicker";
 import { Card, SkuAvatar, SectionTitle } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
@@ -282,7 +282,7 @@ export function LotEditor({
                             <span key={`${c.label}-${i}`} className="whitespace-nowrap text-[11px] text-muted">
                               {c.label}{" "}
                               <span className={`tabular ${c.short ? "font-semibold text-negative" : "text-ink-soft"}`} title={c.short ? "Not enough stock purchased" : undefined}>
-                                {c.short ? "⚠" : perUnit(c.value)}
+                                {c.short ? <AlertTriangle size={11} className="inline-block align-[-1px]" /> : perUnit(c.value)}
                               </span>
                             </span>
                           ))}

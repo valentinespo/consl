@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, X } from "@/components/icons";
+import { Plus, X, AlertTriangle } from "@/components/icons";
 import { DatePicker } from "@/components/DatePicker";
 import { createPurchaseOrder, updatePurchaseOrder, deletePurchaseOrder, type PoLineInput } from "@/app/purchase-orders/actions";
 import { TwoStepDelete } from "@/components/TwoStepDelete";
@@ -43,6 +43,7 @@ type EditLine = {
   description: string;
   unitCost: string;
   quantity: string;
+  ratio: string; // PO units per ONE lot unit — qty ÷ ratio = lot units (e.g. 15 tea bags → 1 pouch)
   lotUnits: string;
   costFromPo?: string | null; // set when unitCost was prefilled from the most recent PO
   descAuto?: boolean; // description was auto-filled (safe to replace on SKU/vendor change)
@@ -52,6 +53,20 @@ const inputCls = "h-9 w-full rounded-lg border border-border bg-surface px-2.5 t
 
 let seq = 0;
 const newKey = () => `po${seq++}`;
+
+/** qty ÷ ratio, trimmed to 2 decimals — blank while qty is blank so the field stays quiet. */
+function lotUnitsFrom(qtyStr: string, ratioStr: string): string {
+  const q = Number(qtyStr) || 0;
+  if (!qtyStr.trim() || q <= 0) return "";
+  const r = Number(ratioStr) || 0;
+  return String(Math.round((q / (r > 0 ? r : 1)) * 100) / 100);
+}
+
+/** Reconstruct the divider from a saved line (27,000 bags → 1,800 pouches ⇒ 15). */
+function ratioFrom(quantity: number, lotUnits: number | null): string {
+  if (!quantity || !lotUnits || lotUnits <= 0) return "1";
+  return String(Math.round((quantity / lotUnits) * 10000) / 10000);
+}
 
 export function PoForm({
   facilities,
@@ -84,9 +99,10 @@ export function PoForm({
           description: l.description,
           unitCost: l.unitCost == null ? "" : String(l.unitCost),
           quantity: String(l.quantity),
+          ratio: ratioFrom(l.quantity, l.lotUnits),
           lotUnits: l.lotUnits == null ? "" : String(l.lotUnits),
         }))
-      : [{ key: newKey(), kind: "SKU", productId: "", description: "", unitCost: "", quantity: "", lotUnits: "" }],
+      : [{ key: newKey(), kind: "SKU", productId: "", description: "", unitCost: "", quantity: "", ratio: "1", lotUnits: "" }],
   );
   const [pending, setPending] = useState(false);
   const [delStep, setDelStep] = useState(0);
@@ -111,7 +127,7 @@ export function PoForm({
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...p } : l)));
   }
   function addLine(kind: "SKU" | "FEE") {
-    setLines((prev) => [...prev, { key: newKey(), kind, productId: "", description: "", unitCost: "", quantity: "", lotUnits: "" }]);
+    setLines((prev) => [...prev, { key: newKey(), kind, productId: "", description: "", unitCost: "", quantity: "", ratio: "1", lotUnits: "" }]);
   }
   function removeLine(key: string) {
     setLines((prev) => (prev.length === 1 ? prev : prev.filter((l) => l.key !== key)));
@@ -188,7 +204,7 @@ export function PoForm({
       // row collapses) — clear it back to a blank slate so it's ready for the next PO. Without
       // this the button sat on "Creating…" forever even though the PO had been created.
       if (!editing) {
-        setLines([{ key: newKey(), kind: "SKU", productId: "", description: "", unitCost: "", quantity: "", lotUnits: "" }]);
+        setLines([{ key: newKey(), kind: "SKU", productId: "", description: "", unitCost: "", quantity: "", ratio: "1", lotUnits: "" }]);
         setDateISO(todayISO);
       }
       onDone();
@@ -237,7 +253,14 @@ export function PoForm({
       {facility && (
         <div className="rounded-lg border border-line bg-surface-2 px-3 py-2 text-[12px] leading-relaxed text-muted">
           <span className="font-medium text-ink-soft">{facility.legalName}</span>
-          {facility.address ? ` · ${facility.address.replace(/\n/g, ", ")}` : " · ⚠ no address on file (edit the facility)"}
+          {facility.address ? (
+            ` · ${facility.address.replace(/\n/g, ", ")}`
+          ) : (
+            <>
+              {" · "}
+              <AlertTriangle size={12} className="inline-block align-[-1.5px]" /> no address on file (edit the facility)
+            </>
+          )}
         </div>
       )}
 
@@ -312,8 +335,8 @@ export function PoForm({
                     value={l.quantity}
                     onChange={(e) => {
                       const p: Partial<EditLine> = { quantity: e.target.value };
-                      // lot units follow qty until the user overrides them
-                      if (isSku && (l.lotUnits === "" || l.lotUnits === l.quantity)) p.lotUnits = e.target.value;
+                      // lot units follow qty through the divider (÷1 by default)
+                      if (isSku) p.lotUnits = lotUnitsFrom(e.target.value, l.ratio);
                       patch(l.key, p);
                     }}
                     placeholder="0"
@@ -321,9 +344,35 @@ export function PoForm({
                   />
                 </MiniField>
                 {isSku && (
-                  <MiniField label="Lot units" className="w-[90px]" hint="finished units">
-                    <input type="number" step="1" value={l.lotUnits} onChange={(e) => patch(l.key, { lotUnits: e.target.value })} placeholder="= qty" className={`${inputCls} text-right tabular`} />
-                  </MiniField>
+                  <>
+                    {/* The qty → lot-units bridge: how many order units make ONE finished unit
+                        (e.g. 15 tea bags ÷ = 1 pouch). Deliberately small and quiet. */}
+                    <MiniField label="÷" className="w-[58px]" hint="Order units per ONE lot unit — qty ÷ this = lot units (e.g. 15 tea bags make 1 pouch)">
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        value={l.ratio}
+                        onChange={(e) => patch(l.key, { ratio: e.target.value, lotUnits: lotUnitsFrom(l.quantity, e.target.value) })}
+                        placeholder="1"
+                        className={`${inputCls} px-1.5 text-center tabular`}
+                      />
+                    </MiniField>
+                    <MiniField label="Lot units" className="w-[90px]" hint="Finished units the lot produces — qty ÷ the divider. Type here to set it directly; the divider follows.">
+                      <input
+                        type="number"
+                        step="1"
+                        value={l.lotUnits}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          // Typing lot units directly re-derives the divider, so the trio stays consistent.
+                          patch(l.key, { lotUnits: v, ratio: ratioFrom(Number(l.quantity) || 0, Number(v) || 0) });
+                        }}
+                        placeholder="= qty"
+                        className={`${inputCls} text-right tabular`}
+                      />
+                    </MiniField>
+                  </>
                 )}
                 <div className="flex h-9 w-[90px] items-center justify-end px-1 text-[12.5px] tabular text-muted">
                   {l.unitCost.trim() === "" ? "TBD" : money((Number(l.unitCost) || 0) * (Number(l.quantity) || 0), 2)}

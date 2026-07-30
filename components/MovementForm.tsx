@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { X } from "@/components/icons";
+import { X, AlertTriangle } from "@/components/icons";
 import { DatePicker } from "@/components/DatePicker";
 import { Field, inputCls } from "@/components/FormKit";
 import { DESTINATIONS, RAW_DESTINATIONS } from "@/lib/destinations";
@@ -192,9 +192,12 @@ export function MovementForm({
       </Field>
 
       {short && q > 0 && (
-        <div className="rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-[12.5px] text-negative">
-          ⚠ That location only shows {Math.round(available).toLocaleString()} on hand. You can still record this — it&apos;ll be
-          flagged as short until an earlier movement, lot or purchase is corrected.
+        <div className="flex items-start gap-1.5 rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-[12.5px] text-negative">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+          <span>
+            That location only shows {Math.round(available).toLocaleString()} on hand. You can still record this — it&apos;ll be
+            flagged as short until an earlier movement, lot or purchase is corrected.
+          </span>
         </div>
       )}
       {error && <div className="rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-[12.5px] text-negative">{error}</div>}

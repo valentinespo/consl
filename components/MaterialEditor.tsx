@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Package } from "@/components/icons";
+import { Package, Lock } from "@/components/icons";
 import { Card } from "@/components/ui";
 import { ImageUpload } from "@/components/ImageUpload";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
@@ -133,9 +133,12 @@ export function MaterialEditor({ material, locked }: { material: MaterialForEdit
               </span>
             </label>
             {locked && (
-              <div className="mt-2 text-[11.5px] text-muted">
-                🔒 This can&apos;t be changed now that the material has purchases or is used in production — switching it would
-                scramble its stock pools. To change it, create a new material.
+              <div className="mt-2 flex items-start gap-1.5 text-[11.5px] text-muted">
+                <Lock size={13} className="mt-0.5 shrink-0" />
+                <span>
+                  This can&apos;t be changed now that the material has purchases or is used in production — switching it would
+                  scramble its stock pools. To change it, create a new material.
+                </span>
               </div>
             )}
           </div>

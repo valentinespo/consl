@@ -2,7 +2,7 @@
 
 import { Fragment, useState } from "react";
 import Link from "next/link";
-import { ChevronRight, FileText } from "@/components/icons";
+import { ChevronRight, FileText, Lock } from "@/components/icons";
 import { Pill, SkuAvatar } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
 import { PoForm, type PoFacility, type PoProduct, type PoRow } from "@/components/PoForm";
@@ -188,7 +188,7 @@ function ImportedPo({ po }: { po: PoListRow }) {
           )}
         </p>
         {po.status === "SENT" ? (
-          <span className="text-[12px] text-muted">🔒 Sent — switch to Draft to delete.</span>
+          <span className="inline-flex items-center gap-1.5 text-[12px] text-muted"><Lock size={13} className="shrink-0" /> Sent — switch to Draft to delete.</span>
         ) : (
           <div className="flex items-center gap-3">
             {error && <span className="text-[12px] text-negative">{error}</span>}
@@ -252,7 +252,7 @@ function SentPo({ po }: { po: PoListRow }) {
   return (
     <div className="space-y-3">
       <PoLinesList po={po} />
-      <p className="text-[12px] text-muted">🔒 This PO is marked as Sent and locked. Switch its status to Draft to edit or delete it.</p>
+      <p className="flex items-center gap-1.5 text-[12px] text-muted"><Lock size={13} className="shrink-0" /> This PO is marked as Sent and locked. Switch its status to Draft to edit or delete it.</p>
     </div>
   );
 }

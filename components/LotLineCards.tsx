@@ -1,6 +1,7 @@
 "use client";
 
 import { SkuAvatar } from "@/components/ui";
+import { AlertTriangle } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import type { CostChip } from "@/lib/lot-costs";
 
@@ -19,7 +20,7 @@ function Chip({ chip }: { chip: CostChip }) {
     <span className="whitespace-nowrap text-[10.5px] text-muted">
       {chip.label}{" "}
       <span className={`tabular ${chip.short ? "font-semibold text-negative" : "text-ink-soft"}`}>
-        {chip.short ? "⚠" : perUnit(chip.value)}
+        {chip.short ? <AlertTriangle size={11} className="inline-block align-[-1px]" /> : perUnit(chip.value)}
       </span>
     </span>
   );

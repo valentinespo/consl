@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useState } from "react";
-import { Plus, ChevronRight } from "@/components/icons";
+import { Plus, ChevronRight, Package } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { Card, FacilityTag, SkuAvatar, SupplierAvatar } from "@/components/ui";
 import { PurchaseInvoiceForm, type PurchaseInvoiceRow, type PurchaseOptions, type PurchaseMaterial } from "@/components/PurchaseInvoiceForm";
@@ -46,7 +46,7 @@ export function MaterialPurchaseInvoices({ group, options }: { group: Group; opt
             // eslint-disable-next-line @next/next/no-img-element
             <img src={material.imageUrl} alt="" className="h-8 w-8 rounded-lg border border-border object-cover" />
           ) : (
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-soft text-base">📦</span>
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-soft text-accent"><Package size={16} /></span>
           )}
           <h2 className="text-[15px] font-semibold text-ink-soft">{material.name} purchases</h2>
           <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-ink-soft">{invoices.length}</span>
