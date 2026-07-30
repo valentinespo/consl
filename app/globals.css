@@ -122,6 +122,27 @@ html[data-theme="dark"] .iso-invert {
   transform-origin: top;
 }
 
+/* The company switcher's menu gets a touch more personality: a subtle pop with a hint of
+ * overshoot — still fast, never cartoonish. */
+@keyframes org-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(-5px) scale(0.97);
+  }
+  70% {
+    opacity: 1;
+    transform: translateY(1px) scale(1.004);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+.org-pop {
+  animation: org-pop 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
+  transform-origin: top left;
+}
+
 /* The chart hover pill's rolling date: the old label exits upward as the new one rises in. */
 @keyframes roll-in-up {
   from {

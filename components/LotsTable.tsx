@@ -133,7 +133,7 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
                 </td>
               </tr>
               {open && (
-                <tr className="border-b border-line bg-surface-2">
+                <tr className="dropdown-in border-b border-line bg-surface-2">
                   <td colSpan={10} className="px-4 py-3">
                     <LotLineCards lines={l.lines} />
                   </td>

@@ -87,7 +87,7 @@ export function NotificationsBell() {
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full z-50 mt-2 w-[min(92vw,360px)] overflow-hidden rounded-xl border border-border bg-surface shadow-xl"
+          className="dropdown-in absolute right-0 top-full z-50 mt-2 w-[min(92vw,360px)] overflow-hidden rounded-xl border border-border bg-surface shadow-xl"
         >
           <div className="flex items-center justify-between border-b border-line px-4 py-3">
             <span className="text-[13.5px] font-semibold text-ink">Notifications</span>

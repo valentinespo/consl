@@ -13,6 +13,7 @@ import {
   WarehouseFilled,
   ImagesFilled,
   ReorderFilled,
+  Plug,
   Settings,
 } from "@/components/icons";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -51,9 +52,11 @@ export function Sidebar({
   return (
     <aside className="flex h-full w-[230px] shrink-0 flex-col overflow-y-auto bg-sidebar">
       {/* Theme switch sits where a sidebar search would — a full-width control, not a pill. */}
-      <div className="px-3 pb-1 pt-3">
+      <div className="px-3 pb-2.5 pt-3">
         <ThemeToggle />
       </div>
+      {/* Hairline between the theme switch and the tabs, like the header draws between its items. */}
+      <div aria-hidden className="mx-3 h-px bg-border" />
 
       <nav className="flex-1 px-3 py-2">
         {nav.map((item) => {
@@ -75,7 +78,28 @@ export function Sidebar({
         })}
       </nav>
 
-      <div className="flex items-center justify-between px-4 py-4">
+      {/* Integrations sleeve: its own little landing above the footer, split off by a hairline. */}
+      {canView("settings") && (
+        <>
+          <div aria-hidden className="mx-3 h-px bg-border" />
+          <div className="px-3 py-2">
+            <Link
+              href="/settings/integrations"
+              onClick={onNavigate}
+              className={`flex items-center gap-3 rounded-lg px-3 py-1.5 text-[13.5px] font-medium transition-colors ${
+                pathname.startsWith("/settings/integrations")
+                  ? "bg-nav-active text-ink"
+                  : "text-muted hover:bg-surface-2 hover:text-ink-soft"
+              }`}
+            >
+              <Plug size={19} className={pathname.startsWith("/settings/integrations") ? "text-ink" : "text-muted"} />
+              Integrations
+            </Link>
+          </div>
+        </>
+      )}
+
+      <div className="flex items-center justify-between px-4 pb-4 pt-2">
         <div className="min-w-0">
           <div className="truncate text-[12px] font-medium text-ink-soft">{orgName ?? "Your company"}</div>
           <div className="text-[11px] text-muted">Production &amp; Inventory</div>

@@ -107,7 +107,7 @@ export function OrgSwitcher({
       {open && (
         <div
           role="menu"
-          className={`absolute top-full z-50 mt-1 overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-xl ${
+          className={`org-pop absolute top-full z-50 mt-1 overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-xl ${
             header ? "left-0 w-72" : "inset-x-3"
           }`}
         >

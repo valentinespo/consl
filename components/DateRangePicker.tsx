@@ -228,7 +228,7 @@ export function DateRangePicker({
             role="dialog"
             aria-label="Choose a date range"
             style={{ position: "fixed", top: box.top, left: box.left, width: panelW() }}
-            className="z-[300] flex overflow-hidden rounded-xl border border-border bg-surface shadow-2xl"
+            className="dropdown-in z-[300] flex overflow-hidden rounded-xl border border-border bg-surface shadow-2xl"
           >
             <div className="w-[150px] shrink-0 border-r border-border py-1.5">
               {RANGES.map((r, i) => (

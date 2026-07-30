@@ -4,7 +4,7 @@ import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
 import { Plus, ArrowUpDown, ChevronRight } from "@/components/icons";
 import { DatePicker } from "@/components/DatePicker";
-import { Pill, SupplierAvatar, SkuAvatar } from "@/components/ui";
+import { SupplierAvatar, SkuAvatar } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
 import { TransactionInvoiceForm, type InvoiceRow, type LotOption } from "@/components/TransactionInvoiceForm";
 import { DocumentList } from "@/components/DocumentList";
@@ -136,14 +136,6 @@ export function TransactionInvoicesTable({
             Clear
           </button>
         )}
-        {canCreate && (
-          <button
-            onClick={() => setAdding((v) => !v)}
-            className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-2 text-[12.5px] font-medium text-bg hover:opacity-90"
-          >
-            <Plus size={15} /> Add transaction
-          </button>
-        )}
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-3 text-[12.5px]">
@@ -155,6 +147,14 @@ export function TransactionInvoicesTable({
         <span className="text-muted">
           {filtered.length} of {invoices.length} invoices
         </span>
+        {canCreate && (
+          <button
+            onClick={() => setAdding((v) => !v)}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-2 text-[12.5px] font-medium text-bg hover:opacity-90"
+          >
+            <Plus size={15} /> Add transaction
+          </button>
+        )}
       </div>
 
       {adding && (
@@ -235,7 +235,7 @@ export function TransactionInvoicesTable({
                     <td className="px-3 py-3 align-middle">
                       <div className="flex flex-wrap items-center gap-1">
                         {inv.presentCats.map((c) => (
-                          <Pill key={c} kind={c}>{catLabel(c)}</Pill>
+                          <span key={c} className="inline-flex items-center rounded-md border border-border bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-ink-soft">{catLabel(c)}</span>
                         ))}
                       </div>
                     </td>
@@ -255,7 +255,7 @@ export function TransactionInvoicesTable({
                     </td>
                   </tr>
                   {open && (
-                    <tr className="border-b border-line bg-surface-2">
+                    <tr className="dropdown-in border-b border-line bg-surface-2">
                       <td colSpan={colSpan} className="px-4 py-4">
                         <div className="mb-3 rounded-lg border border-border bg-surface px-3 py-2.5">
                           <div className="mb-2 text-[12px] font-medium uppercase tracking-wide text-muted">Invoice documents</div>

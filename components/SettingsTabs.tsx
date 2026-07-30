@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const TABS = [
   { href: "/settings/company", label: "Company & team" },
   { href: "/settings/sync", label: "Sync & restock" },
+  { href: "/settings/integrations", label: "Integrations" },
 ];
 
 /** Tab strip for the Settings section. Client-side only so the current tab can be highlighted. */

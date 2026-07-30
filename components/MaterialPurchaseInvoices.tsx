@@ -122,7 +122,7 @@ export function MaterialPurchaseInvoices({ group, options }: { group: Group; opt
                       </td>
                     </tr>
                     {isOpen && (
-                      <tr className="border-b border-line bg-surface-2">
+                      <tr className="dropdown-in border-b border-line bg-surface-2">
                         <td colSpan={colSpan} className="px-4 py-4">
                           <div className="mb-3 rounded-lg border border-border bg-surface px-3 py-2.5">
                             <div className="mb-2 text-[12px] font-medium uppercase tracking-wide text-muted">Invoice documents</div>

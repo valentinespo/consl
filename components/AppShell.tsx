@@ -52,7 +52,12 @@ export function AppShell({
         {/* The header floats over the page as a frosted overlay — content scrolling in the panel
             below passes beneath it and blurs. Over the static sidebar it reads as solid gray. */}
         <div className="absolute inset-x-0 top-0 z-30">
-          <AppHeader onMenu={() => setOpen(true)} orgs={orgs} />
+          {/* The frosted bar's backdrop-filter makes it a sealed stacking context, so its popups
+              (company menu, notifications) can't out-z later siblings on their own — lift the
+              whole bar above the decorative frame edge below. */}
+          <div className="relative z-10">
+            <AppHeader onMenu={() => setOpen(true)} orgs={orgs} />
+          </div>
           {/* The page frame's top edge, persistent beneath the frosted bar: two inverted-radius
               gray shoulders recreate the curved corners, joined by the frame's hairline. Content
               scrolls under the frost and disappears beneath this edge — the frame never moves. */}

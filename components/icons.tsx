@@ -56,6 +56,8 @@ export const WarehouseFilled = regular(P.Warehouse);
 export const ImagesFilled = regular(P.Tag);
 /** Reorder / restock recommendations — a circular "order again" arrow. */
 export const ReorderFilled = regular(P.ArrowClockwise);
+/** Integrations — two plugs meeting. */
+export const Plug = regular(P.Plugs);
 /** Outline storefront for the header's org-mark fallback (chrome runs outline weight). */
 export const Building2Outline = regular(P.Storefront);
 

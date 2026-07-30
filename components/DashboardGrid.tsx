@@ -244,7 +244,7 @@ export function DashboardGrid({
                 <Plus size={14} /> Add widget
               </button>
               {addOpen && available.length > 0 && (
-                <div className="absolute right-0 top-full z-40 mt-1 w-56 overflow-hidden rounded-lg border border-border bg-surface shadow-lg">
+                <div className="dropdown-in absolute right-0 top-full z-40 mt-1 w-56 overflow-hidden rounded-lg border border-border bg-surface shadow-lg">
                   {available.map((k) => (
                     <button key={k} onClick={() => addWidget(k)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-ink-soft hover:bg-surface-2">
                       <Plus size={13} className="text-muted" /> {WIDGETS[k].title}

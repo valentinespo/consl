@@ -135,7 +135,7 @@ export function DatePicker({
             role="dialog"
             aria-label="Choose a date"
             style={{ position: "fixed", top: box.top, left: box.left, width: PANEL_W }}
-            className="z-[300] overflow-hidden rounded-xl border border-border bg-surface p-3 shadow-2xl"
+            className="dropdown-in z-[300] overflow-hidden rounded-xl border border-border bg-surface p-3 shadow-2xl"
           >
             <div className="mb-2 flex items-center justify-between">
               <div className="text-[13px] font-medium text-ink">
