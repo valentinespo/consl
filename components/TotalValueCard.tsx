@@ -56,9 +56,9 @@ export function TotalValueCard({
               locale={locale}
             />
             {pts.length >= 2 && (
-              <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] leading-none ${up ? "pill-green" : "pill-red"}`}>
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-semibold leading-none ${up ? "pill-green" : "pill-red"}`}>
                 {up ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                <span className="font-semibold tabular">{Math.abs(pct).toFixed(1)}%</span>
+                <span className="tabular">{Math.abs(pct).toFixed(1)}%</span>
                 <span>{windowLabel}</span>
               </span>
             )}
