@@ -79,7 +79,7 @@ export function MaterialPurchaseInvoices({ group, options }: { group: Group; opt
                 <th className="px-4 py-2.5 font-medium">Date</th>
                 <th className="px-3 py-2.5 font-medium">Supplier</th>
                 {material.skuSpecific && <th className="px-3 py-2.5 font-medium">SKUs</th>}
-                <th className="px-3 py-2.5 font-medium">Facilities</th>
+                <th className="px-3 py-2.5 font-medium">Locations</th>
                 <th className="px-3 py-2.5 text-right font-medium">Qty</th>
                 <th className="px-4 py-2.5 text-right font-medium">Invoice total</th>
               </tr>

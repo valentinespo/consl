@@ -51,13 +51,14 @@ export default async function InventoryPage() {
   const cur: Currency = { symbol: org?.currencySymbol ?? "$", locale: org?.locale ?? "en-US", code: org?.currencyCode ?? "USD" };
 
   // ---- In production, aggregated per SKU (one SKU can span several open lots) ----
-  type ProdSku = { code: string; name: string; imageUrl: string | null; units: number; value: number; lots: { id: string; nr: number; units: number }[] };
+  type ProdSku = { code: string; name: string; imageUrl: string | null; units: number; value: number; facilities: string[]; lots: { id: string; nr: number; units: number }[] };
   const prodBySku = new Map<string, ProdSku>();
   for (const lot of prodLots) {
     for (const ln of lot.lines) {
-      const g = prodBySku.get(ln.productId) ?? { code: ln.product.code, name: ln.product.name, imageUrl: ln.product.imageUrl, units: 0, value: 0, lots: [] };
+      const g = prodBySku.get(ln.productId) ?? { code: ln.product.code, name: ln.product.name, imageUrl: ln.product.imageUrl, units: 0, value: 0, facilities: [], lots: [] };
       g.units += ln.units;
       g.value += ln.units * ln.cogPerUnit;
+      if (!g.facilities.includes(lot.facility.code)) g.facilities.push(lot.facility.code);
       g.lots.push({ id: lot.id, nr: lot.lotNr, units: ln.units });
       prodBySku.set(ln.productId, g);
     }
@@ -228,16 +229,25 @@ export default async function InventoryPage() {
             <table className="w-full min-w-[640px] text-[13px]">
               <thead>
                 <tr className={thRow}>
-                  <th className={`${TH} pl-4`}>SKU</th>
+                  <th className={`${TH} pl-4`}>Item</th>
+                  <th className={TH}>Location</th>
                   <th className={TH}>Open lots</th>
-                  <th className={`${TH} text-right`}>Units</th>
-                  <th className={`${TH} pr-4 text-right`}>COG value</th>
+                  <th className={`${TH} text-right`}>Unit cost</th>
+                  <th className={`${TH} text-right`}>Qty</th>
+                  <th className={`${TH} pr-4 text-right`}>Value</th>
                 </tr>
               </thead>
               <tbody>
                 {prodSkus.map((r, i) => (
                   <tr key={r.code} className={i < prodSkus.length - 1 ? "border-b border-line" : ""}>
                     <td className="py-2.5 pl-4 pr-3">{item(<SkuAvatar code={r.code} imageUrl={r.imageUrl} size={34} />, r.name || r.code, r.code)}</td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {r.facilities.map((fc) => (
+                          <FacilityTag key={fc} code={fc} />
+                        ))}
+                      </div>
+                    </td>
                     <td className="px-3 py-2.5">
                       <div className="flex flex-wrap items-center gap-1.5">
                         {r.lots.map((l) => (
@@ -248,6 +258,7 @@ export default async function InventoryPage() {
                         ))}
                       </div>
                     </td>
+                    <td className="px-3 py-2.5 text-right tabular text-ink-soft">{unitCost(r.value, r.units, cur)}</td>
                     <td className="px-3 py-2.5 text-right font-medium tabular">{qty(r.units, cur)}</td>
                     <td className="py-2.5 pl-3 pr-4 text-right font-medium tabular">{money(r.value, 2, cur)}</td>
                   </tr>
@@ -268,10 +279,10 @@ export default async function InventoryPage() {
             <table className="w-full min-w-[640px] text-[13px]">
               <thead>
                 <tr className={thRow}>
-                  <th className={`${TH} pl-4`}>SKU</th>
-                  <th className={TH}>Facility</th>
+                  <th className={`${TH} pl-4`}>Item</th>
+                  <th className={TH}>Location</th>
                   <th className={`${TH} text-right`}>Unit cost</th>
-                  <th className={`${TH} text-right`}>Units</th>
+                  <th className={`${TH} text-right`}>Qty</th>
                   <th className={`${TH} pr-4 text-right`}>Value</th>
                 </tr>
               </thead>
