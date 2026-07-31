@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useExitAnimation } from "@/components/animate";
 import { useRouter } from "next/navigation";
 import { Plus, X, AlertTriangle } from "@/components/icons";
 import { DatePicker } from "@/components/DatePicker";
@@ -499,6 +500,7 @@ function FeeDescInput({ value, onChange, options }: { value: string; onChange: (
 
   const q = value.trim().toLowerCase();
   const filtered = options.filter((o) => o.toLowerCase().includes(q) && o !== value).slice(0, 8);
+  const panel = useExitAnimation(open && filtered.length > 0);
 
   return (
     <div ref={wrap} className="relative">
@@ -513,8 +515,8 @@ function FeeDescInput({ value, onChange, options }: { value: string; onChange: (
         placeholder="e.g. testing, freight, samples"
         className={inputCls}
       />
-      {open && filtered.length > 0 && (
-        <div className="dropdown-in absolute inset-x-0 top-full z-30 mt-1 overflow-hidden rounded-lg border border-border bg-surface py-1 shadow-lg">
+      {panel.mounted && (
+        <div className={`${panel.closing ? "dropdown-out" : "dropdown-in"} absolute inset-x-0 top-full z-30 mt-1 overflow-hidden rounded-lg border border-border bg-surface py-1 shadow-lg`}>
           {filtered.map((o) => (
             <button
               type="button"

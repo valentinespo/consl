@@ -121,6 +121,18 @@ html[data-theme="dark"] .iso-invert {
   animation: dropdown-in 0.18s cubic-bezier(0.22, 0.61, 0.36, 1);
   transform-origin: top;
 }
+/* The reverse: slips back under the bar while fading. `forwards` holds the end state for the
+ * few ms until the element actually unmounts. */
+@keyframes dropdown-out {
+  to {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+.dropdown-out {
+  animation: dropdown-out 0.15s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+  transform-origin: top;
+}
 
 /* The company switcher's menu gets a touch more personality: a subtle pop with a hint of
  * overshoot — still fast, never cartoonish. */
@@ -140,6 +152,16 @@ html[data-theme="dark"] .iso-invert {
 }
 .org-pop {
   animation: org-pop 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
+  transform-origin: top left;
+}
+@keyframes org-pop-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+.org-pop-out {
+  animation: org-pop-out 0.16s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
   transform-origin: top left;
 }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { useExitAnimation } from "@/components/animate";
 import { useRouter } from "next/navigation";
 import { Bell, CheckCircle2, PackageSearch, ShoppingCart, Truck, X, Zap } from "@/components/icons";
 import type { LucideIcon } from "@/components/icons";
@@ -22,6 +23,7 @@ export function NotificationsBell() {
   const router = useRouter();
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [open, setOpen] = useState(false);
+  const menu = useExitAnimation(open, 170);
   const [busy, setBusy] = useState<string | null>(null);
   const [, start] = useTransition();
   const wrap = useRef<HTMLDivElement>(null);
@@ -84,10 +86,10 @@ export function NotificationsBell() {
         )}
       </button>
 
-      {open && (
+      {menu.mounted && (
         <div
           role="menu"
-          className="dropdown-in absolute right-0 top-full z-50 mt-2 w-[min(92vw,360px)] overflow-hidden rounded-xl border border-border bg-surface shadow-xl"
+          className={`${menu.closing ? "org-pop-out" : "org-pop"} absolute right-0 top-full z-50 mt-2 w-[min(92vw,360px)] overflow-hidden rounded-xl border border-border bg-surface shadow-xl`}
         >
           <div className="flex items-center justify-between border-b border-line px-4 py-3">
             <span className="text-[13.5px] font-semibold text-ink">Notifications</span>

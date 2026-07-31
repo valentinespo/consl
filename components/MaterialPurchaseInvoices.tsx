@@ -2,6 +2,7 @@
 
 import { Fragment, useState } from "react";
 import { Plus, ChevronRight, Package } from "@/components/icons";
+import { ExpandRow } from "@/components/animate";
 import { useMoney } from "@/components/CurrencyProvider";
 import { Card, FacilityTag, SkuAvatar, SupplierAvatar } from "@/components/ui";
 import { PurchaseInvoiceForm, type PurchaseInvoiceRow, type PurchaseOptions, type PurchaseMaterial } from "@/components/PurchaseInvoiceForm";
@@ -121,8 +122,7 @@ export function MaterialPurchaseInvoices({ group, options }: { group: Group; opt
                         )}
                       </td>
                     </tr>
-                    {isOpen && (
-                      <tr className="dropdown-in border-b border-line bg-surface-2">
+                    <ExpandRow open={isOpen} className="border-b border-line bg-surface-2">
                         <td colSpan={colSpan} className="px-4 py-4">
                           <div className="mb-3 rounded-lg border border-border bg-surface px-3 py-2.5">
                             <div className="mb-2 text-[12px] font-medium uppercase tracking-wide text-muted">Invoice documents</div>
@@ -130,8 +130,7 @@ export function MaterialPurchaseInvoices({ group, options }: { group: Group; opt
                           </div>
                           <PurchaseInvoiceForm material={material} options={options} invoice={inv} onDone={() => toggle(inv.id)} cancelLabel="Collapse" />
                         </td>
-                      </tr>
-                    )}
+                    </ExpandRow>
                   </Fragment>
                 );
               })}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useExitAnimation } from "@/components/animate";
 import { ChevronDown, Check, Plus, CornerDownLeft } from "@/components/icons";
 
 /**
@@ -32,6 +33,7 @@ export function SearchSelect({
   createPlaceholder?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const panel = useExitAnimation(open);
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -84,8 +86,8 @@ export function SearchSelect({
         <ChevronDown size={15} className="text-muted" />
       </button>
 
-      {open && (
-        <div className="dropdown-in absolute z-30 mt-1 w-full overflow-hidden rounded-lg border border-border bg-surface shadow-lg">
+      {panel.mounted && (
+        <div className={`${panel.closing ? "dropdown-out" : "dropdown-in"} absolute z-30 mt-1 w-full overflow-hidden rounded-lg border border-border bg-surface shadow-lg`}>
           <div className="border-b border-line p-1.5">
             <input
               ref={field}

@@ -3,6 +3,7 @@
 import { Fragment, useState } from "react";
 import Link from "next/link";
 import { ChevronRight } from "@/components/icons";
+import { ExpandRow } from "@/components/animate";
 import { Pill, FacilityTag, SkuAvatar } from "@/components/ui";
 import { LotLineCards, type LotLineSummary } from "@/components/LotLineCards";
 import { useMoney } from "@/components/CurrencyProvider";
@@ -87,13 +88,11 @@ export function RecentLots({ lots }: { lots: RecentLot[] }) {
                   </Link>
                 </td>
               </tr>
-              {open && (
-                <tr className="dropdown-in border-b border-line bg-surface-2">
+              <ExpandRow open={open} className="border-b border-line bg-surface-2">
                   <td colSpan={7} className="px-4 py-3">
                     <LotLineCards lines={l.lines} />
                   </td>
-                </tr>
-              )}
+              </ExpandRow>
             </Fragment>
           );
         })}

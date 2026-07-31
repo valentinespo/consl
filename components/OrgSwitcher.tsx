@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check, ChevronsUpDown, Plus, Building2Outline as Building2 } from "@/components/icons";
 import type { MyOrg } from "@/lib/orgs";
 import { switchOrg } from "@/app/org/actions";
+import { useExitAnimation } from "@/components/animate";
 
 /** A company's own square mark, falling back to a neutral icon when it hasn't uploaded one. */
 function OrgMark({ org, size }: { org: MyOrg | null; size: number }) {
@@ -44,6 +45,7 @@ export function OrgSwitcher({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const menu = useExitAnimation(open, 170);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const wrap = useRef<HTMLDivElement>(null);
@@ -104,10 +106,10 @@ export function OrgSwitcher({
         <ChevronsUpDown size={14} className="shrink-0 text-muted" />
       </button>
 
-      {open && (
+      {menu.mounted && (
         <div
           role="menu"
-          className={`org-pop absolute top-full z-50 mt-1 overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-xl ${
+          className={`${menu.closing ? "org-pop-out" : "org-pop"} absolute top-full z-50 mt-1 overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-xl ${
             header ? "left-0 w-72" : "inset-x-3"
           }`}
         >

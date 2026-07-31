@@ -72,7 +72,7 @@ export function AppHeader({ onMenu, orgs = [] }: { onMenu?: () => void; orgs?: M
         <NotificationsBell />
         <span aria-hidden className="h-5 w-px shrink-0 bg-border" />
         <span className="flex items-center">
-          <UserButton appearance={{ elements: { avatarBox: "h-8 w-8" } }} />
+          <UserButton appearance={{ elements: { avatarBox: "h-8 w-8", userButtonPopoverCard: "org-pop" } }} />
         </span>
       </div>
     </header>

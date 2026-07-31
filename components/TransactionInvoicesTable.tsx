@@ -3,6 +3,7 @@
 import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
 import { Plus, ArrowUpDown, ChevronRight } from "@/components/icons";
+import { ExpandRow } from "@/components/animate";
 import { DatePicker } from "@/components/DatePicker";
 import { SupplierAvatar, SkuAvatar } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
@@ -107,7 +108,7 @@ export function TransactionInvoicesTable({
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search supplier, SKU, lot, concept…"
-          className="h-9 w-56 rounded-lg border border-border bg-surface px-3 text-[13px] text-ink outline-none placeholder:text-muted focus:border-accent-strong"
+          className="h-9 min-w-[220px] flex-1 rounded-lg border border-border bg-surface px-3 text-[13px] text-ink outline-none placeholder:text-muted focus:border-accent-strong"
         />
         <Select value={category} onChange={setCategory} options={["ALL", ...presentCategories]} label={(v) => (v === "ALL" ? "All categories" : catLabel(v))} />
         {showLotColumn && (
@@ -254,8 +255,7 @@ export function TransactionInvoicesTable({
                       )}
                     </td>
                   </tr>
-                  {open && (
-                    <tr className="dropdown-in border-b border-line bg-surface-2">
+                  <ExpandRow open={open} className="border-b border-line bg-surface-2">
                       <td colSpan={colSpan} className="px-4 py-4">
                         <div className="mb-3 rounded-lg border border-border bg-surface px-3 py-2.5">
                           <div className="mb-2 text-[12px] font-medium uppercase tracking-wide text-muted">Invoice documents</div>
@@ -272,8 +272,7 @@ export function TransactionInvoicesTable({
                           cancelLabel="Collapse"
                         />
                       </td>
-                    </tr>
-                  )}
+                  </ExpandRow>
                 </Fragment>
               );
             })}

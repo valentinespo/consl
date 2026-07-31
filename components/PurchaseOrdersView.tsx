@@ -3,6 +3,7 @@
 import { Fragment, useState } from "react";
 import Link from "next/link";
 import { ChevronRight, FileText, Lock } from "@/components/icons";
+import { ExpandRow } from "@/components/animate";
 import { Pill, SkuAvatar } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
 import { PoForm, type PoFacility, type PoProduct, type PoRow } from "@/components/PoForm";
@@ -118,8 +119,7 @@ export function PurchaseOrdersView({
                         )}
                       </td>
                     </tr>
-                    {open && (
-                      <tr className="dropdown-in border-b border-line bg-surface-2">
+                    <ExpandRow open={open} className="border-b border-line bg-surface-2">
                         <td colSpan={7} className="px-4 py-4">
                           {po.imported ? (
                             <ImportedPo po={po} />
@@ -129,8 +129,7 @@ export function PurchaseOrdersView({
                             <PoForm facilities={facilities} products={products} descSeeds={descSeeds} feeDescs={feeDescs} nextLotNr={nextLotNr} po={po} todayISO={todayISO} onDone={() => toggle(po.id)} />
                           )}
                         </td>
-                      </tr>
-                    )}
+                    </ExpandRow>
                   </Fragment>
                 );
               })}

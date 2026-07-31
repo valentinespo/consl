@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight } from "@/components/icons";
 import { RANGES, rangeBounds, type RangeKey } from "@/lib/chart";
+import { useExitAnimation } from "@/components/animate";
 
 export type Range = { key: RangeKey; from: string; to: string };
 
@@ -61,6 +62,8 @@ export function DateRangePicker({
   const panel = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
   const [box, setBox] = useState<{ top: number; left: number } | null>(null);
+  const lastBox = useRef(box);
+  if (box) lastBox.current = box;
 
   // Edits are staged so Cancel can genuinely abandon them.
   const [draft, setDraft] = useState<Range>(value);
@@ -73,6 +76,7 @@ export function DateRangePicker({
   useEffect(() => setMounted(true), []);
 
   const open = box !== null;
+  const exit = useExitAnimation(open);
   useEffect(() => {
     if (!open) return;
     const place = () => {
@@ -221,14 +225,15 @@ export function DateRangePicker({
       </button>
 
       {mounted &&
-        box &&
+        exit.mounted &&
+        lastBox.current &&
         createPortal(
           <div
             ref={panel}
             role="dialog"
             aria-label="Choose a date range"
-            style={{ position: "fixed", top: box.top, left: box.left, width: panelW() }}
-            className="dropdown-in z-[300] flex overflow-hidden rounded-xl border border-border bg-surface shadow-2xl"
+            style={{ position: "fixed", top: lastBox.current.top, left: lastBox.current.left, width: panelW() }}
+            className={`${exit.closing ? "dropdown-out" : "dropdown-in"} z-[300] flex overflow-hidden rounded-xl border border-border bg-surface shadow-2xl`}
           >
             <div className="w-[150px] shrink-0 border-r border-border py-1.5">
               {RANGES.map((r, i) => (

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CalendarDays, ChevronLeft, ChevronRight } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
+import { useExitAnimation } from "@/components/animate";
 
 const DOW = ["S", "M", "T", "W", "T", "F", "S"];
 const PANEL_W = 264;
@@ -55,6 +56,10 @@ export function DatePicker({
   const [mounted, setMounted] = useState(false);
   const [box, setBox] = useState<{ top: number; left: number } | null>(null);
   const open = box !== null;
+  // The panel lingers through its exit animation after `box` clears — remember where it was.
+  const lastBox = useRef(box);
+  if (box) lastBox.current = box;
+  const exit = useExitAnimation(open);
 
   const [month, setMonth] = useState(() => {
     const [y, m] = (value || localToday()).split("-").map(Number);
@@ -128,14 +133,15 @@ export function DatePicker({
       </button>
 
       {mounted &&
-        box &&
+        exit.mounted &&
+        lastBox.current &&
         createPortal(
           <div
             ref={panel}
             role="dialog"
             aria-label="Choose a date"
-            style={{ position: "fixed", top: box.top, left: box.left, width: PANEL_W }}
-            className="dropdown-in z-[300] overflow-hidden rounded-xl border border-border bg-surface p-3 shadow-2xl"
+            style={{ position: "fixed", top: lastBox.current.top, left: lastBox.current.left, width: PANEL_W }}
+            className={`${exit.closing ? "dropdown-out" : "dropdown-in"} z-[300] overflow-hidden rounded-xl border border-border bg-surface p-3 shadow-2xl`}
           >
             <div className="mb-2 flex items-center justify-between">
               <div className="text-[13px] font-medium text-ink">
