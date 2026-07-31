@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import { Plus, X, Upload, Paperclip } from "@/components/icons";
 import { DatePicker } from "@/components/DatePicker";
 import { upsertTransactionInvoice, deleteTransactionInvoice, type InvoiceLineInput } from "@/app/transactions/actions";
-import { uploadDocument } from "@/app/documents/actions";
+import { uploadDocument, deleteDocument } from "@/app/documents/actions";
+import { DocPreview } from "@/components/DocPreview";
+import type { Doc } from "@/components/DocumentList";
 import { SearchSelect } from "@/components/SearchSelect";
 import { TwoStepDelete } from "@/components/TwoStepDelete";
 import { SkuAvatar } from "@/components/ui";
@@ -72,10 +74,13 @@ export function TransactionInvoiceForm({
   categories = [],
   skuImages,
   defaultLotId,
+  documents = [],
   onDone,
   cancelLabel = "Cancel",
 }: {
   invoice?: InvoiceRow | null;
+  /** Already-attached documents (edit mode) — removals are staged and applied on Save. */
+  documents?: Doc[];
   lots: LotOption[];
   suppliers: string[];
   categories?: string[]; // in-use categories, merged with the seeds for the dropdown
@@ -128,10 +133,12 @@ export function TransactionInvoiceForm({
         : null,
     [invoice],
   );
-  // Files picked but not yet uploaded — they only reach the server on Save, like every other edit.
+  // Attachment edits are staged like every other change — new files upload and marked
+  // removals delete only when Save is clicked.
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [removeIds, setRemoveIds] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
-  const dirty = !invoice || currentSnapshot !== originalSnapshot || pendingFiles.length > 0;
+  const dirty = !invoice || currentSnapshot !== originalSnapshot || pendingFiles.length > 0 || removeIds.length > 0;
 
   function patch(key: string, p: Partial<EditLine>) {
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...p } : l)));
@@ -175,6 +182,15 @@ export function TransactionInvoiceForm({
         setPending(false);
         return;
       }
+      for (const id of removeIds) {
+        const dr = await deleteDocument(id);
+        if (dr && !dr.ok) {
+          setError(`Saved, but removing a document failed: ${dr.error}`);
+          setPending(false);
+          router.refresh();
+          return;
+        }
+      }
       for (const file of pendingFiles) {
         const fd = new FormData();
         fd.set("parent", "transaction");
@@ -190,6 +206,7 @@ export function TransactionInvoiceForm({
         }
       }
       setPendingFiles([]);
+      setRemoveIds([]);
       onDone();
       router.refresh();
     } catch (e) {
@@ -207,6 +224,78 @@ export function TransactionInvoiceForm({
 
   return (
     <div className="space-y-4">
+      {/* Invoice documents — where the old card sat. Everything here is STAGED: new files upload
+          and marked removals delete only when Save is clicked, like any other edit. */}
+      <div className="rounded-lg border border-border bg-surface px-3 py-2.5">
+        <div className="mb-2 flex items-center gap-2">
+          <span className="text-[12px] font-medium uppercase tracking-wide text-muted">Invoice documents</span>
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="ml-auto inline-flex items-center gap-1 rounded-lg border border-border bg-surface px-2.5 py-1 text-[12px] font-medium text-ink-soft hover:border-accent-strong"
+          >
+            <Upload size={13} /> Attach file
+          </button>
+        </div>
+        {documents.length === 0 && pendingFiles.length === 0 && (
+          <div className="text-[12px] text-muted">No invoice attached yet — attachments upload when you save.</div>
+        )}
+        <div className="space-y-1.5">
+          {documents.map((d) => {
+            const marked = removeIds.includes(d.id);
+            return (
+              <div key={d.id} className={`flex items-center gap-2 rounded-lg border px-2.5 py-1.5 ${marked ? "border-[#f0d3cb] bg-[#fdf2ef]" : "border-border bg-surface"}`}>
+                <Paperclip size={13} className="shrink-0 text-muted" />
+                <span className={`min-w-0 truncate text-[12.5px] ${marked ? "text-negative line-through" : "text-ink-soft"}`} title={d.fileName ?? ""}>
+                  {d.fileName ?? "document"}
+                </span>
+                <span className="ml-auto flex shrink-0 items-center gap-2.5">
+                  {marked ? (
+                    <>
+                      <span className="text-[11px] text-negative">removed on save</span>
+                      <button type="button" onClick={() => setRemoveIds((prev) => prev.filter((x) => x !== d.id))} className="text-[11.5px] font-medium text-ink-soft hover:underline">
+                        Undo
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <DocPreview url={d.fileUrl} name={d.fileName ?? "Document"} />
+                      <button type="button" onClick={() => setRemoveIds((prev) => [...prev, d.id])} className="text-muted hover:text-negative" title="Remove (applies on save)">
+                        <X size={13} />
+                      </button>
+                    </>
+                  )}
+                </span>
+              </div>
+            );
+          })}
+          {pendingFiles.map((file, i) => (
+            <div key={`new-${file.name}-${i}`} className="flex items-center gap-2 rounded-lg border border-dashed border-accent/40 bg-accent-soft/30 px-2.5 py-1.5">
+              <Paperclip size={13} className="shrink-0 text-accent" />
+              <span className="min-w-0 truncate text-[12.5px] text-ink-soft">{file.name}</span>
+              <span className="ml-auto flex shrink-0 items-center gap-2.5">
+                <span className="text-[11px] text-muted">uploads on save</span>
+                <button type="button" onClick={() => setPendingFiles((prev) => prev.filter((_, j) => j !== i))} className="text-muted hover:text-negative" title="Remove">
+                  <X size={13} />
+                </button>
+              </span>
+            </div>
+          ))}
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/pdf,image/*"
+          multiple
+          hidden
+          onChange={(e) => {
+            const picked = Array.from(e.target.files ?? []);
+            if (picked.length) setPendingFiles((prev) => [...prev, ...picked]);
+            e.target.value = "";
+          }}
+        />
+      </div>
+
       {/* Invoice header */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Field label="Supplier">
@@ -372,50 +461,6 @@ export function TransactionInvoiceForm({
         >
           <Plus size={14} /> Add line
         </button>
-      </div>
-
-      <div>
-        <div className="mb-1.5 text-[12px] font-medium uppercase tracking-wide text-muted">{editing ? "Add invoice documents" : "Invoice documents"}</div>
-        {pendingFiles.length > 0 && (
-          <div className="mb-2 space-y-1.5">
-            {pendingFiles.map((file, i) => (
-              <div key={`${file.name}-${i}`} className="flex items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5">
-                <Paperclip size={13} className="shrink-0 text-muted" />
-                <span className="min-w-0 truncate text-[12.5px] text-ink-soft">{file.name}</span>
-                <button
-                  type="button"
-                  onClick={() => setPendingFiles((prev) => prev.filter((_, j) => j !== i))}
-                  className="ml-auto shrink-0 text-muted hover:text-negative"
-                  title="Remove"
-                >
-                  <X size={13} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink-soft hover:border-accent-strong"
-          >
-            <Upload size={13} /> Attach file
-          </button>
-          <span className="text-[11.5px] text-muted">Uploads when you save.</span>
-        </div>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="application/pdf,image/*"
-          multiple
-          hidden
-          onChange={(e) => {
-            const picked = Array.from(e.target.files ?? []);
-            if (picked.length) setPendingFiles((prev) => [...prev, ...picked]);
-            e.target.value = "";
-          }}
-        />
       </div>
 
       {error && <div className="rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-[12.5px] text-negative">{error}</div>}

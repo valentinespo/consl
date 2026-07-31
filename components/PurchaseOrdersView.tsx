@@ -116,7 +116,7 @@ export function PurchaseOrdersView({
                             <DocPreview url={po.pdfUrl} name={`PO ${po.number}`} className="inline-flex items-center gap-1 text-[12.5px] font-medium text-accent hover:underline">
                               <FileText size={13} /> View
                             </DocPreview>
-                            <a href={po.pdfUrl} download={`PO-${po.number}.pdf`} className="text-muted hover:text-ink-soft" title="Download PDF">
+                            <a href={po.pdfUrl} download={`PO-${po.number}.pdf`} className="text-accent hover:text-accent-strong" title="Download PDF">
                               <Download size={14} />
                             </a>
                           </span>

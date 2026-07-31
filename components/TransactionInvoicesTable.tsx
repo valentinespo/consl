@@ -8,7 +8,6 @@ import { DatePicker } from "@/components/DatePicker";
 import { SupplierAvatar, SkuAvatar } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
 import { TransactionInvoiceForm, type InvoiceRow, type LotOption } from "@/components/TransactionInvoiceForm";
-import { DocumentList } from "@/components/DocumentList";
 import { Paperclip } from "@/components/icons";
 import { useCan } from "@/components/AccessProvider";
 
@@ -257,12 +256,9 @@ export function TransactionInvoicesTable({
                   </tr>
                   <ExpandRow open={open} className="border-b border-line bg-surface-2">
                       <td colSpan={colSpan} className="px-4 py-4">
-                        <div className="mb-3 rounded-lg border border-border bg-surface px-3 py-2.5">
-                          <div className="mb-2 text-[12px] font-medium uppercase tracking-wide text-muted">Invoice documents</div>
-                          <DocumentList parent="transaction" parentId={inv.id} documents={inv.documents} canUpload={false} emptyText="No invoice attached yet. Attach one below — it uploads when you save." />
-                        </div>
                         <TransactionInvoiceForm
                           invoice={inv}
+                          documents={inv.documents}
                           lots={lots}
                           suppliers={suppliers}
                           categories={categories}
