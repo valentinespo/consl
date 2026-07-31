@@ -48,3 +48,4 @@ next-env.d.ts
 /dev.db-wal
 /dev.db-shm
 /prisma/dev.db*
+legacy-uploads/
