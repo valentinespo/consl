@@ -78,27 +78,33 @@ html[data-theme="dark"] .iso-invert {
 }
 
 /* Unified status-pill palette. EVERY chip/pill in the app draws from these five — no ad-hoc
- * tints. Solid soft backgrounds (the Production-lead-time chip is the canon), identical in both
- * themes. green = good, amber = needs attention, red = critical, neutral = informational,
- * chart = violet accents tied to chart-owned controls. */
+ * tints. The recipe is the Finished-lot pill's frosted look: a translucent wash of the signal
+ * colour, a faint border of the same hue, and the hue itself as text — all token-driven, so
+ * both themes follow. green = good, amber = needs attention, red = critical, neutral =
+ * informational, chart = violet accents tied to chart-owned controls. */
 .pill-green {
-  background: #dcfce7;
-  color: #16a34a;
+  background: color-mix(in srgb, var(--color-positive) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-positive) 25%, transparent);
+  color: var(--color-positive);
 }
 .pill-amber {
-  background: #fef3c7;
-  color: #b45309;
+  background: color-mix(in srgb, var(--color-warn) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warn) 25%, transparent);
+  color: var(--color-warn);
 }
 .pill-red {
-  background: #fee2e2;
-  color: #dc2626;
+  background: color-mix(in srgb, var(--color-negative) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-negative) 25%, transparent);
+  color: var(--color-negative);
 }
 .pill-neutral {
   background: var(--color-surface-2);
+  border: 1px solid color-mix(in srgb, var(--color-muted) 22%, transparent);
   color: var(--color-muted);
 }
 .pill-chart {
   background: color-mix(in srgb, var(--color-chart) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-chart) 25%, transparent);
   color: var(--color-chart);
 }
 

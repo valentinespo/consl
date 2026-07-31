@@ -33,13 +33,22 @@ export type Defaults = {
  *  Action column, because a row can need shipping, expediting and a PO at once. A green pill
  *  guarantees the action column is empty. */
 type Status = "nosales" | "ok" | "reordered" | "channelLow" | "belowFloor" | "oos";
-const STATUS: Record<Status, { bg: string; fg: string; dot: string }> = {
-  nosales: { bg: "#f3f4f6", fg: "#6b7280", dot: "#9ca3af" },
-  ok: { bg: "#dcfce7", fg: "#166534", dot: "#16a34a" },
-  reordered: { bg: "#dcfce7", fg: "#166534", dot: "#16a34a" },
-  channelLow: { bg: "#dbeafe", fg: "#1d4ed8", dot: "#2563eb" }, // "ship what you have" — blue, matching At my locations
-  belowFloor: { bg: "#ffedd5", fg: "#9a3412", dot: "#ea580c" },
-  oos: { bg: "#fee2e2", fg: "#b91c1c", dot: "#dc2626" },
+/** The unified frosted pill recipe (see .pill-* in globals.css): translucent wash of the signal
+ *  colour, faint same-hue border, the hue as text. Built from one colour so every status stays
+ *  consistent — and token-driven where a token exists, so both themes follow. */
+const frost = (c: string) => ({
+  bg: `color-mix(in srgb, ${c} 12%, transparent)`,
+  bd: `color-mix(in srgb, ${c} 25%, transparent)`,
+  fg: c,
+  dot: c,
+});
+const STATUS: Record<Status, { bg: string; fg: string; dot: string; bd: string }> = {
+  nosales: frost("var(--color-muted)"),
+  ok: frost("var(--color-positive)"),
+  reordered: frost("var(--color-positive)"),
+  channelLow: frost("#2563eb"), // "ship what you have" — blue, matching At my locations
+  belowFloor: frost("var(--color-warn)"),
+  oos: frost("var(--color-negative)"),
 };
 
 /** What each status means, in the terms the person reading it thinks in. Kept next to the colours
@@ -336,7 +345,7 @@ export function RestockDashboard({
                 </div>
                 {/* Status */}
                 <div>
-                  <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium" style={{ background: st.bg, color: st.fg }}>
+                  <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium" style={{ background: st.bg, color: st.fg, border: `1px solid ${st.bd}` }}>
                     <span className="h-1.5 w-1.5 rounded-full" style={{ background: st.dot }} />
                     {r.statusLabel}
                     <HoverHint {...STATUS_HELP[r.status]} size={11} />
