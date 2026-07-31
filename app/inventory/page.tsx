@@ -73,6 +73,18 @@ export default async function InventoryPage() {
   const finishedValue = finishedRows.reduce((s, r) => s + r.value, 0);
   const finishedUnits = finishedRows.reduce((s, r) => s + r.units, 0);
   const finFacilities = new Set(finishedRows.map((r) => r.facilityId)).size;
+  // One row per SKU — a SKU held in several places (own warehouse, FBA, AWD…) breaks down into
+  // per-facility sub-rows, exactly like the raw-materials table.
+  type FinishedSku = { productId: string; code: string; name: string; imageUrl: string | null; units: number; value: number; pools: typeof finishedRows };
+  const finBySku = new Map<string, FinishedSku>();
+  for (const r of finishedRows) {
+    const g = finBySku.get(r.productId) ?? { productId: r.productId, code: r.code, name: r.name, imageUrl: r.imageUrl, units: 0, value: 0, pools: [] };
+    g.units += r.units;
+    g.value += r.value;
+    g.pools.push(r);
+    finBySku.set(r.productId, g);
+  }
+  const finSkus = [...finBySku.values()].sort((a, b) => b.value - a.value);
 
   // ---- Raw materials, grouped by material then SKU/facility ----
   const meta = new Map(materials.map((m) => [m.code, m]));
@@ -264,20 +276,50 @@ export default async function InventoryPage() {
                 </tr>
               </thead>
               <tbody>
-                {finishedRows.map((r, i) => (
-                  <tr key={`${r.productId}-${r.facilityId}`} className={i < finishedRows.length - 1 ? "border-b border-line" : ""}>
-                    <td className="py-2.5 pl-4 pr-3">{item(<SkuAvatar code={r.code} imageUrl={r.imageUrl} size={34} />, r.name || r.code, r.code)}</td>
-                    <td className="px-3 py-2.5">
-                      <span className="inline-flex items-center gap-2">
-                        <FacilityTag code={r.facilityCode} />
-                        {r.facilityName && <span className="text-[11.5px] text-muted">{r.facilityName}</span>}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular text-ink-soft">{unitCost(r.value, r.units, cur)}</td>
-                    <td className="px-3 py-2.5 text-right font-medium tabular">{qty(r.units, cur)}</td>
-                    <td className="py-2.5 pl-3 pr-4 text-right font-medium tabular">{money(r.value, 2, cur)}</td>
-                  </tr>
-                ))}
+                {finSkus.map((g, gi) => {
+                  const lastSku = gi === finSkus.length - 1;
+                  const multi = g.pools.length > 1;
+                  return (
+                    <React.Fragment key={g.productId}>
+                      <tr className={multi || !lastSku ? "border-b border-line" : ""}>
+                        <td className="py-2.5 pl-4 pr-3">{item(<SkuAvatar code={g.code} imageUrl={g.imageUrl} size={34} />, g.name || g.code, g.code)}</td>
+                        <td className="px-3 py-2.5">
+                          {multi ? (
+                            <span className="text-[12px] text-muted">{g.pools.length} locations</span>
+                          ) : (
+                            <span className="inline-flex items-center gap-2">
+                              <FacilityTag code={g.pools[0].facilityCode} />
+                              {g.pools[0].facilityName && <span className="text-[11.5px] text-muted">{g.pools[0].facilityName}</span>}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular text-ink-soft">{unitCost(g.value, g.units, cur)}</td>
+                        <td className="px-3 py-2.5 text-right font-medium tabular">{qty(g.units, cur)}</td>
+                        <td className="py-2.5 pl-3 pr-4 text-right font-medium tabular">{money(g.value, 2, cur)}</td>
+                      </tr>
+                      {multi &&
+                        g.pools.map((p, pi) => (
+                          <tr
+                            key={`${g.productId}-${p.facilityId}`}
+                            className={`text-[12px] ${pi === g.pools.length - 1 ? (lastSku ? "" : "border-b border-line") : "border-b border-line/60"}`}
+                          >
+                            <td className="py-1.5 pl-4 pr-3">
+                              <span className="block pl-[46px] text-muted">↳</span>
+                            </td>
+                            <td className="px-3 py-1.5">
+                              <span className="inline-flex items-center gap-2">
+                                <FacilityTag code={p.facilityCode} />
+                                {p.facilityName && <span className="text-[11px] text-muted">{p.facilityName}</span>}
+                              </span>
+                            </td>
+                            <td className="px-3 py-1.5 text-right tabular text-muted">{unitCost(p.value, p.units, cur)}</td>
+                            <td className="px-3 py-1.5 text-right tabular text-ink-soft">{qty(p.units, cur)}</td>
+                            <td className="py-1.5 pl-3 pr-4 text-right tabular text-ink-soft">{money(p.value, 2, cur)}</td>
+                          </tr>
+                        ))}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
