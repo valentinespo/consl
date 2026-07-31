@@ -100,7 +100,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
             <ul className="mt-1 list-disc space-y-0.5 pl-4">
               {shortLineDetails.map((s, i) => (
                 <li key={i}>
-                  <span className="font-medium">{s.sku}</span> needs {qty(s.shortBy)} more {materialLabel(s.materialCode)}
+                  <span className="font-medium">{s.sku}</span> needs {qty(s.shortBy)} more units of {matName(s.materialCode)}
                 </li>
               ))}
             </ul>
@@ -160,10 +160,6 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
   );
 }
 
-function materialLabel(code: string): string {
-  const map: Record<string, string> = { POUCH: "pouches", TEABAG: "tea bags" };
-  return map[code] ?? code.toLowerCase();
-}
 
 function Meta({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
   return (

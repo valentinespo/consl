@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
-    "start": "node scripts/migrate-legacy-uploads.mjs && prisma migrate deploy && next start",
+    "start": "prisma migrate deploy && next start",
     "lint": "eslint"
   },
   "dependencies": {
