@@ -345,7 +345,7 @@ export function RestockDashboard({
                 </div>
                 {/* Status */}
                 <div>
-                  <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold" style={{ background: st.bg, color: st.fg, border: `1px solid ${st.bd}` }}>
+                  <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium" style={{ background: st.bg, color: st.fg, border: `1px solid ${st.bd}` }}>
                     <span className="h-1.5 w-1.5 rounded-full" style={{ background: st.dot }} />
                     {r.statusLabel}
                     <HoverHint {...STATUS_HELP[r.status]} size={11} />

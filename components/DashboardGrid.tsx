@@ -395,7 +395,7 @@ function CoverWidget({ months }: { months: number }) {
     <Card className="flex h-full flex-col justify-between">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-[15px] font-semibold text-ink">Months of cover</span>
-        <span className={`inline-flex items-center rounded-full px-2 py-[4px] text-[11px] font-semibold leading-none ${low ? "pill-amber" : "pill-chart"}`}>
+        <span className={`inline-flex items-center rounded-full px-2 py-[4px] text-[11px] font-medium leading-none ${low ? "pill-amber" : "pill-chart"}`}>
           {Math.round(frac * 100)}% of target
         </span>
       </div>
@@ -590,7 +590,7 @@ function LeadTimeWidget({ lt }: { lt: DashboardData["leadTimes"] }) {
     <Card className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[15px] font-semibold text-ink">Production lead time</span>
-        <span className={`inline-flex items-center rounded-full px-2 py-[4px] text-[11px] font-semibold leading-none ${chip.cls}`}>
+        <span className={`inline-flex items-center rounded-full px-2 py-[4px] text-[11px] font-medium leading-none ${chip.cls}`}>
           {chip.text}
         </span>
       </div>
@@ -658,7 +658,7 @@ function ReorderAlertsWidget({ alerts }: { alerts: Alert[] }) {
     <Card className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[15px] font-semibold text-ink">Reorder alerts</span>
-        <span className={`inline-flex items-center rounded-full px-2 py-[4px] text-[11px] font-semibold leading-none ${total ? "pill-red" : "pill-green"}`}>
+        <span className={`inline-flex items-center rounded-full px-2 py-[4px] text-[11px] font-medium leading-none ${total ? "pill-red" : "pill-green"}`}>
           {total ? `${total} need action` : "all clear"}
         </span>
       </div>

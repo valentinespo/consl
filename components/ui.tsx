@@ -65,7 +65,7 @@ const PILL: Record<string, string> = {
 export function Pill({ kind, children }: { kind?: keyof typeof PILL | string; children: React.ReactNode }) {
   const cls = (kind && PILL[kind]) || "bg-[#f0eee6] text-muted border-border";
   return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${cls}`}>
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${cls}`}>
       {children}
     </span>
   );
