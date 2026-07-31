@@ -114,7 +114,9 @@ model Facility {
   organization    Organization?   @relation(fields: [orgId], references: [id], onDelete: Cascade)
   code            String
   name            String
-  type            String          @default("co-packer") // co-packer | warehouse | 3pl | other
+  type            String          @default("co-packer") // co-packer | warehouse | 3pl | other | channel
+  channel         String? // set when this facility mirrors a connected sales channel (AMAZON_FBA, AMAZON_AWD, SHOPIFY, TIKTOK)
+  locked          Boolean         @default(false) // managed by an integration — not editable or deletable in-app
   legalName       String? // vendor name printed on POs (falls back to name)
   address         String? // multiline vendor address for POs
   notes           String?

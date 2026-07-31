@@ -403,7 +403,9 @@ export async function getLotOptions() {
 }
 
 export async function getFacilities() {
-  const f = await prisma.facility.findMany({ orderBy: { code: "asc" } });
+  // Pickers only — channel facilities (Amazon FBA/AWD…) are never vendors, lot sites or
+  // movement targets, so they stay out of every dropdown this feeds.
+  const f = await prisma.facility.findMany({ where: { channel: null }, orderBy: { code: "asc" } });
   return f.map((x) => ({ id: x.id, code: x.code, name: x.name }));
 }
 
@@ -633,7 +635,7 @@ export async function getPurchaseInvoicesByMaterial() {
 
 export async function getPurchaseFormOptions() {
   const [facilities, products, suppliers, materials] = await Promise.all([
-    prisma.facility.findMany({ orderBy: { code: "asc" } }),
+    prisma.facility.findMany({ where: { channel: null }, orderBy: { code: "asc" } }),
     prisma.product.findMany({ orderBy: { code: "asc" } }),
     prisma.supplier.findMany({ orderBy: { name: "asc" } }),
     prisma.materialType.findMany({ orderBy: { name: "asc" } }),
@@ -686,7 +688,7 @@ export async function getPurchaseOrders() {
 /** Options for the PO creation form. */
 export async function getPoFormOptions() {
   const [facilities, products, lotNrs, pricedLines, feeLines] = await Promise.all([
-    prisma.facility.findMany({ include: { supplierProfile: true }, orderBy: { code: "asc" } }),
+    prisma.facility.findMany({ where: { channel: null }, include: { supplierProfile: true }, orderBy: { code: "asc" } }),
     prisma.product.findMany({ orderBy: { code: "asc" } }),
     prisma.lot.findMany({ select: { lotNr: true } }),
     prisma.purchaseOrderLine.findMany({

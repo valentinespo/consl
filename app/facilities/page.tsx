@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronRight, Warehouse, Truck, Package } from "@/components/icons";
+import { ChevronRight, Warehouse, Truck, Package, Plug, Lock, AlertTriangle } from "@/components/icons";
 import {
   getFacilitiesDetailed,
   getFinishedStock,
@@ -35,6 +35,10 @@ export default async function FacilitiesPage() {
   ]);
   const todayISO = new Date().toISOString().slice(0, 10);
 
+  // Channel facilities (Amazon FBA/AWD…) are integration-managed mirrors of a sales platform —
+  // they get their own quiet section instead of mixing with the places you actually run.
+  const physical = facilities.filter((f) => !f.channel);
+  const channels = facilities.filter((f) => f.channel);
   const codeToId = new Map(facilityOptions.map((f) => [f.code, f.id]));
   const materialIdByCode = new Map(materials.map((m) => [m.code, m.id]));
   const productIdByCode = new Map(products.map((p) => [p.code, p.id]));
@@ -85,7 +89,7 @@ export default async function FacilitiesPage() {
         </div>
       </PageHeader>
 
-      {facilities.length === 0 ? (
+      {physical.length === 0 ? (
         <EmptyState
           icon={Warehouse}
           title="No facilities yet"
@@ -95,7 +99,7 @@ export default async function FacilitiesPage() {
         </EmptyState>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {facilities.map((f) => {
+          {physical.map((f) => {
             const fin = finByFacility.get(f.id);
             const raw = rawByFacilityCode.get(f.code) ?? [];
             const rawValue = raw.reduce((s, r) => s + r.value, 0);
@@ -166,6 +170,40 @@ export default async function FacilitiesPage() {
         </div>
       )}
 
+      {/* Integration-managed mirrors of connected sales platforms — locked, read-only. */}
+      {channels.length > 0 && (
+        <div className="mt-8">
+          <SectionTitle>Sales channels</SectionTitle>
+          <p className="-mt-2 mb-3 text-[12.5px] text-muted">
+            Created automatically by your connected platforms — they can&apos;t be edited or deleted here.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {channels.map((f) => (
+              <Link key={f.id} href={`/facilities/${f.id}`} className="block">
+                <Card className="flex h-full items-center gap-3 transition-colors hover:border-accent-strong hover:bg-accent-soft/30">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
+                    <Plug size={18} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-ink">{f.code}</span>
+                      <span className="rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[10.5px] font-medium text-muted">
+                        {facilityTypeLabel(f.type)}
+                      </span>
+                    </div>
+                    <div className="truncate text-[12.5px] text-muted">{f.name}</div>
+                  </div>
+                  <span className="inline-flex items-center gap-1 text-[11px] text-muted">
+                    <Lock size={12} /> Managed
+                  </span>
+                  <ChevronRight size={16} className="shrink-0 text-muted" />
+                </Card>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="mt-8">
         <SectionTitle>Stock movements</SectionTitle>
         <p className="-mt-2 mb-3 text-[12.5px] text-muted">
@@ -174,9 +212,12 @@ export default async function FacilitiesPage() {
         </p>
 
         {stock.shortfalls.length > 0 && (
-          <div className="mb-3 rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-[12px] text-negative">
-            ⚠ {stock.shortfalls.length} movement{stock.shortfalls.length === 1 ? "" : "s"} shipped more units than that
-            location had on record. Check the quantities below.
+          <div className="mb-3 flex items-start gap-1.5 rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-[12px] text-negative">
+            <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+            <span>
+              {stock.shortfalls.length} movement{stock.shortfalls.length === 1 ? "" : "s"} shipped more units than that
+              location had on record. Check the quantities below.
+            </span>
           </div>
         )}
 

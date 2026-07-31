@@ -6,6 +6,8 @@ import { Package } from "@/components/icons";
 import { PageHeader, Card, SkuAvatar } from "@/components/ui";
 import { PrevNextNav, neighbours } from "@/components/PrevNextNav";
 import { FacilityEditor } from "@/components/FacilityEditor";
+import { Lock } from "@/components/icons";
+import { CHANNEL_PROVIDER, PROVIDERS } from "@/lib/integrations";
 import { DeleteEntity } from "@/components/DeleteEntity";
 import { deleteFacility } from "@/app/facilities/actions";
 import { facilityTypeLabel } from "@/lib/facility-types";
@@ -43,19 +45,36 @@ export default async function FacilityDetailPage({ params }: { params: Promise<{
         <PrevNextNav {...nav} />
       </PageHeader>
 
-      <FacilityEditor
-        facility={{
-          id: facility.id,
-          code: facility.code,
-          name: facility.name,
-          type: facility.type,
-          legalName: facility.legalName,
-          address: facility.address,
-          notes: facility.notes,
-          supplierId: facility.supplierProfile?.id ?? null,
-        }}
-        suppliers={suppliers}
-      />
+      {facility.locked ? (
+        <Card className="flex items-start gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
+            <Lock size={17} />
+          </span>
+          <div className="text-[13px] leading-relaxed text-ink-soft">
+            <div className="font-semibold text-ink">Managed by your {channelProviderLabel(facility.channel)} connection</div>
+            This facility mirrors a connected sales channel, so its details can&apos;t be edited or deleted here — it lives and
+            dies with the connection in{" "}
+            <Link href="/settings/integrations" className="font-medium text-accent hover:underline">
+              Settings → Integrations
+            </Link>
+            .
+          </div>
+        </Card>
+      ) : (
+        <FacilityEditor
+          facility={{
+            id: facility.id,
+            code: facility.code,
+            name: facility.name,
+            type: facility.type,
+            legalName: facility.legalName,
+            address: facility.address,
+            notes: facility.notes,
+            supplierId: facility.supplierProfile?.id ?? null,
+          }}
+          suppliers={suppliers}
+        />
+      )}
 
       <div className="mt-5">
         <Card>
@@ -138,4 +157,11 @@ export default async function FacilityDetailPage({ params }: { params: Promise<{
       />
     </>
   );
+}
+
+/** "AMAZON_FBA" → "Amazon" (falls back to the raw channel name). */
+function channelProviderLabel(channel: string | null): string {
+  if (!channel) return "integration";
+  const p = CHANNEL_PROVIDER[channel];
+  return p ? PROVIDERS[p].label : channel;
 }

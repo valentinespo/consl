@@ -20,5 +20,6 @@ export function isProductionSite(type: string): boolean {
 }
 
 export function facilityTypeLabel(value: string): string {
+  if (value === "channel") return "Sales channel"; // integration-managed, never in the pickers
   return FACILITY_TYPES.find((t) => t.value === value)?.label ?? value;
 }

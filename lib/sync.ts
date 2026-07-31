@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
+import { ensureChannelFacilities } from "@/lib/integrations";
 import { prismaBase } from "@/lib/prisma-base";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { getFbaInventory, getAwdInventory, getAllOrders } from "@/lib/spapi";
@@ -121,5 +122,13 @@ export async function syncAmazonCore(): Promise<
     };
   });
   await prisma.skuSnapshot.createMany({ data: rows });
+  // A working Amazon connection materialises its locked channel facilities (FBA/AWD) — the same
+  // call the per-tenant OAuth connect flow will make once the Integrations page goes live.
+  // Best-effort: a hiccup here must never fail the sync itself.
+  try {
+    await ensureChannelFacilities("amazon");
+  } catch {
+    /* facilities will appear on the next successful sync */
+  }
   return { ok: true, count: rows.length, salesOk };
 }

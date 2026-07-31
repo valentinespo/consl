@@ -19,6 +19,7 @@ export async function createFacility(input: { code: string; name: string; type: 
   const clash = await prisma.facility.findFirst({ where: { code } });
   if (clash) return { ok: false as const, error: `Code ${code} already exists` };
 
+  if (input.type === "channel") return { ok: false as const, error: "Channel facilities are created by connecting an integration." };
   const f = await prisma.facility.create({ data: { code, name, type: input.type || "co-packer" } });
   revalidatePath("/", "layout");
   return { ok: true as const, id: f.id };
@@ -46,6 +47,7 @@ export async function updateFacility(input: {
 
   const current = await prisma.facility.findFirst({ where: { id: input.id } });
   if (!current) return { ok: false as const, error: "Facility not found" };
+  if (current.locked) return { ok: false as const, error: "This facility is managed by an integration and can't be edited here." };
   if (code !== current.code) {
     const clash = await prisma.facility.findFirst({ where: { code } });
     if (clash) return { ok: false as const, error: `Code ${code} already exists` };
@@ -85,6 +87,7 @@ export async function deleteFacility(id: string) {
   if (!gate.ok) return { ok: false as const, error: gate.error };
   const facility = await prisma.facility.findFirst({ where: { id } });
   if (!facility) return { ok: false as const, error: "Facility not found" };
+  if (facility.locked) return { ok: false as const, error: "This facility is managed by an integration and can't be deleted." };
 
   // Movements count on BOTH sides. A 3PL you only ever ship *to* has no lots, purchases or POs,
   // so without this it looks freely deletable — and deleting it nulls `toFacilityId` on every
