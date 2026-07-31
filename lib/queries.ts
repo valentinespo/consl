@@ -121,7 +121,9 @@ export async function getLots() {
       include: {
         facility: true,
         lines: { include: { product: true } },
-        _count: { select: { transactions: true } },
+        // The count shown is INVOICES touching the lot, not allocation lines — one invoice split
+        // across three lines is still one transaction to the person reading the table.
+        transactions: { select: { invoiceId: true } },
       },
       orderBy: { lotNr: "desc" },
     }),
@@ -129,6 +131,9 @@ export async function getLots() {
   ]);
   const matName = (code: string) => materials.find((m) => m.code === code)?.name ?? code;
   return lots.map((lot) => {
+    const invoiceIds = new Set<string>();
+    let looseLines = 0; // legacy lines with no parent invoice count as one transaction each
+    for (const t of lot.transactions) (t.invoiceId ? invoiceIds.add(t.invoiceId) : looseLines++);
     const units = lot.lines.reduce((s, l) => s + l.units, 0);
     const cog = lot.lines.reduce((s, l) => s + l.cogPerUnit * l.units, 0);
     return {
@@ -152,7 +157,7 @@ export async function getLots() {
       units,
       cogTotal: cog,
       avgCogPerUnit: units ? cog / units : 0,
-      txnCount: lot._count.transactions,
+      txnCount: invoiceIds.size + looseLines,
       notes: lot.notes,
     };
   });

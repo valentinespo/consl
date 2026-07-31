@@ -1,8 +1,9 @@
 "use client";
 
+import { DocPreview } from "@/components/DocPreview";
 import { Fragment, useState } from "react";
 import Link from "next/link";
-import { ChevronRight, FileText, Lock } from "@/components/icons";
+import { ChevronRight, FileText, Lock, Download } from "@/components/icons";
 import { ExpandRow } from "@/components/animate";
 import { Pill, SkuAvatar } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
@@ -111,9 +112,14 @@ export function PurchaseOrdersView({
                       </td>
                       <td className="px-4 py-3 text-right">
                         {po.pdfUrl ? (
-                          <a href={po.pdfUrl.startsWith("/media/po/") ? `/po-preview/${encodeURIComponent(po.pdfUrl.slice("/media/po/".length))}` : po.pdfUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 text-[12.5px] font-medium text-accent hover:underline">
-                            <FileText size={13} /> View
-                          </a>
+                          <span className="inline-flex items-center gap-2.5" onClick={(e) => e.stopPropagation()}>
+                            <DocPreview url={po.pdfUrl} name={`PO ${po.number}`} className="inline-flex items-center gap-1 text-[12.5px] font-medium text-accent hover:underline">
+                              <FileText size={13} /> View
+                            </DocPreview>
+                            <a href={po.pdfUrl} download={`PO-${po.number}.pdf`} className="text-muted hover:text-ink-soft" title="Download PDF">
+                              <Download size={14} />
+                            </a>
+                          </span>
                         ) : (
                           <span className="text-muted">—</span>
                         )}

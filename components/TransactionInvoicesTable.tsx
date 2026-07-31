@@ -259,7 +259,7 @@ export function TransactionInvoicesTable({
                       <td colSpan={colSpan} className="px-4 py-4">
                         <div className="mb-3 rounded-lg border border-border bg-surface px-3 py-2.5">
                           <div className="mb-2 text-[12px] font-medium uppercase tracking-wide text-muted">Invoice documents</div>
-                          <DocumentList parent="transaction" parentId={inv.id} documents={inv.documents} emptyText="No invoice attached yet." />
+                          <DocumentList parent="transaction" parentId={inv.id} documents={inv.documents} canUpload={false} emptyText="No invoice attached yet. Attach one below — it uploads when you save." />
                         </div>
                         <TransactionInvoiceForm
                           invoice={inv}

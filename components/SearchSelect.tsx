@@ -160,7 +160,9 @@ export function SearchSelect({
                   <div className="my-1 border-t border-line" />
                   <button
                     type="button"
-                    onClick={startCreating}
+                    // A typed name IS the answer — create it in one click; the two-step naming
+                    // view only appears when there is nothing typed yet.
+                    onClick={q && !exists ? commitNew : startCreating}
                     className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[13px] font-medium text-accent hover:bg-surface-2"
                   >
                     <Plus size={14} />

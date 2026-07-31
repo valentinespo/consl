@@ -16,6 +16,7 @@ export function DocumentList({
   quickLabels = [],
   showLabelField = false,
   emptyText = "No documents yet.",
+  canUpload = true,
 }: {
   parent: DocParent;
   parentId: string;
@@ -23,6 +24,8 @@ export function DocumentList({
   quickLabels?: string[];
   showLabelField?: boolean;
   emptyText?: string;
+  /** false = list/preview/delete only; adding files lives elsewhere (e.g. a form with Save). */
+  canUpload?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [label, setLabel] = useState("");
@@ -78,6 +81,7 @@ export function DocumentList({
         ))}
         {documents.length === 0 && <div className="text-[12px] text-muted">{emptyText}</div>}
       </div>
+      {canUpload && (
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         {showLabelField && (
           <input
@@ -108,6 +112,7 @@ export function DocumentList({
         <input ref={inputRef} type="file" accept="application/pdf,image/*" hidden onChange={onPick} />
         {error && <span className="text-[11px] text-negative">{error}</span>}
       </div>
+      )}
     </div>
   );
 }

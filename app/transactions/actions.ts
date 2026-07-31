@@ -69,6 +69,7 @@ export async function upsertTransactionInvoice(payload: InvoicePayload) {
     });
 
   let staleSuppliers: (string | null)[] = [];
+  let invoiceId = payload.id;
   if (payload.id) {
     const old = await prisma.transaction.findMany({ where: { invoiceId: payload.id }, select: { supplierId: true } });
     staleSuppliers = old.map((o) => o.supplierId);
@@ -77,13 +78,15 @@ export async function upsertTransactionInvoice(payload: InvoicePayload) {
     await prisma.transaction.createMany({ data: toRow(payload.id) });
   } else {
     const inv = await prisma.transactionInvoice.create({ data: { supplierId, date, invoiceTotal: payload.invoiceTotal } });
+    invoiceId = inv.id;
     await prisma.transaction.createMany({ data: toRow(inv.id) });
   }
 
   for (const sid of new Set(staleSuppliers)) if (sid && sid !== supplierId) await cleanupSupplierIfOrphan(sid);
   await recomputeAll();
   revalidatePath("/", "layout");
-  return { ok: true as const };
+  // The id lets the form attach staged documents right after a create.
+  return { ok: true as const, id: invoiceId! };
 }
 
 export async function deleteTransactionInvoice(id: string) {

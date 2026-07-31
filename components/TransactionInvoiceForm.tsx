@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, X } from "@/components/icons";
+import { Plus, X, Upload, Paperclip } from "@/components/icons";
 import { DatePicker } from "@/components/DatePicker";
 import { upsertTransactionInvoice, deleteTransactionInvoice, type InvoiceLineInput } from "@/app/transactions/actions";
+import { uploadDocument } from "@/app/documents/actions";
 import { SearchSelect } from "@/components/SearchSelect";
 import { TwoStepDelete } from "@/components/TwoStepDelete";
 import { SkuAvatar } from "@/components/ui";
@@ -127,7 +128,10 @@ export function TransactionInvoiceForm({
         : null,
     [invoice],
   );
-  const dirty = !invoice || currentSnapshot !== originalSnapshot;
+  // Files picked but not yet uploaded — they only reach the server on Save, like every other edit.
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const dirty = !invoice || currentSnapshot !== originalSnapshot || pendingFiles.length > 0;
 
   function patch(key: string, p: Partial<EditLine>) {
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...p } : l)));
@@ -171,6 +175,21 @@ export function TransactionInvoiceForm({
         setPending(false);
         return;
       }
+      for (const file of pendingFiles) {
+        const fd = new FormData();
+        fd.set("parent", "transaction");
+        fd.set("parentId", res.id);
+        fd.set("label", "");
+        fd.set("file", file);
+        const up = await uploadDocument(fd);
+        if (up && !up.ok) {
+          setError(`Saved, but attaching “${file.name}” failed: ${up.error}`);
+          setPending(false);
+          router.refresh();
+          return;
+        }
+      }
+      setPendingFiles([]);
       onDone();
       router.refresh();
     } catch (e) {
@@ -353,6 +372,50 @@ export function TransactionInvoiceForm({
         >
           <Plus size={14} /> Add line
         </button>
+      </div>
+
+      <div>
+        <div className="mb-1.5 text-[12px] font-medium uppercase tracking-wide text-muted">{editing ? "Add invoice documents" : "Invoice documents"}</div>
+        {pendingFiles.length > 0 && (
+          <div className="mb-2 space-y-1.5">
+            {pendingFiles.map((file, i) => (
+              <div key={`${file.name}-${i}`} className="flex items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5">
+                <Paperclip size={13} className="shrink-0 text-muted" />
+                <span className="min-w-0 truncate text-[12.5px] text-ink-soft">{file.name}</span>
+                <button
+                  type="button"
+                  onClick={() => setPendingFiles((prev) => prev.filter((_, j) => j !== i))}
+                  className="ml-auto shrink-0 text-muted hover:text-negative"
+                  title="Remove"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink-soft hover:border-accent-strong"
+          >
+            <Upload size={13} /> Attach file
+          </button>
+          <span className="text-[11.5px] text-muted">Uploads when you save.</span>
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/pdf,image/*"
+          multiple
+          hidden
+          onChange={(e) => {
+            const picked = Array.from(e.target.files ?? []);
+            if (picked.length) setPendingFiles((prev) => [...prev, ...picked]);
+            e.target.value = "";
+          }}
+        />
       </div>
 
       {error && <div className="rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-[12.5px] text-negative">{error}</div>}
