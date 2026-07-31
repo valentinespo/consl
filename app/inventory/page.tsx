@@ -4,6 +4,7 @@ import { Package } from "@/components/icons";
 import { prisma } from "@/lib/prisma";
 import { getInventory, getMaterialTypes, getFinishedStock, type InventoryPool } from "@/lib/queries";
 import { getChannelStock } from "@/lib/integrations";
+import { SEG } from "@/lib/segments";
 import { money, qty, perUnit, costFine, type Currency } from "@/lib/format";
 import { getCurrentOrg } from "@/lib/org";
 import { PageHeader, SectionTitle, FacilityTag, SkuAvatar } from "@/components/ui";
@@ -16,7 +17,7 @@ export const dynamic = "force-dynamic";
 // The three stocks the company physically holds, in pipeline order (inputs → work in progress →
 // finished goods). Amazon FBA/AWD stock and its restock maths live on the Reorder page now.
 const CAT = {
-  raw: { label: "Raw materials", color: "#f59e0b" },
+  raw: { label: "Raw materials", color: SEG.raw }, // the dashboard's raw-materials dot — one colour, one meaning
   prod: { label: "In production", color: "#8b5cf6" },
   finished: { label: "Finished on hand", color: "#16a34a" },
 };

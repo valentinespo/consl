@@ -8,8 +8,8 @@ export type Slice = { label: string; value: number };
 
 const C = 70; // centre
 const R = 66; // outer radius
-const IR = 31; // inner radius — a small hole, the reference's thick ring
-const CR = 3; // corner rounding — drawn inset, then a fat round-joined stroke restores the size
+const IR = 38; // inner radius — a slightly slimmer ring than the reference's chunky original
+const CR = 5; // corner rounding — drawn inset, then a fat round-joined stroke restores the size
 const GAP = 2.6; // seam between slices, in viewBox px — constant width from hole to rim
 
 const pt = (rad: number, a: number) => `${C + rad * Math.cos(a)} ${C + rad * Math.sin(a)}`;

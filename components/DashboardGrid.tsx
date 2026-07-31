@@ -543,7 +543,7 @@ function RingWidget({ title, subtitle, data, total }: { title: string; subtitle:
 function EmptyRing() {
   return (
     <svg viewBox="0 0 140 140" className="h-full w-full" role="img" aria-label="Awaiting data">
-      <circle cx="70" cy="70" r="48.5" fill="none" stroke="var(--color-line)" strokeWidth="35" />
+      <circle cx="70" cy="70" r="52" fill="none" stroke="var(--color-line)" strokeWidth="28" />
     </svg>
   );
 }
