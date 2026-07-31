@@ -40,10 +40,8 @@ export async function getInventory() {
     .sort((a, b) => b.valueRemaining - a.valueRemaining);
 
   const totalValue = pools.reduce((s, p) => s + p.valueRemaining, 0);
-  const teabagUnits = pools.filter((p) => p.materialCode === "TEABAG").reduce((s, p) => s + p.quantityRemaining, 0);
-  const pouchUnits = pools.filter((p) => p.materialCode === "POUCH").reduce((s, p) => s + p.quantityRemaining, 0);
 
-  return { pools, totalValue, teabagUnits, pouchUnits };
+  return { pools, totalValue };
 }
 
 export async function getDashboard() {

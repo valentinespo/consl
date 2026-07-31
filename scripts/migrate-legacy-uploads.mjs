@@ -21,6 +21,17 @@ function countFiles(dir) {
 try {
   const dest = process.env.UPLOAD_DIR;
   const src = path.join(process.cwd(), "legacy-uploads");
+  // Herbl's PO-letterhead logo was a bundled public asset — tenant branding, so it moves to the
+  // volume too (DB logoUrl is flipped to /media/brand/herbl-po-logo.png separately). No-op once
+  // the bundled file leaves the repo.
+  const brandSrc = path.join(process.cwd(), "public", "brand", "logo.png");
+  if (dest && existsSync(brandSrc)) {
+    const brandDest = path.join(dest, "brand", "herbl-po-logo.png");
+    if (!existsSync(brandDest)) {
+      cpSync(brandSrc, brandDest);
+      console.log("[legacy-uploads] tenant PO logo copied to volume as brand/herbl-po-logo.png");
+    }
+  }
   if (!dest) {
     console.log("[legacy-uploads] no UPLOAD_DIR — local dev, nothing to do");
   } else if (!existsSync(src)) {

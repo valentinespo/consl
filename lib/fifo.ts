@@ -1,5 +1,5 @@
 /**
- * Herbl FIFO costing engine — pure, deterministic, no DB/IO.
+ * FIFO costing engine — pure, deterministic, no DB/IO.
  *
  * Two cost sources per lot line:
  *  1. FIFO materials (stocked): each material a lot consumes. Cost = oldest-stock-first from purchases.
