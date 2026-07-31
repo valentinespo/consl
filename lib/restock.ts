@@ -19,9 +19,11 @@ export type RestockRow = {
   fbaInbound: number;
   fbaReserved: number;
   fbaTotal: number;
+  fbaValue: number; // those units at cost, valued newest-shipment-first (shared pass with AWD)
   awdOnhand: number;
   awdInbound: number;
   awdTotal: number;
+  awdValue: number;
   inProduction: number;
   atLocations: number; // finished units sitting at your own facilities — made, just not shipped
   atLocationsBy: { code: string; units: number }[]; // where those units are, biggest first
@@ -197,9 +199,11 @@ export async function getRestock(): Promise<{
       fbaInbound: s?.fbaInbound ?? 0,
       fbaReserved: s?.fbaReserved ?? 0,
       fbaTotal,
+      fbaValue: fbaVal,
       awdOnhand: s?.awdOnhand ?? 0,
       awdInbound: s?.awdInbound ?? 0,
       awdTotal,
+      awdValue: awdVal,
       inProduction,
       atLocations: heldBySku.get(p.id)?.units ?? 0,
       atLocationsBy: heldBySku.get(p.id)?.by ?? [],

@@ -17,13 +17,14 @@ import { NewMovementPanel, type OnHandRow } from "@/components/MovementForm";
 import { MovementsLedger } from "@/components/MovementsLedger";
 import { StockSection } from "@/components/StockSection";
 import { facilityTypeLabel, isProductionSite } from "@/lib/facility-types";
+import { getChannelStock } from "@/lib/integrations";
 import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
 
 export default async function FacilitiesPage() {
   await requireView("facilities");
-  const [facilities, stock, rawByFacilityCode, movements, products, materials, facilityOptions, { money, qty, date }] = await Promise.all([
+  const [facilities, stock, rawByFacilityCode, movements, products, materials, facilityOptions, channelStock, { money, qty, date }] = await Promise.all([
     getFacilitiesDetailed(),
     getFinishedStock(),
     getRawStockByFacility(),
@@ -31,6 +32,7 @@ export default async function FacilitiesPage() {
     getProducts(),
     getMaterialTypes(),
     getFacilities(),
+    getChannelStock(),
     getFmt(),
   ]);
   const todayISO = new Date().toISOString().slice(0, 10);
@@ -39,6 +41,14 @@ export default async function FacilitiesPage() {
   // they get their own quiet section instead of mixing with the places you actually run.
   const physical = facilities.filter((f) => !f.channel);
   const channels = facilities.filter((f) => f.channel);
+  // What each channel is holding, per its own platform's report (valued at cost).
+  const channelHeld = new Map<string, { value: number; rows: typeof channelStock.rows }>();
+  for (const r of channelStock.rows) {
+    const cur = channelHeld.get(r.facilityId) ?? { value: 0, rows: [] };
+    cur.value += r.value;
+    cur.rows.push(r);
+    channelHeld.set(r.facilityId, cur);
+  }
   const codeToId = new Map(facilityOptions.map((f) => [f.code, f.id]));
   const materialIdByCode = new Map(materials.map((m) => [m.code, m.id]));
   const productIdByCode = new Map(products.map((p) => [p.code, p.id]));
@@ -180,23 +190,38 @@ export default async function FacilitiesPage() {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {channels.map((f) => (
               <Link key={f.id} href={`/facilities/${f.id}`} className="block">
-                <Card className="flex h-full items-center gap-3 transition-colors hover:border-accent-strong hover:bg-accent-soft/30">
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
-                    <Plug size={18} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-ink">{f.code}</span>
-                      <span className="rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[10.5px] font-medium text-muted">
-                        {facilityTypeLabel(f.type)}
-                      </span>
+                <Card className="flex h-full flex-col gap-3 transition-colors hover:border-accent-strong hover:bg-accent-soft/30">
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
+                      <Plug size={18} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-ink">{f.code}</span>
+                        <span className="whitespace-nowrap rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[10.5px] font-medium text-muted">
+                          {facilityTypeLabel(f.type)}
+                        </span>
+                      </div>
+                      <div className="truncate text-[12.5px] text-muted">{f.name}</div>
                     </div>
-                    <div className="truncate text-[12.5px] text-muted">{f.name}</div>
+                    <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] text-muted">
+                      <Lock size={12} /> Managed
+                    </span>
+                    <ChevronRight size={16} className="shrink-0 text-muted" />
                   </div>
-                  <span className="inline-flex items-center gap-1 text-[11px] text-muted">
-                    <Lock size={12} /> Managed
-                  </span>
-                  <ChevronRight size={16} className="shrink-0 text-muted" />
+                  <div className="mt-auto">
+                    <StockSection label="Finished stock here" total={channelHeld.has(f.id) ? money(channelHeld.get(f.id)!.value) : null}>
+                      {channelHeld.get(f.id)?.rows.map((s) => (
+                        <div key={s.productId} className="flex items-center gap-2">
+                          <SkuAvatar code={s.code} size={22} imageUrl={s.imageUrl} />
+                          <span className="text-[12px] font-medium text-ink-soft">{s.code}</span>
+                          <span className="tabular ml-auto whitespace-nowrap text-[12px] text-muted">
+                            {qty(s.units)} units · {money(s.value)}
+                          </span>
+                        </div>
+                      ))}
+                    </StockSection>
+                  </div>
                 </Card>
               </Link>
             ))}

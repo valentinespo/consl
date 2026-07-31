@@ -7,7 +7,7 @@ import { PageHeader, Card, SkuAvatar } from "@/components/ui";
 import { PrevNextNav, neighbours } from "@/components/PrevNextNav";
 import { FacilityEditor } from "@/components/FacilityEditor";
 import { Lock } from "@/components/icons";
-import { CHANNEL_PROVIDER, PROVIDERS } from "@/lib/integrations";
+import { CHANNEL_PROVIDER, PROVIDERS, getChannelStock } from "@/lib/integrations";
 import { DeleteEntity } from "@/components/DeleteEntity";
 import { deleteFacility } from "@/app/facilities/actions";
 import { facilityTypeLabel } from "@/lib/facility-types";
@@ -27,10 +27,13 @@ export default async function FacilityDetailPage({ params }: { params: Promise<{
     getSupplierOptions(),
     getFmt(),
   ]);
+  const channelStock = await getChannelStock();
   if (!detail) notFound();
   const { facility, usedBy } = detail;
   const nav = neighbours(facilities, id, "/facilities");
-  const here = stock.rows.filter((r) => r.facilityId === id);
+  // A channel facility holds what its platform reports (FBA/AWD snapshots, valued at cost);
+  // physical facilities hold what the finished-goods engine says is on hand.
+  const here = facility.channel ? channelStock.rows.filter((r) => r.facilityId === id) : stock.rows.filter((r) => r.facilityId === id);
   const hereValue = here.reduce((s, r) => s + r.value, 0);
   const rawHere = rawByFacilityCode.get(facility.code) ?? [];
   const rawValue = rawHere.reduce((s, r) => s + r.value, 0);
@@ -84,8 +87,9 @@ export default async function FacilityDetailPage({ params }: { params: Promise<{
           </div>
           {here.length === 0 ? (
             <p className="text-[12.5px] text-muted">
-              No finished stock recorded here. Units land here when a lot produced at this facility is marked finished, and
-              leave when you record a movement.
+              {facility.channel
+                ? "Nothing reported by the platform yet — stock appears here with each sync."
+                : "No finished stock recorded here. Units land here when a lot produced at this facility is marked finished, and leave when you record a movement."}
             </p>
           ) : (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -107,6 +111,7 @@ export default async function FacilityDetailPage({ params }: { params: Promise<{
         </Card>
       </div>
 
+      {!facility.channel && (
       <div className="mt-5">
         <Card>
           <div className="mb-3 flex items-center justify-between">
@@ -146,15 +151,18 @@ export default async function FacilityDetailPage({ params }: { params: Promise<{
           )}
         </Card>
       </div>
+      )}
 
-      <DeleteEntity
-        kind="facility"
-        name={facility.name}
-        usedBy={usedBy}
-        onDelete={deleteFacility.bind(null, facility.id)}
-        redirectTo="/facilities"
-        resource="facilities"
-      />
+      {!facility.locked && (
+        <DeleteEntity
+          kind="facility"
+          name={facility.name}
+          usedBy={usedBy}
+          onDelete={deleteFacility.bind(null, facility.id)}
+          redirectTo="/facilities"
+          resource="facilities"
+        />
+      )}
     </>
   );
 }

@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
+import { getRestock } from "@/lib/restock";
 
 /**
  * The sales-channel integration registry — the single source for what can be connected and what
@@ -50,6 +51,57 @@ export const CHANNEL_PROVIDER: Record<string, Provider> = Object.fromEntries(
  * someone managed to unlock it; a physical facility squatting on the code keeps its code and the
  * channel facility takes a suffixed one.
  */
+export type ChannelStockRow = {
+  productId: string;
+  code: string;
+  name: string;
+  imageUrl: string | null;
+  facilityId: string;
+  facilityCode: string;
+  facilityName: string;
+  channel: string;
+  units: number;
+  value: number;
+};
+
+/**
+ * Finished inventory HELD BY the connected channels, per SKU × channel facility — the platform's
+ * own reported stock (FBA/AWD snapshots), valued at cost the same way the dashboard values it
+ * (newest-shipment-first). Shaped like getFinishedStock().rows so channel facilities slot into
+ * every finished-stock view like any other facility. Empty until the channel facilities exist.
+ */
+export async function getChannelStock(): Promise<{ rows: ChannelStockRow[]; totalUnits: number; totalValue: number }> {
+  const facilities = await prisma.facility.findMany({ where: { channel: { not: null } } });
+  if (facilities.length === 0) return { rows: [], totalUnits: 0, totalValue: 0 };
+  const { rows: restock } = await getRestock();
+  const rows: ChannelStockRow[] = [];
+  for (const f of facilities) {
+    for (const r of restock) {
+      const [units, value] =
+        f.channel === "AMAZON_FBA" ? [r.fbaTotal, r.fbaValue] : f.channel === "AMAZON_AWD" ? [r.awdTotal, r.awdValue] : [0, 0];
+      if (units <= 0) continue;
+      rows.push({
+        productId: r.id,
+        code: r.code,
+        name: r.name,
+        imageUrl: r.imageUrl,
+        facilityId: f.id,
+        facilityCode: f.code,
+        facilityName: f.name,
+        channel: f.channel!,
+        units,
+        value,
+      });
+    }
+  }
+  rows.sort((a, b) => b.value - a.value);
+  return {
+    rows,
+    totalUnits: rows.reduce((s, r) => s + r.units, 0),
+    totalValue: rows.reduce((s, r) => s + r.value, 0),
+  };
+}
+
 export async function ensureChannelFacilities(provider: Provider): Promise<void> {
   for (const spec of PROVIDERS[provider].facilities) {
     const existing = await prisma.facility.findFirst({ where: { channel: spec.channel } });

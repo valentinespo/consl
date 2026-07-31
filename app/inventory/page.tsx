@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Package } from "@/components/icons";
 import { prisma } from "@/lib/prisma";
 import { getInventory, getMaterialTypes, getFinishedStock, type InventoryPool } from "@/lib/queries";
+import { getChannelStock } from "@/lib/integrations";
 import { money, qty, perUnit, costFine, type Currency } from "@/lib/format";
 import { getCurrentOrg } from "@/lib/org";
 import { PageHeader, SectionTitle, FacilityTag, SkuAvatar } from "@/components/ui";
@@ -35,7 +36,7 @@ type RawGroup = { key: string; sku: string | null; productName: string | null; i
 
 export default async function InventoryPage() {
   await requireView("inventory");
-  const [{ pools, totalValue: rawValue }, materials, prodLots, finished, org] = await Promise.all([
+  const [{ pools, totalValue: rawValue }, materials, prodLots, finished, channelStock, org] = await Promise.all([
     getInventory(),
     getMaterialTypes(),
     prisma.lot.findMany({
@@ -44,6 +45,7 @@ export default async function InventoryPage() {
       orderBy: [{ poDate: "desc" }, { createdAt: "desc" }],
     }),
     getFinishedStock(),
+    getChannelStock(),
     getCurrentOrg().catch(() => null),
   ]);
   const cur: Currency = { symbol: org?.currencySymbol ?? "$", locale: org?.locale ?? "en-US", code: org?.currencyCode ?? "USD" };
@@ -65,9 +67,12 @@ export default async function InventoryPage() {
   const prodValue = prodSkus.reduce((s, r) => s + r.value, 0);
 
   // ---- Finished stock (per SKU × facility, sorted by value) ----
-  const finishedValue = finished.rows.reduce((s, r) => s + r.value, 0);
-  const finishedUnits = finished.rows.reduce((s, r) => s + r.units, 0);
-  const finFacilities = new Set(finished.rows.map((r) => r.facilityId)).size;
+  // Connected sales channels hold finished goods too — their reported stock (valued at cost)
+  // joins the finished bucket and the table like stock at any other facility.
+  const finishedRows = [...finished.rows, ...channelStock.rows].sort((a, b) => b.value - a.value);
+  const finishedValue = finishedRows.reduce((s, r) => s + r.value, 0);
+  const finishedUnits = finishedRows.reduce((s, r) => s + r.units, 0);
+  const finFacilities = new Set(finishedRows.map((r) => r.facilityId)).size;
 
   // ---- Raw materials, grouped by material then SKU/facility ----
   const meta = new Map(materials.map((m) => [m.code, m]));
@@ -244,7 +249,7 @@ export default async function InventoryPage() {
       {/* ---- Finished stock per facility ---- */}
       <section className="mt-9">
         <SectionTitle action={<CatTotal color={CAT.finished.color} text={`${money(finishedValue, 2, cur)} · ${qty(finishedUnits, cur)} units`} />}>Finished stock by facility</SectionTitle>
-        {finished.rows.length === 0 ? (
+        {finishedRows.length === 0 ? (
           <EmptyState icon={Package} title="No finished stock on hand" body="Once lots are finished, whatever hasn't shipped to Amazon or sold shows here — the sellable stock sitting at your own facilities." />
         ) : (
           <div className={tableShell}>
@@ -259,8 +264,8 @@ export default async function InventoryPage() {
                 </tr>
               </thead>
               <tbody>
-                {finished.rows.map((r, i) => (
-                  <tr key={`${r.productId}-${r.facilityId}`} className={i < finished.rows.length - 1 ? "border-b border-line" : ""}>
+                {finishedRows.map((r, i) => (
+                  <tr key={`${r.productId}-${r.facilityId}`} className={i < finishedRows.length - 1 ? "border-b border-line" : ""}>
                     <td className="py-2.5 pl-4 pr-3">{item(<SkuAvatar code={r.code} imageUrl={r.imageUrl} size={34} />, r.name || r.code, r.code)}</td>
                     <td className="px-3 py-2.5">
                       <span className="inline-flex items-center gap-2">
