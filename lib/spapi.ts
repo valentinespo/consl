@@ -240,3 +240,54 @@ export async function getSalesUnits(startISO: string, endISO: string): Promise<R
   }
   return map;
 }
+
+// ── Per-seller (multi-tenant) helpers ─────────────────────────────────────────────────────────
+// The functions above read one refresh token from env (the legacy single-tenant Herbl sync).
+// These take a seller's own refresh token, for connections stored on `Integration`.
+
+const LWA_URL = "https://api.amazon.com/auth/o2/token";
+
+/** LWA access token for a SPECIFIC seller's refresh token. No global cache (tokens differ per org);
+ *  Phase 3's per-org sync caches by token. */
+export async function getAccessTokenFor(refreshToken: string): Promise<string> {
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+    client_id: process.env.SPAPI_CLIENT_ID ?? "",
+    client_secret: process.env.SPAPI_CLIENT_SECRET ?? "",
+  });
+  const r = await fetch(LWA_URL, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+  const j = await r.json();
+  if (!r.ok || !j.access_token) throw new Error(`LWA token failed: ${j.error_description || j.error || r.status}`);
+  return j.access_token;
+}
+
+export type SellerMarketplace = { id: string; name: string; countryCode: string; participating: boolean };
+
+/** Confirm a freshly-connected token actually works, and return the seller's marketplaces (with
+ *  whether they actively sell there). Called right after the OAuth callback to prove the connection
+ *  end-to-end and to choose which marketplace to sync. */
+export async function getMarketplaceParticipations(refreshToken: string, region = "na"): Promise<SellerMarketplace[]> {
+  const token = await getAccessTokenFor(refreshToken);
+  const base = HOSTS[region] ?? HOSTS.na;
+  const r = await fetch(base + "/sellers/v1/marketplaceParticipations", {
+    headers: { "x-amz-access-token": token, "Content-Type": "application/json" },
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(`marketplaceParticipations ${r.status}: ${JSON.stringify(j).slice(0, 200)}`);
+  return (j.payload || [])
+    .filter((p: { marketplace?: { id?: string } }) => !!p.marketplace?.id)
+    .map((p: { marketplace: { id: string; name?: string; countryCode?: string }; participation?: { isParticipating?: boolean } }) => ({
+      id: p.marketplace.id,
+      name: p.marketplace.name ?? p.marketplace.id,
+      countryCode: p.marketplace.countryCode ?? "",
+      participating: p.participation?.isParticipating ?? false,
+    }));
+}
+
+/** Pick the marketplace to sync from a participations list. Prefer a marketplace the seller actually
+ *  sells in; among those, prefer Amazon US for now (the MVP focus). Sellers get a picker later. */
+export function chooseMarketplace(list: SellerMarketplace[], fallback = "ATVPDKIKX0DER"): string {
+  const active = list.filter((m) => m.participating);
+  return active.find((m) => m.id === "ATVPDKIKX0DER")?.id ?? active[0]?.id ?? list[0]?.id ?? fallback;
+}
