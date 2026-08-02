@@ -66,6 +66,32 @@ model Organization {
   lotMaterials            LotMaterial[]
   purchaseOrderLines      PurchaseOrderLine[]
   stockMovements          StockMovement[]
+  integrations            Integration[]
+}
+
+/// A tenant's connection to an external sales platform (Amazon, Shopify, TikTok Shop). Holds the
+/// per-seller OAuth credential (refresh token, ENCRYPTED at rest — never plaintext) plus the
+/// marketplace/region needed to call that platform's API. One row per (org, provider). The app's
+/// own OAuth app id/secret stay in env; only the seller-specific token lives here.
+model Integration {
+  id           String        @id @default(cuid())
+  orgId        String?
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  provider     String // "amazon" | "shopify" | "tiktok"
+  status       String        @default("connected") // connected | error | revoked
+  // Encrypted refresh token (see lib/secret-box.ts). Null until the OAuth callback completes.
+  refreshTokenEnc String?
+  sellerId        String? // platform's account id (Amazon selling-partner id, Shopify shop, …)
+  marketplaceId   String? // e.g. ATVPDKIKX0DER (Amazon US)
+  region          String? // na | eu | fe (Amazon endpoint group)
+  scope           String? // granted OAuth scopes, if the platform returns them
+  connectedAt     DateTime?
+  lastSyncAt      DateTime?
+  lastError       String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@unique([orgId, provider])
 }
 
 /// Links a Clerk user account to an Organization (which company they belong to + their role).

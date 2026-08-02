@@ -27,6 +27,7 @@ export const TENANT_MODELS = new Set([
   "LotMaterial",
   "PurchaseOrderLine",
   "StockMovement",
+  "Integration",
   // Scoped for the owner's view (listing / revoking). Accepting an invite deliberately uses the
   // unscoped client instead: the invitee has no organization yet, and the token is the credential.
   "Invite",
