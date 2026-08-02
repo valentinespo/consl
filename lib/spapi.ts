@@ -1,8 +1,8 @@
 /**
  * Amazon Selling Partner API client (server-only).
- * LWA token refresh + FBA inventory (getInventorySummaries) + Sales & Traffic report.
- * Credentials come from env: SPAPI_CLIENT_ID / SPAPI_CLIENT_SECRET / SPAPI_REFRESH_TOKEN /
- * SPAPI_MARKETPLACE_ID / SPAPI_REGION. Never logged.
+ * LWA token refresh + FBA/AWD inventory + All-Orders sales, per connected seller.
+ * App-level LWA client id/secret come from env (SPAPI_CLIENT_ID/SECRET); the seller-specific
+ * refresh token + marketplace + region are passed in via makeClient(). Never logged.
  */
 import { gunzipSync } from "node:zlib";
 
@@ -11,33 +11,44 @@ const HOSTS: Record<string, string> = {
   eu: "https://sellingpartnerapi-eu.amazon.com",
   fe: "https://sellingpartnerapi-fe.amazon.com",
 };
-const host = () => HOSTS[process.env.SPAPI_REGION ?? "na"] ?? HOSTS.na;
-const marketplace = () => process.env.SPAPI_MARKETPLACE_ID || "ATVPDKIKX0DER";
+/** A per-seller SP-API client: the seller's endpoint host + marketplace, plus a cached LWA access
+ *  token minted from THEIR refresh token. Build one per connection (see lib/sync.ts) and pass it to
+ *  the data calls below — nothing here reads a shared env token anymore. */
+export type SpApiClient = {
+  host: string;
+  marketplaceId: string;
+  accessToken: () => Promise<string>;
+};
 
-let cached: { value: string; exp: number } = { value: "", exp: 0 };
-
-export async function getAccessToken(): Promise<string> {
-  if (cached.value && Date.now() < cached.exp - 60_000) return cached.value;
-  const body = new URLSearchParams({
-    grant_type: "refresh_token",
-    refresh_token: process.env.SPAPI_REFRESH_TOKEN ?? "",
-    client_id: process.env.SPAPI_CLIENT_ID ?? "",
-    client_secret: process.env.SPAPI_CLIENT_SECRET ?? "",
-  });
-  const r = await fetch("https://api.amazon.com/auth/o2/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
-  const j = await r.json();
-  if (!r.ok || !j.access_token) throw new Error(`LWA token failed: ${j.error_description || j.error || r.status}`);
-  cached = { value: j.access_token, exp: Date.now() + (j.expires_in || 3600) * 1000 };
-  return cached.value;
+export function makeClient(creds: { refreshToken: string; marketplaceId: string; region: string }): SpApiClient {
+  let cache: { value: string; exp: number } = { value: "", exp: 0 };
+  return {
+    host: HOSTS[creds.region] ?? HOSTS.na,
+    marketplaceId: creds.marketplaceId || "ATVPDKIKX0DER",
+    accessToken: async () => {
+      if (cache.value && Date.now() < cache.exp - 60_000) return cache.value;
+      const body = new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: creds.refreshToken,
+        client_id: process.env.SPAPI_CLIENT_ID ?? "",
+        client_secret: process.env.SPAPI_CLIENT_SECRET ?? "",
+      });
+      const r = await fetch("https://api.amazon.com/auth/o2/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body,
+      });
+      const j = await r.json();
+      if (!r.ok || !j.access_token) throw new Error(`LWA token failed: ${j.error_description || j.error || r.status}`);
+      cache = { value: j.access_token, exp: Date.now() + (j.expires_in || 3600) * 1000 };
+      return cache.value;
+    },
+  };
 }
 
-async function sp(path: string, init: RequestInit = {}): Promise<Response> {
-  const token = await getAccessToken();
-  return fetch(host() + path, {
+async function sp(client: SpApiClient, path: string, init: RequestInit = {}): Promise<Response> {
+  const token = await client.accessToken();
+  return fetch(client.host + path, {
     ...init,
     headers: { "x-amz-access-token": token, "Content-Type": "application/json", ...(init.headers || {}) },
   });
@@ -55,18 +66,18 @@ export type FbaRow = {
 };
 
 /** Current FBA inventory per seller SKU (fulfillable + inbound breakdown). */
-export async function getFbaInventory(): Promise<FbaRow[]> {
+export async function getFbaInventory(client: SpApiClient): Promise<FbaRow[]> {
   const out: FbaRow[] = [];
   let next = "";
   do {
     const q = new URLSearchParams({
       details: "true",
       granularityType: "Marketplace",
-      granularityId: marketplace(),
-      marketplaceIds: marketplace(),
+      granularityId: client.marketplaceId,
+      marketplaceIds: client.marketplaceId,
     });
     if (next) q.set("nextToken", next);
-    const r = await sp(`/fba/inventory/v1/summaries?${q.toString()}`);
+    const r = await sp(client, `/fba/inventory/v1/summaries?${q.toString()}`);
     const j = await r.json();
     if (!r.ok) throw new Error(`FBA inventory: ${JSON.stringify(j).slice(0, 200)}`);
     for (const s of j.payload?.inventorySummaries || []) {
@@ -92,13 +103,13 @@ export async function getFbaInventory(): Promise<FbaRow[]> {
 export type AwdRow = { sku: string; onhand: number; inbound: number };
 
 /** Amazon Warehousing & Distribution inventory per SKU (on-hand + inbound to AWD). */
-export async function getAwdInventory(): Promise<AwdRow[]> {
+export async function getAwdInventory(client: SpApiClient): Promise<AwdRow[]> {
   const out: AwdRow[] = [];
   let next = "";
   do {
     const q = new URLSearchParams({ details: "SHOW" });
     if (next) q.set("nextToken", next);
-    const r = await sp(`/awd/2024-05-09/inventory?${q.toString()}`);
+    const r = await sp(client, `/awd/2024-05-09/inventory?${q.toString()}`);
     if (r.status === 403 || r.status === 404) return out; // AWD not enabled — treat as none
     const j = await r.json();
     if (!r.ok) throw new Error(`AWD inventory: ${JSON.stringify(j).slice(0, 200)}`);
@@ -117,7 +128,7 @@ export async function getAwdInventory(): Promise<AwdRow[]> {
 
 /** Per-SKU, per-day units from the All Orders report. Amazon-fulfilled (FBA + MCF), non-cancelled.
  * Returns { sellerSku: { "YYYY-MM-DD": units } }. Chunks into ≤30-day reports (API cap) run in parallel. */
-export async function getAllOrders(startISO: string, endISO: string): Promise<Record<string, Record<string, number>>> {
+export async function getAllOrders(client: SpApiClient, startISO: string, endISO: string): Promise<Record<string, Record<string, number>>> {
   const start = new Date(startISO);
   const end = new Date(endISO);
   const chunks: [Date, Date][] = [];
@@ -128,7 +139,7 @@ export async function getAllOrders(startISO: string, endISO: string): Promise<Re
     s = e;
   }
   const iso = (d: Date) => d.toISOString().slice(0, 19) + "Z";
-  const results = await Promise.all(chunks.map(([cs, ce]) => oneOrdersChunk(iso(cs), iso(ce))));
+  const results = await Promise.all(chunks.map(([cs, ce]) => oneOrdersChunk(client, iso(cs), iso(ce))));
   const merged: Record<string, Record<string, number>> = {};
   for (const chunk of results) {
     for (const [sku, days] of Object.entries(chunk)) {
@@ -139,12 +150,12 @@ export async function getAllOrders(startISO: string, endISO: string): Promise<Re
   return merged;
 }
 
-async function oneOrdersChunk(startISO: string, endISO: string): Promise<Record<string, Record<string, number>>> {
-  let r = await sp("/reports/2021-06-30/reports", {
+async function oneOrdersChunk(client: SpApiClient, startISO: string, endISO: string): Promise<Record<string, Record<string, number>>> {
+  let r = await sp(client, "/reports/2021-06-30/reports", {
     method: "POST",
     body: JSON.stringify({
       reportType: "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL",
-      marketplaceIds: [marketplace()],
+      marketplaceIds: [client.marketplaceId],
       dataStartTime: startISO,
       dataEndTime: endISO,
     }),
@@ -156,7 +167,7 @@ async function oneOrdersChunk(startISO: string, endISO: string): Promise<Record<
   let status = "";
   for (let i = 0; i < 60; i++) {
     await new Promise((res) => setTimeout(res, 4000));
-    r = await sp(`/reports/2021-06-30/reports/${reportId}`);
+    r = await sp(client, `/reports/2021-06-30/reports/${reportId}`);
     j = await r.json();
     status = j.processingStatus;
     if (status === "DONE") {
@@ -167,7 +178,7 @@ async function oneOrdersChunk(startISO: string, endISO: string): Promise<Record<
   }
   if (!docId) throw new Error(`orders report timeout (${status})`);
 
-  r = await sp(`/reports/2021-06-30/documents/${docId}`);
+  r = await sp(client, `/reports/2021-06-30/documents/${docId}`);
   j = await r.json();
   const dl = await fetch(j.url);
   const buf = Buffer.from(await dl.arrayBuffer());
@@ -193,52 +204,6 @@ async function oneOrdersChunk(startISO: string, endISO: string): Promise<Record<
     out[sku][day] = (out[sku][day] ?? 0) + qty;
   }
   return out;
-}
-
-/** Units ordered per child ASIN over [startISO, endISO] via the Sales & Traffic report (async). */
-export async function getSalesUnits(startISO: string, endISO: string): Promise<Record<string, number>> {
-  let r = await sp("/reports/2021-06-30/reports", {
-    method: "POST",
-    body: JSON.stringify({
-      reportType: "GET_SALES_AND_TRAFFIC_REPORT",
-      marketplaceIds: [marketplace()],
-      dataStartTime: startISO,
-      dataEndTime: endISO,
-      reportOptions: { dateGranularity: "DAY", asinGranularity: "CHILD" },
-    }),
-  });
-  let j = await r.json();
-  if (!r.ok) throw new Error(`report create: ${JSON.stringify(j).slice(0, 200)}`);
-  const reportId = j.reportId;
-
-  let docId = "";
-  let status = "";
-  for (let i = 0; i < 45; i++) {
-    await new Promise((res) => setTimeout(res, 4000));
-    r = await sp(`/reports/2021-06-30/reports/${reportId}`);
-    j = await r.json();
-    status = j.processingStatus;
-    if (status === "DONE") {
-      docId = j.reportDocumentId;
-      break;
-    }
-    if (status === "FATAL" || status === "CANCELLED") throw new Error(`report ${status}`);
-  }
-  if (!docId) throw new Error(`report timeout (${status})`);
-
-  r = await sp(`/reports/2021-06-30/documents/${docId}`);
-  j = await r.json();
-  const dl = await fetch(j.url);
-  const buf = Buffer.from(await dl.arrayBuffer());
-  const text = j.compressionAlgorithm === "GZIP" ? gunzipSync(buf).toString("utf8") : buf.toString("utf8");
-  const data = JSON.parse(text);
-  const map: Record<string, number> = {};
-  for (const a of data.salesAndTrafficByAsin || []) {
-    const asin = a.childAsin || a.parentAsin;
-    const units = a.salesByAsin?.unitsOrdered || 0;
-    if (asin) map[asin] = (map[asin] || 0) + units;
-  }
-  return map;
 }
 
 // ── Per-seller (multi-tenant) helpers ─────────────────────────────────────────────────────────

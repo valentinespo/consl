@@ -3,36 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { ensureChannelFacilities } from "@/lib/integrations";
 import { prismaBase } from "@/lib/prisma-base";
 import { getCurrentOrgId } from "@/lib/tenant";
-import { getFbaInventory, getAwdInventory, getAllOrders } from "@/lib/spapi";
-
-/**
- * Interim guard until Amazon credentials move onto the Organization (the Integrations tab).
- *
- * SP-API keys currently come from server-wide env vars, so every org's sync would pull from the
- * SAME Amazon seller account. Since ASINs are public, another tenant could map one of ours and
- * receive our FBA quantities and 90 days of sales in their own snapshots. Only one org may sync
- * against the shared account:
- *   - SPAPI_ORG_ID set  → exactly that org (explicit, correct).
- *   - SPAPI_ORG_ID unset → fall back to the OLDEST org (the original seller). This fails safe: a
- *     forgotten env var restricts sync to the founding account instead of opening it to everyone,
- *     so a newly-created company still can't pull the seller's data. The fallback is cached for
- *     the process so it isn't a query per sync.
- */
-let cachedOwnerOrgId: string | null | undefined;
-async function syncOwnerOrgId(): Promise<string | null> {
-  const explicit = process.env.SPAPI_ORG_ID;
-  if (explicit) return explicit;
-  if (cachedOwnerOrgId === undefined) {
-    const first = await prismaBase.organization.findFirst({ orderBy: { createdAt: "asc" }, select: { id: true } });
-    cachedOwnerOrgId = first?.id ?? null;
-  }
-  return cachedOwnerOrgId;
-}
-async function orgMaySync(): Promise<boolean> {
-  const owner = await syncOwnerOrgId();
-  if (!owner) return false; // no orgs at all — nothing may sync
-  return (await getCurrentOrgId()) === owner;
-}
+import { decryptSecret } from "@/lib/secret-box";
+import { makeClient, getFbaInventory, getAwdInventory, getAllOrders } from "@/lib/spapi";
 
 /** Units sold + days-with-sales over the last `n` days (kept for the stored rollups). */
 function windowStats(days: Record<string, number> | undefined, end: Date, n: number) {
@@ -50,19 +22,22 @@ function windowStats(days: Record<string, number> | undefined, end: Date, n: num
 }
 
 /**
- * Pull FBA + AWD inventory + per-day sales (All Orders) and store a fresh snapshot per SKU.
- * Pure core with no request-scoped calls (revalidate) — safe to run from the background scheduler.
+ * Pull FBA + AWD inventory + per-day sales (All Orders) for the CURRENT org and store a fresh
+ * snapshot per SKU. Each org syncs its OWN Amazon connection (the encrypted token on its
+ * Integration row) — no shared env token, no owner guard. Runs in the caller's org context
+ * (a request, or runWithOrg from the scheduler). Pure core: no request-scoped revalidate.
  */
 export async function syncAmazonCore(): Promise<
   { ok: true; count: number; salesOk: boolean } | { ok: false; error: string; nothingToSync?: true }
 > {
-  if (!(await orgMaySync())) {
-    return {
-      ok: false,
-      error: "Amazon isn't connected for this workspace yet.",
-      nothingToSync: true,
-    };
+  const orgId = await getCurrentOrgId();
+  if (!orgId) return { ok: false, error: "No organization in context.", nothingToSync: true };
+
+  const conn = await prisma.integration.findFirst({ where: { provider: "amazon", status: "connected" } });
+  if (!conn?.refreshTokenEnc) {
+    return { ok: false, error: "Amazon isn't connected for this company yet.", nothingToSync: true };
   }
+
   const products = await prisma.product.findMany({ where: { asin: { not: null } } });
   if (products.length === 0) {
     // Not a failure — there is simply nothing to pull. Flagged so the scheduler counts the day
@@ -70,12 +45,20 @@ export async function syncAmazonCore(): Promise<
     return { ok: false, error: "No SKUs are mapped to Amazon ASINs yet.", nothingToSync: true };
   }
 
+  const client = makeClient({
+    refreshToken: decryptSecret(conn.refreshTokenEnc),
+    marketplaceId: conn.marketplaceId ?? "ATVPDKIKX0DER",
+    region: conn.region ?? "na",
+  });
+
   let inv, awd;
   try {
-    inv = await getFbaInventory();
-    awd = await getAwdInventory();
+    inv = await getFbaInventory(client);
+    awd = await getAwdInventory(client);
   } catch (e) {
-    return { ok: false, error: `Amazon inventory pull failed: ${(e as Error).message}` };
+    const msg = (e as Error).message;
+    await prismaBase.integration.update({ where: { id: conn.id }, data: { status: "error", lastError: msg.slice(0, 300) } });
+    return { ok: false, error: `Amazon inventory pull failed: ${msg}` };
   }
 
   // Sales lag ~2 days; pull 90 days of per-day orders, fall back to the last snapshot on failure.
@@ -84,7 +67,7 @@ export async function syncAmazonCore(): Promise<
   let orders: Record<string, Record<string, number>> = {};
   let salesOk = true;
   try {
-    orders = await getAllOrders(iso(new Date(end.getTime() - 90 * 86_400_000)), iso(end));
+    orders = await getAllOrders(client, iso(new Date(end.getTime() - 90 * 86_400_000)), iso(end));
   } catch {
     salesOk = false;
   }
@@ -122,13 +105,16 @@ export async function syncAmazonCore(): Promise<
     };
   });
   await prisma.skuSnapshot.createMany({ data: rows });
-  // A working Amazon connection materialises its locked channel facilities (FBA/AWD) — the same
-  // call the per-tenant OAuth connect flow will make once the Integrations page goes live.
-  // Best-effort: a hiccup here must never fail the sync itself.
+  // Keep the locked channel facilities present (idempotent). Best-effort — must never fail the sync.
   try {
     await ensureChannelFacilities("amazon");
   } catch {
     /* facilities will appear on the next successful sync */
   }
+  // Record the successful sync on the connection (clears any prior error / re-marks connected).
+  await prismaBase.integration.update({
+    where: { id: conn.id },
+    data: { lastSyncAt: new Date(), status: "connected", lastError: null },
+  });
   return { ok: true, count: rows.length, salesOk };
 }
