@@ -19,9 +19,9 @@ const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 /** The tab shows the product, not the customer — one person can have several companies open in
- *  different tabs, and the app they're all in is SellerOps. */
+ *  different tabs, and the app they're all in is consl. */
 export const metadata: Metadata = {
-  title: "SellerOps",
+  title: "consl",
   description: "Inventory, production and purchasing for ecommerce operators.",
 };
 

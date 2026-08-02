@@ -33,7 +33,7 @@ export default async function IntegrationsSettingsPage() {
   return (
     <div className="max-w-3xl space-y-3">
       <p className="text-[13px] leading-relaxed text-muted">
-        Connecting a platform pulls its stock and sales into SellerOps and creates a locked{" "}
+        Connecting a platform pulls its stock and sales into consl and creates a locked{" "}
         <Link href="/facilities" className="font-medium text-accent hover:underline">
           facility
         </Link>{" "}

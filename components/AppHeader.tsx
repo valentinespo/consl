@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import Image from "next/image";
 import { UserButton } from "@clerk/nextjs";
 import { Menu, Search } from "@/components/icons";
 import { OrgSwitcher } from "@/components/OrgSwitcher";
@@ -42,14 +41,9 @@ export function AppHeader({ onMenu, orgs = [] }: { onMenu?: () => void; orgs?: M
             <Menu size={19} />
           </button>
         )}
-        <Image
-          src="/brand/iso-black.png"
-          alt="SellerOps"
-          width={1260}
-          height={1524}
-          priority
-          className="iso-invert ml-1 h-7 w-auto shrink-0"
-        />
+        {/* Text wordmark until a real consl logo asset exists. text-ink keeps it legible in both
+            themes on the frosted header. */}
+        <span className="ml-1.5 shrink-0 select-none text-[19px] font-bold lowercase leading-none tracking-tight text-ink">consl</span>
         <span aria-hidden className="mx-1 h-5 w-px shrink-0 bg-border" />
         <OrgSwitcher orgs={orgs} variant="header" />
       </div>

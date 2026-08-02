@@ -1,8 +1,8 @@
 @AGENTS.md
 
-# The app
+# consl
 
-> **Brand name: TBD.** The product is currently called **SellerOps** in the UI (the `<AppLogo>` wordmark and page copy). A final SaaS name is being chosen; when it lands, sweep the brand string, `package.json` name, the GitHub repo, and the Railway project in one pass. Until then, "the app" or "SellerOps" both refer to this product.
+> **Brand: consl** (lowercase), domain **consl.ai**. Rendered as a text wordmark for now (`components/AppHeader.tsx`); a real logo image + favicon/`app/icon.png`/`apple-icon.png` are still to be designed (they currently show the old mark). The old `public/brand/*.png` app marks are unreferenced. Repo still named `sellerops` on GitHub and project `herbl-ops-v2` on Railway — rename when convenient (cosmetic; both track by ID).
 
 A multi-tenant **inventory, production & cost-accounting web app for ecommerce operators** — businesses that manufacture or assemble physical goods and sell them on Amazon (and, soon, Shopify + TikTok Shop). Its differentiator is **true landed cost per unit**: a FIFO costing engine that turns raw-material purchases and per-lot expenses into an accurate cost-of-goods for every finished unit, then layers restock/reorder recommendations and channel inventory on top. It began as an internal tool for one brand (Herbl) and is being generalized into a SaaS where each company is a tenant; **build every change tenant-agnostic** — no hardcoded product names, material codes, or brand assets.
 

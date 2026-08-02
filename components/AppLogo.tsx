@@ -16,15 +16,15 @@ export function AppLogo({ className = "" }: { className?: string }) {
 
   if (missing) {
     return (
-      <span className={`text-[17px] font-bold leading-none tracking-tight text-[#0b63f6] ${className}`}>
-        SellerOps
+      <span className={`text-[17px] font-bold lowercase leading-none tracking-tight text-accent ${className}`}>
+        consl
       </span>
     );
   }
   return (
     <Image
       src="/brand/app-logo.png"
-      alt="SellerOps"
+      alt="consl"
       width={791}
       height={176}
       // Renders ~90px wide; without this hint Next fetches a variant sized for the source instead.
