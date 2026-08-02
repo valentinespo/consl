@@ -52,7 +52,9 @@ Efferd-inspired, one **violet** accent. Never hardcode a hex where a token exist
 
 ## Deploy & verify
 
-- **Branch `v2` → Railway staging** (project currently `herbl-ops-v2`, DB shared with local dev). `start` runs real migrations: `prisma migrate deploy && next start`. **After committing a completed change, `git push origin v2` to auto-deploy** — no need to ask.
+- **Branch `v2` → Railway** (project "Ecom Inventory Management", service `web`; DB shared with local dev). `start` runs real migrations: `prisma migrate deploy && next start`. **After committing a completed change, `git push origin v2` to auto-deploy** — no need to ask.
+- **Live domain `consl.ai`** — Cloudflare DNS (apex CNAME flattened to Railway) with valid TLS. DNS is managed via the Cloudflare API using the account's global key, kept locally on the founder's machine (details + the exact command are in local memory, not here). Composio/the Cloudflare "developer" MCP can't do DNS — use the direct API.
+- **Auth is still Clerk *dev***. Switching to a Clerk **production** instance is NOT a drop-in: `Membership.clerkUserId` gates access, and a prod instance mints new user ids — so the switch must migrate existing members' `clerkUserId` (or the founder gets locked out of Herbl Inc.). Deferred until onboarding real users.
 - **Migrations are real and additive-only**: new tables / nullable columns; never drop/rename in a way that breaks a running deploy. Files in `prisma/migrations/`.
 - **Local dev**: `.claude/launch.json` entry **"app"** (`cd App && npm run dev -- --port 3210`). `.env` `DATABASE_URL` points at staging, so local work and staging **share data** — verify reversibly, don't churn real rows.
 - **Verify in-browser before claiming done** for anything the preview renders (see the harness's preview tools). Deploys are confirmed by watching the staging chunk-set fingerprint change.
