@@ -21,7 +21,7 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 /** The tab shows the product, not the customer — one person can have several companies open in
  *  different tabs, and the app they're all in is consl. */
 export const metadata: Metadata = {
-  title: "consl",
+  title: "Consl — the console for ecommerce operators",
   description: "Inventory, production and purchasing for ecommerce operators.",
 };
 
