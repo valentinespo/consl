@@ -1,37 +1,9 @@
-"use client";
-
-import { useState } from "react";
-import Image from "next/image";
-
 /**
  * The product's own mark — not the customer's. Each company's logo appears on their documents;
- * this is the app they're all signed in to.
- *
- * Served through next/image so the 791×176 source is resized and re-encoded rather than shipping
- * 137 KB to render ~90px wide. Falls back to the wordmark as type if the file ever goes missing,
- * so the sidebar can't end up blank.
+ * this is the app they're all signed in to. Pure black artwork; add `iso-invert` via className
+ * to flip it white on dark chrome.
  */
 export function AppLogo({ className = "" }: { className?: string }) {
-  const [missing, setMissing] = useState(false);
-
-  if (missing) {
-    return (
-      <span className={`text-[17px] font-bold lowercase leading-none tracking-tight text-accent ${className}`}>
-        consl
-      </span>
-    );
-  }
-  return (
-    <Image
-      src="/brand/app-logo.png"
-      alt="consl"
-      width={791}
-      height={176}
-      // Renders ~90px wide; without this hint Next fetches a variant sized for the source instead.
-      sizes="96px"
-      priority
-      onError={() => setMissing(true)}
-      className={`h-[20px] w-auto ${className}`}
-    />
-  );
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src="/brand/consl-mark.png" alt="consl" className={`h-6 w-6 ${className}`} />;
 }

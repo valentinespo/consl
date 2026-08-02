@@ -41,9 +41,9 @@ export function AppHeader({ onMenu, orgs = [] }: { onMenu?: () => void; orgs?: M
             <Menu size={19} />
           </button>
         )}
-        {/* Text wordmark until a real consl logo asset exists. text-ink keeps it legible in both
-            themes on the frosted header. */}
-        <span className="ml-1.5 shrink-0 select-none text-[19px] font-bold lowercase leading-none tracking-tight text-ink">consl</span>
+        {/* consl mark — pure black artwork; iso-invert flips it white when the chrome goes dark. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/brand/consl-mark.png" alt="consl" className="iso-invert ml-1.5 h-7 w-7 shrink-0" />
         <span aria-hidden className="mx-1 h-5 w-px shrink-0 bg-border" />
         <OrgSwitcher orgs={orgs} variant="header" />
       </div>
