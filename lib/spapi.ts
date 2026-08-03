@@ -47,11 +47,17 @@ export function makeClient(creds: { refreshToken: string; marketplaceId: string;
 }
 
 async function sp(client: SpApiClient, path: string, init: RequestInit = {}): Promise<Response> {
-  const token = await client.accessToken();
-  return fetch(client.host + path, {
-    ...init,
-    headers: { "x-amz-access-token": token, "Content-Type": "application/json", ...(init.headers || {}) },
-  });
+  // SP-API throttles aggressively (some endpoints allow <1 rps). Retry 429/5xx with exponential
+  // backoff instead of surfacing a transient throttle as a failed sync.
+  for (let attempt = 0; ; attempt++) {
+    const token = await client.accessToken();
+    const r = await fetch(client.host + path, {
+      ...init,
+      headers: { "x-amz-access-token": token, "Content-Type": "application/json", ...(init.headers || {}) },
+    });
+    if ((r.status !== 429 && r.status < 500) || attempt >= 4) return r;
+    await new Promise((res) => setTimeout(res, 1200 * 2 ** attempt));
+  }
 }
 
 export type FbaRow = {
@@ -255,4 +261,148 @@ export async function getMarketplaceParticipations(refreshToken: string, region 
 export function chooseMarketplace(list: SellerMarketplace[], fallback = "ATVPDKIKX0DER"): string {
   const active = list.filter((m) => m.participating);
   return active.find((m) => m.id === "ATVPDKIKX0DER")?.id ?? active[0]?.id ?? list[0]?.id ?? fallback;
+}
+
+
+// ── Inbound shipments (the single-count plan's mirror source) ────────────────────────────────
+// FBA uses the legacy v0 API on purpose: it is the catch-all that lists EVERY inbound shipment
+// regardless of how it was created, and the only API that reports per-SKU RECEIVED quantities.
+// (v0 read operations are not deprecated; everything v0 is isolated here for easy migration.)
+// AWD has its own 2024-05-09 API, rate-limited to ~1 rps — calls are strictly serialized.
+
+export type InboundShipmentHeader = {
+  channel: "FBA" | "AWD";
+  externalId: string; // FBA ShipmentId / AWD shipmentId
+  confirmationId: string | null;
+  name: string | null;
+  extStatus: string;
+  destination: string | null; // FBA destination fulfillment center, when known
+  origin: "SELLER" | "AMAZON"; // AMAZON = Amazon-internal (e.g. AWD→FBA replenishment)
+  extCreatedAt: string | null; // ISO
+  extUpdatedAt: string | null; // ISO
+};
+
+export type InboundShipmentItem = { sellerSku: string; qtyShipped: number; qtyReceived: number | null };
+
+const AMAZON_ORIGIN_RE = /amazon|awd|fulfillment center/i;
+
+/** FBA inbound shipments updated in a window (paged to exhaustion). */
+export async function getFbaInboundShipments(
+  client: SpApiClient,
+  updatedAfterISO: string,
+): Promise<InboundShipmentHeader[]> {
+  const out: InboundShipmentHeader[] = [];
+  let next = "";
+  do {
+    const q = new URLSearchParams(
+      next
+        ? { QueryType: "NEXT_TOKEN", NextToken: next, MarketplaceId: client.marketplaceId }
+        : {
+            QueryType: "DATE_RANGE",
+            LastUpdatedAfter: updatedAfterISO,
+            LastUpdatedBefore: new Date().toISOString(),
+            MarketplaceId: client.marketplaceId,
+            // Amazon requires an explicit status list even for date-range queries; ask for all.
+            ShipmentStatusList:
+              "WORKING,READY_TO_SHIP,SHIPPED,IN_TRANSIT,DELIVERED,CHECKED_IN,RECEIVING,CLOSED,CANCELLED,DELETED,ERROR",
+          },
+    );
+    const r = await sp(client, `/fba/inbound/v0/shipments?${q.toString()}`);
+    if (r.status === 403 || r.status === 404) return out; // role not granted — treat as none
+    const j = await r.json();
+    if (!r.ok) throw new Error(`FBA shipments: ${JSON.stringify(j).slice(0, 200)}`);
+    for (const sh of j.payload?.ShipmentData ?? []) {
+      const fromName = `${sh.ShipFromAddress?.Name ?? ""} ${sh.ShipFromAddress?.AddressLine1 ?? ""}`;
+      out.push({
+        channel: "FBA",
+        externalId: sh.ShipmentId,
+        confirmationId: sh.ShipmentId ?? null,
+        name: sh.ShipmentName ?? null,
+        extStatus: sh.ShipmentStatus ?? "UNKNOWN",
+        destination: sh.DestinationFulfillmentCenterId ?? null,
+        origin: AMAZON_ORIGIN_RE.test(fromName) ? "AMAZON" : "SELLER",
+        extCreatedAt: null, // v0 has no created timestamp; the mirror falls back to first-seen
+        extUpdatedAt: null,
+      });
+    }
+    next = j.payload?.NextToken ?? "";
+  } while (next);
+  return out;
+}
+
+/** Per-SKU shipped + received quantities for one FBA shipment (paged). */
+export async function getFbaInboundShipmentItems(client: SpApiClient, shipmentId: string): Promise<InboundShipmentItem[]> {
+  const out: InboundShipmentItem[] = [];
+  let next = "";
+  do {
+    const q = new URLSearchParams(
+      next ? { QueryType: "NEXT_TOKEN", NextToken: next, MarketplaceId: client.marketplaceId } : { MarketplaceId: client.marketplaceId },
+    );
+    const path = next
+      ? `/fba/inbound/v0/shipmentItems?${q.toString()}`
+      : `/fba/inbound/v0/shipments/${encodeURIComponent(shipmentId)}/items?${q.toString()}`;
+    const r = await sp(client, path);
+    const j = await r.json();
+    if (!r.ok) throw new Error(`FBA shipment items ${shipmentId}: ${JSON.stringify(j).slice(0, 200)}`);
+    for (const it of j.payload?.ItemData ?? []) {
+      out.push({
+        sellerSku: it.SellerSKU,
+        qtyShipped: it.QuantityShipped ?? 0,
+        qtyReceived: it.QuantityReceived ?? null,
+      });
+    }
+    next = j.payload?.NextToken ?? "";
+  } while (next);
+  return out;
+}
+
+const awdPause = () => new Promise((r) => setTimeout(r, 1100)); // ≤1 rps, burst 1
+
+/** AWD inbound shipments (list is summaries; detail adds per-SKU quantities). Serialized. */
+export async function getAwdInboundShipments(
+  client: SpApiClient,
+  updatedAfterISO: string,
+): Promise<{ header: InboundShipmentHeader; items: InboundShipmentItem[] }[]> {
+  const out: { header: InboundShipmentHeader; items: InboundShipmentItem[] }[] = [];
+  let next = "";
+  do {
+    const q = new URLSearchParams({ updatedAfter: updatedAfterISO });
+    if (next) q.set("nextToken", next);
+    const r = await sp(client, `/awd/2024-05-09/inboundShipments?${q.toString()}`);
+    if (r.status === 403 || r.status === 404) return out; // AWD not enabled
+    const j = await r.json();
+    if (!r.ok) throw new Error(`AWD shipments: ${JSON.stringify(j).slice(0, 200)}`);
+    for (const sh of j.shipments ?? []) {
+      await awdPause();
+      const dr = await sp(client, `/awd/2024-05-09/inboundShipments/${encodeURIComponent(sh.shipmentId)}?skuQuantities=SHOW`);
+      const dj = await dr.json();
+      if (!dr.ok) throw new Error(`AWD shipment ${sh.shipmentId}: ${JSON.stringify(dj).slice(0, 200)}`);
+      const items: InboundShipmentItem[] = [];
+      // Field shape has varied across doc revisions — read both spellings defensively.
+      for (const sq of dj.shipmentSkuQuantities ?? dj.skuQuantities ?? []) {
+        items.push({
+          sellerSku: sq.sku ?? sq.sellerSku,
+          qtyShipped: sq.expectedQuantity?.quantity ?? sq.expectedQuantity ?? 0,
+          qtyReceived: sq.receivedQuantity?.quantity ?? sq.receivedQuantity ?? null,
+        });
+      }
+      out.push({
+        header: {
+          channel: "AWD",
+          externalId: sh.shipmentId,
+          confirmationId: dj.externalReferenceId ?? sh.externalReferenceId ?? null,
+          name: dj.shipmentName ?? sh.shipmentName ?? null,
+          extStatus: dj.shipmentStatus ?? sh.shipmentStatus ?? "UNKNOWN",
+          destination: null,
+          origin: "SELLER", // AWD inbound is always seller→Amazon; replenishment OUT of AWD shows on the FBA side
+          extCreatedAt: dj.createdAt ?? sh.createdAt ?? null,
+          extUpdatedAt: dj.updatedAt ?? sh.updatedAt ?? null,
+        },
+        items,
+      });
+    }
+    next = j.nextToken ?? "";
+    if (next) await awdPause();
+  } while (next);
+  return out;
 }
