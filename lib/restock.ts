@@ -99,16 +99,14 @@ export async function getRestock(): Promise<{
     prisma.facility.findMany({ select: { id: true, code: true } }),
     getHandoffPlan(),
   ]);
-  // Lots whose cost is provisional (open estimate invoice or unpriced PO lines) — their share of
-  // today's value is recorded on the snapshot so history steps self-explain when estimates true up.
-  const [estLotRows, tbdPoRows] = await Promise.all([
-    prisma.transaction.findMany({ where: { lotId: { not: null }, invoice: { isEstimate: true } }, select: { lotId: true } }),
-    prisma.purchaseOrder.findMany({ where: { lotId: { not: null }, lines: { some: { unitCost: null } } }, select: { lotId: true } }),
-  ]);
-  const provisionalLotIds = new Set<string>([
-    ...estLotRows.map((r) => r.lotId!),
-    ...tbdPoRows.map((r) => r.lotId!),
-  ]);
+  // Lots whose cost is provisional (they carry an open ESTIMATE invoice) — their share of today's
+  // value is recorded on the snapshot so history steps self-explain when estimates true up.
+  // PO prices are informational only (never in COG), so TBD PO lines don't make a lot provisional.
+  const estLotRows = await prisma.transaction.findMany({
+    where: { lotId: { not: null }, invoice: { isEstimate: true } },
+    select: { lotId: true },
+  });
+  const provisionalLotIds = new Set<string>(estLotRows.map((r) => r.lotId!));
   const snapByProduct = new Map(snaps.map((s) => [s.productId, s]));
   const lastSync = snaps.reduce<Date | null>((m, s) => (!m || s.capturedAt > m ? s.capturedAt : m), null);
 

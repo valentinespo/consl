@@ -157,8 +157,11 @@ AUTO movement stamps its shipment so auto-materialization never recreates it.
   logs a CostRevision (with the sold-units disclosure). "Mark estimate as final" (accepts as-is).
   Stale-provisional alert with per-invoice dismiss.
 - **Derived provisional badge** (never stored): lot is provisional iff any attached line belongs
-  to an isEstimate invoice OR its PO has TBD lines. Shows in LotEditor, LotsTable, Dashboard
-  footnote, tinted cost chips.
+  to an isEstimate invoice. Shows in LotEditor, LotsTable, Dashboard footnote, tinted cost chips.
+  (CORRECTED post-build: the original rule also counted TBD-priced PO lines, but PO prices are
+  informational — they never enter COG, so a blank PO price says nothing about whether the lot's
+  cost is final. Herbl's lots 6/8/13/15 had complete transactions and still showed "est." — wrong.
+  TBD PO lines no longer trigger the badge, the snapshot provisionalValue, or the finish prompt.)
 - **Deposit/estimate coexistence guard (blocker fix):** adding a non-estimate invoice to a lot
   with an open estimate prompts: (a) "payment on the estimate" → records amountPaid, no COG
   lines; (b) "partial cost" → reduces the estimate's lines by the same amount atomically. Warning

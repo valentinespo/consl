@@ -125,8 +125,6 @@ export async function getLots() {
         // The count shown is INVOICES touching the lot, not allocation lines — one invoice split
         // across three lines is still one transaction to the person reading the table.
         transactions: { select: { invoiceId: true, invoice: { select: { isEstimate: true } } } },
-        // TBD-priced PO lines mean the lot's cost isn't final yet (part of the provisional badge).
-        purchaseOrder: { select: { lines: { select: { unitCost: true, kind: true } } } },
       },
       orderBy: { lotNr: "desc" },
     }),
@@ -137,11 +135,10 @@ export async function getLots() {
     const invoiceIds = new Set<string>();
     let looseLines = 0; // legacy lines with no parent invoice count as one transaction each
     for (const t of lot.transactions) (t.invoiceId ? invoiceIds.add(t.invoiceId) : looseLines++);
-    // DERIVED provisional-cost flag (never stored): estimated invoice lines or TBD PO prices mean
-    // this lot's cogPerUnit is expected to move when the real numbers land.
-    const provisional =
-      lot.transactions.some((t) => t.invoice?.isEstimate) ||
-      (lot.purchaseOrder?.lines ?? []).some((pl) => pl.unitCost == null);
+    // DERIVED provisional-cost flag (never stored): the lot carries an ESTIMATE invoice line, so
+    // its cogPerUnit is expected to move when the real invoice lands. PO prices are informational
+    // only — they never enter COG, so a TBD price on the PO says nothing about this badge.
+    const provisional = lot.transactions.some((t) => t.invoice?.isEstimate);
     const units = lot.lines.reduce((s, l) => s + l.units, 0);
     const cog = lot.lines.reduce((s, l) => s + l.cogPerUnit * l.units, 0);
     return {
