@@ -119,6 +119,9 @@ export type MovementInput = {
   toFacilityId: string | null;
   toDestination: string | null;
   notes: string | null;
+  /** Optional: the live platform shipment these units are on — links the movement so the
+   *  reconciliation layer knows this handoff is recorded (finished goods → AMAZON only). */
+  shipmentId?: string | null;
 };
 
 /** Record stock leaving one of your locations — finished goods or raw materials. */
@@ -181,7 +184,7 @@ export async function createMovement(input: MovementInput) {
     onHand = pools.find((p) => p.sku === input.productId && p.facilityId === input.fromFacilityId)?.units ?? 0;
   }
 
-  await prisma.stockMovement.create({
+  const created = await prisma.stockMovement.create({
     data: {
       itemType: input.itemType,
       productId: input.productId || null,
@@ -194,6 +197,25 @@ export async function createMovement(input: MovementInput) {
       notes: input.notes?.trim().slice(0, 500) || null,
     },
   });
+
+  // Link to the platform shipment when one was picked — best-effort attribution: the movement is
+  // recorded either way; a bad link choice must never block the ledger entry.
+  if (input.shipmentId && !raw && toDestination === "AMAZON" && input.productId) {
+    const shipment = await prisma.inboundShipment.findFirst({
+      where: { id: input.shipmentId },
+      include: { lines: true, links: { include: { movement: { select: { productId: true } } } } },
+    });
+    const line = shipment?.lines.find((l) => l.productId === input.productId);
+    if (shipment && line) {
+      const already = shipment.links
+        .filter((k) => k.movement.productId === input.productId)
+        .reduce((s, k) => s + k.qty, 0);
+      const qty = Math.min(quantity, Math.max(0, line.qtyShipped - already));
+      if (qty > 1e-6) {
+        await prisma.movementShipmentLink.create({ data: { movementId: created.id, shipmentId: shipment.id, qty } });
+      }
+    }
+  }
 
   revalidatePath("/", "layout");
   return {

@@ -8,6 +8,7 @@ import {
   getProducts,
   getMaterialTypes,
   getFacilities,
+  getOpenProductionLots,
 } from "@/lib/queries";
 import { getFmt } from "@/lib/fmt-server";
 import { PageHeader, Card, SectionTitle, SkuAvatar } from "@/components/ui";
@@ -19,6 +20,7 @@ import { StockSection } from "@/components/StockSection";
 import { facilityTypeLabel, isProductionSite } from "@/lib/facility-types";
 import { getChannelStock } from "@/lib/integrations";
 import { getInboundShipments, getShipmentSyncHealth } from "@/lib/shipment-mirror";
+import { getHandoffPlan } from "@/lib/handoff";
 import { ShipmentsPanel } from "@/components/ShipmentsPanel";
 import { getMyAccess } from "@/lib/membership";
 import { requireView } from "@/lib/membership";
@@ -42,6 +44,13 @@ export default async function FacilitiesPage() {
     canSeeShipments ? getShipmentSyncHealth() : Promise.resolve(null),
     getFmt(),
   ]);
+  const openLots = canSeeShipments ? await getOpenProductionLots() : [];
+  // SKUs with units still counted virtually — only their shipments get a Record button. A live
+  // shipment already covered by (unlinked) hand-recorded movements must NOT invite a second
+  // recording: that would double-drain the pool the moment the link suppressed the netting.
+  const handoffPlan = canSeeShipments ? await getHandoffPlan() : null;
+  const awaitingSkus = handoffPlan ? [...handoffPlan.bySku.keys()] : [];
+  const canEditShipments = access?.can("shipments", "edit") ?? false;
   const todayISO = new Date().toISOString().slice(0, 10);
 
   // Channel facilities (Amazon FBA/AWD…) are integration-managed mirrors of a sales platform —
@@ -100,6 +109,13 @@ export default async function FacilitiesPage() {
               facilities={facilityOptions}
               onHand={onHand}
               todayISO={todayISO}
+              openShipments={shipments
+                .filter((s) => !s.historical && !s.ignored && !s.dead && !s.recorded)
+                .map((s) => ({
+                  id: s.id,
+                  label: s.name ?? s.externalId,
+                  productIds: s.lines.filter((l) => l.productId).map((l) => l.productId!),
+                }))}
             />
           )}
           {facilities.length > 0 && <NewFacilityButton />}
@@ -249,7 +265,7 @@ export default async function FacilitiesPage() {
               <span className="ml-1 text-muted">{shipmentHealth}</span>
             </div>
           )}
-          <ShipmentsPanel shipments={shipments} />
+          <ShipmentsPanel shipments={shipments} facilities={facilityOptions} openLots={openLots} canEdit={canEditShipments} awaitingSkus={awaitingSkus} />
         </div>
       )}
 

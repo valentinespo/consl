@@ -12,7 +12,7 @@ const SEV: Record<Alert["severity"], { bg: string; dot: string }> = {
   critical: { bg: "#fef2f2", dot: "#dc2626" },
   warn: { bg: "#fff7ed", dot: "#ea580c" },
 };
-const KIND_ICON: Record<Alert["kind"], LucideIcon> = { material: PackageSearch, reorder: ShoppingCart, expedite: Zap, ship: Truck, payable: FileText, estimate: FileText };
+const KIND_ICON: Record<Alert["kind"], LucideIcon> = { material: PackageSearch, reorder: ShoppingCart, expedite: Zap, ship: Truck, payable: FileText, estimate: FileText, handoff: Truck, shipCancel: X };
 
 /**
  * The header bell: a count badge and a drop-down feed of the app's alerts (what the dashboard

@@ -11,6 +11,8 @@ import { createMovement } from "@/app/facilities/actions";
 export type MoveProduct = { id: string; code: string; name: string };
 export type MoveMaterial = { id: string; code: string; name: string; skuSpecific: boolean };
 export type MoveFacility = { id: string; code: string; name: string };
+/** A live platform shipment a to-Amazon movement can attach to (reconciliation attribution). */
+export type MoveShipment = { id: string; label: string; productIds: string[] };
 // On-hand keyed loosely: finished uses productId+facility; raw uses materialId(+poolSku)+facility.
 // poolSku is the product ID (matches what the action stores); poolSkuCode is for display.
 export type OnHandRow = {
@@ -29,6 +31,7 @@ export function MovementForm({
   onHand,
   todayISO,
   onDone,
+  openShipments = [],
 }: {
   products: MoveProduct[];
   materials: MoveMaterial[];
@@ -36,6 +39,7 @@ export function MovementForm({
   onHand: OnHandRow[];
   todayISO: string;
   onDone: () => void;
+  openShipments?: MoveShipment[];
 }) {
   const router = useRouter();
   // The item is picked as "FINISHED:<productId>" or "RAW:<materialId>".
@@ -52,6 +56,11 @@ export function MovementForm({
 
   const [kind, itemId] = item.split(":") as ["FINISHED" | "RAW", string];
   const isRaw = kind === "RAW";
+  // A to-Amazon finished movement can attach to a live shipment; default to the single match.
+  const matchingShipments = !isRaw ? openShipments.filter((s) => s.productIds.includes(itemId)) : [];
+  const [shipmentId, setShipmentId] = useState<string>("");
+  const effectiveShipmentId =
+    shipmentId === "none" ? "" : shipmentId || (matchingShipments.length === 1 ? matchingShipments[0].id : "");
   const material = isRaw ? materials.find((m) => m.id === itemId) ?? null : null;
   const needsSku = isRaw && !!material?.skuSpecific;
 
@@ -92,6 +101,7 @@ export function MovementForm({
         toFacilityId: isTransfer ? effectiveTarget.slice("facility:".length) : null,
         toDestination: isTransfer ? null : effectiveTarget,
         notes,
+        shipmentId: !isTransfer && effectiveTarget === "AMAZON" ? effectiveShipmentId || null : null,
       });
       if (!res.ok) {
         setError(res.error);
@@ -182,6 +192,19 @@ export function MovementForm({
           <input type="number" min="1" step="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" className={`${inputCls} tabular text-right`} />
         </Field>
 
+        {effectiveTarget === "AMAZON" && matchingShipments.length > 0 && (
+          <Field label="Amazon shipment" hint="Ties this movement to the real inbound shipment.">
+            <select value={effectiveShipmentId || "none"} onChange={(e) => setShipmentId(e.target.value)} className={inputCls}>
+              <option value="none">Not on a listed shipment</option>
+              {matchingShipments.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+
         <Field label="Date">
           <DatePicker value={dateISO} onChange={setDateISO} />
         </Field>
@@ -225,12 +248,14 @@ export function NewMovementPanel({
   facilities,
   onHand,
   todayISO,
+  openShipments = [],
 }: {
   products: MoveProduct[];
   materials: MoveMaterial[];
   facilities: MoveFacility[];
   onHand: OnHandRow[];
   todayISO: string;
+  openShipments?: MoveShipment[];
 }) {
   const [open, setOpen] = useState(false);
   if (!open) {
@@ -251,7 +276,7 @@ export function NewMovementPanel({
           <X size={18} />
         </button>
       </div>
-      <MovementForm products={products} materials={materials} facilities={facilities} onHand={onHand} todayISO={todayISO} onDone={() => setOpen(false)} />
+      <MovementForm products={products} materials={materials} facilities={facilities} onHand={onHand} todayISO={todayISO} onDone={() => setOpen(false)} openShipments={openShipments} />
     </div>
   );
 }

@@ -322,8 +322,10 @@ export async function getTransactionInvoices(lotId?: string) {
 }
 
 /** Run the finished-goods engine: where finished units physically are and what they're worth.
- *  Includes the virtual-handoff drains (lib/handoff.ts) — LOCKSTEP with lib/restock.ts. */
-export async function computeFinishedGoods() {
+ *  Includes the virtual-handoff drains (lib/handoff.ts) — LOCKSTEP with lib/restock.ts.
+ *  `physicalOnly` skips the virtuals: what a REAL movement could still draw from (the handoff
+ *  card's dry-run must not see the very drain it is about to replace with written movements). */
+export async function computeFinishedGoods(opts?: { physicalOnly?: boolean }) {
   const [lots, movements, handoff] = await Promise.all([
     prisma.lot.findMany({
       where: { status: "FINISHED" },
@@ -331,7 +333,7 @@ export async function computeFinishedGoods() {
       orderBy: [{ poDate: "desc" }, { createdAt: "desc" }],
     }),
     prisma.stockMovement.findMany({ where: { itemType: "FINISHED" }, orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
-    getHandoffPlan(),
+    opts?.physicalOnly ? Promise.resolve(null) : getHandoffPlan(),
   ]);
   const supply: FinishedSupply[] = [];
   let seq = 0;
@@ -357,7 +359,7 @@ export async function computeFinishedGoods() {
     date: m.date.getTime(),
     seq: i,
   }));
-  mv.push(...buildVirtualMovements(handoff, supply));
+  if (handoff) mv.push(...buildVirtualMovements(handoff, supply));
   const res = runFinishedGoodsEngine(supply, mv);
   // Virtual drains legitimately exceed the pool when the units are still in production (or the
   // brand onboarded with stock already at Amazon) — that remainder is not an operator error.
@@ -389,6 +391,21 @@ export async function getFinishedStock() {
       .sort((a, b) => b.value - a.value),
     shortfalls,
   };
+}
+
+/** Open production lots, light — the handoff card's "also finish these" checkboxes. */
+export async function getOpenProductionLots() {
+  const lots = await prisma.lot.findMany({
+    where: { status: "IN_PRODUCTION" },
+    include: { lines: { select: { productId: true, units: true } } },
+    orderBy: [{ poDate: "asc" }, { createdAt: "asc" }],
+  });
+  return lots.map((l) => ({
+    id: l.id,
+    poNumber: l.poNumber,
+    productIds: [...new Set(l.lines.map((x) => x.productId))],
+    units: l.lines.reduce((s, x) => s + x.units, 0),
+  }));
 }
 
 /** Suppliers as light options for the facility ↔ supplier link picker. */

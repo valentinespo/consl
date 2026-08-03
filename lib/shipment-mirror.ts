@@ -168,29 +168,45 @@ export async function getShipmentSyncHealth(): Promise<string | null> {
 /** Panel/read query: the org's mirrored shipments with lines + linked totals (org-scoped client). */
 export async function getInboundShipments() {
   const shipments = await prisma.inboundShipment.findMany({
-    include: { lines: { include: { product: { select: { code: true, imageUrl: true } } } }, links: true },
+    include: {
+      lines: { include: { product: { select: { code: true, imageUrl: true } } } },
+      links: { include: { movement: { select: { productId: true } } } },
+    },
     orderBy: [{ extCreatedAt: "desc" }, { createdAt: "desc" }],
   });
-  return shipments.map((s) => ({
-    id: s.id,
-    channel: s.channel,
-    externalId: s.externalId,
-    name: s.name,
-    extStatus: s.extStatus,
-    destination: s.destination,
-    origin: s.origin,
-    historical: s.historical,
-    ignored: s.ignored,
-    dead: isDeadStatus(s.extStatus),
-    effDateISO: (s.extCreatedAt ?? s.createdAt).toISOString().slice(0, 10),
-    linkedQty: s.links.reduce((t, k) => t + k.qty, 0),
-    lines: s.lines.map((l) => ({
+  return shipments.map((s) => {
+    const linkedBySku = new Map<string, number>();
+    for (const k of s.links) {
+      if (k.movement.productId) linkedBySku.set(k.movement.productId, (linkedBySku.get(k.movement.productId) ?? 0) + k.qty);
+    }
+    const lines = s.lines.map((l) => ({
       sellerSku: l.sellerSku,
+      productId: l.productId,
       code: l.product?.code ?? null,
       imageUrl: l.product?.imageUrl ?? null,
       qtyShipped: l.qtyShipped,
       qtyReceived: l.qtyReceived,
+      linked: l.productId ? Math.min(l.qtyShipped, linkedBySku.get(l.productId) ?? 0) : 0,
       unmapped: !l.productId,
-    })),
-  }));
+    }));
+    const mapped = lines.filter((l) => !l.unmapped);
+    return {
+      id: s.id,
+      channel: s.channel,
+      externalId: s.externalId,
+      name: s.name,
+      extStatus: s.extStatus,
+      destination: s.destination,
+      origin: s.origin,
+      historical: s.historical,
+      ignored: s.ignored,
+      dead: isDeadStatus(s.extStatus),
+      effDateISO: (s.extCreatedAt ?? s.createdAt).toISOString().slice(0, 10),
+      linkedQty: s.links.reduce((t, k) => t + k.qty, 0),
+      hasLinks: s.links.length > 0,
+      // Every mapped unit accounted for by a real linked movement — the virtual drain is retired.
+      recorded: mapped.length > 0 && mapped.every((l) => l.linked >= l.qtyShipped - 1e-6),
+      lines,
+    };
+  });
 }
