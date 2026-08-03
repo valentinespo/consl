@@ -52,11 +52,17 @@ Efferd-inspired, one **violet** accent. Never hardcode a hex where a token exist
 
 ## Deploy & verify
 
-- **Branch `v2` → Railway** (project "Ecom Inventory Management", service `web`; DB shared with local dev). `start` runs real migrations: `prisma migrate deploy && next start`. **After committing a completed change, `git push origin v2` to auto-deploy** — no need to ask.
+- **Two Railway environments** in project "Ecom Inventory Management" (service `web` in each):
+  **production** = branch `v2` → **consl.ai** (live, Herbl's real data, hayabusa DB) and
+  **staging** = branch `staging` → web-staging-7384.up.railway.app (roundhouse DB, a copy of live
+  taken 2026-08-03; its scheduled Amazon sync is disabled). `start` runs `prisma migrate deploy &&
+  next start` in both. **Work lands on `staging` (push origin staging = auto-deploy staging);
+  merge staging → v2 ONLY when verified — that deploys the LIVE app.** Local dev's `.env`
+  DATABASE_URL points at the STAGING DB (live URL preserved commented in .env).
 - **Live domain `consl.ai`** — Cloudflare DNS (apex CNAME flattened to Railway) with valid TLS. DNS is managed via the Cloudflare API using the account's global key, kept locally on the founder's machine (details + the exact command are in local memory, not here). Composio/the Cloudflare "developer" MCP can't do DNS — use the direct API.
 - **Auth is still Clerk *dev***. Switching to a Clerk **production** instance is NOT a drop-in: `Membership.clerkUserId` gates access, and a prod instance mints new user ids — so the switch must migrate existing members' `clerkUserId` (or the founder gets locked out of Herbl Inc.). Deferred until onboarding real users.
 - **Migrations are real and additive-only**: new tables / nullable columns; never drop/rename in a way that breaks a running deploy. Files in `prisma/migrations/`.
-- **Local dev**: `.claude/launch.json` entry **"app"** (`cd App && npm run dev -- --port 3210`). `.env` `DATABASE_URL` points at staging, so local work and staging **share data** — verify reversibly, don't churn real rows.
+- **Local dev**: `.claude/launch.json` entry **"app"** (`cd App && npm run dev -- --port 3210`). Local shares the STAGING DB — a sandbox copy; live data is never touched from dev.
 - **Verify in-browser before claiming done** for anything the preview renders (see the harness's preview tools). Deploys are confirmed by watching the staging chunk-set fingerprint change.
 - **Tenant files** (invoices, COAs, photos, PO logos) live on the Railway volume (`UPLOAD_DIR=/data`), served through `app/media/[...path]` with per-org ownership checks — **never commit tenant files into the repo**. The `legacy-uploads/` folder is gitignored (dev-only fallback).
 
