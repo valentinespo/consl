@@ -26,6 +26,7 @@ export function TransactionInvoicesTable({
   skuImages,
   showLotColumn = true,
   defaultLotId,
+  openEstimateLots = [],
 }: {
   invoices: InvoiceRow[];
   lots: LotOption[];
@@ -34,6 +35,7 @@ export function TransactionInvoicesTable({
   skuImages?: Record<string, string | null>;
   showLotColumn?: boolean;
   defaultLotId?: string;
+  openEstimateLots?: { lotId: string; lotNr: number; invoiceId: string }[];
 }) {
   const { money, date } = useMoney();
   const canCreate = useCan("transactions", "create");
@@ -46,6 +48,7 @@ export function TransactionInvoicesTable({
   );
   const [lot, setLot] = useState("ALL");
   const [supplier, setSupplier] = useState("ALL");
+  const [payment, setPayment] = useState("ALL"); // ALL | unpaid | partial | overdue | paid | est
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("date");
@@ -69,6 +72,8 @@ export function TransactionInvoicesTable({
       if (lot === "UNASSIGNED" && !inv.hasUnassigned) return false;
       if (lot !== "ALL" && lot !== "UNASSIGNED" && !inv.lines.some((l) => String(l.lotNr) === lot)) return false;
       if (supplier !== "ALL" && (inv.supplier ?? "") !== supplier) return false;
+      if (payment === "est" && !inv.isEstimate) return false;
+      if (payment !== "ALL" && payment !== "est" && inv.paymentStatus !== payment) return false;
       if (from && (!inv.dateISO || inv.dateISO < from)) return false;
       if (to && (!inv.dateISO || inv.dateISO > to)) return false;
       if (needle) {
@@ -84,7 +89,7 @@ export function TransactionInvoicesTable({
       return sortDir === "asc" ? cmp : -cmp;
     });
     return out;
-  }, [invoices, q, category, lot, supplier, from, to, sortKey, sortDir]);
+  }, [invoices, q, category, lot, supplier, payment, from, to, sortKey, sortDir]);
 
   const applicableTotal = filtered.reduce((s, inv) => s + inv.applicable, 0);
   const naTotal = filtered.reduce((s, inv) => s + inv.notApplicable, 0);
@@ -119,6 +124,14 @@ export function TransactionInvoicesTable({
           />
         )}
         <Select value={supplier} onChange={setSupplier} options={["ALL", ...suppliers]} label={(v) => (v === "ALL" ? "All suppliers" : v)} />
+        <Select
+          value={payment}
+          onChange={setPayment}
+          options={["ALL", "unpaid", "partial", "overdue", "paid", "est"]}
+          label={(v) =>
+            v === "ALL" ? "All payments" : v === "est" ? "Estimates" : v === "unpaid" ? "Unpaid" : v === "partial" ? "Partially paid" : v === "overdue" ? "Overdue" : "Paid"
+          }
+        />
         <DateInput value={from} onChange={setFrom} placeholder="From" />
         <DateInput value={to} onChange={setTo} placeholder="To" />
         {anyFilter && (
@@ -160,7 +173,7 @@ export function TransactionInvoicesTable({
       {adding && (
         <div className="mb-3 rounded-[var(--radius-card)] border border-accent-strong bg-surface p-4">
           <div className="mb-3 text-[13px] font-semibold text-ink-soft">New transaction</div>
-          <TransactionInvoiceForm lots={lots} suppliers={suppliers} categories={categories} skuImages={skuImages} defaultLotId={defaultLotId} onDone={() => setAdding(false)} />
+          <TransactionInvoiceForm lots={lots} suppliers={suppliers} categories={categories} skuImages={skuImages} defaultLotId={defaultLotId} openEstimateLots={openEstimateLots} onDone={() => setAdding(false)} />
         </div>
       )}
 
@@ -244,6 +257,25 @@ export function TransactionInvoicesTable({
                     </td>
                     <td className="px-4 py-3 text-right align-middle">
                       <div className="text-[12px] tabular text-muted">{money(inv.invoiceTotal, 2)}</div>
+                      {(inv.isEstimate || inv.paymentStatus) && (
+                        <div className="mt-0.5 flex items-center justify-end gap-1">
+                          {inv.isEstimate && (
+                            <span className="pill-amber inline-flex items-center rounded-full px-1.5 py-[2px] text-[10px] font-medium leading-none">est.</span>
+                          )}
+                          {inv.paymentStatus === "overdue" && (
+                            <span className="pill-red inline-flex items-center rounded-full px-1.5 py-[2px] text-[10px] font-medium leading-none">overdue</span>
+                          )}
+                          {inv.paymentStatus === "unpaid" && (
+                            <span className="pill-neutral inline-flex items-center rounded-full px-1.5 py-[2px] text-[10px] font-medium leading-none">unpaid</span>
+                          )}
+                          {inv.paymentStatus === "partial" && (
+                            <span className="pill-amber inline-flex items-center rounded-full px-1.5 py-[2px] text-[10px] font-medium leading-none">partial</span>
+                          )}
+                          {inv.paymentStatus === "paid" && (
+                            <span className="pill-green inline-flex items-center rounded-full px-1.5 py-[2px] text-[10px] font-medium leading-none">paid</span>
+                          )}
+                        </div>
+                      )}
                       {inv.notApplicable > 0 && (
                         <div className="text-[11px] tabular text-negative/70">N/A {money(inv.notApplicable, 2)}</div>
                       )}
@@ -259,6 +291,7 @@ export function TransactionInvoicesTable({
                         <TransactionInvoiceForm
                           invoice={inv}
                           documents={inv.documents}
+                          openEstimateLots={openEstimateLots}
                           lots={lots}
                           suppliers={suppliers}
                           categories={categories}

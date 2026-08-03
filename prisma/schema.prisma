@@ -67,6 +67,7 @@ model Organization {
   purchaseOrderLines      PurchaseOrderLine[]
   stockMovements          StockMovement[]
   integrations            Integration[]
+  costRevisions           CostRevision[]
 }
 
 /// A tenant's connection to an external sales platform (Amazon, Shopify, TikTok Shop). Holds the
@@ -221,6 +222,9 @@ model Product {
   code               String             
   name               String
   imageUrl           String?
+  // Day-one valuation fallback: values channel stock that predates any recorded production
+  // (org home currency, per unit). Real FIFO layers take over as history accrues.
+  standardUnitCost Float?
   notes              String?
   barcode            String? // UPC / EAN / GTIN — the identifier shared across every channel
   // --- Amazon mapping (drives the FBA/restock dashboard sync) ---
@@ -312,6 +316,9 @@ model InventoryValueSnapshot {
   awd          Float
   atLocations  Float         @default(0) // finished goods held at your own facilities / 3PLs
   total        Float
+  // Share of `total` valued from estimate-sourced costs that day — lets the history chart mark
+  // provisional periods instead of showing unexplained steps when estimates true up.
+  provisionalValue Float     @default(0)
 
   @@unique([orgId, day])
 }
@@ -578,11 +585,33 @@ model TransactionInvoice {
   supplierId   String?
   date         DateTime?
   invoiceTotal Float         @default(0) // entered; lines must sum to this
+  // COST axis: an estimate carries expected costs into COG immediately and is later replaced by
+  // (or accepted as) the final numbers. Header-level on purpose — lines are delete-and-recreated
+  // on every edit, so per-line flags would not survive.
+  isEstimate   Boolean       @default(false)
+  // PAYMENT axis — display/payables only, the cost engine NEVER reads these. dueDate = when the
+  // BALANCE is due; amountPaid = running total paid; paidAt set only once fully paid.
+  dueDate      DateTime?
+  paidAt       DateTime?
+  amountPaid   Float?
   documentUrl  String? // legacy single-doc field (superseded by documents[])
   documents    Document[]
   lines        Transaction[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
+}
+
+/// Audit trail of estimate true-ups: written when an estimate invoice's amounts change or its
+/// flag is cleared. Keeps COG history explainable (the engine itself reprices from scratch).
+model CostRevision {
+  id           String        @id @default(cuid())
+  orgId        String?
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  invoiceId    String
+  oldTotal     Float
+  newTotal     Float
+  note         String?
+  createdAt    DateTime      @default(now())
 }
 
 /// A single allocation line of an invoice. category drives whether it hits COG.

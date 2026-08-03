@@ -7,7 +7,7 @@ import type { RestockRow } from "@/lib/restock";
 
 export type Alert = {
   key: string; // stable identity, e.g. "reorder:LDX"
-  kind: "reorder" | "expedite" | "material" | "ship";
+  kind: "reorder" | "expedite" | "material" | "ship" | "payable" | "estimate";
   title: string;
   detail: string;
   severity: "critical" | "warn";
@@ -86,5 +86,45 @@ export async function getAlerts(rows: RestockRow[]): Promise<Alert[]> {
   const stale = dismissed.filter((d) => isAlertKey(d.key) && !activeKeys.has(d.key)).map((d) => d.key);
   if (stale.length) await prisma.dismissedNotification.deleteMany({ where: { key: { in: stale } } });
   const hidden = new Set(dismissed.map((d) => d.key));
+  // PAYMENT axis: invoices due within 7 days or overdue (payables never touch COGS — these are
+  // purely reminders), and estimates that have sat unresolved for 30+ days.
+  const invoices = await prisma.transactionInvoice.findMany({
+    select: { id: true, invoiceTotal: true, isEstimate: true, dueDate: true, paidAt: true, amountPaid: true, date: true, supplier: { select: { name: true } } },
+  });
+  const { money } = await getFmt();
+  const soon = now + 7 * 86_400_000;
+  for (const inv of invoices) {
+    const paid = inv.paidAt || (inv.amountPaid ?? 0) >= inv.invoiceTotal - 0.01;
+    if (inv.dueDate && !paid) {
+      const due = inv.dueDate.getTime();
+      if (due < now) {
+        alerts.push({
+          key: `payable-overdue:${inv.id}`,
+          kind: "payable",
+          title: `Invoice overdue — ${inv.supplier?.name ?? "supplier"}`,
+          detail: `${money(inv.invoiceTotal - (inv.amountPaid ?? 0))} was due ${inv.dueDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`,
+          severity: "critical",
+        });
+      } else if (due < soon) {
+        alerts.push({
+          key: `payable-due:${inv.id}`,
+          kind: "payable",
+          title: `Invoice due soon — ${inv.supplier?.name ?? "supplier"}`,
+          detail: `${money(inv.invoiceTotal - (inv.amountPaid ?? 0))} due ${inv.dueDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`,
+          severity: "warn",
+        });
+      }
+    }
+    if (inv.isEstimate && inv.date && now - inv.date.getTime() > 30 * 86_400_000) {
+      alerts.push({
+        key: `estimate-stale:${inv.id}`,
+        kind: "estimate",
+        title: `Estimate awaiting final invoice — ${inv.supplier?.name ?? "supplier"}`,
+        detail: `${money(inv.invoiceTotal)} estimated ${inv.date.toLocaleDateString("en-US", { month: "short", day: "numeric" })} — replace or mark final`,
+        severity: "warn",
+      });
+    }
+  }
+
   return alerts.filter((a) => !hidden.has(a.key));
 }

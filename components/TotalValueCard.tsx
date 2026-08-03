@@ -15,10 +15,12 @@ import { BUCKETS } from "@/lib/segments";
  *  stacked over the %-delta on the right, bucket pills, then the chart. */
 export function TotalValueCard({
   totals,
+  provisionalLots = 0,
   history,
   className = "",
 }: {
   totals: RestockTotals;
+  provisionalLots?: number;
   history?: { day: string; total: number }[];
   className?: string;
 }) {
@@ -44,6 +46,11 @@ export function TotalValueCard({
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div>
           <div className="text-[36px] font-semibold leading-none tracking-tight text-ink tabular">{money(totals.total)}</div>
+          {provisionalLots > 0 && (
+            <div className="mt-1 text-[11px] text-muted">
+              includes {provisionalLots} {provisionalLots === 1 ? "lot" : "lots"} at estimated cost
+            </div>
+          )}
           <div className="mt-1.5 text-[13px] text-muted">Today&apos;s total inventory value</div>
         </div>
         {history && history.length > 0 && (

@@ -43,6 +43,7 @@ export default async function DashboardPage() {
     spentBySupplier: d.spentBySupplier,
     spentTotal: d.spentTotal,
     recentLots: lots.slice(0, 6),
+    provisionalLots: lots.filter((l) => l.provisional).length,
     alerts,
     leadTimes: { ...leadTimes, configuredDays: Math.round(settings.defaultLeadMonths * 30.44) },
   };

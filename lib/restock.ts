@@ -95,6 +95,16 @@ export async function getRestock(): Promise<{
     prisma.stockMovement.findMany({ where: { itemType: "FINISHED" }, orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
     prisma.facility.findMany({ select: { id: true, code: true } }),
   ]);
+  // Lots whose cost is provisional (open estimate invoice or unpriced PO lines) — their share of
+  // today's value is recorded on the snapshot so history steps self-explain when estimates true up.
+  const [estLotRows, tbdPoRows] = await Promise.all([
+    prisma.transaction.findMany({ where: { lotId: { not: null }, invoice: { isEstimate: true } }, select: { lotId: true } }),
+    prisma.purchaseOrder.findMany({ where: { lotId: { not: null }, lines: { some: { unitCost: null } } }, select: { lotId: true } }),
+  ]);
+  const provisionalLotIds = new Set<string>([
+    ...estLotRows.map((r) => r.lotId!),
+    ...tbdPoRows.map((r) => r.lotId!),
+  ]);
   const snapByProduct = new Map(snaps.map((s) => [s.productId, s]));
   const lastSync = snaps.reduce<Date | null>((m, s) => (!m || s.capturedAt > m ? s.capturedAt : m), null);
 
@@ -103,6 +113,7 @@ export async function getRestock(): Promise<{
   const inProdUnits = new Map<string, number>();
   const soonestPo = new Map<string, Date>();
   let inProductionValue = 0;
+  let provisionalValue = 0; // v1 approximation: the in-production share of provisional lots
   const finishedLots = new Map<string, { units: number; cog: number }[]>();
   const supply: FinishedSupply[] = [];
   let supplySeq = 0;
@@ -112,6 +123,7 @@ export async function getRestock(): Promise<{
       if (lot.status === "IN_PRODUCTION") {
         inProdUnits.set(ln.productId, (inProdUnits.get(ln.productId) ?? 0) + ln.units);
         inProductionValue += ln.units * ln.cogPerUnit;
+        if (provisionalLotIds.has(lot.id)) provisionalValue += ln.units * ln.cogPerUnit;
         const cur = soonestPo.get(ln.productId);
         if (!cur || poDate < cur) soonestPo.set(ln.productId, poDate);
       } else {
@@ -251,7 +263,7 @@ export async function getRestock(): Promise<{
     coverMonths: monthlyCOGS > 0 ? grandTotal / monthlyCOGS : 0,
   };
 
-  await recordDailyInventoryValue(totals, settings.syncTz);
+  await recordDailyInventoryValue(totals, settings.syncTz, provisionalValue);
 
   return {
     rows,
@@ -291,9 +303,9 @@ export async function getInventoryValueHistory(): Promise<ValueHistoryPoint[]> {
  *  "Today" is the org's local calendar day (syncTz), not UTC — otherwise an org far from UTC
  *  records under tomorrow's date and its chart, month-to-date boundary and calendar read a day
  *  ahead of its own clock. */
-async function recordDailyInventoryValue(t: RestockTotals, tz: string) {
+async function recordDailyInventoryValue(t: RestockTotals, tz: string, provisionalValue = 0) {
   const day = localDay(tz);
-  const values = { raw: t.raw, inProduction: t.inProduction, fba: t.fba, awd: t.awd, atLocations: t.atLocations, total: t.total };
+  const values = { raw: t.raw, inProduction: t.inProduction, fba: t.fba, awd: t.awd, atLocations: t.atLocations, total: t.total, provisionalValue };
   try {
     const existing = await prisma.inventoryValueSnapshot.findFirst({ where: { day } }); // auto-scoped to org
     if (existing) {

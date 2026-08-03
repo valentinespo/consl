@@ -7,6 +7,7 @@ import { DatePicker } from "@/components/DatePicker";
 import { Card, SkuAvatar, SectionTitle } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
 import { updateLot } from "@/app/lots/actions";
+import { upsertTransactionInvoice } from "@/app/transactions/actions";
 import { LotBom, type MaterialType, type Mat } from "@/components/LotBom";
 import type { CostChip } from "@/lib/lot-costs";
 
@@ -65,6 +66,7 @@ export function LotEditor({
   products,
   materialTypes,
   skuTxnCounts,
+  costMeta,
 }: {
   lotId: string;
   initial: {
@@ -82,6 +84,9 @@ export function LotEditor({
   products: Product[];
   materialTypes: MaterialType[];
   skuTxnCounts: Record<string, number>;
+  /** Finish-flow helper: is the lot's cost visibly incomplete, is an estimate already open,
+   *  and which supplier a quick estimate should default to. */
+  costMeta?: { incomplete: boolean; estimateOpen: boolean; supplier: string | null };
 }) {
   const { perUnit, qty } = useMoney();
   const router = useRouter();
@@ -104,6 +109,7 @@ export function LotEditor({
   const [poDateISO, setPoDateISO] = useState(initial.poDateISO ?? "");
   const [facilityId, setFacilityId] = useState(initial.facilityId);
   const [status, setStatus] = useState(initial.status);
+  const [estimateAmount, setEstimateAmount] = useState(""); // finish-flow quick estimate (optional)
   const [finishedAtISO, setFinishedAtISO] = useState(initial.finishedAtISO ?? "");
   const [expiryISO, setExpiryISO] = useState(initial.expiryISO ?? "");
   const [batchNr, setBatchNr] = useState(initial.batchNr ?? "");
@@ -199,6 +205,19 @@ export function LotEditor({
         setError(res.error ?? "Could not save.");
         return;
       }
+      const estAmt = Number(estimateAmount) || 0;
+      if (estAmt > 0 && status === "FINISHED") {
+        const est = await upsertTransactionInvoice({
+          id: null,
+          supplierName: costMeta?.supplier ?? null,
+          dateISO: finishedAtISO || new Date().toLocaleDateString("en-CA"),
+          invoiceTotal: estAmt,
+          isEstimate: true,
+          lines: [{ category: "Production", amount: estAmt, lotId, sku: null, concept: "Estimated production cost" }],
+        });
+        if (!est.ok) setError(`Lot saved, but the estimate failed: ${est.error}`);
+        setEstimateAmount("");
+      }
       router.refresh(); // lot.updatedAt changes → the page remounts this editor with fresh data
     } catch {
       // The lot commits before the cost recompute + revalidate run, so a hiccup there (or a slow
@@ -252,6 +271,27 @@ export function LotEditor({
               <input value={batchNr} onChange={(e) => setBatchNr(e.target.value)} placeholder="e.g. B-24137" className={inputCls} />
             </Field>
           </>
+        )}
+        {/* Finishing marks PHYSICAL completion — costing can lag. When it visibly does, offer a
+            one-field estimate so the lot's value is honest until the real invoice lands. */}
+        {status === "FINISHED" && initial.status !== "FINISHED" && costMeta?.incomplete && !costMeta.estimateOpen && (
+          <div className="sm:col-span-3 flex flex-wrap items-center gap-2 rounded-lg border border-[#f3dcb8] bg-[#fdf6ec] px-3 py-2.5">
+            <span className="text-[12.5px] text-ink-soft">
+              Cost looks incomplete — add an <b>estimated</b> production amount? It counts into COG now and gets replaced by the
+              final invoice later.
+            </span>
+            <span className="ml-auto inline-flex items-center gap-1.5">
+              <input
+                type="number"
+                step="0.01"
+                value={estimateAmount}
+                onChange={(e) => setEstimateAmount(e.target.value)}
+                placeholder="0.00"
+                className="h-8 w-28 rounded-lg border border-border bg-surface px-2 text-[12.5px] text-ink outline-none focus:border-accent-strong"
+              />
+              <span className="text-[11.5px] text-muted">saved with this lot{costMeta.supplier ? ` · ${costMeta.supplier}` : ""}</span>
+            </span>
+          </div>
         )}
       </div>
 

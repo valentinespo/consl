@@ -23,6 +23,7 @@ export default async function LotsPage() {
     cogTotal: l.cogTotal,
     avgCogPerUnit: l.avgCogPerUnit,
     txnCount: l.txnCount,
+    provisional: l.provisional,
   }));
   const facilities = [...new Set(lots.map((l) => l.facility))].sort();
 

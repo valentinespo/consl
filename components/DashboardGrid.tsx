@@ -32,6 +32,7 @@ export type DashboardData = {
   recentLots: RecentLot[];
   alerts: Alert[];
   leadTimes: LeadTimes & { configuredDays: number };
+  provisionalLots: number; // lots whose cost still includes estimates / unpriced PO lines
 };
 
 type Meta = { title: string; minW: number; minH: number; w: number; h: number };
@@ -345,7 +346,7 @@ export function DashboardGrid({
 function renderContent(id: string, d: DashboardData) {
   switch (id) {
     case "totalValue":
-      return <TotalValueCard totals={d.totals} history={d.history} className="h-full" />;
+      return <TotalValueCard totals={d.totals} history={d.history} provisionalLots={d.provisionalLots} className="h-full" />;
     case "producedValue":
       return (
         <RingWidget

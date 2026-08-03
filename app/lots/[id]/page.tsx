@@ -113,6 +113,14 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
         <LotEditor
           key={lot.updatedAt.toISOString()}
           lotId={lot.id}
+          costMeta={{
+            // "Cost looks incomplete" = unpriced PO lines, or no COG transactions at all yet.
+            incomplete:
+              (lot.purchaseOrder?.lines ?? []).some((pl) => pl.unitCost == null) ||
+              !lot.transactions.some((t) => t.appliesToCog),
+            estimateOpen: invoices.some((i) => i.isEstimate),
+            supplier: lot.facility.supplierProfile?.name ?? null,
+          }}
           initial={{
             poNumber: lot.poNumber,
             poDateISO: lot.poDate ? lot.poDate.toISOString().slice(0, 10) : null,

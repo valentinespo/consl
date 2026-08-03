@@ -123,7 +123,9 @@ export async function getLots() {
         lines: { include: { product: true } },
         // The count shown is INVOICES touching the lot, not allocation lines — one invoice split
         // across three lines is still one transaction to the person reading the table.
-        transactions: { select: { invoiceId: true } },
+        transactions: { select: { invoiceId: true, invoice: { select: { isEstimate: true } } } },
+        // TBD-priced PO lines mean the lot's cost isn't final yet (part of the provisional badge).
+        purchaseOrder: { select: { lines: { select: { unitCost: true, kind: true } } } },
       },
       orderBy: { lotNr: "desc" },
     }),
@@ -134,6 +136,11 @@ export async function getLots() {
     const invoiceIds = new Set<string>();
     let looseLines = 0; // legacy lines with no parent invoice count as one transaction each
     for (const t of lot.transactions) (t.invoiceId ? invoiceIds.add(t.invoiceId) : looseLines++);
+    // DERIVED provisional-cost flag (never stored): estimated invoice lines or TBD PO prices mean
+    // this lot's cogPerUnit is expected to move when the real numbers land.
+    const provisional =
+      lot.transactions.some((t) => t.invoice?.isEstimate) ||
+      (lot.purchaseOrder?.lines ?? []).some((pl) => pl.unitCost == null);
     const units = lot.lines.reduce((s, l) => s + l.units, 0);
     const cog = lot.lines.reduce((s, l) => s + l.cogPerUnit * l.units, 0);
     return {
@@ -158,6 +165,7 @@ export async function getLots() {
       cogTotal: cog,
       avgCogPerUnit: units ? cog / units : 0,
       txnCount: invoiceIds.size + looseLines,
+      provisional,
       notes: lot.notes,
     };
   });
@@ -167,7 +175,8 @@ export async function getLot(id: string) {
   return prisma.lot.findUnique({
     where: { id },
     include: {
-      facility: true,
+      facility: { include: { supplierProfile: true } },
+      purchaseOrder: { include: { lines: true } },
       lines: { include: { product: true, materials: { include: { materialType: true } } }, orderBy: { seq: "asc" } },
       transactions: { include: { supplier: true }, orderBy: [{ date: "asc" }] },
       documents: { orderBy: [{ seq: "asc" }, { createdAt: "asc" }] },
@@ -206,6 +215,39 @@ export async function getAllTransactions() {
 }
 
 /** Transactions grouped into invoices (one real payment → many allocation lines). */
+export type PaymentStatus = "paid" | "partial" | "overdue" | "unpaid" | null;
+
+/** Derived payables state. Null when nothing payment-related was ever entered (brand doesn't
+ *  track payment here) — the UI then shows nothing instead of a misleading "unpaid". */
+export function derivePaymentStatus(
+  invoiceTotal: number,
+  amountPaid: number | null,
+  dueDate: Date | null,
+  paidAt: Date | null,
+): PaymentStatus {
+  const tracked = amountPaid != null || dueDate != null || paidAt != null;
+  if (!tracked) return null;
+  const paid = amountPaid ?? 0;
+  if (paidAt || paid >= invoiceTotal - 0.01) return "paid";
+  if (dueDate && Date.now() > dueDate.getTime()) return "overdue";
+  if (paid > 0) return "partial";
+  return "unpaid";
+}
+
+/** Lot ids that currently carry cost from an OPEN estimate invoice — used by the invoice editor
+ *  to warn against double-costing (estimate + real invoice on the same lot). */
+export async function getLotsWithOpenEstimates(): Promise<{ lotId: string; lotNr: number; invoiceId: string }[]> {
+  const lines = await prisma.transaction.findMany({
+    where: { lotId: { not: null }, invoice: { isEstimate: true } },
+    select: { lotId: true, invoiceId: true, lot: { select: { lotNr: true } } },
+  });
+  const seen = new Map<string, { lotId: string; lotNr: number; invoiceId: string }>();
+  for (const l of lines) {
+    if (l.lotId && l.invoiceId && !seen.has(l.lotId)) seen.set(l.lotId, { lotId: l.lotId, lotNr: l.lot?.lotNr ?? 0, invoiceId: l.invoiceId });
+  }
+  return [...seen.values()];
+}
+
 export async function getTransactionInvoices(lotId?: string) {
   const [invoices, products, lots] = await Promise.all([
     prisma.transactionInvoice.findMany({
@@ -256,6 +298,13 @@ export async function getTransactionInvoices(lotId?: string) {
       supplier: inv.supplier?.name ?? null,
       supplierPhotoUrl: inv.supplier?.photoUrl ?? null,
       invoiceTotal: inv.invoiceTotal,
+      isEstimate: inv.isEstimate,
+      dueDateISO: inv.dueDate ? inv.dueDate.toISOString().slice(0, 10) : null,
+      amountPaid: inv.amountPaid,
+      paidAtISO: inv.paidAt ? inv.paidAt.toISOString().slice(0, 10) : null,
+      // Payables status is derived, never stored: paid / partial / overdue / unpaid (or null when
+      // the brand doesn't track payment on this invoice at all).
+      paymentStatus: derivePaymentStatus(inv.invoiceTotal, inv.amountPaid, inv.dueDate, inv.paidAt),
       documents: inv.documents.map((d) => ({ id: d.id, label: d.label, fileUrl: d.fileUrl, fileName: d.fileName })),
       applicable,
       notApplicable,

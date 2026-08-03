@@ -1,4 +1,4 @@
-import { getTransactionInvoices, getLotOptions, getSupplierNames, getProductImageMap, getCategoriesInUse } from "@/lib/queries";
+import { getTransactionInvoices, getLotOptions, getSupplierNames, getProductImageMap, getCategoriesInUse, getLotsWithOpenEstimates } from "@/lib/queries";
 import { PageHeader } from "@/components/ui";
 import { TransactionInvoicesTable } from "@/components/TransactionInvoicesTable";
 import { requireView } from "@/lib/membership";
@@ -7,12 +7,13 @@ export const dynamic = "force-dynamic";
 
 export default async function TransactionsPage() {
   await requireView("transactions");
-  const [invoices, lots, suppliers, skuImages, categories] = await Promise.all([
+  const [invoices, lots, suppliers, skuImages, categories, openEstimateLots] = await Promise.all([
     getTransactionInvoices(),
     getLotOptions(),
     getSupplierNames(),
     getProductImageMap(),
     getCategoriesInUse(),
+    getLotsWithOpenEstimates(),
   ]);
 
   return (
@@ -21,7 +22,7 @@ export default async function TransactionsPage() {
         title="Transactions"
         subtitle={`${invoices.length} invoices. Each fans out into allocation lines — costs flow into each lot's COG by category.`}
       />
-      <TransactionInvoicesTable invoices={invoices} lots={lots} suppliers={suppliers} categories={categories} skuImages={skuImages} showLotColumn />
+      <TransactionInvoicesTable invoices={invoices} lots={lots} suppliers={suppliers} categories={categories} skuImages={skuImages} openEstimateLots={openEstimateLots} showLotColumn />
     </>
   );
 }

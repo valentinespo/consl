@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X, Upload, Paperclip } from "@/components/icons";
 import { DatePicker } from "@/components/DatePicker";
-import { upsertTransactionInvoice, deleteTransactionInvoice, type InvoiceLineInput } from "@/app/transactions/actions";
+import { upsertTransactionInvoice, deleteTransactionInvoice, markEstimateFinal, type InvoiceLineInput } from "@/app/transactions/actions";
 import { uploadDocument, deleteDocument } from "@/app/documents/actions";
 import { DocPreview } from "@/components/DocPreview";
 import type { Doc } from "@/components/DocumentList";
@@ -30,6 +30,10 @@ export type InvoiceRow = {
   supplier: string | null;
   supplierPhotoUrl?: string | null;
   invoiceTotal: number;
+  isEstimate?: boolean;
+  dueDateISO?: string | null;
+  amountPaid?: number | null;
+  paymentStatus?: "paid" | "partial" | "overdue" | "unpaid" | null;
   documents: { id: string; label: string | null; fileUrl: string; fileName: string | null }[];
   applicable: number;
   notApplicable: number;
@@ -42,6 +46,7 @@ export type InvoiceRow = {
   lines: InvLine[];
 };
 export type LotOption = { id: string; lotNr: number; label: string; skus: string[] };
+export type OpenEstimateLot = { lotId: string; lotNr: number; invoiceId: string };
 
 const DEFAULT_CATEGORY = SEED_COG_CATEGORIES[0]; // "Ingredients"
 
@@ -75,6 +80,7 @@ export function TransactionInvoiceForm({
   skuImages,
   defaultLotId,
   documents = [],
+  openEstimateLots = [],
   onDone,
   cancelLabel = "Cancel",
 }: {
@@ -86,6 +92,9 @@ export function TransactionInvoiceForm({
   categories?: string[]; // in-use categories, merged with the seeds for the dropdown
   skuImages?: Record<string, string | null>;
   defaultLotId?: string;
+  /** Lots already costed by an OPEN estimate invoice — composing real lines against them risks
+   *  double-costing, so the form warns and points at the estimate to replace instead. */
+  openEstimateLots?: OpenEstimateLot[];
   onDone: () => void;
   cancelLabel?: string;
 }) {
@@ -94,6 +103,9 @@ export function TransactionInvoiceForm({
   const [supplier, setSupplier] = useState(invoice?.supplier ?? "");
   const [dateISO, setDateISO] = useState(invoice?.dateISO ?? "");
   const [total, setTotal] = useState(invoice ? String(invoice.invoiceTotal) : "");
+  const [isEstimate, setIsEstimate] = useState(!!invoice?.isEstimate);
+  const [dueDateISO, setDueDateISO] = useState(invoice?.dueDateISO ?? "");
+  const [amountPaid, setAmountPaid] = useState(invoice?.amountPaid != null ? String(invoice.amountPaid) : "");
   const [lines, setLines] = useState<EditLine[]>(() => toEditLines(invoice?.lines, defaultLotId));
   const [pending, setPending] = useState(false);
   const [delStep, setDelStep] = useState(0); // 0 = idle, 1 = first confirm, 2 = final confirm
@@ -119,6 +131,9 @@ export function TransactionInvoiceForm({
     s: supplier.trim(),
     d: dateISO,
     t: totalNum,
+    e: isEstimate,
+    dd: dueDateISO || "",
+    ap: amountPaid === "" ? null : Number(amountPaid) || 0,
     l: lines.map((l) => lineKey(l.category, Number(l.amount) || 0, l.lotId, l.sku, l.concept)),
   });
   const originalSnapshot = useMemo(
@@ -128,6 +143,9 @@ export function TransactionInvoiceForm({
             s: (invoice.supplier ?? "").trim(),
             d: invoice.dateISO ?? "",
             t: invoice.invoiceTotal,
+            e: !!invoice.isEstimate,
+            dd: invoice.dueDateISO ?? "",
+            ap: invoice.amountPaid ?? null,
             l: invoice.lines.map((l) => lineKey(l.category, l.amount, l.lotId ?? "", l.sku ?? "ALL", l.concept ?? "")),
           })
         : null,
@@ -176,6 +194,9 @@ export function TransactionInvoiceForm({
         dateISO: dateISO || null,
         invoiceTotal: totalNum,
         lines: payloadLines,
+        isEstimate,
+        dueDateISO: dueDateISO || null,
+        amountPaid: amountPaid === "" ? null : Number(amountPaid) || 0,
       });
       if (!res.ok) {
         setError(res.error);
@@ -322,6 +343,64 @@ export function TransactionInvoiceForm({
           />
         </Field>
       </div>
+
+      {/* COST + PAYMENT — the estimate flag and payables fields. Payment is bookkeeping only and
+          never affects the lot costs; the estimate DOES cost the lots now and trues up later. */}
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-border bg-surface px-3 py-2.5">
+        <label className="inline-flex cursor-pointer items-center gap-2 text-[12.5px] font-medium text-ink-soft">
+          <input type="checkbox" checked={isEstimate} onChange={(e) => setIsEstimate(e.target.checked)} className="h-3.5 w-3.5 accent-[var(--color-accent)]" />
+          Estimated amounts
+          {isEstimate && <span className="pill-amber inline-flex items-center rounded-full px-2 py-[3px] text-[11px] font-medium leading-none">est.</span>}
+        </label>
+        {editing && invoice?.isEstimate && (
+          <button
+            type="button"
+            disabled={pending}
+            onClick={async () => {
+              setPending(true);
+              const r = await markEstimateFinal(invoice.id);
+              if (!r.ok) setError(r.error);
+              setPending(false);
+              onDone();
+              router.refresh();
+            }}
+            className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink-soft hover:border-accent-strong"
+            title="Accept these amounts as final — clears the estimate flag without changing any numbers"
+          >
+            Mark as final
+          </button>
+        )}
+        <span className="text-[11.5px] text-muted">{isEstimate ? "Costs the lots now; replace with the final invoice when it arrives." : ""}</span>
+        <span className="ml-auto inline-flex flex-wrap items-center gap-3">
+          <label className="inline-flex items-center gap-1.5 text-[12px] text-muted">
+            Due
+            <DatePicker value={dueDateISO} onChange={setDueDateISO} clearable />
+          </label>
+          <label className="inline-flex items-center gap-1.5 text-[12px] text-muted">
+            Paid ($)
+            <input
+              type="number"
+              step="0.01"
+              value={amountPaid}
+              onChange={(e) => setAmountPaid(e.target.value)}
+              placeholder="0.00"
+              className="h-8 w-24 rounded-lg border border-border bg-surface px-2 text-[12.5px] text-ink outline-none focus:border-accent-strong"
+            />
+          </label>
+        </span>
+      </div>
+
+      {/* Double-costing guard: real lines pointed at a lot that already carries an open estimate. */}
+      {!isEstimate && (() => {
+        const hit = openEstimateLots.filter((o) => (invoice ? o.invoiceId !== invoice.id : true) && lines.some((l) => l.lotId === o.lotId));
+        return hit.length > 0 ? (
+          <div className="rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-[12.5px] text-negative">
+            {hit.map((h) => `Lot #${h.lotNr}`).join(", ")} already {hit.length === 1 ? "carries" : "carry"} an open <b>estimated</b> invoice.
+            Adding real costs on top would count the same cost twice — if this is the final invoice, open the estimate and
+            use &ldquo;Replace with final&rdquo; (or reduce the estimate by this amount).
+          </div>
+        ) : null;
+      })()}
 
       {/* Allocation lines */}
       <div className="space-y-2">

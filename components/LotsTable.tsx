@@ -22,6 +22,7 @@ export type LotRow = {
   cogTotal: number;
   avgCogPerUnit: number;
   txnCount: number;
+  provisional?: boolean; // derived: estimate invoices or TBD PO lines still feeding this lot's cost
 };
 
 export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: string[] }) {
@@ -114,7 +115,14 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
                 </td>
                 <td className="px-3 py-3"><FacilityTag code={l.facility} /></td>
                 <td className="px-3 py-3 text-right tabular">{qty(l.units)}</td>
-                <td className="px-3 py-3 text-right tabular text-ink-soft">{perUnit(l.avgCogPerUnit)}</td>
+                <td className="px-3 py-3 text-right tabular text-ink-soft">
+                  {perUnit(l.avgCogPerUnit)}
+                  {l.provisional && (
+                    <div className="mt-0.5 flex justify-end">
+                      <span className="pill-amber inline-flex items-center rounded-full px-1.5 py-[2px] text-[10px] font-medium leading-none" title="Cost includes estimated amounts or unpriced PO lines — will true up when final numbers land">est.</span>
+                    </div>
+                  )}
+                </td>
                 <td className="px-3 py-3 text-right font-medium tabular">{money(l.cogTotal)}</td>
                 <td className="px-3 py-3 text-center tabular text-muted">{l.txnCount}</td>
                 <td className="px-3 py-3">

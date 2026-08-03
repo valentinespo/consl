@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useExitAnimation } from "@/components/animate";
 import { useRouter } from "next/navigation";
-import { Bell, CheckCircle2, PackageSearch, ShoppingCart, Truck, X, Zap } from "@/components/icons";
+import { Bell, CheckCircle2, FileText, PackageSearch, ShoppingCart, Truck, X, Zap } from "@/components/icons";
 import type { LucideIcon } from "@/components/icons";
 import type { Alert } from "@/lib/alerts";
 import { getHeaderNotifications, dismissNotification } from "@/app/settings/actions";
@@ -12,7 +12,7 @@ const SEV: Record<Alert["severity"], { bg: string; dot: string }> = {
   critical: { bg: "#fef2f2", dot: "#dc2626" },
   warn: { bg: "#fff7ed", dot: "#ea580c" },
 };
-const KIND_ICON: Record<Alert["kind"], LucideIcon> = { material: PackageSearch, reorder: ShoppingCart, expedite: Zap, ship: Truck };
+const KIND_ICON: Record<Alert["kind"], LucideIcon> = { material: PackageSearch, reorder: ShoppingCart, expedite: Zap, ship: Truck, payable: FileText, estimate: FileText };
 
 /**
  * The header bell: a count badge and a drop-down feed of the app's alerts (what the dashboard
