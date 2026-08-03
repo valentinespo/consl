@@ -18,13 +18,18 @@ import { MovementsLedger } from "@/components/MovementsLedger";
 import { StockSection } from "@/components/StockSection";
 import { facilityTypeLabel, isProductionSite } from "@/lib/facility-types";
 import { getChannelStock } from "@/lib/integrations";
+import { getInboundShipments } from "@/lib/shipment-mirror";
+import { ShipmentsPanel } from "@/components/ShipmentsPanel";
+import { getMyAccess } from "@/lib/membership";
 import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
 
 export default async function FacilitiesPage() {
   await requireView("facilities");
-  const [facilities, stock, rawByFacilityCode, movements, products, materials, facilityOptions, channelStock, { money, qty, date }] = await Promise.all([
+  const access = await getMyAccess();
+  const canSeeShipments = access?.can("shipments", "view") ?? false;
+  const [facilities, stock, rawByFacilityCode, movements, products, materials, facilityOptions, channelStock, shipments, { money, qty, date }] = await Promise.all([
     getFacilitiesDetailed(),
     getFinishedStock(),
     getRawStockByFacility(),
@@ -33,6 +38,7 @@ export default async function FacilitiesPage() {
     getMaterialTypes(),
     getFacilities(),
     getChannelStock(),
+    canSeeShipments ? getInboundShipments() : Promise.resolve([]),
     getFmt(),
   ]);
   const todayISO = new Date().toISOString().slice(0, 10);
@@ -226,6 +232,17 @@ export default async function FacilitiesPage() {
               </Link>
             ))}
           </div>
+        </div>
+      )}
+
+      {canSeeShipments && shipments.length > 0 && (
+        <div className="mt-8">
+          <SectionTitle>Platform shipments</SectionTitle>
+          <p className="-mt-2 mb-3 text-[12.5px] text-muted">
+            Your real Amazon inbound shipments, mirrored automatically — the source of truth for what&apos;s on its way to a
+            channel. Shipped → received quantities shown when they differ.
+          </p>
+          <ShipmentsPanel shipments={shipments} />
         </div>
       )}
 

@@ -5,6 +5,7 @@ import { prismaBase } from "@/lib/prisma-base";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { decryptSecret } from "@/lib/secret-box";
 import { makeClient, getFbaInventory, getAwdInventory, getAllOrders } from "@/lib/spapi";
+import { mirrorAmazonShipments } from "@/lib/shipment-mirror";
 
 /** Units sold + days-with-sales over the last `n` days (kept for the stored rollups). */
 function windowStats(days: Record<string, number> | undefined, end: Date, n: number) {
@@ -110,6 +111,16 @@ export async function syncAmazonCore(): Promise<
     await ensureChannelFacilities("amazon");
   } catch {
     /* facilities will appear on the next successful sync */
+  }
+  // Mirror the org's real inbound shipments (the single-count reconciliation source). Isolated:
+  // a mirror failure records shipmentSyncStatus for the degraded-mode banner but NEVER fails the
+  // inventory snapshot or marks the whole Integration errored.
+  try {
+    await mirrorAmazonShipments(client, { id: conn.id, orgId });
+  } catch (e) {
+    await prismaBase.integration
+      .update({ where: { id: conn.id }, data: { shipmentSyncStatus: (e as Error).message.slice(0, 300) } })
+      .catch(() => {});
   }
   // Record the successful sync on the connection (clears any prior error / re-marks connected).
   await prismaBase.integration.update({

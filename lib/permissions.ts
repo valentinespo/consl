@@ -15,6 +15,7 @@ export const RESOURCES = {
   purchaseOrders: { label: "Purchase Orders", actions: ["view", "create", "edit", "delete"] },
   suppliers: { label: "Suppliers", actions: ["view", "create", "edit", "delete"] },
   facilities: { label: "Facilities", actions: ["view", "create", "edit", "delete"] }, // incl. movements
+  shipments: { label: "Channel Shipments", actions: ["view", "edit"] }, // mirrored platform shipments + linking
   catalog: { label: "Catalog", actions: ["view", "create", "edit", "delete"] }, // products + materials
   settings: { label: "Settings", actions: ["view", "edit"] },
   team: { label: "Team", actions: ["view", "manage"] }, // manage = invite/remove/permissions

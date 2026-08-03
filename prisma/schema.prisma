@@ -68,6 +68,70 @@ model Organization {
   stockMovements          StockMovement[]
   integrations            Integration[]
   costRevisions           CostRevision[]
+  inboundShipments        InboundShipment[]
+  inboundShipmentLines    InboundShipmentLine[]
+  movementShipmentLinks   MovementShipmentLink[]
+}
+
+/// A real inbound shipment on a sales platform (Amazon FBA/AWD today), mirrored per org from the
+/// platform's own records. This is the reconciliation bridge of the single-count plan: unlinked
+/// non-terminal seller shipments drive read-time "virtual" handoff movements; linking real
+/// StockMovements to shipments suppresses them pro-rata. Rows are NEVER deleted (state outlives
+/// the API's query window); lines are re-upserted every sync and must never be FK'd.
+model InboundShipment {
+  id             String        @id @default(cuid())
+  orgId          String?
+  organization   Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  platform       String // "amazon"
+  channel        String // "FBA" | "AWD"
+  externalId     String // platform shipment id
+  confirmationId String?
+  name           String?
+  extStatus      String
+  destination    String? // e.g. FBA destination fulfillment center
+  origin         String        @default("SELLER") // SELLER | AMAZON (internal, e.g. AWD→FBA replenishment)
+  marketplaceId  String?
+  historical     Boolean       @default(false) // terminal at first sight → inert (no virtual movements)
+  ignored        Boolean       @default(false) // user-muted or Amazon-internal
+  extCreatedAt   DateTime? // platform's creation time (FBA v0 doesn't report one — createdAt stands in)
+  extUpdatedAt   DateTime?
+  lastSyncedAt   DateTime      @default(now())
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  lines          InboundShipmentLine[]
+  links          MovementShipmentLink[]
+
+  @@unique([orgId, platform, externalId])
+}
+
+model InboundShipmentLine {
+  id          String          @id @default(cuid())
+  orgId       String?
+  organization Organization?  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  shipment    InboundShipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  shipmentId  String
+  sellerSku   String
+  product     Product?        @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productId   String? // joined via Product.sellerSku; null = unmapped SKU (surfaced, never dropped)
+  qtyShipped  Float
+  qtyReceived Float?
+}
+
+/// Many-to-many with allocated quantity: one movement may cover three shipment tranches, and two
+/// partial movements may cover one shipment. Correctness never depends on links existing — they
+/// refine attribution; SKU-level netting in the handoff layer guarantees no double-drain.
+model MovementShipmentLink {
+  id         String          @id @default(cuid())
+  orgId      String?
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  movement   StockMovement   @relation(fields: [movementId], references: [id], onDelete: Cascade)
+  movementId String
+  shipment   InboundShipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  shipmentId String
+  qty        Float
+
+  @@index([movementId])
+  @@index([shipmentId])
 }
 
 /// A tenant's connection to an external sales platform (Amazon, Shopify, TikTok Shop). Holds the
@@ -89,6 +153,13 @@ model Integration {
   connectedAt     DateTime?
   lastSyncAt      DateTime?
   lastError       String?
+  // Shipment-mirror bookkeeping. reconcileSince = when mirroring began (bounds the first query);
+  // shipmentsSyncedThrough = high-water mark the delta query resumes from (NEVER keyed to
+  // lastSyncAt — an outage would silently lose shipments); shipmentSyncStatus = "ok" or the last
+  // mirror error, surfaced as a degraded-reconciliation banner without failing the main sync.
+  reconcileSince        DateTime?
+  shipmentsSyncedThrough DateTime?
+  shipmentSyncStatus    String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
@@ -189,6 +260,9 @@ model StockMovement {
   @@index([productId, date])
   @@index([materialTypeId, date])
   @@index([fromFacilityId])
+  // MANUAL = user-recorded; AUTO reserved for the future opt-in materializer.
+  source        String   @default("MANUAL")
+  shipmentLinks MovementShipmentLink[]
 }
 
 /// A vendor we pay (may also be a facility, matched loosely by name).
@@ -259,6 +333,7 @@ model Product {
   updatedAt          DateTime            @updatedAt
 
   @@unique([orgId, code])
+  inboundShipmentLines InboundShipmentLine[]
 }
 
 /// A point-in-time capture of a SKU's Amazon FBA position + trailing sales, pulled from SP-API.

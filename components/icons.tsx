@@ -59,6 +59,7 @@ export const ReorderFilled = regular(P.ArrowClockwise);
 /** Integrations — two plugs meeting. */
 export const Plug = regular(P.Plugs);
 export const Download = regular(P.DownloadSimple);
+export const CaretDown = regular(P.CaretDown);
 /** Outline storefront for the header's org-mark fallback (chrome runs outline weight). */
 export const Building2Outline = regular(P.Storefront);
 
