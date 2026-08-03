@@ -96,7 +96,7 @@ export async function createMaterial(input: {
 }
 
 /** Edit an existing SKU's code &/or name. A code rename cascades to transaction allocation tags. */
-export async function updateProduct(input: { id: string; code: string; name: string; notes?: string }) {
+export async function updateProduct(input: { id: string; code: string; name: string; notes?: string; standardUnitCost?: number | null }) {
   const gate = await requirePermission("catalog", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };
   const code = input.code.trim().toUpperCase().replace(/\s+/g, "");
@@ -113,7 +113,14 @@ export async function updateProduct(input: { id: string; code: string; name: str
   await prisma.$transaction(async (tx) => {
     await tx.product.update({
       where: { id: input.id },
-      data: { code, name, ...(input.notes !== undefined ? { notes: input.notes.trim() || null } : {}) },
+      data: {
+        code,
+        name,
+        ...(input.notes !== undefined ? { notes: input.notes.trim() || null } : {}),
+        ...(input.standardUnitCost !== undefined
+          ? { standardUnitCost: input.standardUnitCost != null && Number.isFinite(input.standardUnitCost) && input.standardUnitCost > 0 ? input.standardUnitCost : null }
+          : {}),
+      },
     });
     // Transaction allocation lines tag their SKU by code string — keep them pointing at this SKU.
     if (code !== current.code) await tx.transaction.updateMany({ where: { skus: current.code }, data: { skus: code } });

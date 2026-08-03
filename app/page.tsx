@@ -31,6 +31,10 @@ export default async function DashboardPage() {
     { label: "Add a facility", body: "where stock is made or stored", href: "/facilities", cta: "Add", done: setup.facilities > 0 },
     { label: "Add a supplier", body: "who you buy from", href: "/suppliers", cta: "Add", done: setup.suppliers > 0 },
     { label: "Link a sales channel", body: "Amazon, Shopify or TikTok IDs", href: "/catalog", cta: "Map", done: setup.mapped > 0 },
+    // Only appears for the day-one shape: channel stock exists but no production history yet.
+    ...(setup.needsStandardCosts || (setup.mapped > 0 && setup.lots === 0)
+      ? [{ label: "Set unit costs for your channel stock", body: "values your existing Amazon inventory", href: "/catalog", cta: "Set", done: !setup.needsStandardCosts }]
+      : []),
     { label: "Log a purchase", body: "raw materials you've bought", href: "/purchases", cta: "Log", done: setup.purchases > 0 },
     { label: "Create a production lot", body: "turns materials into product", href: "/lots", cta: "Create", done: setup.lots > 0 },
   ];

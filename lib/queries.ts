@@ -502,7 +502,13 @@ export async function getSetupProgress() {
     }),
     prisma.dismissedNotification.findFirst({ where: { key: SETUP_DISMISS_KEY } }),
   ]);
-  return { products, materials, facilities, suppliers, purchases, lots, mapped, dismissed: !!dismissed };
+  // Day-one valuation: channel-mapped SKUs with no finished production history need a standard
+  // unit cost, or their Amazon stock shows as $0. Resolved by either entering costs or producing.
+  const [finishedLots, mappedNoCost] = await Promise.all([
+    prisma.lot.count({ where: { status: "FINISHED" } }),
+    prisma.product.count({ where: { asin: { not: null }, standardUnitCost: null } }),
+  ]);
+  return { products, materials, facilities, suppliers, purchases, lots, mapped, dismissed: !!dismissed, needsStandardCosts: finishedLots === 0 && mapped > 0 && mappedNoCost > 0 };
 }
 
 export const SETUP_DISMISS_KEY = "getting-started";

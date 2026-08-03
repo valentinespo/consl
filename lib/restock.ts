@@ -114,7 +114,7 @@ export async function getRestock(): Promise<{
   const soonestPo = new Map<string, Date>();
   let inProductionValue = 0;
   let provisionalValue = 0; // v1 approximation: the in-production share of provisional lots
-  const finishedLots = new Map<string, { units: number; cog: number }[]>();
+  const finishedLots = new Map<string, { units: number; cog: number; provisional: boolean }[]>();
   const supply: FinishedSupply[] = [];
   let supplySeq = 0;
   for (const lot of lots) {
@@ -128,7 +128,7 @@ export async function getRestock(): Promise<{
         if (!cur || poDate < cur) soonestPo.set(ln.productId, poDate);
       } else {
         if (!finishedLots.has(ln.productId)) finishedLots.set(ln.productId, []);
-        finishedLots.get(ln.productId)!.push({ units: ln.units, cog: ln.cogPerUnit });
+        finishedLots.get(ln.productId)!.push({ units: ln.units, cog: ln.cogPerUnit, provisional: provisionalLotIds.has(lot.id) });
         supply.push({
           sku: ln.productId,
           facilityId: lot.facilityId,
@@ -196,7 +196,11 @@ export async function getRestock(): Promise<{
     // Value Amazon's reported units from what was actually shipped to Amazon, newest first —
     // FBA is filled before AWD from one shared pass so they can't draw the same units twice.
     // Anything beyond what we recorded shipping falls back to the newest lot cost.
-    const fb = finishedLots.get(p.id)?.[0]?.cog ?? 0;
+    // Channel-residual fallback cost, most-trusted first: the SKU's deliberate standard cost
+    // (day-one onboarding), else the newest finished lot with FINAL numbers, else a provisional
+    // lot, else 0. A wild estimate on the newest lot can no longer become the org-wide basis.
+    const lotsOf = finishedLots.get(p.id) ?? [];
+    const fb = p.standardUnitCost ?? lotsOf.find((l) => !l.provisional)?.cog ?? lotsOf[0]?.cog ?? 0;
     const [fbaVal, awdVal] = valueChannelStock(amazonLayers.get(p.id) ?? [], [fbaTotal, awdTotal], fb);
     fbaValue += fbaVal;
     awdValue += awdVal;

@@ -30,7 +30,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
 
       <div className="space-y-5">
         <ProductEditor
-          product={{ id: product.id, code: product.code, name: product.name, notes: product.notes, imageUrl: product.imageUrl }}
+          product={{ id: product.id, code: product.code, name: product.name, notes: product.notes, imageUrl: product.imageUrl, standardUnitCost: product.standardUnitCost }}
         />
 
         <ChannelMapping
