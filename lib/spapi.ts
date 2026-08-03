@@ -64,6 +64,7 @@ export type FbaRow = {
   sellerSku: string;
   asin: string | null;
   fnsku: string | null;
+  name: string | null; // Amazon's listing title — the catalog-import bootstrap
   available: number;
   inbound: number;
   reserved: number;
@@ -94,6 +95,7 @@ export async function getFbaInventory(client: SpApiClient): Promise<FbaRow[]> {
         sellerSku: s.sellerSku,
         asin: s.asin || null,
         fnsku: s.fnSku || null,
+        name: s.productName || null,
         available: d.fulfillableQuantity || 0,
         inbound,
         reserved: d.reservedQuantity?.totalReservedQuantity || 0,

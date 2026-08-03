@@ -120,6 +120,8 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
               !lot.transactions.some((t) => t.appliesToCog),
             estimateOpen: invoices.some((i) => i.isEstimate),
             supplier: lot.facility.supplierProfile?.name ?? null,
+            // One-click estimate basis: the PO's priced lines (TBD lines contribute nothing).
+            poTotal: (lot.purchaseOrder?.lines ?? []).reduce((s, pl) => s + (pl.unitCost != null ? pl.quantity * pl.unitCost : 0), 0) || null,
           }}
           initial={{
             poNumber: lot.poNumber,

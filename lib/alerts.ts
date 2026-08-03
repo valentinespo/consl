@@ -89,6 +89,18 @@ export async function getAlerts(rows: RestockRow[]): Promise<Alert[]> {
       severity: "warn",
     });
   }
+  // Shipped beyond everything pools + production ever held — usually a lot edited down after the
+  // fact (or units shipped that were never entered). The numbers stay floored; the books don't lie,
+  // they just can't explain where these units came from.
+  for (const r of rows.filter((x) => x.handoffUncovered > 0)) {
+    alerts.push({
+      key: `handoff-uncovered:${r.code}`,
+      kind: "handoff",
+      title: `${r.name} — shipped more than recorded production`,
+      detail: `${num(r.handoffUncovered)} units on Amazon shipments exceed every recorded lot — check the lot quantities`,
+      severity: "critical",
+    });
+  }
   const cancelled = await prisma.inboundShipment.findMany({
     where: { extStatus: { in: ["CANCELLED", "DELETED", "VOIDED", "ABANDONED", "ERROR"] }, ignored: false, links: { some: {} } },
     select: { id: true, name: true, externalId: true },
@@ -108,7 +120,7 @@ export async function getAlerts(rows: RestockRow[]): Promise<Alert[]> {
   const activeKeys = new Set(alerts.map((a) => a.key));
   // Only prune dismissals that belong to the alert namespace — other features (the Getting
   // Started banner) store their own dismissal in this same table and must not be swept away.
-  const isAlertKey = (k: string) => /^(ship|expedite|reorder|material|handoff|shipcancel):/.test(k);
+  const isAlertKey = (k: string) => /^(ship|expedite|reorder|material|handoff|handoff-uncovered|shipcancel):/.test(k);
   const stale = dismissed.filter((d) => isAlertKey(d.key) && !activeKeys.has(d.key)).map((d) => d.key);
   if (stale.length) await prisma.dismissedNotification.deleteMany({ where: { key: { in: stale } } });
   const hidden = new Set(dismissed.map((d) => d.key));

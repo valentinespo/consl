@@ -86,7 +86,7 @@ export function LotEditor({
   skuTxnCounts: Record<string, number>;
   /** Finish-flow helper: is the lot's cost visibly incomplete, is an estimate already open,
    *  and which supplier a quick estimate should default to. */
-  costMeta?: { incomplete: boolean; estimateOpen: boolean; supplier: string | null };
+  costMeta?: { incomplete: boolean; estimateOpen: boolean; supplier: string | null; poTotal?: number | null };
 }) {
   const { perUnit, qty } = useMoney();
   const router = useRouter();
@@ -281,6 +281,16 @@ export function LotEditor({
               final invoice later.
             </span>
             <span className="ml-auto inline-flex items-center gap-1.5">
+              {costMeta.poTotal != null && costMeta.poTotal > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setEstimateAmount(String(+costMeta.poTotal!.toFixed(2)))}
+                  className="rounded-lg border border-border px-2 py-1.5 text-[11.5px] text-ink-soft hover:bg-surface-2"
+                  title="Fill with the purchase order's priced lines total"
+                >
+                  Use PO total ({costMeta.poTotal.toFixed(2)})
+                </button>
+              )}
               <input
                 type="number"
                 step="0.01"

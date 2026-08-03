@@ -53,6 +53,56 @@ function slugCode(name: string, max = 10): string {
 }
 
 /** Create a product (SKU). Returns the created (or existing) product. */
+/**
+ * Catalog bootstrap (single-count plan §5): create products from the org's live FBA inventory
+ * summaries so onboarding isn't a manual wall. Idempotent — SKUs already in the catalog (matched
+ * by sellerSku or ASIN) are skipped; new ones arrive mapped and ready to sync.
+ */
+export async function importAmazonCatalog() {
+  const gate = await requirePermission("catalog", "create");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  const conn = await prisma.integration.findFirst({ where: { provider: "amazon", status: "connected" } });
+  if (!conn?.refreshTokenEnc) return { ok: false as const, error: "Connect Amazon first (Settings → Integrations)." };
+
+  const { makeClient, getFbaInventory } = await import("@/lib/spapi");
+  const { decryptSecret } = await import("@/lib/secret-box");
+  let rows;
+  try {
+    rows = await getFbaInventory(
+      makeClient({
+        refreshToken: decryptSecret(conn.refreshTokenEnc),
+        marketplaceId: conn.marketplaceId ?? "ATVPDKIKX0DER",
+        region: conn.region ?? "na",
+      }),
+    );
+  } catch (e) {
+    return { ok: false as const, error: `Amazon pull failed: ${(e as Error).message.slice(0, 200)}` };
+  }
+
+  const existing = await prisma.product.findMany({ select: { code: true, sellerSku: true, asin: true } });
+  const knownSku = new Set(existing.flatMap((p) => [p.sellerSku, p.code]).filter(Boolean) as string[]);
+  const knownAsin = new Set(existing.map((p) => p.asin).filter(Boolean) as string[]);
+  const usedCodes = new Set(existing.map((p) => p.code));
+
+  let created = 0;
+  for (const r of rows) {
+    if (!r.sellerSku || knownSku.has(r.sellerSku) || (r.asin && knownAsin.has(r.asin))) continue;
+    // Short display code from the seller SKU; suffix on collision so the import never stalls.
+    let code = r.sellerSku.trim().toUpperCase().replace(/\s+/g, "").slice(0, 12);
+    let n = 2;
+    while (usedCodes.has(code)) code = `${code.slice(0, 10)}-${n++}`;
+    usedCodes.add(code);
+    knownSku.add(r.sellerSku);
+    if (r.asin) knownAsin.add(r.asin);
+    await prisma.product.create({
+      data: { code, name: r.name ?? r.sellerSku, sellerSku: r.sellerSku, asin: r.asin },
+    });
+    created++;
+  }
+  revalidatePath("/", "layout");
+  return { ok: true as const, created, total: rows.length };
+}
+
 export async function createProduct(input: { code: string; name?: string }) {
   const gate = await requirePermission("catalog", "create");
   if (!gate.ok) return { ok: false as const, error: gate.error };

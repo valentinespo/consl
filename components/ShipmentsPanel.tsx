@@ -106,7 +106,12 @@ export function ShipmentsPanel({
         )}
         <span className="text-[11px] text-muted">{s.effDateISO}{s.destination ? ` · ${s.destination}` : ""}</span>
         <span className="ml-auto flex flex-wrap items-center gap-2">
-          {s.lines.map((l) => (
+          {s.lines.map((l) => {
+            // A CLOSED shipment with a receiving gap is final — Amazon lost or found units.
+            // Informational only (never an automatic LOSS movement): shorts are reimbursement
+            // candidates, overs are free stock; both deserve a look, not a write.
+            const diff = s.extStatus.toUpperCase() === "CLOSED" && l.qtyReceived != null ? l.qtyReceived - l.qtyShipped : 0;
+            return (
             <span key={l.sellerSku} className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-soft" title={l.sellerSku}>
               {l.code ? <SkuAvatar code={l.code} size={18} imageUrl={l.imageUrl} /> : null}
               <span className={l.unmapped ? "text-negative" : ""}>{l.code ?? `${l.sellerSku} (unmapped)`}</span>
@@ -114,8 +119,19 @@ export function ShipmentsPanel({
                 {l.qtyShipped}
                 {l.qtyReceived != null && l.qtyReceived !== l.qtyShipped ? ` → ${l.qtyReceived}` : ""}
               </span>
+              {diff < 0 && (
+                <span className="pill-amber inline-flex items-center rounded-full px-1.5 py-[2px] text-[10px] font-medium leading-none" title={`Amazon closed this shipment having received ${-diff} fewer than shipped — worth a reimbursement check`}>
+                  {diff} short
+                </span>
+              )}
+              {diff > 0 && (
+                <span className="pill-neutral inline-flex items-center rounded-full px-1.5 py-[2px] text-[10px] font-medium leading-none" title={`Amazon received ${diff} more than the shipment declared`}>
+                  +{diff} over
+                </span>
+              )}
             </span>
-          ))}
+            );
+          })}
           {canEdit && needsAction && (
             <button
               type="button"
