@@ -3,6 +3,7 @@ import { prisma } from "./prisma";
 import { computeEngineResult } from "./recompute";
 import { buildCostChips } from "./lot-costs";
 import { runFinishedGoodsEngine, type FinishedSupply, type FinishedMovement } from "./finished-goods";
+import { getHandoffPlan, buildVirtualMovements, isVirtualMovement } from "./handoff";
 
 export type InventoryPool = {
   materialCode: string;
@@ -320,15 +321,17 @@ export async function getTransactionInvoices(lotId?: string) {
   return lotId ? mapped.filter((inv) => inv.lines.some((l) => l.lotId === lotId)) : mapped;
 }
 
-/** Run the finished-goods engine: where finished units physically are and what they're worth. */
+/** Run the finished-goods engine: where finished units physically are and what they're worth.
+ *  Includes the virtual-handoff drains (lib/handoff.ts) — LOCKSTEP with lib/restock.ts. */
 export async function computeFinishedGoods() {
-  const [lots, movements] = await Promise.all([
+  const [lots, movements, handoff] = await Promise.all([
     prisma.lot.findMany({
       where: { status: "FINISHED" },
       include: { lines: true },
       orderBy: [{ poDate: "desc" }, { createdAt: "desc" }],
     }),
     prisma.stockMovement.findMany({ where: { itemType: "FINISHED" }, orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
+    getHandoffPlan(),
   ]);
   const supply: FinishedSupply[] = [];
   let seq = 0;
@@ -354,7 +357,11 @@ export async function computeFinishedGoods() {
     date: m.date.getTime(),
     seq: i,
   }));
-  return runFinishedGoodsEngine(supply, mv);
+  mv.push(...buildVirtualMovements(handoff, supply));
+  const res = runFinishedGoodsEngine(supply, mv);
+  // Virtual drains legitimately exceed the pool when the units are still in production (or the
+  // brand onboarded with stock already at Amazon) — that remainder is not an operator error.
+  return { ...res, shortfalls: res.shortfalls.filter((s) => !isVirtualMovement(s.movementId)) };
 }
 
 /** Finished stock on hand at your own facilities, with product + facility names attached. */

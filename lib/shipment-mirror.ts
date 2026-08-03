@@ -159,6 +159,12 @@ export async function autoMatch(orgId: string): Promise<number> {
   return made;
 }
 
+/** Mirror health for the degraded-mode banner: null = no connection, "ok" = healthy, else the error. */
+export async function getShipmentSyncHealth(): Promise<string | null> {
+  const conn = await prisma.integration.findFirst({ where: { provider: "amazon", status: "connected" } });
+  return conn ? conn.shipmentSyncStatus ?? "ok" : null;
+}
+
 /** Panel/read query: the org's mirrored shipments with lines + linked totals (org-scoped client). */
 export async function getInboundShipments() {
   const shipments = await prisma.inboundShipment.findMany({

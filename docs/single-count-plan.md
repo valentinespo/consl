@@ -92,6 +92,16 @@ computeFinishedGoods) — they must never diverge.
   toDestination=AMAZON movement qty within extCreatedAt ± 30d)`, then attributed per shipment.
   Double-drain is impossible even when the matcher misses; ambiguity degrades to correct totals
   with fuzzy attribution + a "probable match" alert. Epsilon: qty ≤ 1e-6 is zero.
+- **Adoption-era guard (added during Phase 5, verified against Herbl's real data):** the ±30d
+  window assumed extCreatedAt is the true creation date, but FBA's v0 API reports none — every
+  backfilled shipment's effective date is first-seen, months away from the operator's hand-recorded
+  movements (Herbl: live tranches eff-dated Aug 3 vs covering movements dated Apr 10/29). So
+  shipments first seen within 48h of `reconcileSince` (the initial backfill) ALSO net against
+  unlinked AMAZON movements dated before reconcileSince: mid-flight shipments discovered on day one
+  were inevitably already recorded under the operator's old bookkeeping dates. The pre-era lump can
+  never touch shipments first seen later, so it is a one-time reconciliation, not a leak. Over-netting
+  degrades to the status quo (no drain); under-netting would double-drain — generosity is the safe
+  direction.
 - **Pre-receipt lag cap:** until qtyReceived>0 or status ≥ RECEIVING, cap per-SKU virtual qty at
   the snapshot-reported inbound for that channel (min with fbaInbound/awdInbound) — closes both
   directions of cross-endpoint lag. After receiving starts, basis is qtyShipped.

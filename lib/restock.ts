@@ -9,6 +9,7 @@ import {
   type FinishedMovement,
   type ShippedLayer,
 } from "@/lib/finished-goods";
+import { getHandoffPlan, buildVirtualMovements, isVirtualMovement } from "@/lib/handoff";
 
 export type RestockRow = {
   id: string;
@@ -25,6 +26,7 @@ export type RestockRow = {
   awdTotal: number;
   awdValue: number;
   inProduction: number;
+  awaitingHandoff: number; // units counted virtually at Amazon (live shipment, no recorded movement)
   atLocations: number; // finished units sitting at your own facilities — made, just not shipped
   atLocationsBy: { code: string; units: number }[]; // where those units are, biggest first
   onHand: number; // fbaTotal + awdTotal (everything at Amazon, excluding production)
@@ -83,7 +85,7 @@ export async function getRestock(): Promise<{
   };
   sortMode: string;
 }> {
-  const [products, snaps, lots, rawInv, settings, allProducts, movements, allFacilities] = await Promise.all([
+  const [products, snaps, lots, rawInv, settings, allProducts, movements, allFacilities, handoff] = await Promise.all([
     prisma.product.findMany({ where: { asin: { not: null } }, orderBy: { code: "asc" } }),
     prisma.skuSnapshot.findMany({ distinct: ["productId"], orderBy: { capturedAt: "desc" } }),
     prisma.lot.findMany({ include: { lines: true }, orderBy: [{ poDate: "desc" }, { createdAt: "desc" }] }),
@@ -94,6 +96,7 @@ export async function getRestock(): Promise<{
     prisma.product.findMany({ orderBy: { code: "asc" } }),
     prisma.stockMovement.findMany({ where: { itemType: "FINISHED" }, orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
     prisma.facility.findMany({ select: { id: true, code: true } }),
+    getHandoffPlan(),
   ]);
   // Lots whose cost is provisional (open estimate invoice or unpriced PO lines) — their share of
   // today's value is recorded on the snapshot so history steps self-explain when estimates true up.
@@ -111,6 +114,7 @@ export async function getRestock(): Promise<{
   // Per-SKU: in-production units/value, soonest open-lot PO date, and finished lots.
   // Finished lot lines double as the finished-goods FIFO supply, at the facility that made them.
   const inProdUnits = new Map<string, number>();
+  const inProdLines: { sku: string; units: number; cog: number; poMs: number; provisional: boolean }[] = [];
   const soonestPo = new Map<string, Date>();
   let inProductionValue = 0;
   let provisionalValue = 0; // v1 approximation: the in-production share of provisional lots
@@ -122,6 +126,7 @@ export async function getRestock(): Promise<{
     for (const ln of lot.lines) {
       if (lot.status === "IN_PRODUCTION") {
         inProdUnits.set(ln.productId, (inProdUnits.get(ln.productId) ?? 0) + ln.units);
+        inProdLines.push({ sku: ln.productId, units: ln.units, cog: ln.cogPerUnit, poMs: poDate.getTime(), provisional: provisionalLotIds.has(lot.id) });
         inProductionValue += ln.units * ln.cogPerUnit;
         if (provisionalLotIds.has(lot.id)) provisionalValue += ln.units * ln.cogPerUnit;
         const cur = soonestPo.get(ln.productId);
@@ -152,7 +157,37 @@ export async function getRestock(): Promise<{
     date: m.date.getTime(),
     seq: i,
   }));
-  const finished = runFinishedGoodsEngine(supply, finishedMovements);
+  // Virtual handoff drains (LOCKSTEP with computeFinishedGoods): live mirrored shipments whose
+  // units nobody recorded leaving. They consume pools global-FIFO; whatever the pools can't cover
+  // is deducted from IN_PRODUCTION lot lines oldest-first — Amazon's snapshot already counts those
+  // units, so leaving them in production would count them twice (the batch-18 double count).
+  const virtualMovements = buildVirtualMovements(handoff, supply);
+  const virtualDate = new Map(virtualMovements.map((m) => [m.sku, m.date]));
+  const finished = runFinishedGoodsEngine(supply, [...finishedMovements, ...virtualMovements]);
+
+  for (const sf of finished.shortfalls) {
+    if (!isVirtualMovement(sf.movementId)) continue;
+    let remaining = sf.shortBy;
+    for (const ln of inProdLines.filter((l) => l.sku === sf.sku).sort((a, b) => a.poMs - b.poMs)) {
+      if (remaining <= 1e-6) break;
+      const take = Math.min(ln.units, remaining);
+      ln.units -= take;
+      remaining -= take;
+      inProdUnits.set(sf.sku, Math.max(0, (inProdUnits.get(sf.sku) ?? 0) - take));
+      inProductionValue -= take * ln.cog;
+      if (ln.provisional) provisionalValue -= take * ln.cog;
+      // Valuation continuity: the deducted units' cost travels to the channel as a shipped layer,
+      // so Amazon's stock is valued from them instead of jumping to the fallback cost.
+      finished.shipped.push({
+        sku: sf.sku,
+        destination: "AMAZON",
+        units: take,
+        unitCost: ln.cog,
+        date: virtualDate.get(sf.sku) ?? Date.now(),
+      });
+    }
+    // Any remainder beyond production floors at zero — Amazon's bucket already carries the units.
+  }
 
   // Amazon is valued from what was actually SHIPPED to Amazon — never from lots still sitting at
   // your own locations or already sold direct, which would double-count the same units' cost.
@@ -221,6 +256,7 @@ export async function getRestock(): Promise<{
       awdTotal,
       awdValue: awdVal,
       inProduction,
+      awaitingHandoff: handoff.bySku.get(p.id)?.qty ?? 0,
       atLocations: heldBySku.get(p.id)?.units ?? 0,
       atLocationsBy: heldBySku.get(p.id)?.by ?? [],
       onHand: fbaTotal + awdTotal,

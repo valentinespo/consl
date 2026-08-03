@@ -18,7 +18,7 @@ import { MovementsLedger } from "@/components/MovementsLedger";
 import { StockSection } from "@/components/StockSection";
 import { facilityTypeLabel, isProductionSite } from "@/lib/facility-types";
 import { getChannelStock } from "@/lib/integrations";
-import { getInboundShipments } from "@/lib/shipment-mirror";
+import { getInboundShipments, getShipmentSyncHealth } from "@/lib/shipment-mirror";
 import { ShipmentsPanel } from "@/components/ShipmentsPanel";
 import { getMyAccess } from "@/lib/membership";
 import { requireView } from "@/lib/membership";
@@ -29,7 +29,7 @@ export default async function FacilitiesPage() {
   await requireView("facilities");
   const access = await getMyAccess();
   const canSeeShipments = access?.can("shipments", "view") ?? false;
-  const [facilities, stock, rawByFacilityCode, movements, products, materials, facilityOptions, channelStock, shipments, { money, qty, date }] = await Promise.all([
+  const [facilities, stock, rawByFacilityCode, movements, products, materials, facilityOptions, channelStock, shipments, shipmentHealth, { money, qty, date }] = await Promise.all([
     getFacilitiesDetailed(),
     getFinishedStock(),
     getRawStockByFacility(),
@@ -39,6 +39,7 @@ export default async function FacilitiesPage() {
     getFacilities(),
     getChannelStock(),
     canSeeShipments ? getInboundShipments() : Promise.resolve([]),
+    canSeeShipments ? getShipmentSyncHealth() : Promise.resolve(null),
     getFmt(),
   ]);
   const todayISO = new Date().toISOString().slice(0, 10);
@@ -242,6 +243,12 @@ export default async function FacilitiesPage() {
             Your real Amazon inbound shipments, mirrored automatically — the source of truth for what&apos;s on its way to a
             channel. Shipped → received quantities shown when they differ.
           </p>
+          {shipmentHealth && shipmentHealth !== "ok" && (
+            <div className="mb-3 rounded-[var(--radius-card)] border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] text-ink-soft">
+              Shipment sync hit a problem on the last run — showing the last successful mirror.
+              <span className="ml-1 text-muted">{shipmentHealth}</span>
+            </div>
+          )}
           <ShipmentsPanel shipments={shipments} />
         </div>
       )}

@@ -24,11 +24,13 @@ export interface FinishedSupply {
   seq: number; // stable tie-breaker
 }
 
-/** Units leaving one of your facilities. Exactly one of toFacilityId / toDestination is set. */
+/** Units leaving one of your facilities. Exactly one of toFacilityId / toDestination is set.
+ *  `fromFacilityId: null` is a GLOBAL drain (virtual handoff): the units leave whichever pools
+ *  hold the SKU, oldest layer first across every facility — facility attribution is inferred. */
 export interface FinishedMovement {
   id: string;
   sku: string;
-  fromFacilityId: string;
+  fromFacilityId: string | null;
   toFacilityId: string | null;
   toDestination: string | null; // AMAZON | SHOPIFY | TIKTOK | CUSTOMER | LOSS
   quantity: number;
@@ -95,6 +97,24 @@ class FinishedPoolStack {
     return { drawn, consumed: demand - remaining };
   }
 
+  /** The (date, seq) of the oldest layer, or null when empty — for global-FIFO across pools. */
+  peekOldest(): { date: number; seq: number } | null {
+    if (this.layers.length === 0) return null;
+    this.layers.sort((a, b) => a.date - b.date || a.seq - b.seq);
+    return { date: this.layers[0].date, seq: this.layers[0].seq };
+  }
+
+  /** Consume at most the OLDEST layer (a single layer), up to `demand` units. */
+  takeHead(demand: number): { units: number; unitCost: number } | null {
+    this.layers.sort((a, b) => a.date - b.date || a.seq - b.seq);
+    const layer = this.layers[0];
+    if (!layer) return null;
+    const take = Math.min(layer.units, demand);
+    layer.units -= take;
+    if (layer.units <= 1e-9) this.layers.shift();
+    return { units: take, unitCost: layer.unitCost };
+  }
+
   remaining(): { units: number; value: number } {
     let units = 0;
     let value = 0;
@@ -108,10 +128,14 @@ class FinishedPoolStack {
 
 export function runFinishedGoodsEngine(supply: FinishedSupply[], movements: FinishedMovement[]): FinishedResult {
   const pools = new Map<string, FinishedPoolStack>();
+  const skuFacilities = new Map<string, Set<string>>(); // which facilities ever held the SKU
   const stackFor = (sku: string, facilityId: string) => {
     const k = key(sku, facilityId);
     let p = pools.get(k);
     if (!p) pools.set(k, (p = new FinishedPoolStack()));
+    let f = skuFacilities.get(sku);
+    if (!f) skuFacilities.set(sku, (f = new Set()));
+    f.add(facilityId);
     return p;
   };
 
@@ -124,6 +148,38 @@ export function runFinishedGoodsEngine(supply: FinishedSupply[], movements: Fini
   // Replay movements in chronological order so transfers chain correctly.
   const ordered = [...movements].sort((a, b) => a.date - b.date || a.seq - b.seq);
   for (const m of ordered) {
+    if (m.fromFacilityId === null) {
+      // Global drain (virtual handoff): consume the globally-oldest layer first across every
+      // facility holding the SKU — one head layer at a time, stable facility-id tiebreak.
+      let remaining = m.quantity;
+      const drawn: { units: number; unitCost: number }[] = [];
+      const facs = [...(skuFacilities.get(m.sku) ?? [])].sort();
+      while (remaining > 1e-9) {
+        let best: { fac: string; date: number; seq: number } | null = null;
+        for (const f of facs) {
+          const head = stackFor(m.sku, f).peekOldest();
+          if (!head) continue;
+          if (!best || head.date < best.date || (head.date === best.date && head.seq < best.seq)) {
+            best = { fac: f, ...head };
+          }
+        }
+        if (!best) break;
+        const d = stackFor(m.sku, best.fac).takeHead(remaining);
+        if (!d || d.units <= 1e-9) break;
+        drawn.push(d);
+        remaining -= d.units;
+      }
+      const consumed = m.quantity - remaining;
+      if (consumed + 1e-6 < m.quantity) {
+        shortfalls.push({ movementId: m.id, sku: m.sku, facilityId: "", requested: m.quantity, available: consumed, shortBy: m.quantity - consumed });
+      }
+      if (m.toDestination) {
+        for (const d of drawn) {
+          shipped.push({ sku: m.sku, destination: m.toDestination, units: d.units, unitCost: d.unitCost, date: m.date });
+        }
+      }
+      continue;
+    }
     const from = stackFor(m.sku, m.fromFacilityId);
     const { drawn, consumed } = from.take(m.quantity);
 

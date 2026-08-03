@@ -266,6 +266,9 @@ export function RestockDashboard({
             r.fbaReserved && `${n(r.fbaReserved)} Reserved`,
             r.atLocations && `${n(r.atLocations)} At ${r.atLocationsBy.map((x) => x.code).join("/")}`,
             r.inProduction && `${n(r.inProduction)} In production`,
+            // Units on a live Amazon shipment nobody recorded — counted in the channel buckets
+            // above (virtual handoff), so they've already left production/locations here.
+            r.awaitingHandoff && `${n(r.awaitingHandoff)} Awaiting handoff`,
           ].filter(Boolean);
           return (
             <div
