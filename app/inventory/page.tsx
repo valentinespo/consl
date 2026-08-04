@@ -1,8 +1,7 @@
 import React from "react";
 import Link from "next/link";
 import { Package } from "@/components/icons";
-import { prisma } from "@/lib/prisma";
-import { getInventory, getMaterialTypes, getFinishedStock, type InventoryPool } from "@/lib/queries";
+import { getInventory, getMaterialTypes, getFinishedStock, getInProductionStock, type InventoryPool } from "@/lib/queries";
 import { getChannelStock } from "@/lib/integrations";
 import { SEG } from "@/lib/segments";
 import { money, qty, perUnit, costFine, type Currency } from "@/lib/format";
@@ -40,11 +39,9 @@ export default async function InventoryPage() {
   const [{ pools, totalValue: rawValue }, materials, prodLots, finished, channelStock, org] = await Promise.all([
     getInventory(),
     getMaterialTypes(),
-    prisma.lot.findMany({
-      where: { status: "IN_PRODUCTION" },
-      include: { facility: true, lines: { include: { product: true } } },
-      orderBy: [{ poDate: "desc" }, { createdAt: "desc" }],
-    }),
+    // Handoff-aware: units already counted at a channel (live shipment) are deducted per line,
+    // so this page can never count them here AND in the channel rows below.
+    getInProductionStock(),
     getFinishedStock(),
     getChannelStock(),
     getCurrentOrg().catch(() => null),
@@ -52,15 +49,18 @@ export default async function InventoryPage() {
   const cur: Currency = { symbol: org?.currencySymbol ?? "$", locale: org?.locale ?? "en-US", code: org?.currencyCode ?? "USD" };
 
   // ---- In production, aggregated per SKU (one SKU can span several open lots) ----
-  type ProdSku = { code: string; name: string; imageUrl: string | null; units: number; value: number; facilities: string[]; lots: { id: string; nr: number; units: number }[] };
+  // `remaining` is what's physically still at the facility; `awaiting` is already on a live
+  // Amazon shipment (counted in the channel rows below) and shows as a chip, never as stock.
+  type ProdSku = { code: string; name: string; imageUrl: string | null; units: number; value: number; awaiting: number; facilities: string[]; lots: { id: string; nr: number; units: number }[] };
   const prodBySku = new Map<string, ProdSku>();
   for (const lot of prodLots) {
     for (const ln of lot.lines) {
-      const g = prodBySku.get(ln.productId) ?? { code: ln.product.code, name: ln.product.name, imageUrl: ln.product.imageUrl, units: 0, value: 0, facilities: [], lots: [] };
-      g.units += ln.units;
-      g.value += ln.units * ln.cogPerUnit;
+      const g = prodBySku.get(ln.productId) ?? { code: ln.product.code, name: ln.product.name, imageUrl: ln.product.imageUrl, units: 0, value: 0, awaiting: 0, facilities: [], lots: [] };
+      g.units += ln.remaining;
+      g.value += ln.remaining * ln.cogPerUnit;
+      g.awaiting += ln.awaiting;
       if (!g.facilities.includes(lot.facility.code)) g.facilities.push(lot.facility.code);
-      g.lots.push({ id: lot.id, nr: lot.lotNr, units: ln.units });
+      g.lots.push({ id: lot.id, nr: lot.lotNr, units: ln.remaining });
       prodBySku.set(ln.productId, g);
     }
   }
@@ -257,6 +257,14 @@ export default async function InventoryPage() {
                             <span className="font-normal tabular text-muted">· {qty(l.units, cur)}</span>
                           </Link>
                         ))}
+                        {r.awaiting > 0 && (
+                          <span
+                            className="pill-chart inline-flex items-center rounded-full px-2 py-[3px] text-[11px] font-medium leading-none"
+                            title="These units are on a live Amazon shipment and already counted in channel stock — record the handoff from Facilities → Platform shipments"
+                          >
+                            {qty(r.awaiting, cur)} at Amazon
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="px-3 py-2.5 text-right tabular text-ink-soft">{unitCost(r.value, r.units, cur)}</td>

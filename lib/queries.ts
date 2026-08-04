@@ -359,8 +359,61 @@ export async function computeFinishedGoods(opts?: { physicalOnly?: boolean }) {
   if (handoff) mv.push(...buildVirtualMovements(handoff, supply));
   const res = runFinishedGoodsEngine(supply, mv);
   // Virtual drains legitimately exceed the pool when the units are still in production (or the
-  // brand onboarded with stock already at Amazon) — that remainder is not an operator error.
-  return { ...res, shortfalls: res.shortfalls.filter((s) => !isVirtualMovement(s.movementId)) };
+  // brand onboarded with stock already at Amazon) — that remainder is not an operator error, so
+  // it's kept out of the user-facing shortfall list. It IS the in-production deduction, though,
+  // so it's returned separately for the builders that subtract from open lots.
+  return {
+    ...res,
+    shortfalls: res.shortfalls.filter((s) => !isVirtualMovement(s.movementId)),
+    virtualShortfalls: res.shortfalls.filter((s) => isVirtualMovement(s.movementId)),
+  };
+}
+
+/**
+ * Open production lots with the virtual-handoff deduction applied per line — what is PHYSICALLY
+ * still at the facility. Units already counted at a channel (live shipment, nothing recorded)
+ * come off oldest lot first — the SAME walk lib/restock.ts does, so every page agrees.
+ */
+export async function getInProductionStock() {
+  const [fg, lots] = await Promise.all([
+    computeFinishedGoods(),
+    prisma.lot.findMany({
+      where: { status: "IN_PRODUCTION" },
+      include: { facility: true, lines: { include: { product: true } } },
+      orderBy: [{ poDate: "desc" }, { createdAt: "desc" }],
+    }),
+  ]);
+  const shortBySku = new Map<string, number>();
+  for (const sf of fg.virtualShortfalls) shortBySku.set(sf.sku, (shortBySku.get(sf.sku) ?? 0) + sf.shortBy);
+  const walkOrder = [...lots].sort(
+    (a, b) => (a.poDate ?? a.createdAt).getTime() - (b.poDate ?? b.createdAt).getTime(),
+  );
+  const awaitingByLine = new Map<string, number>();
+  for (const lot of walkOrder) {
+    for (const ln of lot.lines) {
+      const short = shortBySku.get(ln.productId) ?? 0;
+      if (short <= 1e-6) continue;
+      const take = Math.min(ln.units, short);
+      awaitingByLine.set(ln.id, take);
+      shortBySku.set(ln.productId, short - take);
+    }
+  }
+  return lots.map((lot) => ({
+    id: lot.id,
+    lotNr: lot.lotNr,
+    facility: lot.facility,
+    lines: lot.lines.map((ln) => {
+      const awaiting = awaitingByLine.get(ln.id) ?? 0;
+      return {
+        productId: ln.productId,
+        product: ln.product,
+        cogPerUnit: ln.cogPerUnit,
+        units: ln.units, // produced by the lot (the lot page's number)
+        awaiting, // already counted at a channel — not physically here anymore
+        remaining: ln.units - awaiting, // what this page should count
+      };
+    }),
+  }));
 }
 
 /** Finished stock on hand at your own facilities, with product + facility names attached. */
