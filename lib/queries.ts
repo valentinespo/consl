@@ -3,6 +3,7 @@ import { prisma } from "./prisma";
 import { computeEngineResult } from "./recompute";
 import { buildCostChips } from "./lot-costs";
 import { runFinishedGoodsEngine, type FinishedSupply, type FinishedMovement } from "./finished-goods";
+import { getOrgSettings } from "./settings";
 
 export type InventoryPool = {
   materialCode: string;
@@ -116,7 +117,7 @@ export async function getDashboard() {
 }
 
 export async function getLots() {
-  const [lots, materials] = await Promise.all([
+  const [lots, materials, settings] = await Promise.all([
     prisma.lot.findMany({
       include: {
         facility: true,
@@ -124,16 +125,22 @@ export async function getLots() {
         // The count shown is INVOICES touching the lot, not allocation lines — one invoice split
         // across three lines is still one transaction to the person reading the table.
         transactions: { select: { invoiceId: true } },
+        documents: { select: { label: true } },
       },
       orderBy: { lotNr: "desc" },
     }),
     prisma.materialType.findMany({ select: { code: true, name: true } }),
+    getOrgSettings(),
   ]);
   const matName = (code: string) => materials.find((m) => m.code === code)?.name ?? code;
+  // Key documents are matched to a lot's attached documents by label, case-insensitively.
+  const keyDocs = (settings.keyDocuments ?? []).filter((d) => d.trim());
+  const norm = (s: string) => s.trim().toLowerCase();
   return lots.map((lot) => {
     const invoiceIds = new Set<string>();
     let looseLines = 0; // legacy lines with no parent invoice count as one transaction each
     for (const t of lot.transactions) (t.invoiceId ? invoiceIds.add(t.invoiceId) : looseLines++);
+    const present = new Set(lot.documents.map((d) => norm(d.label ?? "")));
     const units = lot.lines.reduce((s, l) => s + l.units, 0);
     const cog = lot.lines.reduce((s, l) => s + l.cogPerUnit * l.units, 0);
     return {
@@ -145,6 +152,7 @@ export async function getLots() {
       facilityName: lot.facility.name,
       status: lot.status,
       paymentStatus: lot.paymentStatus,
+      keyDocs: keyDocs.map((label) => ({ label, present: present.has(norm(label)) })),
       finishedAt: lot.finishedAt,
       skus: lot.lines.map((l) => ({ code: l.product.code, imageUrl: l.product.imageUrl })),
       lines: lot.lines.map((l) => ({

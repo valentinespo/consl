@@ -17,6 +17,7 @@ export default async function LotsPage() {
     facility: l.facility,
     status: l.status,
     paymentStatus: l.paymentStatus,
+    keyDocs: l.keyDocs,
     finishedAt: l.finishedAt ? l.finishedAt.toISOString() : null,
     skus: l.skus,
     lines: l.lines,

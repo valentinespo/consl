@@ -92,6 +92,32 @@ export async function getAppSettings() {
   };
 }
 
+/** The org's key-document labels (e.g. BOL, COA) shown as presence pills on the lots table. */
+export async function getKeyDocuments(): Promise<string[]> {
+  const s = await getOrgSettings();
+  return s.keyDocuments ?? [];
+}
+
+/** Replace the org's key-document labels. Trimmed, de-duplicated (case-insensitive), max 8. */
+export async function saveKeyDocuments(labels: string[]) {
+  const gate = await requirePermission("settings", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  const seen = new Set<string>();
+  const clean: string[] = [];
+  for (const raw of labels) {
+    const label = raw.trim().slice(0, 24);
+    if (!label) continue;
+    const key = label.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    clean.push(label);
+    if (clean.length >= 8) break;
+  }
+  await saveOrgSettings({ keyDocuments: clean });
+  revalidatePath("/", "layout");
+  return { ok: true as const, labels: clean };
+}
+
 /** Save the automatic-sync schedule + restock defaults from the settings panel. */
 /** Clamp to [lo,hi]; fall back to `fallback` only when the input isn't a finite number (a real 0
  *  is kept). Mirrors the Inventory gear's clamp so the two settings surfaces agree. */

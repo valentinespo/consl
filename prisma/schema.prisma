@@ -338,6 +338,10 @@ model Settings {
   // Round every order up to a multiple of this. 0 = order any quantity. Per-SKU `batchSize` wins.
   defaultBatchSize  Int           @default(0)
   sortMode          String        @default("sales") // inventory dashboard sort: sales | available | manual
+  // Labels of the "key documents" every lot is expected to carry (e.g. BOL, COA). Each shows as a
+  // pill on the lots table — purple when a matching-label document is attached, grey when missing.
+  // Operator-editable per org; empty = the Documents column shows nothing.
+  keyDocuments      String[]      @default([])
   // --- Automatic daily Amazon sync + inventory-value snapshot ---
   syncEnabled       Boolean       @default(true)
   syncHour          Int           @default(5) // hour-of-day to run (in syncTz)
