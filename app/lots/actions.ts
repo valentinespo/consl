@@ -8,6 +8,43 @@ import { checkOwned, type OwnedModel } from "@/lib/ownership";
 import { requirePermission } from "@/lib/membership";
 import { createLotCore, defaultMaterialsFor } from "@/lib/lot-core";
 
+/**
+ * Batch-update production and/or payment status for several lots at once — the inline editing on
+ * the Production Lots table (staged edits committed together via the floating save bar).
+ * Production status is the only field here that affects COG bucketing, so recompute runs only when
+ * one actually changed; flipping to FINISHED defaults finishedAt to today, flipping back clears it
+ * (mirrors updateLot).
+ */
+export async function updateLotStatuses(
+  changes: { lotId: string; status?: "IN_PRODUCTION" | "FINISHED"; paymentStatus?: "PAID" | "DUE" }[],
+) {
+  const gate = await requirePermission("lots", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+
+  const badRef = await checkOwned(changes.map((c) => ["lot", c.lotId] as [OwnedModel, string]));
+  if (badRef) return badRef;
+
+  let productionChanged = false;
+  for (const ch of changes) {
+    const lot = await prisma.lot.findFirst({ where: { id: ch.lotId } }); // tenant-scoped
+    if (!lot) continue;
+    const data: { status?: "IN_PRODUCTION" | "FINISHED"; finishedAt?: Date | null; paymentStatus?: string } = {};
+    if (ch.status && ch.status !== lot.status) {
+      data.status = ch.status;
+      productionChanged = true;
+      // Keep an existing finished date; only default it when there isn't one. Back to production clears it.
+      if (ch.status === "FINISHED") data.finishedAt = lot.finishedAt ?? new Date();
+      else data.finishedAt = null;
+    }
+    if (ch.paymentStatus) data.paymentStatus = ch.paymentStatus === "PAID" ? "PAID" : "DUE";
+    if (Object.keys(data).length) await prisma.lot.update({ where: { id: lot.id }, data });
+  }
+
+  if (productionChanged) await recomputeAll();
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
 /** Permanently delete a lot (cascades its SKU lines, bill of materials and transactions). */
 export async function deleteLot(formData: FormData) {
   const gate = await requirePermission("lots", "delete");
