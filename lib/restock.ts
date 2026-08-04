@@ -9,7 +9,7 @@ import {
   type FinishedMovement,
   type ShippedLayer,
 } from "@/lib/finished-goods";
-import { getHandoffPlan, buildVirtualMovements, isVirtualMovement } from "@/lib/handoff";
+import { getHandoffPlan, buildVirtualMovements } from "@/lib/handoff";
 
 export type RestockRow = {
   id: string;
@@ -160,11 +160,12 @@ export async function getRestock(): Promise<{
   // is deducted from IN_PRODUCTION lot lines oldest-first — Amazon's snapshot already counts those
   // units, so leaving them in production would count them twice (the batch-18 double count).
   const virtualMovements = buildVirtualMovements(handoff, supply);
-  const virtualDate = new Map(virtualMovements.map((m) => [m.sku, m.date]));
+  const virtualById = new Map(virtualMovements.map((m) => [m.id, m]));
   const finished = runFinishedGoodsEngine(supply, [...finishedMovements, ...virtualMovements]);
 
   for (const sf of finished.shortfalls) {
-    if (!isVirtualMovement(sf.movementId)) continue;
+    const vm = virtualById.get(sf.movementId);
+    if (!vm) continue;
     let remaining = sf.shortBy;
     for (const ln of inProdLines.filter((l) => l.sku === sf.sku).sort((a, b) => a.poMs - b.poMs)) {
       if (remaining <= 1e-6) break;
@@ -174,14 +175,15 @@ export async function getRestock(): Promise<{
       inProdUnits.set(sf.sku, Math.max(0, (inProdUnits.get(sf.sku) ?? 0) - take));
       inProductionValue -= take * ln.cog;
       if (ln.provisional) provisionalValue -= take * ln.cog;
-      // Valuation continuity: the deducted units' cost travels to the channel as a shipped layer,
-      // so Amazon's stock is valued from them instead of jumping to the fallback cost.
+      // Valuation continuity: the deducted units' cost travels to the channel as a shipped layer
+      // tagged with the shipment's channel, so the value lands in the bucket the units went to.
       finished.shipped.push({
         sku: sf.sku,
         destination: "AMAZON",
+        channel: vm.channelHint ?? null,
         units: take,
         unitCost: ln.cog,
-        date: virtualDate.get(sf.sku) ?? Date.now(),
+        date: vm.date,
       });
     }
     // Any remainder beyond production floors at zero — Amazon's bucket already carries the units.
@@ -234,7 +236,14 @@ export async function getRestock(): Promise<{
     // lot, else 0. A wild estimate on the newest lot can no longer become the org-wide basis.
     const lotsOf = finishedLots.get(p.id) ?? [];
     const fb = p.standardUnitCost ?? lotsOf.find((l) => !l.provisional)?.cog ?? lotsOf[0]?.cog ?? 0;
-    const [fbaVal, awdVal] = valueChannelStock(amazonLayers.get(p.id) ?? [], [fbaTotal, awdTotal], fb);
+    const [fbaVal, awdVal] = valueChannelStock(
+      amazonLayers.get(p.id) ?? [],
+      [
+        { qty: fbaTotal, channel: "FBA" },
+        { qty: awdTotal, channel: "AWD" },
+      ],
+      fb,
+    );
     fbaValue += fbaVal;
     awdValue += awdVal;
     monthlyCOGS += ((s?.units90d ?? 0) / 90) * 30.44 * fb; // blended 90-day sell-through × unit cost

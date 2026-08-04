@@ -26,13 +26,16 @@ export interface FinishedSupply {
 
 /** Units leaving one of your facilities. Exactly one of toFacilityId / toDestination is set.
  *  `fromFacilityId: null` is a GLOBAL drain (virtual handoff): the units leave whichever pools
- *  hold the SKU, oldest layer first across every facility — facility attribution is inferred. */
+ *  hold the SKU, oldest layer first across every facility — facility attribution is inferred.
+ *  `channelHint` marks WHICH channel bucket the units went to when known (a mirrored shipment's
+ *  FBA/AWD) — it travels onto the shipped layers so valuation lands in the right bucket. */
 export interface FinishedMovement {
   id: string;
   sku: string;
   fromFacilityId: string | null;
   toFacilityId: string | null;
   toDestination: string | null; // AMAZON | SHOPIFY | TIKTOK | CUSTOMER | LOSS
+  channelHint?: string | null; // e.g. "FBA" | "AWD" — null when the operator just said "Amazon"
   quantity: number;
   date: number;
   seq: number;
@@ -46,10 +49,12 @@ export interface FinishedPool {
   value: number;
 }
 
-/** A layer of units that left the network, tagged with the destination and the cost they carried. */
+/** A layer of units that left the network, tagged with the destination and the cost they carried.
+ *  `channel` narrows the destination to a specific channel bucket (FBA/AWD) when known. */
 export interface ShippedLayer {
   sku: string;
   destination: string;
+  channel?: string | null;
   units: number;
   unitCost: number;
   date: number;
@@ -175,7 +180,7 @@ export function runFinishedGoodsEngine(supply: FinishedSupply[], movements: Fini
       }
       if (m.toDestination) {
         for (const d of drawn) {
-          shipped.push({ sku: m.sku, destination: m.toDestination, units: d.units, unitCost: d.unitCost, date: m.date });
+          shipped.push({ sku: m.sku, destination: m.toDestination, channel: m.channelHint ?? null, units: d.units, unitCost: d.unitCost, date: m.date });
         }
       }
       continue;
@@ -201,7 +206,7 @@ export function runFinishedGoodsEngine(supply: FinishedSupply[], movements: Fini
     } else if (m.toDestination) {
       // Left the network — record what it cost us, per destination.
       for (const d of drawn) {
-        shipped.push({ sku: m.sku, destination: m.toDestination, units: d.units, unitCost: d.unitCost, date: m.date });
+        shipped.push({ sku: m.sku, destination: m.toDestination, channel: m.channelHint ?? null, units: d.units, unitCost: d.unitCost, date: m.date });
       }
     }
   }
@@ -220,32 +225,51 @@ export function runFinishedGoodsEngine(supply: FinishedSupply[], movements: Fini
  * Value a channel's reported on-hand units from what was actually shipped to that channel.
  * Newest shipments first — what's still sitting at a channel is the most recently sent stock.
  *
- * `needs` are filled in order from ONE shared newest-first pass, so sub-buckets of the same
- * channel (Amazon FBA then AWD) can never draw the same layer twice. Units beyond anything we
- * recorded shipping fall back to `fallbackUnitCost` (pre-ledger history / unrecorded movements).
+ * Two passes. Layers tagged with a specific channel (a mirrored FBA/AWD shipment — we KNOW where
+ * those units went) fill THAT bucket first, so a batch shipped to AWD is valued in AWD, never
+ * smeared onto FBA's older stock. Untagged history (operator-recorded "to Amazon" movements) plus
+ * any tagged leftovers (Amazon shuffles stock between its warehouses internally) then fill the
+ * rest in ONE shared newest-first pass, so buckets can never draw the same layer twice. Units
+ * beyond anything we recorded shipping fall back to `fallbackUnitCost`.
  */
 export function valueChannelStock(
   shippedLayers: ShippedLayer[],
-  needs: number[],
+  needs: { qty: number; channel: string }[],
   fallbackUnitCost: number,
 ): number[] {
-  const remaining = [...shippedLayers]
+  const layers = [...shippedLayers]
     .sort((a, b) => b.date - a.date)
-    .map((l) => ({ units: l.units, unitCost: l.unitCost }));
-  let idx = 0;
+    .map((l) => ({ units: l.units, unitCost: l.unitCost, channel: l.channel ?? null }));
+  const want = needs.map((n) => n.qty);
+  const value = needs.map(() => 0);
 
-  return needs.map((need) => {
-    let want = need;
-    let value = 0;
-    while (want > 1e-9 && idx < remaining.length) {
-      const layer = remaining[idx];
-      const take = Math.min(layer.units, want);
-      value += take * layer.unitCost;
-      layer.units -= take;
-      want -= take;
-      if (layer.units <= 1e-9) idx++;
+  // Pass 1: channel-tagged layers into their own bucket.
+  for (let i = 0; i < needs.length; i++) {
+    for (const l of layers) {
+      if (want[i] <= 1e-9) break;
+      if (l.channel !== needs[i].channel || l.units <= 1e-9) continue;
+      const take = Math.min(l.units, want[i]);
+      value[i] += take * l.unitCost;
+      l.units -= take;
+      want[i] -= take;
     }
-    if (want > 1e-9) value += want * fallbackUnitCost;
-    return value;
-  });
+  }
+
+  // Pass 2: whatever's left (untagged history + tagged leftovers), shared, newest first.
+  let idx = 0;
+  for (let i = 0; i < needs.length; i++) {
+    while (want[i] > 1e-9 && idx < layers.length) {
+      const l = layers[idx];
+      if (l.units <= 1e-9) {
+        idx++;
+        continue;
+      }
+      const take = Math.min(l.units, want[i]);
+      value[i] += take * l.unitCost;
+      l.units -= take;
+      want[i] -= take;
+    }
+    if (want[i] > 1e-9) value[i] += want[i] * fallbackUnitCost;
+  }
+  return value;
 }

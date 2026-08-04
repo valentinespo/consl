@@ -36,8 +36,9 @@ const RECEIPT_STARTED = new Set(["RECEIVING", "DELIVERED", "CHECKED_IN", "CLOSED
 const FIRST_PULL_WINDOW = 60 * 60 * 1000;
 
 export type HandoffPlan = {
-  /** Per productId: units to drain virtually, and the replay date (max counting-shipment eff date). */
-  bySku: Map<string, { qty: number; effMs: number; shipmentIds: string[] }>;
+  /** Per productId: units to drain virtually, split by the channel the shipments went to (FBA/AWD
+   *  — drives bucket-correct valuation), and the replay date (max counting-shipment eff date). */
+  bySku: Map<string, { qty: number; byChannel: Record<string, number>; effMs: number; shipmentIds: string[] }>;
   /** Total units across all SKUs (0 ⇒ no virtual movements at all). */
   totalUnits: number;
   /** Last mirror outcome — non-"ok" drives the degraded-mode banner. Null = no Amazon connection. */
@@ -82,8 +83,7 @@ export async function getHandoffPlan(): Promise<HandoffPlan> {
   const snapBySku = new Map(snaps.map((s) => [s.productId, s]));
 
   type Acc = {
-    post: number; // qtyShipped where receiving has started — counts in full
-    preByChannel: Map<string, number>; // pre-receipt qtyShipped per channel — capped at snapshot inbound
+    byChannel: Map<string, { post: number; pre: number }>; // post = receiving started (counts in full); pre = capped at snapshot inbound
     linked: number;
     effMs: number;
     effDates: number[]; // counting shipments' effective dates (the ±30d windows)
@@ -92,7 +92,7 @@ export async function getHandoffPlan(): Promise<HandoffPlan> {
   const acc = new Map<string, Acc>();
   const of = (sku: string) => {
     let a = acc.get(sku);
-    if (!a) acc.set(sku, (a = { post: 0, preByChannel: new Map(), linked: 0, effMs: 0, effDates: [], shipmentIds: [] }));
+    if (!a) acc.set(sku, (a = { byChannel: new Map(), linked: 0, effMs: 0, effDates: [], shipmentIds: [] }));
     return a;
   };
 
@@ -103,8 +103,10 @@ export async function getHandoffPlan(): Promise<HandoffPlan> {
     for (const l of s.lines) {
       if (!l.productId || l.qtyShipped <= EPS) continue;
       const a = of(l.productId);
-      if (receiptStarted) a.post += l.qtyShipped;
-      else a.preByChannel.set(s.channel, (a.preByChannel.get(s.channel) ?? 0) + l.qtyShipped);
+      let ch = a.byChannel.get(s.channel);
+      if (!ch) a.byChannel.set(s.channel, (ch = { post: 0, pre: 0 }));
+      if (receiptStarted) ch.post += l.qtyShipped;
+      else ch.pre += l.qtyShipped;
       a.effMs = Math.max(a.effMs, effMs);
       a.effDates.push(effMs);
       if (!a.shipmentIds.includes(s.id)) a.shipmentIds.push(s.id);
@@ -129,10 +131,13 @@ export async function getHandoffPlan(): Promise<HandoffPlan> {
     // Pre-receipt shipments only count up to what Amazon's snapshot actually shows inbound for
     // that channel — labels printed with boxes still on the dock must not drain the pool yet.
     const snap = snapBySku.get(sku);
-    let capped = a.post;
-    for (const [channel, pre] of a.preByChannel) {
+    const cappedByChannel = new Map<string, number>();
+    let capped = 0;
+    for (const [channel, ch] of a.byChannel) {
       const inbound = channel === "AWD" ? snap?.awdInbound ?? 0 : snap?.fbaInbound ?? 0;
-      capped += Math.min(pre, inbound);
+      const c = ch.post + Math.min(ch.pre, inbound);
+      if (c > EPS) cappedByChannel.set(channel, c);
+      capped += c;
     }
     // Net against every unlinked movement that plausibly covers these shipments (see header).
     let netted = 0;
@@ -141,7 +146,15 @@ export async function getHandoffPlan(): Promise<HandoffPlan> {
     }
     const qty = Math.max(0, capped - a.linked - netted);
     if (qty <= EPS) continue;
-    bySku.set(sku, { qty, effMs: a.effMs, shipmentIds: a.shipmentIds });
+    // Links/netting don't know which channel they covered — scale each channel's share down
+    // proportionally so the split always sums to the netted total.
+    const scale = capped > 0 ? qty / capped : 0;
+    const byChannel: Record<string, number> = {};
+    for (const [channel, c] of cappedByChannel) {
+      const share = c * scale;
+      if (share > EPS) byChannel[channel] = share;
+    }
+    bySku.set(sku, { qty, byChannel, effMs: a.effMs, shipmentIds: a.shipmentIds });
     totalUnits += qty;
   }
 
@@ -153,9 +166,11 @@ const VIRTUAL_PREFIX = "virtual:";
 export const isVirtualMovement = (id: string) => id.startsWith(VIRTUAL_PREFIX);
 
 /**
- * The plan as engine movements — identical in both builders. Replay date is
- * max(shipment eff date, the SKU's latest supply date) so late-backfilled lots still get drained;
- * seq sits far above every real movement so same-date virtuals replay last, deterministically.
+ * The plan as engine movements — identical in both builders, ONE per (SKU, channel) so the
+ * shipped layers land in the right valuation bucket (batch 18's AWD shipment must value AWD, not
+ * FBA). Replay date is max(shipment eff date, the SKU's latest supply date) so late-backfilled
+ * lots still get drained; seq sits far above every real movement so same-date virtuals replay
+ * last, deterministically.
  */
 export function buildVirtualMovements(plan: HandoffPlan, supply: FinishedSupply[]): FinishedMovement[] {
   if (plan.totalUnits <= EPS) return [];
@@ -163,16 +178,22 @@ export function buildVirtualMovements(plan: HandoffPlan, supply: FinishedSupply[
   for (const s of supply) {
     latestSupply.set(s.sku, Math.max(latestSupply.get(s.sku) ?? 0, s.date));
   }
-  return [...plan.bySku.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([sku, v], i) => ({
-      id: `${VIRTUAL_PREFIX}${sku}`,
-      sku,
-      fromFacilityId: null,
-      toFacilityId: null,
-      toDestination: "AMAZON",
-      quantity: v.qty,
-      date: Math.max(v.effMs, latestSupply.get(sku) ?? 0),
-      seq: 1_000_000_000 + i,
-    }));
+  const out: FinishedMovement[] = [];
+  let seq = 1_000_000_000;
+  for (const [sku, v] of [...plan.bySku.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    for (const [channel, qty] of Object.entries(v.byChannel).sort(([a], [b]) => a.localeCompare(b))) {
+      out.push({
+        id: `${VIRTUAL_PREFIX}${sku}:${channel}`,
+        sku,
+        fromFacilityId: null,
+        toFacilityId: null,
+        toDestination: "AMAZON",
+        channelHint: channel,
+        quantity: qty,
+        date: Math.max(v.effMs, latestSupply.get(sku) ?? 0),
+        seq: seq++,
+      });
+    }
+  }
+  return out;
 }

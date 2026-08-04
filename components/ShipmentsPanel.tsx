@@ -55,8 +55,11 @@ export function ShipmentsPanel({
   const [cardFor, setCardFor] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const live = shipments.filter((s) => !s.historical && !s.ignored);
-  const rest = shipments.filter((s) => s.historical || s.ignored);
+  // User-ignored seller shipments STAY in the main list (with an "ignored" pill + Include button)
+  // — hiding them made an Ignore click look like the shipment vanished, while its units silently
+  // double-counted again. Only historical rows and Amazon-internal noise collapse.
+  const live = shipments.filter((s) => !s.historical && !(s.ignored && s.origin === "AMAZON"));
+  const rest = shipments.filter((s) => s.historical || (s.ignored && s.origin === "AMAZON"));
 
   const act = async (id: string, fn: () => Promise<{ ok: boolean; error?: string }>) => {
     setBusy(id);
@@ -100,8 +103,8 @@ export function ShipmentsPanel({
           </span>
         )}
         {s.ignored && (
-          <span className="pill-neutral inline-flex items-center rounded-full px-2 py-[3px] text-[10.5px] font-medium leading-none" title={s.origin === "AMAZON" ? "Amazon-internal shipment (e.g. AWD→FBA replenishment) — excluded from reconciliation" : "Excluded from reconciliation"}>
-            {s.origin === "AMAZON" ? "amazon-internal" : "ignored"}
+          <span className="pill-amber inline-flex items-center rounded-full px-2 py-[3px] text-[10.5px] font-medium leading-none" title={s.origin === "AMAZON" ? "Amazon-internal shipment (e.g. AWD→FBA replenishment) — excluded from reconciliation" : "Ignored: this shipment's units are NOT being subtracted from your stock, so they can count twice (here and at Amazon). Click Include to bring it back."}>
+            {s.origin === "AMAZON" ? "amazon-internal" : "ignored — not counted"}
           </span>
         )}
         <span className="text-[11px] text-muted">{s.effDateISO}{s.destination ? ` · ${s.destination}` : ""}</span>
