@@ -11,24 +11,29 @@ import type { FinishedSupply, FinishedMovement } from "@/lib/finished-goods";
  * nothing is written. Consumed in lockstep by BOTH stock builders (lib/restock.ts getRestock and
  * lib/queries.ts computeFinishedGoods); they must never diverge, so all rules live in this file.
  *
- * Netting is structural, matcher-independent: per SKU,
- *   virtual = max(0, cappedShipped − linked qty − unlinked AMAZON movements that plausibly cover)
- * so a hand-recorded but never-linked movement can never double-drain. "Plausibly covers" is
- * (a) dated within ±30d of a counting shipment's effective date, or (b) for shipments first seen
- * during the org's initial mirror backfill (adoption era), ANY movement dated before
- * reconcileSince — mid-flight shipments discovered on day one were inevitably already recorded by
- * hand under whatever date the operator's old books used (FBA's v0 API reports no creation date,
- * so effective dates of backfilled shipments are first-seen, far from the hand-records).
- * Over-netting degrades to today's status quo (no drain); under-netting would double-drain — so
- * netting is deliberately generous. Epsilon: qty ≤ 1e-6 is zero.
+ * Only shipments the org creates AFTER connecting count. Shipments discovered by the FIRST
+ * backfill pull predate the app — their units were produced before any lot existed here, the
+ * snapshot already counts them at Amazon, and (FBA's v0 API reporting no creation date) their
+ * effective dates are just first-seen timestamps. They stay visible in the panel but never drain.
+ *
+ * For counting shipments, netting is structural, matcher-independent: per SKU,
+ *   virtual = max(0, cappedShipped − linked qty − unlinked AMAZON movements dated within ±30d
+ *   of a counting shipment's effective date)
+ * so a hand-recorded but never-linked movement can never double-drain. Over-netting degrades to
+ * today's status quo (no drain); under-netting would double-drain — so netting is deliberately
+ * generous. Epsilon: qty ≤ 1e-6 is zero.
  */
 
 const EPS = 1e-6;
 const DAY = 86_400_000;
 /** Amazon has started receiving (or reported receipts) — the pre-receipt inbound cap no longer applies. */
 const RECEIPT_STARTED = new Set(["RECEIVING", "DELIVERED", "CHECKED_IN", "CLOSED"]);
-/** Shipments first seen within this many ms of reconcileSince belong to the initial backfill. */
-const ADOPTION_WINDOW = 2 * DAY;
+/** Mirror rows created within this window of reconcileSince came from the FIRST backfill pull.
+ *  Those shipments predate the app: their units were produced before any lot existed here (the
+ *  no-backdating onboarding stance), and Amazon's snapshot already counts them — so they are
+ *  display-only and never generate drains. Tight on purpose: a shipment the operator creates the
+ *  day after connecting must land OUTSIDE it and count normally. */
+const FIRST_PULL_WINDOW = 60 * 60 * 1000;
 
 export type HandoffPlan = {
   /** Per productId: units to drain virtually, and the replay date (max counting-shipment eff date). */
@@ -61,18 +66,20 @@ export async function getHandoffPlan(): Promise<HandoffPlan> {
     prisma.skuSnapshot.findMany({ distinct: ["productId"], orderBy: { capturedAt: "desc" } }),
   ]);
 
-  // Counting set: live, seller-origin, synced-marketplace, any status except never-moved terminals
-  // — INCLUDING CLOSED forever (received units stay inside Amazon's totals, the drain persists).
+  // Counting set: live, seller-origin, synced-marketplace, created after the first backfill pull,
+  // any status except never-moved terminals — INCLUDING CLOSED forever (received units stay
+  // inside Amazon's totals, the drain persists).
+  const reconcileMs = (conn.reconcileSince ?? new Date(0)).getTime();
   const counting = shipments.filter(
     (s) =>
       !isDeadStatus(s.extStatus) &&
       s.origin !== "AMAZON" &&
+      s.createdAt.getTime() > reconcileMs + FIRST_PULL_WINDOW &&
       (!s.marketplaceId || !conn.marketplaceId || s.marketplaceId === conn.marketplaceId),
   );
   if (counting.length === 0) return { ...EMPTY, shipmentSyncStatus: conn.shipmentSyncStatus };
 
   const snapBySku = new Map(snaps.map((s) => [s.productId, s]));
-  const reconcileMs = (conn.reconcileSince ?? new Date(0)).getTime();
 
   type Acc = {
     post: number; // qtyShipped where receiving has started — counts in full
@@ -80,13 +87,12 @@ export async function getHandoffPlan(): Promise<HandoffPlan> {
     linked: number;
     effMs: number;
     effDates: number[]; // counting shipments' effective dates (the ±30d windows)
-    adoptionEra: boolean; // any counting shipment first seen during the initial backfill
     shipmentIds: string[];
   };
   const acc = new Map<string, Acc>();
   const of = (sku: string) => {
     let a = acc.get(sku);
-    if (!a) acc.set(sku, (a = { post: 0, preByChannel: new Map(), linked: 0, effMs: 0, effDates: [], adoptionEra: false, shipmentIds: [] }));
+    if (!a) acc.set(sku, (a = { post: 0, preByChannel: new Map(), linked: 0, effMs: 0, effDates: [], shipmentIds: [] }));
     return a;
   };
 
@@ -94,7 +100,6 @@ export async function getHandoffPlan(): Promise<HandoffPlan> {
     const effMs = (s.extCreatedAt ?? s.createdAt).getTime();
     const receiptStarted =
       RECEIPT_STARTED.has(s.extStatus.toUpperCase()) || s.lines.some((l) => (l.qtyReceived ?? 0) > 0);
-    const adoption = s.createdAt.getTime() <= reconcileMs + ADOPTION_WINDOW;
     for (const l of s.lines) {
       if (!l.productId || l.qtyShipped <= EPS) continue;
       const a = of(l.productId);
@@ -102,7 +107,6 @@ export async function getHandoffPlan(): Promise<HandoffPlan> {
       else a.preByChannel.set(s.channel, (a.preByChannel.get(s.channel) ?? 0) + l.qtyShipped);
       a.effMs = Math.max(a.effMs, effMs);
       a.effDates.push(effMs);
-      a.adoptionEra = a.adoptionEra || adoption;
       if (!a.shipmentIds.includes(s.id)) a.shipmentIds.push(s.id);
     }
     for (const k of s.links) {
@@ -133,9 +137,7 @@ export async function getHandoffPlan(): Promise<HandoffPlan> {
     // Net against every unlinked movement that plausibly covers these shipments (see header).
     let netted = 0;
     for (const m of movBySku.get(sku) ?? []) {
-      const inWindow = a.effDates.some((d) => Math.abs(d - m.dateMs) <= 30 * DAY);
-      const preEra = a.adoptionEra && m.dateMs < reconcileMs;
-      if (inWindow || preEra) netted += m.qty;
+      if (a.effDates.some((d) => Math.abs(d - m.dateMs) <= 30 * DAY)) netted += m.qty;
     }
     const qty = Math.max(0, capped - a.linked - netted);
     if (qty <= EPS) continue;

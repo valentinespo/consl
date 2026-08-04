@@ -380,12 +380,34 @@ export async function getAwdInboundShipments(
       const dj = await dr.json();
       if (!dr.ok) throw new Error(`AWD shipment ${sh.shipmentId}: ${JSON.stringify(dj).slice(0, 200)}`);
       const items: InboundShipmentItem[] = [];
+      // AWD reports skuQuantities in CASES, not units — the real unit counts live in the packing
+      // tree (pallets → cases → products). Walk it, multiplying counts down to product quantity
+      // (verified live: 14 pallets × 70 cases × 20 units = 19,600 where skuQuantities said "70").
+      const treeUnits = new Map<string, number>();
+      const walk = (entry: { count?: number; distributionPackage?: { contents?: { packages?: unknown[]; products?: { sku?: string; quantity?: number }[] } } }, parentMult: number) => {
+        const mult = parentMult * (entry.count ?? 1);
+        const contents = entry.distributionPackage?.contents;
+        for (const pr of contents?.products ?? []) {
+          if (pr.sku) treeUnits.set(pr.sku, (treeUnits.get(pr.sku) ?? 0) + mult * (pr.quantity ?? 0));
+        }
+        for (const child of contents?.packages ?? []) walk(child as typeof entry, mult);
+      };
+      for (const cont of dj.shipmentContainerQuantities ?? []) walk(cont, 1);
       // Field shape has varied across doc revisions — read both spellings defensively.
       for (const sq of dj.shipmentSkuQuantities ?? dj.skuQuantities ?? []) {
+        const sku = sq.sku ?? sq.sellerSku;
+        const expQty = sq.expectedQuantity?.quantity ?? (typeof sq.expectedQuantity === "number" ? sq.expectedQuantity : 0);
+        const uom = String(sq.expectedQuantity?.unitOfMeasurement ?? "").toUpperCase();
+        const recQty = sq.receivedQuantity?.quantity ?? (typeof sq.receivedQuantity === "number" ? sq.receivedQuantity : null);
+        const inCases = uom.startsWith("CASE");
+        const tree = treeUnits.get(sku) ?? 0;
+        const unitsShipped = inCases && tree > 0 ? tree : expQty;
+        // Received comes back in the same measure — convert cases→units by this SKU's case size.
+        const perCase = inCases && tree > 0 && expQty > 0 ? tree / expQty : 1;
         items.push({
-          sellerSku: sq.sku ?? sq.sellerSku,
-          qtyShipped: sq.expectedQuantity?.quantity ?? sq.expectedQuantity ?? 0,
-          qtyReceived: sq.receivedQuantity?.quantity ?? sq.receivedQuantity ?? null,
+          sellerSku: sku,
+          qtyShipped: unitsShipped,
+          qtyReceived: recQty == null ? null : recQty * perCase,
         });
       }
       out.push({

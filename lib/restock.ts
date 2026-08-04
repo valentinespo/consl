@@ -27,7 +27,6 @@ export type RestockRow = {
   awdValue: number;
   inProduction: number;
   awaitingHandoff: number; // units counted virtually at Amazon (live shipment, no recorded movement)
-  handoffUncovered: number; // virtual units beyond pools AND production — a bad-lot-edit signal
   atLocations: number; // finished units sitting at your own facilities — made, just not shipped
   atLocationsBy: { code: string; units: number }[]; // where those units are, biggest first
   onHand: number; // fbaTotal + awdTotal (everything at Amazon, excluding production)
@@ -164,7 +163,6 @@ export async function getRestock(): Promise<{
   const virtualDate = new Map(virtualMovements.map((m) => [m.sku, m.date]));
   const finished = runFinishedGoodsEngine(supply, [...finishedMovements, ...virtualMovements]);
 
-  const uncoveredBySku = new Map<string, number>();
   for (const sf of finished.shortfalls) {
     if (!isVirtualMovement(sf.movementId)) continue;
     let remaining = sf.shortBy;
@@ -187,10 +185,6 @@ export async function getRestock(): Promise<{
       });
     }
     // Any remainder beyond production floors at zero — Amazon's bucket already carries the units.
-    // Shipping more than pools + production ever held is a bad-lot-edit signal — but only for
-    // SKUs the org actually produces; a day-one brand with no lots is expected pure shortfall.
-    const hasLots = finishedLots.has(sf.sku) || inProdLines.some((l) => l.sku === sf.sku);
-    if (remaining > 1e-6 && hasLots) uncoveredBySku.set(sf.sku, remaining);
   }
 
   // Amazon is valued from what was actually SHIPPED to Amazon — never from lots still sitting at
@@ -261,7 +255,6 @@ export async function getRestock(): Promise<{
       awdValue: awdVal,
       inProduction,
       awaitingHandoff: handoff.bySku.get(p.id)?.qty ?? 0,
-      handoffUncovered: uncoveredBySku.get(p.id) ?? 0,
       atLocations: heldBySku.get(p.id)?.units ?? 0,
       atLocationsBy: heldBySku.get(p.id)?.by ?? [],
       onHand: fbaTotal + awdTotal,
