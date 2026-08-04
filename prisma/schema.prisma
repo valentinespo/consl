@@ -441,6 +441,9 @@ model Lot {
   facility           Facility       @relation(fields: [facilityId], references: [id])
   facilityId         String
   status             LotStatus      @default(IN_PRODUCTION)
+  // Whether the supplier has been fully paid for this lot: PAID | DUE. Operator-set, independent
+  // of production status — a batch can be finished and unpaid, or paid upfront while in production.
+  paymentStatus      String         @default("DUE")
   finishedAt         DateTime? // set each time status flips to FINISHED (latest wins; kept if later unmarked)
   expiryAt           DateTime? // expiry of the finished goods — entered when the lot is FINISHED
   batchNr            String? // production batch number printed on the finished goods

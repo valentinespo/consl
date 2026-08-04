@@ -118,6 +118,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
             poDateISO: lot.poDate ? lot.poDate.toISOString().slice(0, 10) : null,
             facilityId: lot.facilityId,
             status: lot.status,
+            paymentStatus: lot.paymentStatus === "PAID" ? "PAID" : "DUE",
             finishedAtISO: lot.finishedAt ? lot.finishedAt.toISOString().slice(0, 10) : null,
             expiryISO: lot.expiryAt ? lot.expiryAt.toISOString().slice(0, 10) : null,
             batchNr: lot.batchNr,

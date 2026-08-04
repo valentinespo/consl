@@ -144,6 +144,7 @@ export async function getLots() {
       facility: lot.facility.code,
       facilityName: lot.facility.name,
       status: lot.status,
+      paymentStatus: lot.paymentStatus,
       finishedAt: lot.finishedAt,
       skus: lot.lines.map((l) => ({ code: l.product.code, imageUrl: l.product.imageUrl })),
       lines: lot.lines.map((l) => ({

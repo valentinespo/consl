@@ -55,6 +55,8 @@ export function SectionTitle({ children, action }: { children: React.ReactNode; 
 const PILL: Record<string, string> = {
   IN_PRODUCTION: "bg-accent-soft text-accent border-accent/25",
   FINISHED: "bg-positive/12 text-positive border-positive/25",
+  PAID: "bg-positive/12 text-positive border-positive/25",
+  DUE: "bg-[#fdf6ec] text-[#b45309] border-[#f3dcb8]",
   TEA: "bg-[#f5f5f5] text-[#404040] border-[#e5e5e5]",
   OTHER: "bg-[#f5f5f5] text-[#737373] border-[#e5e5e5]",
   NOT_APPLICABLE: "bg-[#fef2f2] text-[#dc2626] border-[#fecaca]",

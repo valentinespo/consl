@@ -72,6 +72,7 @@ export function LotEditor({
     poDateISO: string | null;
     facilityId: string;
     status: "IN_PRODUCTION" | "FINISHED";
+    paymentStatus: "PAID" | "DUE";
     finishedAtISO: string | null;
     expiryISO: string | null;
     batchNr: string | null;
@@ -104,6 +105,7 @@ export function LotEditor({
   const [poDateISO, setPoDateISO] = useState(initial.poDateISO ?? "");
   const [facilityId, setFacilityId] = useState(initial.facilityId);
   const [status, setStatus] = useState(initial.status);
+  const [paymentStatus, setPaymentStatus] = useState<"PAID" | "DUE">(initial.paymentStatus);
   const [finishedAtISO, setFinishedAtISO] = useState(initial.finishedAtISO ?? "");
   const [expiryISO, setExpiryISO] = useState(initial.expiryISO ?? "");
   const [batchNr, setBatchNr] = useState(initial.batchNr ?? "");
@@ -123,19 +125,19 @@ export function LotEditor({
 
   // ---- Dirty tracking ----
   const snapshot = (
-    pn: string, pd: string, fac: string, st: string, fin: string, ex: string, bn: string, nt: string, ls: StateLine[], sh: Mat[], ov: Record<string, Mat[]>,
+    pn: string, pd: string, fac: string, st: string, pay: string, fin: string, ex: string, bn: string, nt: string, ls: StateLine[], sh: Mat[], ov: Record<string, Mat[]>,
   ) => {
     const keys = new Set(ls.map((l) => l.key));
     const cleanOv = Object.fromEntries(Object.entries(ov).filter(([k]) => keys.has(k)).map(([k, v]) => [k, matSig(v)]));
     return JSON.stringify({
-      pn: pn.trim(), pd, fac, st, fin: st === "FINISHED" ? fin : "", ex: st === "FINISHED" ? ex : "", bn: st === "FINISHED" ? bn.trim() : "", nt: nt.trim(),
+      pn: pn.trim(), pd, fac, st, pay, fin: st === "FINISHED" ? fin : "", ex: st === "FINISHED" ? ex : "", bn: st === "FINISHED" ? bn.trim() : "", nt: nt.trim(),
       l: ls.map((l) => `${l.id ?? "NEW"}|${l.productId}|${Number(l.units) || 0}`),
       sh: matSig(sh), ov: cleanOv,
     });
   };
-  const current = snapshot(poNumber, poDateISO, facilityId, status, finishedAtISO, expiryISO, batchNr, notes, lines, shared, overrides);
+  const current = snapshot(poNumber, poDateISO, facilityId, status, paymentStatus, finishedAtISO, expiryISO, batchNr, notes, lines, shared, overrides);
   const original = useMemo(
-    () => snapshot(initial.poNumber ?? "", initial.poDateISO ?? "", initial.facilityId, initial.status, initial.finishedAtISO ?? "", initial.expiryISO ?? "", initial.batchNr ?? "", initial.notes ?? "", seed.lines, seed.shared, seed.overrides),
+    () => snapshot(initial.poNumber ?? "", initial.poDateISO ?? "", initial.facilityId, initial.status, initial.paymentStatus, initial.finishedAtISO ?? "", initial.expiryISO ?? "", initial.batchNr ?? "", initial.notes ?? "", seed.lines, seed.shared, seed.overrides),
     [initial, seed],
   );
   const dirty = current !== original;
@@ -167,6 +169,7 @@ export function LotEditor({
     setPoDateISO(initial.poDateISO ?? "");
     setFacilityId(initial.facilityId);
     setStatus(initial.status);
+    setPaymentStatus(initial.paymentStatus);
     setFinishedAtISO(initial.finishedAtISO ?? "");
     setExpiryISO(initial.expiryISO ?? "");
     setBatchNr(initial.batchNr ?? "");
@@ -189,6 +192,7 @@ export function LotEditor({
         poDateISO: poDateISO || null,
         facilityId,
         status,
+        paymentStatus,
         finishedAtISO: status === "FINISHED" ? finishedAtISO || null : null,
         expiryISO: status === "FINISHED" ? expiryISO || null : null,
         batchNr: status === "FINISHED" ? batchNr.trim() || null : null,
@@ -238,6 +242,12 @@ export function LotEditor({
           >
             <option value="IN_PRODUCTION">In production</option>
             <option value="FINISHED">Finished</option>
+          </select>
+        </Field>
+        <Field label="Payment">
+          <select value={paymentStatus} onChange={(e) => setPaymentStatus(e.target.value as "PAID" | "DUE")} className={inputCls}>
+            <option value="DUE">Due — not fully paid</option>
+            <option value="PAID">Paid in full</option>
           </select>
         </Field>
         {status === "FINISHED" && (

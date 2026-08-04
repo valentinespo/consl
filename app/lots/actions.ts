@@ -66,6 +66,7 @@ export type LotEditPayload = {
   poDateISO: string | null;
   facilityId: string;
   status: "IN_PRODUCTION" | "FINISHED";
+  paymentStatus: "PAID" | "DUE"; // supplier paid in full for this lot, or not yet
   finishedAtISO: string | null; // required when FINISHED (defaults to today); ignored otherwise
   expiryISO: string | null; // finished-goods expiry; only meaningful when FINISHED
   batchNr: string | null; // production batch number; only meaningful when FINISHED
@@ -125,6 +126,7 @@ export async function updateLot(payload: LotEditPayload) {
         poDate: payload.poDateISO ? new Date(payload.poDateISO) : null,
         facilityId: payload.facilityId,
         status: payload.status,
+        paymentStatus: payload.paymentStatus === "PAID" ? "PAID" : "DUE",
         finishedAt,
         expiryAt,
         batchNr,

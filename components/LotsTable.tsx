@@ -15,6 +15,7 @@ export type LotRow = {
   poDate: string | null;
   facility: string;
   status: string;
+  paymentStatus: string;
   finishedAt: string | null;
   skus: { code: string; imageUrl: string | null }[];
   lines: LotLineSummary[];
@@ -75,17 +76,22 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
       <div className="overflow-x-auto rounded-[var(--radius-card)] border border-border bg-surface">
         <table className="w-full min-w-[800px] text-[13px]">
           <thead>
-            <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-muted">
-              <th className="px-4 py-2.5 font-medium">PO date</th>
-              <th className="px-3 py-2.5 font-medium">Lot</th>
-              <th className="px-3 py-2.5 font-medium">SKUs</th>
-              <th className="px-3 py-2.5 font-medium">Facility</th>
-              <th className="px-3 py-2.5 text-right font-medium">Units</th>
-              <th className="px-3 py-2.5 text-right font-medium">Avg COG/unit</th>
-              <th className="px-3 py-2.5 text-right font-medium">Total COG</th>
-              <th className="px-3 py-2.5 text-center font-medium">Txns</th>
-              <th className="px-3 py-2.5 font-medium">Status</th>
-              <th className="px-4 py-2.5"></th>
+            <tr className="text-left text-[11px] uppercase tracking-wide text-muted">
+              <th rowSpan={2} className="border-b border-line px-4 py-2.5 font-medium align-bottom">PO date</th>
+              <th rowSpan={2} className="border-b border-line px-3 py-2.5 font-medium align-bottom">Lot</th>
+              <th rowSpan={2} className="border-b border-line px-3 py-2.5 font-medium align-bottom">SKUs</th>
+              <th rowSpan={2} className="border-b border-line px-3 py-2.5 font-medium align-bottom">Facility</th>
+              <th rowSpan={2} className="border-b border-line px-3 py-2.5 text-right font-medium align-bottom">Units</th>
+              <th rowSpan={2} className="border-b border-line px-3 py-2.5 text-right font-medium align-bottom">Avg COG/unit</th>
+              <th rowSpan={2} className="border-b border-line px-3 py-2.5 text-right font-medium align-bottom">Total COG</th>
+              <th rowSpan={2} className="border-b border-line px-3 py-2.5 text-center font-medium align-bottom">Txns</th>
+              {/* Grouped "Status" bar sits on a faintly greyed background over its two sub-columns. */}
+              <th colSpan={2} className="border-b border-l border-line bg-surface-2/60 px-3 pt-2 pb-1 text-center font-medium">Status</th>
+              <th rowSpan={2} className="border-b border-line px-4 py-2.5 align-bottom"></th>
+            </tr>
+            <tr className="text-left text-[11px] uppercase tracking-wide text-muted">
+              <th className="border-b border-l border-line bg-surface-2/60 px-3 pb-2 pt-1 font-medium">Production</th>
+              <th className="border-b border-line bg-surface-2/60 px-3 pb-2 pt-1 font-medium">Payment</th>
             </tr>
           </thead>
           <tbody>
@@ -117,11 +123,14 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
                 <td className="px-3 py-3 text-right tabular text-ink-soft">{perUnit(l.avgCogPerUnit)}</td>
                 <td className="px-3 py-3 text-right font-medium tabular">{money(l.cogTotal)}</td>
                 <td className="px-3 py-3 text-center tabular text-muted">{l.txnCount}</td>
-                <td className="px-3 py-3">
+                <td className="border-l border-line px-3 py-3">
                   <Pill kind={l.status}>{l.status === "IN_PRODUCTION" ? "In production" : "Finished"}</Pill>
                   {l.status === "FINISHED" && l.finishedAt && (
                     <div className="mt-1 text-[10.5px] text-muted">Finished {date(l.finishedAt)}</div>
                   )}
+                </td>
+                <td className="px-3 py-3">
+                  <Pill kind={l.paymentStatus}>{l.paymentStatus === "PAID" ? "Paid" : "Due"}</Pill>
                 </td>
                 <td className="px-4 py-3 text-right">
                   <Link
@@ -134,7 +143,7 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
                 </td>
               </tr>
               <ExpandRow open={open} className="border-b border-line bg-surface-2">
-                  <td colSpan={10} className="px-4 py-3">
+                  <td colSpan={11} className="px-4 py-3">
                     <LotLineCards lines={l.lines} />
                   </td>
               </ExpandRow>
@@ -143,7 +152,7 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-4 py-10 text-center text-[13px] text-muted">
+                <td colSpan={11} className="px-4 py-10 text-center text-[13px] text-muted">
                   {lots.length === 0
                     ? "No production lots yet — create one to start tracking cost and stock."
                     : "No lots match your filters."}
