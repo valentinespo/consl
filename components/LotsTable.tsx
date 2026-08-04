@@ -1,6 +1,7 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronRight, ChevronDown } from "@/components/icons";
@@ -29,24 +30,19 @@ export type LotRow = {
   txnCount: number;
 };
 
-// Pill tints keyed by status value — text colour on the wrapper (so the caret matches), bg/border
-// on the select itself.
-const TEXT_CLS: Record<string, string> = {
-  IN_PRODUCTION: "text-accent",
-  FINISHED: "text-positive",
-  PAID: "text-positive",
-  DUE: "text-[#b45309]",
+// Each status value → its frosted pill class (the design-system tokens, so both themes follow).
+const PILL_CLS: Record<string, string> = {
+  IN_PRODUCTION: "pill-chart",
+  FINISHED: "pill-green",
+  PAID: "pill-green",
+  DUE: "pill-amber",
 };
-const BG_CLS: Record<string, string> = {
-  IN_PRODUCTION: "bg-accent-soft border-accent/25",
-  FINISHED: "bg-positive/12 border-positive/25",
-  PAID: "bg-positive/12 border-positive/25",
-  DUE: "bg-[#fdf6ec] border-[#f3dcb8]",
-};
+type StatusOption = { value: string; label: string };
 
-/** A pill that is also a dropdown — click to change the value; the change is staged, not saved,
- *  until the floating bar's Save. A violet ring marks a staged (unsaved) edit. */
-function StatusSelect({
+/** A frosted pill that is ALSO a dropdown — the button hugs its own text (a native <select> would
+ *  size to its widest option), the menu renders in a portal so the table's overflow can't clip it.
+ *  Changes are staged (violet ring), not saved, until the floating bar's Save. */
+function StatusDropdown({
   value,
   edited,
   options,
@@ -54,27 +50,70 @@ function StatusSelect({
 }: {
   value: string;
   edited: boolean;
-  options: { value: string; label: string }[];
+  options: StatusOption[];
   onChange: (v: string) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const ref = useRef<HTMLSpanElement>(null);
+  const cur = options.find((o) => o.value === value) ?? options[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    document.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [open]);
+
+  const toggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const r = ref.current!.getBoundingClientRect();
+    setPos({ top: r.bottom + 4, left: r.left });
+    setOpen((o) => !o);
+  };
+
   return (
-    <span className={`relative inline-block ${TEXT_CLS[value] ?? "text-ink-soft"}`}>
-      <select
-        value={value}
-        onClick={(e) => e.stopPropagation()}
-        onChange={(e) => onChange(e.target.value)}
-        // globals.css paints an SVG arrow as a select's background-image; kill it (and the native
-        // appearance) so only the single coloured caret below shows — no double chevron.
-        style={{ appearance: "none", WebkitAppearance: "none", MozAppearance: "none", backgroundImage: "none" }}
-        className={`cursor-pointer whitespace-nowrap rounded-full border py-0.5 pl-2.5 pr-6 text-[11px] font-medium text-current outline-none ${BG_CLS[value] ?? "border-border bg-surface-2"} ${edited ? "ring-2 ring-accent/40" : ""}`}
+    <span ref={ref} className="relative inline-block">
+      <button
+        type="button"
+        onClick={toggle}
+        className={`${PILL_CLS[value] ?? "pill-neutral"} inline-flex items-center gap-1 whitespace-nowrap rounded-full border py-0.5 pl-2.5 pr-2 text-[11px] font-medium ${edited ? "ring-2 ring-accent/40" : ""}`}
       >
-        {options.map((o) => (
-          <option key={o.value} value={o.value} className="text-ink">
-            {o.label}
-          </option>
-        ))}
-      </select>
-      <ChevronDown size={11} className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-current opacity-60" />
+        {cur.label}
+        <ChevronDown size={11} className="opacity-60" />
+      </button>
+      {open &&
+        pos &&
+        createPortal(
+          <div
+            style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 60 }}
+            onClick={(e) => e.stopPropagation()}
+            className="min-w-[9rem] overflow-hidden rounded-lg border border-border bg-surface py-1 shadow-lg"
+          >
+            {options.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChange(o.value);
+                  setOpen(false);
+                }}
+                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] hover:bg-surface-2 ${o.value === value ? "font-medium text-ink" : "text-ink-soft"}`}
+              >
+                <span className={`${PILL_CLS[o.value] ?? "pill-neutral"} h-2 w-2 rounded-full border`} />
+                {o.label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
     </span>
   );
 }
@@ -233,11 +272,11 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
                   </div>
                 </td>
                 <td className="px-3 py-3">
-                  <div className="flex -space-x-1.5">
-                    {l.skus.slice(0, 5).map((s) => (
+                  <div className="flex items-center -space-x-1.5">
+                    {l.skus.slice(0, 3).map((s) => (
                       <SkuAvatar key={s.code} code={s.code} size={26} imageUrl={s.imageUrl} />
                     ))}
-                    {l.skus.length > 5 && <span className="ml-2 text-[11px] text-muted">+{l.skus.length - 5}</span>}
+                    {l.skus.length > 3 && <span className="pl-2.5 text-[11px] text-muted">+{l.skus.length - 3}</span>}
                   </div>
                 </td>
                 <td className="px-3 py-3"><LotDocsCell documents={l.documents} /></td>
@@ -248,7 +287,7 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
                 <td className="px-3 py-3 text-center tabular text-muted">{l.txnCount}</td>
                 {/* Production — editable */}
                 <td className="px-3 py-3 text-center">
-                  <StatusSelect
+                  <StatusDropdown
                     value={st}
                     edited={edits[l.id]?.status != null}
                     onChange={(v) => stage(l, "status", v)}
@@ -263,7 +302,7 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
                 </td>
                 {/* Payment — editable */}
                 <td className="px-3 py-3 text-center">
-                  <StatusSelect
+                  <StatusDropdown
                     value={pay}
                     edited={edits[l.id]?.paymentStatus != null}
                     onChange={(v) => stage(l, "paymentStatus", v)}
@@ -277,7 +316,7 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
                   <Link
                     href={`/lots/${l.id}`}
                     onClick={(e) => e.stopPropagation()}
-                    className="text-[12.5px] font-medium text-accent hover:underline"
+                    className="whitespace-nowrap text-[12.5px] font-medium text-accent hover:underline"
                   >
                     Open →
                   </Link>
