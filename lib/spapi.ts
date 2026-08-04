@@ -58,6 +58,7 @@ export type FbaRow = {
   sellerSku: string;
   asin: string | null;
   fnsku: string | null;
+  name: string | null; // Amazon's listing title — the catalog-import bootstrap
   available: number;
   inbound: number;
   reserved: number;
@@ -88,6 +89,7 @@ export async function getFbaInventory(client: SpApiClient): Promise<FbaRow[]> {
         sellerSku: s.sellerSku,
         asin: s.asin || null,
         fnsku: s.fnSku || null,
+        name: s.productName || null,
         available: d.fulfillableQuantity || 0,
         inbound,
         reserved: d.reservedQuantity?.totalReservedQuantity || 0,
@@ -98,6 +100,26 @@ export async function getFbaInventory(client: SpApiClient): Promise<FbaRow[]> {
     next = j.pagination?.nextToken || "";
   } while (next);
   return out;
+}
+
+/** The main product image URL for an ASIN, from the Catalog Items API. Null when unavailable —
+ *  the catalog is optional decoration, never a hard failure. Picks the largest MAIN-variant image. */
+export async function getCatalogImage(client: SpApiClient, asin: string): Promise<string | null> {
+  const q = new URLSearchParams({ marketplaceIds: client.marketplaceId, includedData: "images" });
+  const r = await sp(client, `/catalog/2022-04-01/items/${encodeURIComponent(asin)}?${q.toString()}`);
+  if (!r.ok) return null;
+  const j = await r.json().catch(() => null);
+  if (!j) return null;
+  // images: [{ marketplaceId, images: [{ variant, link, height, width }] }]
+  const groups: { marketplaceId?: string; images?: { variant?: string; link?: string; height?: number; width?: number }[] }[] =
+    j.images ?? [];
+  const group = groups.find((g) => g.marketplaceId === client.marketplaceId) ?? groups[0];
+  const imgs = group?.images ?? [];
+  const mains = imgs.filter((i) => (i.variant ?? "").toUpperCase() === "MAIN" && i.link);
+  const pool = mains.length ? mains : imgs.filter((i) => i.link);
+  if (!pool.length) return null;
+  pool.sort((a, b) => (b.height ?? 0) * (b.width ?? 0) - (a.height ?? 0) * (a.width ?? 0));
+  return pool[0].link ?? null;
 }
 
 export type AwdRow = { sku: string; onhand: number; inbound: number };

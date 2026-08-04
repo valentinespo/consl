@@ -69,8 +69,8 @@ export function ProductEditor({ product }: { product: ProductForEdit }) {
         </div>
         <div className="min-w-0 flex-1 space-y-3">
           <div className="grid gap-3 sm:grid-cols-[160px_1fr]">
-            <Field label="SKU code" hint="Your internal code — any length.">
-              <input value={code} onChange={(e) => setCode(e.target.value)} className={`${inputCls} font-semibold uppercase`} />
+            <Field label="Abbreviation" hint="A short code (max 8) used across the app. Real platform SKUs live below.">
+              <input value={code} onChange={(e) => setCode(e.target.value.slice(0, 8))} maxLength={8} className={`${inputCls} font-semibold uppercase`} />
             </Field>
             <Field label="Product name">
               <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />

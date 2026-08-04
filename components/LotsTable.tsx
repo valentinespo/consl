@@ -63,7 +63,10 @@ function StatusSelect({
         value={value}
         onClick={(e) => e.stopPropagation()}
         onChange={(e) => onChange(e.target.value)}
-        className={`cursor-pointer appearance-none whitespace-nowrap rounded-full border py-0.5 pl-2.5 pr-6 text-[11px] font-medium text-current outline-none ${BG_CLS[value] ?? "border-border bg-surface-2"} ${edited ? "ring-2 ring-accent/40" : ""}`}
+        // Force the native dropdown arrow off (some engines ignore Tailwind's appearance-none) so
+        // only the coloured caret below shows — no double chevron.
+        style={{ appearance: "none", WebkitAppearance: "none", MozAppearance: "none" }}
+        className={`cursor-pointer whitespace-nowrap rounded-full border py-0.5 pl-2.5 pr-6 text-[11px] font-medium text-current outline-none ${BG_CLS[value] ?? "border-border bg-surface-2"} ${edited ? "ring-2 ring-accent/40" : ""}`}
       >
         {options.map((o) => (
           <option key={o.value} value={o.value} className="text-ink">

@@ -53,11 +53,120 @@ function slugCode(name: string, max = 10): string {
 }
 
 /** Create a product (SKU). Returns the created (or existing) product. */
+// Words skipped when building an abbreviation from a product name (so "Liver and Kidney Detox
+// Tea" → LKD, not LAK).
+const CODE_STOPWORDS = new Set(["AND", "THE", "OF", "WITH", "FOR", "A", "AN", "TO", "IN", "ON", "&"]);
+
+/** A 3-letter abbreviation derived from a product name — initials of its significant words, padded
+ *  from the first word's letters if there aren't three. Uppercase, letters/digits only. */
+function abbrevFromName(name: string): string {
+  const words = name
+    .toUpperCase()
+    .replace(/[^A-Z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((w) => !CODE_STOPWORDS.has(w));
+  let base = words.map((w) => w[0]).join("");
+  if (base.length < 3) {
+    const letters = ((words[0] ?? name.toUpperCase().replace(/[^A-Z0-9]/g, "")) + "XXX").replace(/[^A-Z0-9]/g, "");
+    base = (base + letters).slice(0, 3);
+  }
+  return base.slice(0, 3) || "SKU";
+}
+
+/** A unique code (never repeats) for a new product: the 3-letter abbreviation, or that base plus a
+ *  numeric suffix (LKD → LKD2 → LKD3…) for variations/collisions. `used` is mutated to reserve it. */
+function uniqueProductCode(name: string, used: Set<string>): string {
+  const base = abbrevFromName(name);
+  if (!used.has(base)) {
+    used.add(base);
+    return base;
+  }
+  for (let n = 2; n <= 9999; n++) {
+    const cand = `${base}${n}`.slice(0, 8);
+    if (!used.has(cand)) {
+      used.add(cand);
+      return cand;
+    }
+  }
+  const fallback = `${base}${used.size}`.slice(0, 8);
+  used.add(fallback);
+  return fallback;
+}
+
+/**
+ * Catalog bootstrap — create products from the org's live FBA inventory summaries so onboarding
+ * isn't a manual wall. Idempotent (SKUs already present, matched by sellerSku or ASIN, are skipped).
+ * Each new product gets an auto-generated unique 3-letter abbreviation and, best-effort, Amazon's
+ * main product image pulled in as its photo. The real platform SKU/ASIN are stored on the mapping.
+ */
+export async function importAmazonCatalog() {
+  const gate = await requirePermission("catalog", "create");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  const conn = await prisma.integration.findFirst({ where: { provider: "amazon", status: "connected" } });
+  if (!conn?.refreshTokenEnc) return { ok: false as const, error: "Connect Amazon first (Settings → Integrations)." };
+
+  const { makeClient, getFbaInventory, getCatalogImage } = await import("@/lib/spapi");
+  const { decryptSecret } = await import("@/lib/secret-box");
+  const client = makeClient({
+    refreshToken: decryptSecret(conn.refreshTokenEnc),
+    marketplaceId: conn.marketplaceId ?? "ATVPDKIKX0DER",
+    region: conn.region ?? "na",
+  });
+  let rows;
+  try {
+    rows = await getFbaInventory(client);
+  } catch (e) {
+    return { ok: false as const, error: `Amazon pull failed: ${(e as Error).message.slice(0, 200)}` };
+  }
+
+  const existing = await prisma.product.findMany({ select: { code: true, sellerSku: true, asin: true } });
+  const knownSku = new Set(existing.map((p) => p.sellerSku).filter(Boolean) as string[]);
+  const knownAsin = new Set(existing.map((p) => p.asin).filter(Boolean) as string[]);
+  const usedCodes = new Set(existing.map((p) => p.code));
+
+  let created = 0;
+  let images = 0;
+  for (const r of rows) {
+    if (!r.sellerSku || knownSku.has(r.sellerSku) || (r.asin && knownAsin.has(r.asin))) continue;
+    const name = r.name?.trim() || r.sellerSku;
+    const code = uniqueProductCode(name, usedCodes);
+    knownSku.add(r.sellerSku);
+    if (r.asin) knownAsin.add(r.asin);
+
+    // Best-effort main image — never let a failed image block the product.
+    let imageUrl: string | null = null;
+    if (r.asin) {
+      try {
+        const src = await getCatalogImage(client, r.asin);
+        if (src) {
+          const resp = await fetch(src);
+          if (resp.ok) {
+            const buf = Buffer.from(await resp.arrayBuffer());
+            const ext = (src.split("?")[0].split(".").pop() ?? "jpg").toLowerCase();
+            const safeExt = ["jpg", "jpeg", "png", "webp", "gif"].includes(ext) ? ext : "jpg";
+            const key = `product/import-${safeKeySegment(r.asin)}-${Date.now()}.${safeExt}`;
+            imageUrl = await saveImage(key, buf, `image/${safeExt === "jpg" ? "jpeg" : safeExt}`);
+            images++;
+          }
+        }
+      } catch {
+        /* image is decoration — carry on without it */
+      }
+    }
+
+    await prisma.product.create({ data: { code, name, sellerSku: r.sellerSku, asin: r.asin, imageUrl } });
+    created++;
+  }
+  revalidatePath("/", "layout");
+  return { ok: true as const, created, images, total: rows.length };
+}
+
 export async function createProduct(input: { code: string; name?: string }) {
   const gate = await requirePermission("catalog", "create");
   if (!gate.ok) return { ok: false as const, error: gate.error };
-  const code = input.code.trim().toUpperCase().replace(/\s+/g, "");
-  if (!code) return { ok: false as const, error: "SKU code required" };
+  const code = input.code.trim().toUpperCase().replace(/\s+/g, "").slice(0, 8);
+  if (!code) return { ok: false as const, error: "Abbreviation required" };
   const name = (input.name ?? "").trim() || code;
   const existing = await prisma.product.findFirst({ where: { code } });
   if (existing) return { ok: true as const, id: existing.id, code: existing.code, name: existing.name, existed: true };
@@ -99,15 +208,15 @@ export async function createMaterial(input: {
 export async function updateProduct(input: { id: string; code: string; name: string; notes?: string }) {
   const gate = await requirePermission("catalog", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };
-  const code = input.code.trim().toUpperCase().replace(/\s+/g, "");
+  const code = input.code.trim().toUpperCase().replace(/\s+/g, "").slice(0, 8);
   const name = input.name.trim();
-  if (!code) return { ok: false as const, error: "SKU code required" };
+  if (!code) return { ok: false as const, error: "Abbreviation required" };
   if (!name) return { ok: false as const, error: "Name required" };
   const current = await prisma.product.findUnique({ where: { id: input.id } });
   if (!current) return { ok: false as const, error: "SKU not found" };
   if (code !== current.code) {
     const clash = await prisma.product.findFirst({ where: { code } });
-    if (clash) return { ok: false as const, error: `SKU code ${code} already exists` };
+    if (clash) return { ok: false as const, error: `Abbreviation ${code} already exists` };
   }
 
   await prisma.$transaction(async (tx) => {
