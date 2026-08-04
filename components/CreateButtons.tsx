@@ -10,6 +10,7 @@ import { useCan } from "@/components/AccessProvider";
  *  3-letter abbreviation, and (best-effort) Amazon's main image. Idempotent server-side. */
 export function ImportAmazonCatalogButton() {
   const [pending, setPending] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const router = useRouter();
   const canCreate = useCan("catalog", "create");
@@ -17,6 +18,7 @@ export function ImportAmazonCatalogButton() {
 
   async function run() {
     setPending(true);
+    setConfirming(false);
     setNote(null);
     try {
       const r = await importAmazonCatalog();
@@ -37,15 +39,34 @@ export function ImportAmazonCatalogButton() {
     }
   }
 
+  // Two-step: the first click asks to confirm (a stray click can't import a pile of listings), the
+  // second actually runs it.
+  if (confirming) {
+    return (
+      <span className="inline-flex items-center gap-2">
+        <span className="text-[12px] text-ink-soft">Import every Amazon SKU not already in your catalog?</span>
+        <button
+          onClick={run}
+          disabled={pending}
+          className="rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-bg hover:opacity-90 disabled:opacity-40"
+        >
+          {pending ? "Importing…" : "Yes, import"}
+        </button>
+        <button onClick={() => setConfirming(false)} disabled={pending} className="rounded-lg px-2.5 py-1.5 text-[12.5px] text-muted hover:text-ink disabled:opacity-40">
+          Cancel
+        </button>
+      </span>
+    );
+  }
+
   return (
     <span className="inline-flex items-center gap-2">
       {note && <span className="text-[12px] text-muted">{note}</span>}
       <button
-        onClick={run}
-        disabled={pending}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12.5px] font-medium text-ink-soft hover:bg-surface-2 disabled:opacity-40"
+        onClick={() => { setNote(null); setConfirming(true); }}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12.5px] font-medium text-ink-soft hover:bg-surface-2"
       >
-        {pending ? "Importing…" : "Import from Amazon"}
+        Import from Amazon
       </button>
     </span>
   );
