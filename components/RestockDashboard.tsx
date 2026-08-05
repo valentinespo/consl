@@ -333,9 +333,11 @@ export function RestockDashboard({
                 <div>
                   <div className="tabular text-[15px] font-medium leading-none text-ink">{mo(r.onHandCover)}<span className="text-[10.5px] font-normal text-muted"> mo</span></div>
                   <div className="mt-0.5 text-[10px] uppercase tracking-wide text-muted">On hand</div>
+                  {/* Where the stock is, not what to do — the Action column owns "ship it".
+                      The engine still gates AWD behind ship time + buffer either way. */}
                   {r.awdTotal > 0 && (
                     <div className="mt-1.5 tabular text-[13px] font-medium leading-none" style={{ color: SEG.awd }}>
-                      +{mo(r.awdCover)}<span className="text-[10.5px] font-normal text-muted"> mo in AWD (needs shipping)</span>
+                      +{mo(r.awdCover)}<span className="text-[10.5px] font-normal text-muted"> mo in AWD</span>
                     </div>
                   )}
                   {r.atLocations > 0 && (
