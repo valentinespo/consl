@@ -13,7 +13,7 @@ import {
 } from "@/lib/queries";
 import { getFmt } from "@/lib/fmt-server";
 import { buildCostChips } from "@/lib/lot-costs";
-import { PageHeader, Pill, FacilityTag } from "@/components/ui";
+import { PageHeader } from "@/components/ui";
 import { PrevNextNav, neighbours } from "@/components/PrevNextNav";
 import { TransactionInvoicesTable } from "@/components/TransactionInvoicesTable";
 import { LotEditor, type EditorLine } from "@/components/LotEditor";
@@ -78,18 +78,17 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
       </Link>
       <PageHeader title={`Lot #${lot.lotNr}`} subtitle={lot.poNumber ? `PO ${lot.poNumber}` : undefined}>
         <div className="flex flex-wrap items-center gap-2">
-          <FacilityTag code={lot.facility.code} />
-          <Pill kind={lot.status}>{lot.status === "IN_PRODUCTION" ? "In production" : "Finished"}</Pill>
+          {/* LotEditor portals its Production + Payment pill-dropdowns here, so they stage into
+              the form's single save bar. PO date/facility live once, as the form fields below. */}
+          <span id="lot-status-slot" className="flex items-center gap-2" />
           {/* Same list order as the Production Lots page, so the arrows walk it the way it reads. */}
           <PrevNextNav {...neighbours(lotOptions, id, "/lots")} />
         </div>
       </PageHeader>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <Meta label="PO date" value={date(lot.poDate)} />
-        <Meta label="Facility" value={lot.facility.name} />
         <Meta label="Total units" value={qty(totalUnits)} />
-        <Meta label="Total COG" value={money(totalCog, 2)} accent={!hasShortfall} />
+        <Meta label="Total COG" value={money(totalCog, 2)} />
       </div>
 
       {hasShortfall && (
@@ -162,9 +161,9 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
 }
 
 
-function Meta({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
+function Meta({ label, value }: { label: string; value: string }) {
   return (
-    <div className={`rounded-[var(--radius-card)] border p-4 ${accent ? "border-accent-strong bg-accent-soft" : "border-border bg-surface"}`}>
+    <div className="rounded-[var(--radius-card)] border border-border bg-surface p-4">
       <div className="text-[12px] text-muted">{label}</div>
       <div className="mt-1 font-semibold text-ink tabular">{value}</div>
     </div>

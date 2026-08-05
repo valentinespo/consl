@@ -1,10 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Plus, X, AlertTriangle } from "@/components/icons";
 import { DatePicker } from "@/components/DatePicker";
 import { Card, SkuAvatar, SectionTitle } from "@/components/ui";
+import { StatusDropdown } from "@/components/StatusDropdown";
 import { useMoney } from "@/components/CurrencyProvider";
 import { updateLot } from "@/app/lots/actions";
 import { LotBom, type MaterialType, type Mat } from "@/components/LotBom";
@@ -118,6 +120,10 @@ export function LotEditor({
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The page header reserves a slot for the status pills; the editor portals its dropdowns there
+  // so status/payment stay part of THIS form's staged state and single save bar.
+  const [pillSlot, setPillSlot] = useState<Element | null>(null);
+  useEffect(() => setPillSlot(document.getElementById("lot-status-slot")), []);
 
   const facility = facilities.find((f) => f.id === facilityId);
   const availableProducts = products.filter((p) => !lines.some((l) => l.productId === p.id));
@@ -219,6 +225,39 @@ export function LotEditor({
 
   return (
     <div>
+      {/* Status pills, portaled into the page header — dropdowns like the lots table, staged into
+          this form's save bar. The old Status/Payment fields below are gone: one control each. */}
+      {pillSlot &&
+        createPortal(
+          <>
+            <StatusDropdown
+              value={status}
+              edited={status !== initial.status}
+              onChange={(v) => {
+                const next = v as "IN_PRODUCTION" | "FINISHED";
+                setStatus(next);
+                // Flipping to Finished proposes today; the date field stays fully editable and is
+                // the lot's single source of truth — flipping back to production erases it on save.
+                if (next === "FINISHED" && !finishedAtISO) setFinishedAtISO(new Date().toLocaleDateString("en-CA"));
+              }}
+              options={[
+                { value: "IN_PRODUCTION", label: "In production" },
+                { value: "FINISHED", label: "Finished" },
+              ]}
+            />
+            <StatusDropdown
+              value={paymentStatus}
+              edited={paymentStatus !== initial.paymentStatus}
+              onChange={(v) => setPaymentStatus(v as "PAID" | "DUE")}
+              options={[
+                { value: "DUE", label: "Due" },
+                { value: "PAID", label: "Fully paid" },
+              ]}
+            />
+          </>,
+          pillSlot,
+        )}
+
       {/* Details */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
         <Field label="PO number"><input value={poNumber} onChange={(e) => setPoNumber(e.target.value)} placeholder="#7-CCP" className={inputCls} /></Field>
@@ -226,28 +265,6 @@ export function LotEditor({
         <Field label="Facility">
           <select value={facilityId} onChange={(e) => setFacilityId(e.target.value)} className={inputCls}>
             {facilities.map((f) => (<option key={f.id} value={f.id}>{f.code} — {f.name}</option>))}
-          </select>
-        </Field>
-        <Field label="Status">
-          <select
-            value={status}
-            onChange={(e) => {
-              const next = e.target.value as "IN_PRODUCTION" | "FINISHED";
-              setStatus(next);
-              // Flipping to Finished proposes today; the field stays fully editable and is the
-              // lot's single source of truth — flipping back to production erases it on save.
-              if (next === "FINISHED" && !finishedAtISO) setFinishedAtISO(new Date().toLocaleDateString("en-CA"));
-            }}
-            className={inputCls}
-          >
-            <option value="IN_PRODUCTION">In production</option>
-            <option value="FINISHED">Finished</option>
-          </select>
-        </Field>
-        <Field label="Payment">
-          <select value={paymentStatus} onChange={(e) => setPaymentStatus(e.target.value as "PAID" | "DUE")} className={inputCls}>
-            <option value="DUE">Due — not fully paid</option>
-            <option value="PAID">Paid in full</option>
           </select>
         </Field>
         {status === "FINISHED" && (
