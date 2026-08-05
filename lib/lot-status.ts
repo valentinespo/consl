@@ -36,7 +36,7 @@ export function deriveFinishedAt(lines: { status: string; finishedAt: Date | nul
 export const PRODUCTION_LABEL: Record<DerivedProduction, string> = {
   IN_PRODUCTION: "In production",
   PARTIAL: "Partially finished",
-  FINISHED: "Finished",
+  FINISHED: "Fully finished",
 };
 export const PAYMENT_LABEL: Record<DerivedPayment, string> = {
   DUE: "Due",

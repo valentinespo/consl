@@ -46,7 +46,7 @@ const STATUS: Record<Status, { bg: string; fg: string; dot: string; bd: string }
   nosales: frost("var(--color-muted)"),
   ok: frost("var(--color-positive)"),
   reordered: frost("var(--color-positive)"),
-  channelLow: frost("#2563eb"), // "ship what you have" — blue, matching At my locations
+  channelLow: frost("var(--color-warn)"), // "ship what you have" — amber (needs attention soon)
   belowFloor: frost("var(--color-warn)"),
   oos: frost("var(--color-negative)"),
 };
@@ -367,7 +367,7 @@ export function RestockDashboard({
                       // A row can need several things at once — ship what you have, pull the lot
                       // forward, and still start a run. Showing only the first one was how the
                       // ship instruction used to vanish the moment a row turned red.
-                      const acts: { label: string; sub: string; color?: string }[] = [];
+                      const acts: { label: string; sub: string }[] = [];
                       if (r.ship) {
                         // AWD leads the source list: replenishing FBA from AWD is the natural
                         // first move before trucking stock in from your own locations.
@@ -377,16 +377,16 @@ export function RestockDashboard({
                           sub:
                             `From ${sources.join(" / ") || "your locations"}` +
                             (r.shipWithinDays > 0 ? ` · within ${r.shipWithinDays}d` : ""),
-                          color: SEG.locations,
                         });
                       }
-                      if (r.expedite) acts.push({ label: "Expedite", sub: "Incoming lot", color: "#b91c1c" });
+                      if (r.expedite) acts.push({ label: "Expedite", sub: "Incoming lot" });
                       if (r.recommendedQty > 0)
                         acts.push({ label: `Order ${n(r.recommendedQty)} units`, sub: "Recommended" });
                       if (acts.length === 0) return <span className="text-[12px] text-muted">Covered</span>;
+                      // The action always wears its row's status colour, so the two read as one.
                       return acts.map((a, k) => (
                         <div key={a.label} className={k > 0 ? "mt-1.5" : ""}>
-                          <div className="text-[12.5px] font-medium tabular" style={a.color ? { color: a.color } : undefined}>
+                          <div className="text-[12.5px] font-medium tabular" style={{ color: st.fg }}>
                             {a.label}
                           </div>
                           <div className="text-[10.5px] text-muted">{a.sub}</div>
