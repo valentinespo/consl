@@ -11,6 +11,9 @@ export type Alert = {
   title: string;
   detail: string;
   severity: "critical" | "warn";
+  // Reorder-family alerts carry the colour of the SKU's status that caused them: red = OOS (urgent),
+  // amber = below floor / running low. Expedite is always red. Consumed by the dashboard card.
+  tone?: "red" | "amber";
 };
 
 
@@ -36,7 +39,8 @@ export async function getAlerts(rows: RestockRow[]): Promise<Alert[]> {
         detail: `Waiting at ${sources.join(" / ") || "your locations"}${
           c.shipWithinDays > 0 ? ` · within ${c.shipWithinDays}d` : ""
         }`,
-        severity: "warn",
+        severity: c.status === "oos" ? "critical" : "warn",
+        tone: c.status === "oos" ? "red" : "amber",
       });
     }
     if (c.expedite) {
@@ -45,7 +49,8 @@ export async function getAlerts(rows: RestockRow[]): Promise<Alert[]> {
         kind: "expedite",
         title: `${r.name} — expedite incoming lot`,
         detail: c.statusLabel,
-        severity: "warn",
+        severity: "critical",
+        tone: "red", // expedite only ever fires on an OOS row
       });
     }
     if (c.order) {
@@ -54,7 +59,8 @@ export async function getAlerts(rows: RestockRow[]): Promise<Alert[]> {
         kind: "reorder",
         title: `${r.name} needs a PO`,
         detail: c.recommendedQty > 0 ? `${num(c.recommendedQty)} units recommended` : "below the floor",
-        severity: "warn",
+        severity: c.status === "oos" ? "critical" : "warn",
+        tone: c.status === "oos" ? "red" : "amber",
       });
     }
   }

@@ -649,10 +649,15 @@ function ReorderAlertsWidget({ alerts }: { alerts: Alert[] }) {
   // Same order as the inventory KPI row, so the two screens read identically.
   const list = [...reorder, ...ship, ...expedite].slice(0, 8);
   const total = list.length === 0 ? 0 : reorder.length + ship.length + expedite.length;
+  const RED = "var(--color-negative)";
+  const AMBER = "var(--color-warn)";
+  const dotColor = (a: Alert) => (a.tone === "red" ? RED : AMBER);
+  // Red dominates: if any SKU behind a count is OOS the number is red, else amber.
+  const groupColor = (group: Alert[]) => (group.some((a) => a.tone === "red") ? RED : AMBER);
   const cols = [
-    { label: "Need a PO", n: reorder.length, color: "#ea580c" },
-    { label: "To ship", n: ship.length, color: "#8b5cf6" },
-    { label: "Expedite", n: expedite.length, color: "#dc2626" },
+    { label: "Need a PO", n: reorder.length, color: groupColor(reorder) },
+    { label: "To ship", n: ship.length, color: groupColor(ship) },
+    { label: "Expedite", n: expedite.length, color: groupColor(expedite) },
   ];
   return (
     <Card className="flex h-full flex-col">
@@ -678,10 +683,8 @@ function ReorderAlertsWidget({ alerts }: { alerts: Alert[] }) {
       <div className="mt-3.5 min-h-0 flex-1 space-y-1.5 overflow-y-auto border-t border-line pt-3">
         {list.map((a) => (
           <div key={a.key} className="flex items-center gap-2 text-[12px]">
-            <span
-              className="h-1.5 w-1.5 shrink-0 rounded-full"
-              style={{ background: a.kind === "reorder" ? "#ea580c" : a.kind === "ship" ? "#8b5cf6" : "#dc2626" }}
-            />
+            {/* Each line keeps its own true colour — red if that SKU is OOS, amber otherwise. */}
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: dotColor(a) }} />
             <span className="truncate text-ink-soft">
               {a.title.replace(" needs a PO", "").replace(" — expedite incoming lot", "").replace(" — ship stock you already have", "")}
             </span>

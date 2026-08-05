@@ -130,6 +130,9 @@ export function RestockDashboard({
   const expedite = computed.filter((r) => r.expedite).length;
   const healthy = computed.filter((r) => r.status === "ok" || r.status === "reordered").length;
   const unitsToOrder = computed.reduce((s, r) => s + r.recommendedQty, 0);
+  // A KPI wears its rows' status colour: red the moment any contributing SKU is OOS, else amber.
+  const actionTone = (flag: "order" | "ship") =>
+    computed.some((r) => r[flag] && r.status === "oos") ? "var(--color-negative)" : "var(--color-warn)";
 
   function pickSort(m: SortMode) {
     setSort(m);
@@ -163,9 +166,9 @@ export function RestockDashboard({
     <div>
       {/* KPIs */}
       <div className="mb-5 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
-        <Kpi label="Needs a PO" value={String(needsPO)} tone={needsPO > 0 ? "#ea580c" : undefined} />
-        <Kpi label="To ship" value={String(toShip)} tone={toShip > 0 ? SEG.locations : undefined} />
-        <Kpi label="Expedite" value={String(expedite)} tone={expedite > 0 ? "#dc2626" : undefined} />
+        <Kpi label="Needs a PO" value={String(needsPO)} tone={needsPO > 0 ? actionTone("order") : undefined} />
+        <Kpi label="To ship" value={String(toShip)} tone={toShip > 0 ? actionTone("ship") : undefined} />
+        <Kpi label="Expedite" value={String(expedite)} tone={expedite > 0 ? "var(--color-negative)" : undefined} />
         <Kpi label="Healthy" value={`${healthy} / ${computed.length}`} tone={computed.length > 0 && healthy === computed.length ? "#16a34a" : undefined} />
         <Kpi label="Units to order" value={n(unitsToOrder)} />
       </div>
