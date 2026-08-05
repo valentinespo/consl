@@ -3,7 +3,7 @@
 import { DocPreview } from "@/components/DocPreview";
 import { Fragment, useState } from "react";
 import Link from "next/link";
-import { ChevronRight, FileText, Lock, Download } from "@/components/icons";
+import { ChevronRight, Receipt, Lock, Download } from "@/components/icons";
 import { ExpandRow } from "@/components/animate";
 import { Pill, SkuAvatar } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
@@ -64,7 +64,7 @@ export function PurchaseOrdersView({
 
       <div className="mt-8">
         <div className="mb-3 flex items-center gap-2">
-          <FileText size={15} className="text-muted" />
+          <Receipt size={15} className="text-muted" />
           <h2 className="text-[15px] font-medium text-ink-soft">All purchase orders</h2>
           <span className="tabular text-[12px] text-muted">({pos.length})</span>
         </div>
@@ -114,7 +114,7 @@ export function PurchaseOrdersView({
                         {po.pdfUrl ? (
                           <span className="inline-flex items-center gap-2.5" onClick={(e) => e.stopPropagation()}>
                             <DocPreview url={po.pdfUrl} name={`PO ${po.number}`} className="inline-flex items-center gap-1 text-[12.5px] font-medium text-accent hover:underline">
-                              <FileText size={13} /> View
+                              <Receipt size={13} /> View
                             </DocPreview>
                             <a href={po.pdfUrl} download={`PO-${po.number}.pdf`} className="text-accent hover:text-accent-strong" title="Download PDF">
                               <Download size={14} />

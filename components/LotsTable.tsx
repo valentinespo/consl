@@ -113,15 +113,13 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
               return (
               <Fragment key={l.id}>
               <tr onClick={() => toggle(l.id)} className={`cursor-pointer border-b border-line last:border-0 ${open ? "bg-surface-2" : "hover:bg-surface-2"}`}>
-                {/* Lot / PO / Date — merged so the small identifiers share one column. */}
+                {/* Lot / PO / Date — merged into one column, always stacked vertically. */}
                 <td className="px-4 py-3 text-ink-soft">
                   <div className="flex items-start gap-2">
                     <ChevronRight size={15} className={`mt-0.5 shrink-0 text-muted transition-transform ${open ? "rotate-90" : ""}`} />
                     <div className="min-w-0">
-                      <div className="flex flex-wrap items-baseline gap-x-2">
-                        <span className="font-medium text-ink">#{l.lotNr}</span>
-                        {l.poNumber && <span className="text-[11px] text-muted">PO {l.poNumber}</span>}
-                      </div>
+                      <div className="whitespace-nowrap font-medium text-ink">#{l.lotNr}</div>
+                      {l.poNumber && <div className="whitespace-nowrap text-[11px] text-muted">PO {l.poNumber}</div>}
                       <div className="whitespace-nowrap text-[11px] text-muted">{date(l.poDate)}</div>
                     </div>
                   </div>

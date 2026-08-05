@@ -37,7 +37,10 @@ export const Boxes = regular(P.Cube);
 export const FlaskConical = regular(P.Flask); // the flask is back — Phosphor has one
 export const ArrowLeftRight = regular(P.Invoice); // Transactions are invoices here
 export const ShoppingCart = regular(P.ShoppingCart);
-export const FileText = regular(P.Receipt);
+// Document icons: Receipt is reserved for PURCHASE-ORDER contexts; every other document
+// (COAs, BOLs, invoices, previews) uses the plain file-text glyph.
+export const FileText = regular(P.FileText);
+export const Receipt = regular(P.Receipt);
 export const Building2 = regular(P.Storefront);
 export const Warehouse = regular(P.Warehouse);
 export const Images = regular(P.Tag);
@@ -50,7 +53,7 @@ export const BoxesFilled = regular(P.Cube);
 export const FlaskConicalFilled = regular(P.Flask);
 export const ArrowLeftRightFilled = regular(P.Invoice);
 export const ShoppingCartFilled = regular(P.ShoppingCart);
-export const FileTextFilled = regular(P.Receipt);
+export const ReceiptFilled = regular(P.Receipt); // Purchase Orders nav — POs keep the receipt glyph
 export const Building2Filled = regular(P.Storefront);
 export const WarehouseFilled = regular(P.Warehouse);
 export const ImagesFilled = regular(P.Tag);

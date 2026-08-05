@@ -29,7 +29,8 @@ export function LotDocsCell({ documents }: { documents: LotDoc[] }) {
 
   return (
     <>
-      <div className="flex flex-wrap gap-x-2 gap-y-1">
+      {/* Always stacked vertically — one document group per line, never side by side. */}
+      <div className="flex flex-col items-start gap-1">
         {groups.map((g) => (
           <button
             key={g.label}
@@ -38,7 +39,7 @@ export function LotDocsCell({ documents }: { documents: LotDoc[] }) {
               e.stopPropagation();
               setPreview(g);
             }}
-            className="inline-flex items-center gap-1 text-[11.5px] font-medium text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent"
+            className="inline-flex items-center gap-1 whitespace-nowrap text-[11.5px] font-medium text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent"
             title={`Preview ${g.docs.length} ${g.label} document${g.docs.length > 1 ? "s" : ""}`}
           >
             <FileText size={12} className="shrink-0" />
@@ -48,7 +49,8 @@ export function LotDocsCell({ documents }: { documents: LotDoc[] }) {
         ))}
       </div>
 
-      {preview && <DocsModal label={preview.label} docs={preview.docs} onClose={() => setPreview(null)} />}
+      {/* Keyed by label so switching groups resets the active tab instead of reusing stale state. */}
+      {preview && <DocsModal key={preview.label} label={preview.label} docs={preview.docs} onClose={() => setPreview(null)} />}
     </>
   );
 }
@@ -56,7 +58,7 @@ export function LotDocsCell({ documents }: { documents: LotDoc[] }) {
 /** Modal previewing one label group's documents, with a tab per file when there's more than one. */
 function DocsModal({ label, docs, onClose }: { label: string; docs: LotDoc[]; onClose: () => void }) {
   const [active, setActive] = useState(0);
-  const doc = docs[active];
+  const doc = docs[Math.min(active, docs.length - 1)];
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black/60 p-4 sm:p-8" onClick={onClose}>
       <div className="mx-auto flex h-full w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-surface shadow-xl" onClick={(e) => e.stopPropagation()}>
@@ -86,7 +88,10 @@ function DocsModal({ label, docs, onClose }: { label: string; docs: LotDoc[]; on
             </button>
           </div>
         </div>
-        <iframe src={doc.fileUrl} title={doc.fileName ?? label} className="h-full w-full flex-1 bg-white" />
+        {/* Keyed per document: React reuses the iframe element across tab switches, and a mutated
+            src doesn't reliably navigate it — the same file kept showing on every tab. A fresh
+            mount per doc always loads the right file. */}
+        <iframe key={doc.id} src={doc.fileUrl} title={doc.fileName ?? label} className="h-full w-full flex-1 bg-white" />
       </div>
     </div>
   );
