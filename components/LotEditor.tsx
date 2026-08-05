@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Plus, X, AlertTriangle, ChevronDown } from "@/components/icons";
+import { Plus, X, AlertTriangle, ChevronDown, Pencil } from "@/components/icons";
 import { DatePicker } from "@/components/DatePicker";
 import { Card, SkuAvatar, SectionTitle } from "@/components/ui";
 import { StatusDropdown } from "@/components/StatusDropdown";
@@ -271,12 +271,16 @@ export function LotEditor({
           />
         </HeroCard>
         <HeroCard label="PO number">
-          <input
-            value={poNumber}
-            onChange={(e) => setPoNumber(e.target.value)}
-            placeholder="#7-CCP"
-            className="w-full bg-transparent text-[16px] font-semibold text-ink outline-none placeholder:font-normal placeholder:text-muted"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              value={poNumber}
+              onChange={(e) => setPoNumber(e.target.value)}
+              placeholder="#7-CCP"
+              className="min-w-0 flex-1 bg-transparent text-[16px] font-semibold text-ink outline-none placeholder:font-normal placeholder:text-muted"
+            />
+            {/* Affordance only — the whole field is editable, matching the calendar on PO date. */}
+            <Pencil size={14} className="shrink-0 text-ink-soft" />
+          </div>
         </HeroCard>
         <HeroCard label="Facility">
           <div className="relative">
