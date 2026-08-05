@@ -798,17 +798,24 @@ export type LeadTimes = {
  * cure for an odd-looking span is fixing the record, not code quietly dropping it.
  */
 export async function getLeadTimes(): Promise<LeadTimes> {
-  // Measured per finished LINE now — each SKU's own PO-to-finished span counts as soon as that
-  // SKU completes, instead of waiting for the whole lot.
-  const lines = await prisma.lotLine.findMany({
-    where: { status: "FINISHED", finishedAt: { not: null }, lot: { poDate: { not: null } } },
-    select: { finishedAt: true, lot: { select: { poDate: true, facility: { select: { code: true } } } } },
+  // One span PER LOT (per production run), so a big multi-SKU batch counts once, not once per SKU
+  // — otherwise a slow 6-SKU lot would drag the average six times harder than a fast 1-SKU lot.
+  // Each lot's span is the AVERAGE of its finished SKU lines' PO→finished days, so a lot whose SKUs
+  // finish on different days gets a blended figure instead of relying on a single derived date.
+  const lots = await prisma.lot.findMany({
+    where: { poDate: { not: null }, lines: { some: { status: "FINISHED", finishedAt: { not: null } } } },
+    select: {
+      poDate: true,
+      facility: { select: { code: true } },
+      lines: { where: { status: "FINISHED", finishedAt: { not: null } }, select: { finishedAt: true } },
+    },
   });
   const DAY = 86_400_000;
-  const spans = lines.map((l) => ({
-    code: l.lot.facility.code,
-    days: Math.round((l.finishedAt!.getTime() - l.lot.poDate!.getTime()) / DAY),
-  }));
+  const spans = lots.map((lot) => {
+    const po = lot.poDate!.getTime();
+    const skuDays = lot.lines.map((ln) => (ln.finishedAt!.getTime() - po) / DAY);
+    return { code: lot.facility.code, days: Math.round(skuDays.reduce((s, d) => s + d, 0) / skuDays.length) };
+  });
   if (spans.length === 0) return { blendedDays: null, lots: 0, perFacility: [] };
 
   const avg = (a: { days: number }[]) => Math.round(a.reduce((s, x) => s + x.days, 0) / a.length);
