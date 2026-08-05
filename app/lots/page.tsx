@@ -18,7 +18,6 @@ export default async function LotsPage() {
     status: l.status,
     paymentStatus: l.paymentStatus,
     documents: l.documents,
-    finishedAt: l.finishedAt ? l.finishedAt.toISOString() : null,
     skus: l.skus,
     lines: l.lines,
     units: l.units,

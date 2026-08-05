@@ -410,10 +410,11 @@ export function LotEditor({
                       )}
                     </td>
                   </tr>
-                  {/* Finished-only details pop up as a second line under the SKU's row. */}
+                  {/* Finished-only details pop up as a second line under the SKU's row, on the
+                      faint grey wash the app uses to mark a sub-section of the row above. */}
                   {lineFinished && (
-                    <tr className="border-b border-line last:border-0">
-                      <td colSpan={6} className="px-4 pb-3 pt-0">
+                    <tr className="border-b border-line bg-surface-2/60 last:border-0">
+                      <td colSpan={6} className="px-4 py-2.5">
                         <div className="flex flex-wrap items-end gap-3 pl-[42px]">
                           <Field label="Finished date" className="w-[150px]">
                             <DatePicker value={l.finishedAtISO} onChange={(v) => patchLine(l.key, { finishedAtISO: v })} clearable />

@@ -20,7 +20,6 @@ export type LotRow = {
   status: DerivedProduction;
   paymentStatus: DerivedPayment;
   documents: LotDoc[];
-  finishedAt: string | null;
   skus: { code: string; imageUrl: string | null }[];
   lines: LotLineSummary[];
   units: number;
@@ -141,12 +140,10 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
                 <td className="px-3 py-3 text-right tabular text-ink-soft">{perUnit(l.avgCogPerUnit)}</td>
                 <td className="px-3 py-3 text-right font-medium tabular">{money(l.cogTotal)}</td>
                 <td className="px-3 py-3 text-center tabular text-muted">{l.txnCount}</td>
-                {/* Derived, display-only — per-SKU editing lives on the lot page. */}
+                {/* Derived, display-only — per-SKU editing (and each SKU's own finished date)
+                    lives on the lot page. */}
                 <td className="px-3 py-3 text-center">
                   <DerivedPill value={l.status} label={PRODUCTION_LABEL[l.status]} />
-                  {l.status === "FINISHED" && l.finishedAt && (
-                    <div className="mt-1 text-[10.5px] text-muted">Finished {date(l.finishedAt)}</div>
-                  )}
                 </td>
                 <td className="px-3 py-3 text-center">
                   <DerivedPill value={l.paymentStatus === "PARTIAL" ? "PARTIAL" : l.paymentStatus} label={PAYMENT_LABEL[l.paymentStatus]} />

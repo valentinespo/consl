@@ -78,9 +78,6 @@ export function RecentLots({ lots }: { lots: RecentLot[] }) {
                   <span className={`${DERIVED_PILL_CLS[l.status] ?? "pill-neutral"} inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-medium`}>
                     {PRODUCTION_LABEL[l.status as keyof typeof PRODUCTION_LABEL] ?? l.status}
                   </span>
-                  {l.status === "FINISHED" && l.finishedAt && (
-                    <div className="mt-1 text-[10.5px] text-muted">Finished {date(l.finishedAt)}</div>
-                  )}
                 </td>
                 <td className="px-5 py-2.5 text-right">
                   <Link
