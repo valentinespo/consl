@@ -40,7 +40,7 @@ export const PRODUCTION_LABEL: Record<DerivedProduction, string> = {
 };
 export const PAYMENT_LABEL: Record<DerivedPayment, string> = {
   DUE: "Due",
-  PARTIAL: "Partial",
+  PARTIAL: "Partially paid",
   PAID: "Fully paid",
 };
 /** Frosted pill class per derived value — violet → amber → green on both axes. */
