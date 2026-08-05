@@ -72,6 +72,8 @@ export async function createLotCore(input: {
 
   const defaults = await defaultMaterialsFor(input.facilityId);
 
+  // Status lives on each LINE (SKUs finish independently); the lot columns are a derived cache.
+  const finishedAt = input.status === "FINISHED" ? new Date() : null;
   const lot = await prisma.lot.create({
     data: {
       lotNr,
@@ -79,8 +81,10 @@ export async function createLotCore(input: {
       poDate: input.poDateISO ? new Date(input.poDateISO) : new Date(),
       facilityId: input.facilityId,
       status: input.status,
-      finishedAt: input.status === "FINISHED" ? new Date() : null,
-      lines: { create: lines.map((l, i) => ({ productId: l.productId, units: l.units, seq: i })) },
+      finishedAt,
+      lines: {
+        create: lines.map((l, i) => ({ productId: l.productId, units: l.units, seq: i, status: input.status, finishedAt })),
+      },
     },
     include: { lines: true },
   });

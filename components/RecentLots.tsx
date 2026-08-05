@@ -4,9 +4,10 @@ import { Fragment, useState } from "react";
 import Link from "next/link";
 import { ChevronRight } from "@/components/icons";
 import { ExpandRow } from "@/components/animate";
-import { Pill, FacilityTag, SkuAvatar } from "@/components/ui";
+import { FacilityTag, SkuAvatar } from "@/components/ui";
 import { LotLineCards, type LotLineSummary } from "@/components/LotLineCards";
 import { useMoney } from "@/components/CurrencyProvider";
+import { PRODUCTION_LABEL, DERIVED_PILL_CLS } from "@/lib/lot-status";
 
 export type RecentLot = {
   id: string;
@@ -73,7 +74,10 @@ export function RecentLots({ lots }: { lots: RecentLot[] }) {
                 <td className="px-2 py-2.5 text-right tabular">{qty(l.units)}</td>
                 <td className="px-2 py-2.5 text-right tabular">{money(l.cogTotal)}</td>
                 <td className="px-2 py-2.5">
-                  <Pill kind={l.status}>{l.status === "IN_PRODUCTION" ? "In production" : "Finished"}</Pill>
+                  {/* Derived from the SKU lines — mixed lots show as Partially finished. */}
+                  <span className={`${DERIVED_PILL_CLS[l.status] ?? "pill-neutral"} inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-medium`}>
+                    {PRODUCTION_LABEL[l.status as keyof typeof PRODUCTION_LABEL] ?? l.status}
+                  </span>
                   {l.status === "FINISHED" && l.finishedAt && (
                     <div className="mt-1 text-[10.5px] text-muted">Finished {date(l.finishedAt)}</div>
                   )}

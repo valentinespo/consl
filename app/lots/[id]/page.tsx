@@ -57,6 +57,11 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
     name: ln.product.name,
     imageUrl: ln.product.imageUrl,
     units: ln.units,
+    status: ln.status,
+    paymentStatus: ln.paymentStatus === "PAID" ? "PAID" : "DUE",
+    finishedAtISO: ln.finishedAt ? ln.finishedAt.toISOString().slice(0, 10) : null,
+    expiryISO: ln.expiryAt ? ln.expiryAt.toISOString().slice(0, 10) : null,
+    batchNr: ln.batchNr,
     materials: ln.materials.map((m) => ({ materialTypeId: m.materialTypeId, perUnit: m.perUnit })),
     costs: buildCostChips(ln.materialCostsJson, ln.transactionCostsJson, ln.shortfallsJson, matName),
     cogPerUnit: ln.cogPerUnit,
@@ -110,11 +115,6 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
             poNumber: lot.poNumber,
             poDateISO: lot.poDate ? lot.poDate.toISOString().slice(0, 10) : null,
             facilityId: lot.facilityId,
-            status: lot.status,
-            paymentStatus: lot.paymentStatus === "PAID" ? "PAID" : "DUE",
-            finishedAtISO: lot.finishedAt ? lot.finishedAt.toISOString().slice(0, 10) : null,
-            expiryISO: lot.expiryAt ? lot.expiryAt.toISOString().slice(0, 10) : null,
-            batchNr: lot.batchNr,
             notes: lot.notes,
           }}
           initialLines={initialLines}

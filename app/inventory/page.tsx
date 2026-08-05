@@ -40,11 +40,14 @@ export default async function InventoryPage() {
   const [{ pools, totalValue: rawValue }, materials, prodLots, finished, channelStock, org] = await Promise.all([
     getInventory(),
     getMaterialTypes(),
-    prisma.lot.findMany({
-      where: { status: "IN_PRODUCTION" },
-      include: { facility: true, lines: { include: { product: true } } },
-      orderBy: [{ poDate: "desc" }, { createdAt: "desc" }],
-    }),
+    prisma.lot
+      .findMany({
+        // Per-line status: a lot appears while ANY of its SKUs is still cooking, carrying only
+        // those in-production lines — finished lot-mates already count as finished stock.
+        where: { lines: { some: { status: "IN_PRODUCTION" } } },
+        include: { facility: true, lines: { where: { status: "IN_PRODUCTION" }, include: { product: true } } },
+        orderBy: [{ poDate: "desc" }, { createdAt: "desc" }],
+      }),
     getFinishedStock(),
     getChannelStock(),
     getCurrentOrg().catch(() => null),

@@ -8,43 +8,6 @@ import { checkOwned, type OwnedModel } from "@/lib/ownership";
 import { requirePermission } from "@/lib/membership";
 import { createLotCore, defaultMaterialsFor } from "@/lib/lot-core";
 
-/**
- * Batch-update production and/or payment status for several lots at once — the inline editing on
- * the Production Lots table (staged edits committed together via the floating save bar).
- * Production status is the only field here that affects COG bucketing, so recompute runs only when
- * one actually changed; flipping to FINISHED defaults finishedAt to today, flipping back clears it
- * (mirrors updateLot).
- */
-export async function updateLotStatuses(
-  changes: { lotId: string; status?: "IN_PRODUCTION" | "FINISHED"; paymentStatus?: "PAID" | "DUE" }[],
-) {
-  const gate = await requirePermission("lots", "edit");
-  if (!gate.ok) return { ok: false as const, error: gate.error };
-
-  const badRef = await checkOwned(changes.map((c) => ["lot", c.lotId] as [OwnedModel, string]));
-  if (badRef) return badRef;
-
-  let productionChanged = false;
-  for (const ch of changes) {
-    const lot = await prisma.lot.findFirst({ where: { id: ch.lotId } }); // tenant-scoped
-    if (!lot) continue;
-    const data: { status?: "IN_PRODUCTION" | "FINISHED"; finishedAt?: Date | null; paymentStatus?: string } = {};
-    if (ch.status && ch.status !== lot.status) {
-      data.status = ch.status;
-      productionChanged = true;
-      // Keep an existing finished date; only default it when there isn't one. Back to production clears it.
-      if (ch.status === "FINISHED") data.finishedAt = lot.finishedAt ?? new Date();
-      else data.finishedAt = null;
-    }
-    if (ch.paymentStatus) data.paymentStatus = ch.paymentStatus === "PAID" ? "PAID" : "DUE";
-    if (Object.keys(data).length) await prisma.lot.update({ where: { id: lot.id }, data });
-  }
-
-  if (productionChanged) await recomputeAll();
-  revalidatePath("/", "layout");
-  return { ok: true as const };
-}
-
 /** Permanently delete a lot (cascades its SKU lines, bill of materials and transactions). */
 export async function deleteLot(formData: FormData) {
   const gate = await requirePermission("lots", "delete");
@@ -102,21 +65,22 @@ export type LotEditPayload = {
   poNumber: string | null;
   poDateISO: string | null;
   facilityId: string;
-  status: "IN_PRODUCTION" | "FINISHED";
-  paymentStatus: "PAID" | "DUE"; // supplier paid in full for this lot, or not yet
-  finishedAtISO: string | null; // required when FINISHED (defaults to today); ignored otherwise
-  expiryISO: string | null; // finished-goods expiry; only meaningful when FINISHED
-  batchNr: string | null; // production batch number; only meaningful when FINISHED
   notes: string | null;
+  // Status, payment and the finished metadata live per SKU line — the lot only derives.
   lines: {
     id: string | null; // null = newly added SKU
     productId: string;
     units: number;
+    status: "IN_PRODUCTION" | "FINISHED";
+    paymentStatus: "PAID" | "DUE";
+    finishedAtISO: string | null; // FINISHED carries the typed date (or none if cleared); else null
+    expiryISO: string | null; // only meaningful when FINISHED
+    batchNr: string | null; // only meaningful when FINISHED
     materials: { materialTypeId: string; perUnit: number }[];
   }[];
 };
 
-/** One batched save for the whole lot: details, status, notes, SKU lines (add/remove/units) + BOM. */
+/** One batched save for the whole lot: details, notes, SKU lines (add/remove/units/status) + BOM. */
 export async function updateLot(payload: LotEditPayload) {
   const gate = await requirePermission("lots", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };
@@ -126,22 +90,6 @@ export async function updateLot(payload: LotEditPayload) {
   const existing = await prisma.lotLine.findMany({ where: { lotId: payload.lotId }, select: { id: true } });
   const keptIds = new Set(lines.filter((l) => l.id).map((l) => l.id!));
   const toRemove = existing.filter((e) => !keptIds.has(e.id));
-
-  // The finished date is exactly what the form shows: FINISHED carries the typed date, or none at
-  // all if it was cleared — an empty field must stay empty, not spring back to today. Any other
-  // status carries none; keeping a stale date after a lot was flipped back to production made
-  // "finished" lots that weren't.
-  const finishedAt =
-    payload.status === "FINISHED" && payload.finishedAtISO && !isNaN(Date.parse(payload.finishedAtISO))
-      ? new Date(payload.finishedAtISO)
-      : null;
-  // Expiry and batch follow the same rule as the finished date: they belong to a FINISHED lot,
-  // and flipping back to production clears them rather than leaving stale metadata behind.
-  const expiryAt =
-    payload.status === "FINISHED" && payload.expiryISO && !isNaN(Date.parse(payload.expiryISO))
-      ? new Date(payload.expiryISO)
-      : null;
-  const batchNr = payload.status === "FINISHED" ? payload.batchNr?.trim() || null : null;
 
   const badRef = await checkOwned([
     ["facility", payload.facilityId],
@@ -155,54 +103,85 @@ export async function updateLot(payload: LotEditPayload) {
   const allMaterials = await prisma.materialType.findMany({ select: { id: true, skuSpecific: true } });
   const skuSpecificIds = new Set(allMaterials.filter((m) => m.skuSpecific).map((m) => m.id));
 
-  await prisma.$transaction(async (tx) => {
-    await tx.lot.update({
-      where: { id: payload.lotId },
-      data: {
-        poNumber: payload.poNumber?.trim() || null,
-        poDate: payload.poDateISO ? new Date(payload.poDateISO) : null,
-        facilityId: payload.facilityId,
-        status: payload.status,
-        paymentStatus: payload.paymentStatus === "PAID" ? "PAID" : "DUE",
-        finishedAt,
-        expiryAt,
-        batchNr,
-        notes: payload.notes?.trim() || null,
-      },
-    });
+  // Per-line lifecycle fields, with the long-standing rule intact: FINISHED carries exactly what
+  // the form shows (an empty date stays empty, never springs back to today); flipping back to
+  // production clears date/expiry/batch rather than leaving stale metadata behind.
+  const lineStatus = (l: LotEditPayload["lines"][number]) => {
+    const finished = l.status === "FINISHED";
+    return {
+      status: finished ? ("FINISHED" as const) : ("IN_PRODUCTION" as const),
+      paymentStatus: l.paymentStatus === "PAID" ? "PAID" : "DUE",
+      finishedAt: finished && l.finishedAtISO && !isNaN(Date.parse(l.finishedAtISO)) ? new Date(l.finishedAtISO) : null,
+      expiryAt: finished && l.expiryISO && !isNaN(Date.parse(l.expiryISO)) ? new Date(l.expiryISO) : null,
+      batchNr: finished ? l.batchNr?.trim() || null : null,
+    };
+  };
 
-    for (const r of toRemove) await tx.lotLine.delete({ where: { id: r.id } }); // cascades its BOM
+  // The lot's own columns stay a derived cache (FINISHED/PAID only when EVERY line is) so any
+  // straggler reader stays roughly right; the app itself derives from the lines.
+  const allFinished = lines.every((l) => l.status === "FINISHED");
+  const statuses = lines.map((l) => lineStatus(l));
+  const lotCache = {
+    status: allFinished ? ("FINISHED" as const) : ("IN_PRODUCTION" as const),
+    paymentStatus: lines.every((l) => l.paymentStatus === "PAID") ? "PAID" : "DUE",
+    finishedAt: allFinished
+      ? statuses.reduce<Date | null>((m, c) => (c.finishedAt && (!m || c.finishedAt > m) ? c.finishedAt : m), null)
+      : null,
+  };
 
-    let seq = 0;
-    for (const l of lines) {
-      const units = Math.max(0, Number(l.units) || 0);
-      const writeMaterials = async (lotLineId: string, mats: { materialTypeId: string; perUnit: number }[]) => {
-        await tx.lotMaterial.deleteMany({ where: { lotLineId } });
+  // Batched writes (one deleteMany + one createMany for the BOM instead of per-row round trips) —
+  // a six-SKU lot saved over a remote DB link blew Prisma's 5s interactive-transaction limit.
+  await prisma.$transaction(
+    async (tx) => {
+      await tx.lot.update({
+        where: { id: payload.lotId },
+        data: {
+          poNumber: payload.poNumber?.trim() || null,
+          poDate: payload.poDateISO ? new Date(payload.poDateISO) : null,
+          facilityId: payload.facilityId,
+          notes: payload.notes?.trim() || null,
+          ...lotCache,
+        },
+      });
+
+      if (toRemove.length) await tx.lotLine.deleteMany({ where: { id: { in: toRemove.map((r) => r.id) } } }); // cascades BOM
+
+      const matRows: { lotLineId: string; materialTypeId: string; perUnit: number; productId: string | null }[] = [];
+      const lineIds: string[] = [];
+      let seq = 0;
+      for (const [i, l] of lines.entries()) {
+        const units = Math.max(0, Number(l.units) || 0);
+        let lineId: string;
+        if (l.id) {
+          await tx.lotLine.update({ where: { id: l.id }, data: { units, seq, ...statuses[i] } });
+          lineId = l.id;
+        } else {
+          const created = await tx.lotLine.create({
+            data: { lotId: payload.lotId, productId: l.productId, units, seq, ...statuses[i] },
+          });
+          lineId = created.id;
+        }
+        lineIds.push(lineId);
+        // A NEW line with no explicit BOM inherits the facility defaults; an existing line with an
+        // emptied BOM stays empty (the operator deleted its rows on purpose).
+        const mats = l.materials.length ? l.materials : l.id ? [] : defaults.map((m) => ({ materialTypeId: m.id, perUnit: m.defaultPerUnit || 1 }));
         for (const m of mats) {
           if (!m.materialTypeId || !(m.perUnit > 0)) continue;
-          await tx.lotMaterial.create({
-            data: {
-              lotLineId,
-              materialTypeId: m.materialTypeId,
-              perUnit: m.perUnit,
-              productId: skuSpecificIds.has(m.materialTypeId) ? l.productId : null,
-            },
+          matRows.push({
+            lotLineId: lineId,
+            materialTypeId: m.materialTypeId,
+            perUnit: m.perUnit,
+            productId: skuSpecificIds.has(m.materialTypeId) ? l.productId : null,
           });
         }
-      };
-      if (l.id) {
-        await tx.lotLine.update({ where: { id: l.id }, data: { units, seq } });
-        await writeMaterials(l.id, l.materials);
-      } else {
-        const created = await tx.lotLine.create({ data: { lotId: payload.lotId, productId: l.productId, units, seq } });
-        const mats = l.materials.length
-          ? l.materials
-          : defaults.map((m) => ({ materialTypeId: m.id, perUnit: m.defaultPerUnit || 1 }));
-        await writeMaterials(created.id, mats);
+        seq++;
       }
-      seq++;
-    }
-  });
+
+      await tx.lotMaterial.deleteMany({ where: { lotLineId: { in: lineIds } } });
+      if (matRows.length) await tx.lotMaterial.createMany({ data: matRows });
+    },
+    { timeout: 15000 },
+  );
 
   await recomputeAll();
   revalidatePath("/", "layout");

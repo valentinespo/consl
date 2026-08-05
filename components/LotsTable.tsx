@@ -2,15 +2,13 @@
 
 import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { ChevronRight } from "@/components/icons";
-import { StatusDropdown } from "@/components/StatusDropdown";
 import { ExpandRow } from "@/components/animate";
 import { FacilityTag, SkuAvatar } from "@/components/ui";
 import { LotLineCards, type LotLineSummary } from "@/components/LotLineCards";
 import { LotDocsCell, type LotDoc } from "@/components/LotDocsCell";
 import { useMoney } from "@/components/CurrencyProvider";
-import { updateLotStatuses } from "@/app/lots/actions";
+import { PRODUCTION_LABEL, PAYMENT_LABEL, DERIVED_PILL_CLS, type DerivedProduction, type DerivedPayment } from "@/lib/lot-status";
 
 export type LotRow = {
   id: string;
@@ -18,8 +16,9 @@ export type LotRow = {
   poNumber: string | null;
   poDate: string | null;
   facility: string;
-  status: string;
-  paymentStatus: string;
+  // DERIVED from the SKU lines — the lot only summarizes, so these are display-only here.
+  status: DerivedProduction;
+  paymentStatus: DerivedPayment;
   documents: LotDoc[];
   finishedAt: string | null;
   skus: { code: string; imageUrl: string | null }[];
@@ -30,67 +29,27 @@ export type LotRow = {
   txnCount: number;
 };
 
-// StatusDropdown (the frosted pill-as-dropdown) is shared with the lot detail page.
+/** A derived status as a static frosted pill (violet → amber → green on both axes). */
+function DerivedPill({ value, label }: { value: string; label: string }) {
+  return (
+    <span className={`${DERIVED_PILL_CLS[value] ?? "pill-neutral"} inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-medium`}>
+      {label}
+    </span>
+  );
+}
 
 export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: string[] }) {
   const { money, perUnit, qty, date } = useMoney();
-  const router = useRouter();
   const [q, setQ] = useState("");
   const [facility, setFacility] = useState("ALL");
   const [status, setStatus] = useState("ALL");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  // Staged status edits, keyed by lot id — committed together via the floating save bar.
-  const [edits, setEdits] = useState<Record<string, { status?: string; paymentStatus?: string }>>({});
-  const [saving, setSaving] = useState(false);
-  const [saveErr, setSaveErr] = useState<string | null>(null);
-
   const toggle = (id: string) =>
     setExpanded((prev) => {
       const n = new Set(prev);
       n.has(id) ? n.delete(id) : n.add(id);
       return n;
     });
-
-  const effStatus = (l: LotRow) => edits[l.id]?.status ?? l.status;
-  const effPay = (l: LotRow) => edits[l.id]?.paymentStatus ?? l.paymentStatus;
-
-  const stage = (l: LotRow, field: "status" | "paymentStatus", value: string) => {
-    const original = field === "status" ? l.status : l.paymentStatus;
-    setEdits((prev) => {
-      const cur = { ...prev[l.id] };
-      if (value === original) delete cur[field];
-      else cur[field] = value;
-      const next = { ...prev };
-      if (Object.keys(cur).length === 0) delete next[l.id];
-      else next[l.id] = cur;
-      return next;
-    });
-  };
-
-  const dirtyCount = Object.keys(edits).length;
-
-  async function saveEdits() {
-    setSaving(true);
-    setSaveErr(null);
-    try {
-      const changes = Object.entries(edits).map(([lotId, e]) => ({
-        lotId,
-        status: e.status as "IN_PRODUCTION" | "FINISHED" | undefined,
-        paymentStatus: e.paymentStatus as "PAID" | "DUE" | undefined,
-      }));
-      const res = await updateLotStatuses(changes);
-      if (!res.ok) {
-        setSaveErr(res.error ?? "Could not save.");
-        return;
-      }
-      setEdits({});
-      router.refresh();
-    } catch {
-      setSaveErr("Couldn't reach the server — reload and try again.");
-    } finally {
-      setSaving(false);
-    }
-  }
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -108,21 +67,6 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
 
   return (
     <div>
-      {dirtyCount > 0 && (
-        <div className="fixed left-1/2 top-4 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-border bg-surface px-4 py-2 shadow-lg">
-          <span className="text-[12.5px] text-ink-soft">
-            {dirtyCount} lot{dirtyCount > 1 ? "s" : ""} with unsaved status changes
-          </span>
-          {saveErr && <span className="text-[12px] text-negative">{saveErr}</span>}
-          <button onClick={() => { setEdits({}); setSaveErr(null); }} disabled={saving} className="rounded-lg px-2.5 py-1 text-[12.5px] text-muted hover:text-ink disabled:opacity-40">
-            Discard
-          </button>
-          <button onClick={saveEdits} disabled={saving} className="rounded-lg bg-ink px-3 py-1 text-[12.5px] font-medium text-bg hover:opacity-90 disabled:opacity-40">
-            {saving ? "Saving…" : "Save changes"}
-          </button>
-        </div>
-      )}
-
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <input
           value={q}
@@ -134,8 +78,8 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
         <Select
           value={status}
           onChange={setStatus}
-          options={["ALL", "IN_PRODUCTION", "FINISHED"]}
-          labelFor={(v) => (v === "ALL" ? "All statuses" : v === "IN_PRODUCTION" ? "In production" : "Finished")}
+          options={["ALL", "IN_PRODUCTION", "PARTIAL", "FINISHED"]}
+          labelFor={(v) => (v === "ALL" ? "All statuses" : PRODUCTION_LABEL[v as DerivedProduction])}
         />
         <span className="ml-auto text-[12.5px] text-muted">
           {filtered.length} of {lots.length} lots
@@ -167,8 +111,6 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
           <tbody>
             {filtered.map((l) => {
               const open = expanded.has(l.id);
-              const st = effStatus(l);
-              const pay = effPay(l);
               return (
               <Fragment key={l.id}>
               <tr onClick={() => toggle(l.id)} className={`cursor-pointer border-b border-line last:border-0 ${open ? "bg-surface-2" : "hover:bg-surface-2"}`}>
@@ -199,32 +141,15 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
                 <td className="px-3 py-3 text-right tabular text-ink-soft">{perUnit(l.avgCogPerUnit)}</td>
                 <td className="px-3 py-3 text-right font-medium tabular">{money(l.cogTotal)}</td>
                 <td className="px-3 py-3 text-center tabular text-muted">{l.txnCount}</td>
-                {/* Production — editable */}
+                {/* Derived, display-only — per-SKU editing lives on the lot page. */}
                 <td className="px-3 py-3 text-center">
-                  <StatusDropdown
-                    value={st}
-                    edited={edits[l.id]?.status != null}
-                    onChange={(v) => stage(l, "status", v)}
-                    options={[
-                      { value: "IN_PRODUCTION", label: "In production" },
-                      { value: "FINISHED", label: "Finished" },
-                    ]}
-                  />
-                  {st === "FINISHED" && l.finishedAt && edits[l.id]?.status == null && (
+                  <DerivedPill value={l.status} label={PRODUCTION_LABEL[l.status]} />
+                  {l.status === "FINISHED" && l.finishedAt && (
                     <div className="mt-1 text-[10.5px] text-muted">Finished {date(l.finishedAt)}</div>
                   )}
                 </td>
-                {/* Payment — editable */}
                 <td className="px-3 py-3 text-center">
-                  <StatusDropdown
-                    value={pay}
-                    edited={edits[l.id]?.paymentStatus != null}
-                    onChange={(v) => stage(l, "paymentStatus", v)}
-                    options={[
-                      { value: "DUE", label: "Due" },
-                      { value: "PAID", label: "Fully paid" },
-                    ]}
-                  />
+                  <DerivedPill value={l.paymentStatus === "PARTIAL" ? "PARTIAL" : l.paymentStatus} label={PAYMENT_LABEL[l.paymentStatus]} />
                 </td>
                 <td className="px-4 py-3 text-right">
                   <Link

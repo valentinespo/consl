@@ -546,6 +546,14 @@ model LotLine {
   seq       Int           @default(0) // stable ordering within a lot
   materials LotMaterial[]
 
+  // ---- Per-SKU lifecycle. SKUs in one lot finish (and get paid for) at different times, so
+  // status lives HERE; the lot's status/paymentStatus are derived displays (lib/lot-status.ts).
+  status        LotStatus @default(IN_PRODUCTION)
+  paymentStatus String    @default("DUE") // PAID | DUE — supplier fully paid for this SKU's run
+  finishedAt    DateTime? // set when this SKU flips to FINISHED; cleared if flipped back
+  expiryAt      DateTime? // expiry of this SKU's finished goods
+  batchNr       String? // production batch number printed on this SKU's finished goods
+
   // ---- Engine-computed cost snapshot (per unit). Recomputed on data change. ----
   cogPerUnit        Float  @default(0)
   // JSON map of materialCode -> per-unit cost (the authoritative material breakdown).

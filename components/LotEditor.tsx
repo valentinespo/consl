@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Plus, X, AlertTriangle, ChevronDown, Pencil } from "@/components/icons";
@@ -9,6 +9,7 @@ import { Card, SkuAvatar, SectionTitle } from "@/components/ui";
 import { StatusDropdown } from "@/components/StatusDropdown";
 import { useMoney } from "@/components/CurrencyProvider";
 import { updateLot } from "@/app/lots/actions";
+import { deriveProduction, derivePayment, PRODUCTION_LABEL, PAYMENT_LABEL, DERIVED_PILL_CLS } from "@/lib/lot-status";
 import { LotBom, type MaterialType, type Mat } from "@/components/LotBom";
 import type { CostChip } from "@/lib/lot-costs";
 
@@ -23,6 +24,12 @@ export type EditorLine = {
   name: string;
   imageUrl: string | null;
   units: number;
+  // Per-SKU lifecycle — SKUs in one lot finish (and get paid for) independently.
+  status: "IN_PRODUCTION" | "FINISHED";
+  paymentStatus: "PAID" | "DUE";
+  finishedAtISO: string | null;
+  expiryISO: string | null;
+  batchNr: string | null;
   materials: Mat[];
   costs: CostChip[];
   cogPerUnit: number;
@@ -37,6 +44,11 @@ type StateLine = {
   name: string;
   imageUrl: string | null;
   units: string;
+  status: "IN_PRODUCTION" | "FINISHED";
+  paymentStatus: "PAID" | "DUE";
+  finishedAtISO: string;
+  expiryISO: string;
+  batchNr: string;
   cost: { costs: CostChip[]; cogPerUnit: number; shortfalls: Shortfall[] } | null;
 };
 
@@ -74,11 +86,6 @@ export function LotEditor({
     poNumber: string | null;
     poDateISO: string | null;
     facilityId: string;
-    status: "IN_PRODUCTION" | "FINISHED";
-    paymentStatus: "PAID" | "DUE";
-    finishedAtISO: string | null;
-    expiryISO: string | null;
-    batchNr: string | null;
     notes: string | null;
   };
   initialLines: EditorLine[];
@@ -99,6 +106,11 @@ export function LotEditor({
       name: l.name,
       imageUrl: l.imageUrl,
       units: String(l.units),
+      status: l.status,
+      paymentStatus: l.paymentStatus,
+      finishedAtISO: l.finishedAtISO ?? "",
+      expiryISO: l.expiryISO ?? "",
+      batchNr: l.batchNr ?? "",
       cost: { costs: l.costs, cogPerUnit: l.cogPerUnit, shortfalls: l.shortfalls },
     }));
     const bom = deriveBom(initialLines.map((l) => ({ key: l.id ?? `seed-${l.productId}`, materials: l.materials })));
@@ -108,11 +120,6 @@ export function LotEditor({
   const [poNumber, setPoNumber] = useState(initial.poNumber ?? "");
   const [poDateISO, setPoDateISO] = useState(initial.poDateISO ?? "");
   const [facilityId, setFacilityId] = useState(initial.facilityId);
-  const [status, setStatus] = useState(initial.status);
-  const [paymentStatus, setPaymentStatus] = useState<"PAID" | "DUE">(initial.paymentStatus);
-  const [finishedAtISO, setFinishedAtISO] = useState(initial.finishedAtISO ?? "");
-  const [expiryISO, setExpiryISO] = useState(initial.expiryISO ?? "");
-  const [batchNr, setBatchNr] = useState(initial.batchNr ?? "");
   const [notes, setNotes] = useState(initial.notes ?? "");
   const [lines, setLines] = useState<StateLine[]>(seed.lines);
   const [shared, setShared] = useState<Mat[]>(seed.shared);
@@ -130,25 +137,34 @@ export function LotEditor({
   const facility = facilities.find((f) => f.id === facilityId);
   const availableProducts = products.filter((p) => !lines.some((l) => l.productId === p.id));
   const totalUnits = lines.reduce((s, l) => s + (Number(l.units) || 0), 0);
+  // Lot-level statuses are DERIVED from the lines — live, so the header pills preview staged edits.
+  const derivedProd = deriveProduction(lines);
+  const derivedPay = derivePayment(lines);
 
   // ---- Dirty tracking ----
-  const snapshot = (
-    pn: string, pd: string, fac: string, st: string, pay: string, fin: string, ex: string, bn: string, nt: string, ls: StateLine[], sh: Mat[], ov: Record<string, Mat[]>,
-  ) => {
+  const lineSig = (l: StateLine) => {
+    const fin = l.status === "FINISHED";
+    return `${l.id ?? "NEW"}|${l.productId}|${Number(l.units) || 0}|${l.status}|${l.paymentStatus}|${fin ? l.finishedAtISO : ""}|${fin ? l.expiryISO : ""}|${fin ? l.batchNr.trim() : ""}`;
+  };
+  const snapshot = (pn: string, pd: string, fac: string, nt: string, ls: StateLine[], sh: Mat[], ov: Record<string, Mat[]>) => {
     const keys = new Set(ls.map((l) => l.key));
     const cleanOv = Object.fromEntries(Object.entries(ov).filter(([k]) => keys.has(k)).map(([k, v]) => [k, matSig(v)]));
     return JSON.stringify({
-      pn: pn.trim(), pd, fac, st, pay, fin: st === "FINISHED" ? fin : "", ex: st === "FINISHED" ? ex : "", bn: st === "FINISHED" ? bn.trim() : "", nt: nt.trim(),
-      l: ls.map((l) => `${l.id ?? "NEW"}|${l.productId}|${Number(l.units) || 0}`),
+      pn: pn.trim(), pd, fac, nt: nt.trim(),
+      l: ls.map(lineSig),
       sh: matSig(sh), ov: cleanOv,
     });
   };
-  const current = snapshot(poNumber, poDateISO, facilityId, status, paymentStatus, finishedAtISO, expiryISO, batchNr, notes, lines, shared, overrides);
+  const current = snapshot(poNumber, poDateISO, facilityId, notes, lines, shared, overrides);
   const original = useMemo(
-    () => snapshot(initial.poNumber ?? "", initial.poDateISO ?? "", initial.facilityId, initial.status, initial.paymentStatus, initial.finishedAtISO ?? "", initial.expiryISO ?? "", initial.batchNr ?? "", initial.notes ?? "", seed.lines, seed.shared, seed.overrides),
+    () => snapshot(initial.poNumber ?? "", initial.poDateISO ?? "", initial.facilityId, initial.notes ?? "", seed.lines, seed.shared, seed.overrides),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [initial, seed],
   );
   const dirty = current !== original;
+
+  const patchLine = (key: string, patch: Partial<StateLine>) =>
+    setLines((prev) => prev.map((x) => (x.key === key ? { ...x, ...patch } : x)));
 
   function bomFor(key: string): Mat[] {
     return overrides[key] ?? shared;
@@ -158,7 +174,21 @@ export function LotEditor({
     if (!p) return;
     setLines((prev) => [
       ...prev,
-      { key: `new-${tempSeq++}`, id: null, productId: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl, units: addUnits || "0", cost: null },
+      {
+        key: `new-${tempSeq++}`,
+        id: null,
+        productId: p.id,
+        code: p.code,
+        name: p.name,
+        imageUrl: p.imageUrl,
+        units: addUnits || "0",
+        status: "IN_PRODUCTION",
+        paymentStatus: "DUE",
+        finishedAtISO: "",
+        expiryISO: "",
+        batchNr: "",
+        cost: null,
+      },
     ]);
     setAddProductId("");
     setAddUnits("");
@@ -176,11 +206,6 @@ export function LotEditor({
     setPoNumber(initial.poNumber ?? "");
     setPoDateISO(initial.poDateISO ?? "");
     setFacilityId(initial.facilityId);
-    setStatus(initial.status);
-    setPaymentStatus(initial.paymentStatus);
-    setFinishedAtISO(initial.finishedAtISO ?? "");
-    setExpiryISO(initial.expiryISO ?? "");
-    setBatchNr(initial.batchNr ?? "");
     setNotes(initial.notes ?? "");
     setLines(seed.lines);
     setShared(seed.shared);
@@ -199,13 +224,18 @@ export function LotEditor({
         poNumber: poNumber.trim() || null,
         poDateISO: poDateISO || null,
         facilityId,
-        status,
-        paymentStatus,
-        finishedAtISO: status === "FINISHED" ? finishedAtISO || null : null,
-        expiryISO: status === "FINISHED" ? expiryISO || null : null,
-        batchNr: status === "FINISHED" ? batchNr.trim() || null : null,
         notes: notes.trim() || null,
-        lines: lines.map((l) => ({ id: l.id, productId: l.productId, units: Number(l.units) || 0, materials: bomFor(l.key) })),
+        lines: lines.map((l) => ({
+          id: l.id,
+          productId: l.productId,
+          units: Number(l.units) || 0,
+          status: l.status,
+          paymentStatus: l.paymentStatus,
+          finishedAtISO: l.status === "FINISHED" ? l.finishedAtISO || null : null,
+          expiryISO: l.status === "FINISHED" ? l.expiryISO || null : null,
+          batchNr: l.status === "FINISHED" ? l.batchNr.trim() || null : null,
+          materials: bomFor(l.key),
+        })),
       });
       if (!res.ok) {
         setError(res.error ?? "Could not save.");
@@ -227,35 +257,17 @@ export function LotEditor({
 
   return (
     <div>
-      {/* Status pills, portaled into the page header — dropdowns like the lots table, staged into
-          this form's save bar. The old Status/Payment fields below are gone: one control each. */}
+      {/* Header pills, portaled into the page header — DERIVED from the SKU lines (live, so they
+          preview staged edits). Not selectable: each SKU carries its own pills in the table below. */}
       {pillSlot &&
         createPortal(
           <>
-            <StatusDropdown
-              value={status}
-              edited={status !== initial.status}
-              onChange={(v) => {
-                const next = v as "IN_PRODUCTION" | "FINISHED";
-                setStatus(next);
-                // Flipping to Finished proposes today; the date field stays fully editable and is
-                // the lot's single source of truth — flipping back to production erases it on save.
-                if (next === "FINISHED" && !finishedAtISO) setFinishedAtISO(new Date().toLocaleDateString("en-CA"));
-              }}
-              options={[
-                { value: "IN_PRODUCTION", label: "In production" },
-                { value: "FINISHED", label: "Finished" },
-              ]}
-            />
-            <StatusDropdown
-              value={paymentStatus}
-              edited={paymentStatus !== initial.paymentStatus}
-              onChange={(v) => setPaymentStatus(v as "PAID" | "DUE")}
-              options={[
-                { value: "DUE", label: "Due" },
-                { value: "PAID", label: "Fully paid" },
-              ]}
-            />
+            <span className={`${DERIVED_PILL_CLS[derivedProd]} inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-medium`}>
+              {PRODUCTION_LABEL[derivedProd]}
+            </span>
+            <span className={`${DERIVED_PILL_CLS[derivedPay]} inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-medium`}>
+              {PAYMENT_LABEL[derivedPay]}
+            </span>
           </>,
           pillSlot,
         )}
@@ -299,21 +311,6 @@ export function LotEditor({
         <HeroCard label="Total COG"><div className="text-[16px] font-semibold tabular text-ink">{money(totalCog, 2)}</div></HeroCard>
       </div>
 
-      {/* Finished-only details */}
-      {status === "FINISHED" && (
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
-          <Field label="Finished date">
-            <DatePicker value={finishedAtISO} onChange={setFinishedAtISO} clearable />
-          </Field>
-          <Field label="Expiry date">
-            <DatePicker value={expiryISO} onChange={setExpiryISO} clearable placeholder="Optional" />
-          </Field>
-          <Field label="Batch number">
-            <input value={batchNr} onChange={(e) => setBatchNr(e.target.value)} placeholder="e.g. B-24137" className={inputCls} />
-          </Field>
-        </div>
-      )}
-
       {/* Cost breakdown + units + add/remove SKU */}
       <div className="mt-6">
         <SectionTitle>SKUs &amp; cost breakdown {dirty && <span className="text-[11.5px] font-normal text-muted">· costs refresh after saving</span>}</SectionTitle>
@@ -325,14 +322,18 @@ export function LotEditor({
                 <th className="px-3 py-2.5 text-right font-medium">Units</th>
                 <th className="px-3 py-2.5 font-medium">Cost breakdown / unit</th>
                 <th className="px-3 py-2.5 text-right font-medium">COG/unit</th>
+                <th className="px-3 py-2.5 text-center font-medium">Status</th>
                 <th className="px-4 py-2.5 text-right font-medium"></th>
               </tr>
             </thead>
             <tbody>
               {lines.map((l) => {
                 const txnCount = skuTxnCounts[l.code] ?? 0;
+                const lineFinished = l.status === "FINISHED";
+                const seedLine = seed.lines.find((s) => s.key === l.key);
                 return (
-                  <tr key={l.key} className="border-b border-line last:border-0">
+                  <Fragment key={l.key}>
+                  <tr className={lineFinished ? "" : "border-b border-line last:border-0"}>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2.5">
                         <SkuAvatar code={l.code} size={30} imageUrl={l.imageUrl} />
@@ -345,7 +346,7 @@ export function LotEditor({
                     <td className="px-3 py-3 text-right">
                       <input
                         type="number" min="0" value={l.units}
-                        onChange={(e) => setLines((prev) => prev.map((x) => (x.key === l.key ? { ...x, units: e.target.value } : x)))}
+                        onChange={(e) => patchLine(l.key, { units: e.target.value })}
                         className="h-8 w-20 rounded-lg border border-border bg-surface-2 px-2 text-right text-[13px] tabular text-ink outline-none focus:border-accent-strong"
                       />
                     </td>
@@ -366,6 +367,37 @@ export function LotEditor({
                       )}
                     </td>
                     <td className="px-3 py-3 text-right font-semibold tabular text-ink">{l.cost ? perUnit(l.cost.cogPerUnit) : <span className="text-[11px] font-normal text-muted">new</span>}</td>
+                    {/* Per-SKU lifecycle — production + payment, staged like everything else. */}
+                    <td className="px-3 py-3 text-center">
+                      <div className="inline-flex flex-wrap items-center justify-center gap-1.5">
+                        <StatusDropdown
+                          value={l.status}
+                          edited={seedLine ? l.status !== seedLine.status : l.status !== "IN_PRODUCTION"}
+                          onChange={(v) => {
+                            const next = v as "IN_PRODUCTION" | "FINISHED";
+                            // Flipping to Finished proposes today; the field stays editable and is
+                            // this SKU's source of truth — flipping back erases it on save.
+                            patchLine(l.key, {
+                              status: next,
+                              ...(next === "FINISHED" && !l.finishedAtISO ? { finishedAtISO: new Date().toLocaleDateString("en-CA") } : {}),
+                            });
+                          }}
+                          options={[
+                            { value: "IN_PRODUCTION", label: "In production" },
+                            { value: "FINISHED", label: "Finished" },
+                          ]}
+                        />
+                        <StatusDropdown
+                          value={l.paymentStatus}
+                          edited={seedLine ? l.paymentStatus !== seedLine.paymentStatus : false}
+                          onChange={(v) => patchLine(l.key, { paymentStatus: v as "PAID" | "DUE" })}
+                          options={[
+                            { value: "DUE", label: "Due" },
+                            { value: "PAID", label: "Fully paid" },
+                          ]}
+                        />
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-right">
                       {confirmRemove === l.key ? (
                         <span className="inline-flex items-center gap-1.5">
@@ -378,6 +410,25 @@ export function LotEditor({
                       )}
                     </td>
                   </tr>
+                  {/* Finished-only details pop up as a second line under the SKU's row. */}
+                  {lineFinished && (
+                    <tr className="border-b border-line last:border-0">
+                      <td colSpan={6} className="px-4 pb-3 pt-0">
+                        <div className="flex flex-wrap items-end gap-3 pl-[42px]">
+                          <Field label="Finished date" className="w-[150px]">
+                            <DatePicker value={l.finishedAtISO} onChange={(v) => patchLine(l.key, { finishedAtISO: v })} clearable />
+                          </Field>
+                          <Field label="Expiry date" className="w-[150px]">
+                            <DatePicker value={l.expiryISO} onChange={(v) => patchLine(l.key, { expiryISO: v })} clearable placeholder="Optional" />
+                          </Field>
+                          <Field label="Batch number" className="w-[150px]">
+                            <input value={l.batchNr} onChange={(e) => patchLine(l.key, { batchNr: e.target.value })} placeholder="e.g. B-24137" className={inputCls} />
+                          </Field>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>

@@ -3,6 +3,7 @@ import { prisma } from "./prisma";
 import { computeEngineResult } from "./recompute";
 import { buildCostChips } from "./lot-costs";
 import { runFinishedGoodsEngine, type FinishedSupply, type FinishedMovement } from "./finished-goods";
+import { deriveProduction, derivePayment, deriveFinishedAt } from "./lot-status";
 
 export type InventoryPool = {
   materialCode: string;
@@ -65,7 +66,8 @@ export async function getDashboard() {
     for (const ln of lot.lines) {
       const v = ln.cogPerUnit * ln.units;
       totalUnits += ln.units;
-      if (lot.status === "IN_PRODUCTION") inProductionValue += v;
+      // Status is per LINE — a finished SKU counts as finished even while its lot-mates cook.
+      if (ln.status === "IN_PRODUCTION") inProductionValue += v;
       else finishedValue += v;
       byFacility.set(lot.facility.code, (byFacility.get(lot.facility.code) ?? 0) + v);
     }
@@ -93,7 +95,8 @@ export async function getDashboard() {
 
   const counts = {
     lots: lots.length,
-    inProduction: lots.filter((l) => l.status === "IN_PRODUCTION").length,
+    // "Open" = any SKU in the lot still cooking.
+    inProduction: lots.filter((l) => l.lines.some((ln) => ln.status === "IN_PRODUCTION")).length,
     purchases: await prisma.purchase.count(),
     transactions: await prisma.transaction.count(),
     suppliers: await prisma.supplier.count(),
@@ -144,10 +147,11 @@ export async function getLots() {
       poDate: lot.poDate,
       facility: lot.facility.code,
       facilityName: lot.facility.name,
-      status: lot.status,
-      paymentStatus: lot.paymentStatus,
+      // Lot-level status/payment are DERIVED from the lines (lib/lot-status.ts).
+      status: deriveProduction(lot.lines),
+      paymentStatus: derivePayment(lot.lines),
       documents: lot.documents.map((d) => ({ id: d.id, label: d.label, fileUrl: d.fileUrl, fileName: d.fileName })),
-      finishedAt: lot.finishedAt,
+      finishedAt: deriveFinishedAt(lot.lines),
       skus: lot.lines.map((l) => ({ code: l.product.code, imageUrl: l.product.imageUrl })),
       lines: lot.lines.map((l) => ({
         sku: l.product.code,
@@ -155,6 +159,9 @@ export async function getLots() {
         imageUrl: l.product.imageUrl,
         units: l.units,
         cogPerUnit: l.cogPerUnit,
+        status: l.status,
+        paymentStatus: l.paymentStatus,
+        finishedAt: l.finishedAt,
         costs: buildCostChips(l.materialCostsJson, l.transactionCostsJson, l.shortfallsJson, matName),
       })),
       units,
@@ -274,11 +281,12 @@ export async function getTransactionInvoices(lotId?: string) {
   return lotId ? mapped.filter((inv) => inv.lines.some((l) => l.lotId === lotId)) : mapped;
 }
 
-/** Run the finished-goods engine: where finished units physically are and what they're worth. */
+/** Run the finished-goods engine: where finished units physically are and what they're worth.
+ *  Supply is per LINE: a finished SKU feeds the pools even while its lot-mates are still cooking. */
 export async function computeFinishedGoods() {
   const [lots, movements] = await Promise.all([
     prisma.lot.findMany({
-      where: { status: "FINISHED" },
+      where: { lines: { some: { status: "FINISHED" } } },
       include: { lines: true },
       orderBy: [{ poDate: "desc" }, { createdAt: "desc" }],
     }),
@@ -288,6 +296,7 @@ export async function computeFinishedGoods() {
   let seq = 0;
   for (const lot of lots) {
     for (const ln of lot.lines) {
+      if (ln.status !== "FINISHED") continue;
       supply.push({
         sku: ln.productId,
         facilityId: lot.facilityId,
@@ -789,14 +798,16 @@ export type LeadTimes = {
  * cure for an odd-looking span is fixing the record, not code quietly dropping it.
  */
 export async function getLeadTimes(): Promise<LeadTimes> {
-  const lots = await prisma.lot.findMany({
-    where: { status: "FINISHED", finishedAt: { not: null }, poDate: { not: null } },
-    select: { poDate: true, finishedAt: true, facility: { select: { code: true } } },
+  // Measured per finished LINE now — each SKU's own PO-to-finished span counts as soon as that
+  // SKU completes, instead of waiting for the whole lot.
+  const lines = await prisma.lotLine.findMany({
+    where: { status: "FINISHED", finishedAt: { not: null }, lot: { poDate: { not: null } } },
+    select: { finishedAt: true, lot: { select: { poDate: true, facility: { select: { code: true } } } } },
   });
   const DAY = 86_400_000;
-  const spans = lots.map((l) => ({
-    code: l.facility.code,
-    days: Math.round((l.finishedAt!.getTime() - l.poDate!.getTime()) / DAY),
+  const spans = lines.map((l) => ({
+    code: l.lot.facility.code,
+    days: Math.round((l.finishedAt!.getTime() - l.lot.poDate!.getTime()) / DAY),
   }));
   if (spans.length === 0) return { blendedDays: null, lots: 0, perFacility: [] };
 

@@ -109,7 +109,8 @@ export async function getRestock(): Promise<{
   for (const lot of lots) {
     const poDate = lot.poDate ?? lot.createdAt;
     for (const ln of lot.lines) {
-      if (lot.status === "IN_PRODUCTION") {
+      // Status is per LINE — a finished SKU becomes sellable stock while its lot-mates cook.
+      if (ln.status === "IN_PRODUCTION") {
         inProdUnits.set(ln.productId, (inProdUnits.get(ln.productId) ?? 0) + ln.units);
         inProductionValue += ln.units * ln.cogPerUnit;
         const cur = soonestPo.get(ln.productId);
