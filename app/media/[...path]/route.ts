@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrg } from "@/lib/org";
+import { getR2Object } from "@/lib/storage";
 
 // Serves user-uploaded files from the persistent volume (UPLOAD_DIR). These are invoices, BOLs,
 // COAs and product photos — tenant data, so a signed-in session (enforced by middleware) is not
@@ -69,20 +70,26 @@ export async function GET(_req: Request, { params }: { params: Promise<{ path: s
   }
   if (!owned) return new Response("Not found", { status: 404 });
 
-  // Current uploads live on the volume; historical ones under legacy-uploads. Try both.
+  const ext = rel.split(".").pop()?.toLowerCase() ?? "";
+  const serve = (buf: Buffer) =>
+    new Response(new Uint8Array(buf), {
+      headers: {
+        "Content-Type": TYPES[ext] ?? "application/octet-stream",
+        "X-Content-Type-Options": "nosniff",
+        // Private: these are per-tenant documents, so no shared/CDN caching.
+        "Cache-Control": "private, max-age=31536000, immutable",
+      },
+    });
+
+  // R2 (durable backend) first; then the volume and legacy-uploads. Keeping the disk as a fallback
+  // means files not yet migrated to R2 still serve, so switching backends never 404s a file.
+  const fromR2 = await getR2Object(rel);
+  if (fromR2) return serve(fromR2);
+
   const dirs = [UPLOAD_DIR, LEGACY_DIR].filter((d): d is string => !!d);
   for (const dir of dirs) {
     try {
-      const buf = await readFile(path.join(dir, rel));
-      const ext = rel.split(".").pop()?.toLowerCase() ?? "";
-      return new Response(new Uint8Array(buf), {
-        headers: {
-          "Content-Type": TYPES[ext] ?? "application/octet-stream",
-          "X-Content-Type-Options": "nosniff",
-          // Private: these are per-tenant documents, so no shared/CDN caching.
-          "Cache-Control": "private, max-age=31536000, immutable",
-        },
-      });
+      return serve(await readFile(path.join(dir, rel)));
     } catch {
       // try the next directory
     }

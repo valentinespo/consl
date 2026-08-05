@@ -16,10 +16,21 @@ const R2 = {
   accessKeyId: process.env.R2_ACCESS_KEY_ID,
   secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
   bucket: process.env.R2_BUCKET,
-  publicUrl: process.env.R2_PUBLIC_URL, // public base URL for the bucket (no trailing slash)
 };
 
-export const r2Configured = Boolean(R2.endpoint && R2.accessKeyId && R2.secretAccessKey && R2.bucket && R2.publicUrl);
+// R2 is a private bucket read/written server-side; files are still served through the authenticated
+// /media route (never a public URL), so no public-URL env var is needed.
+export const r2Configured = Boolean(R2.endpoint && R2.accessKeyId && R2.secretAccessKey && R2.bucket);
+
+/** One S3 client for R2, lazily built. */
+async function r2Client() {
+  const { S3Client } = await import("@aws-sdk/client-s3");
+  return new S3Client({
+    region: "auto",
+    endpoint: R2.endpoint,
+    credentials: { accessKeyId: R2.accessKeyId!, secretAccessKey: R2.secretAccessKey! },
+  });
+}
 
 /** Reduce a caller-supplied id to something that cannot escape its folder or start a new path. */
 export function safeKeySegment(raw: string): string {
@@ -41,14 +52,13 @@ function assertSafeKey(key: string): void {
 export async function saveImage(key: string, body: Buffer, contentType: string): Promise<string> {
   assertSafeKey(key);
   if (r2Configured) {
-    const { S3Client, PutObjectCommand } = await import("@aws-sdk/client-s3");
-    const s3 = new S3Client({
-      region: "auto",
-      endpoint: R2.endpoint,
-      credentials: { accessKeyId: R2.accessKeyId!, secretAccessKey: R2.secretAccessKey! },
-    });
+    const { PutObjectCommand } = await import("@aws-sdk/client-s3");
+    const s3 = await r2Client();
     await s3.send(new PutObjectCommand({ Bucket: R2.bucket!, Key: key, Body: body, ContentType: contentType }));
-    return `${R2.publicUrl!.replace(/\/+$/, "")}/${key}`;
+    // Served through the authenticated /media route (which reads R2), NOT a public bucket URL —
+    // the stored URL form is identical to the volume backend, so the DB never needs to know which
+    // backend holds the bytes.
+    return `/media/${key}`;
   }
 
   if (UPLOAD_DIR) {
@@ -68,10 +78,8 @@ export async function saveImage(key: string, body: Buffer, contentType: string):
 
 /** Recover the storage key from a URL produced by `saveImage`. Null when it isn't one of ours. */
 export function keyFromUrl(url: string): string | null {
-  const base = R2.publicUrl ? `${R2.publicUrl.replace(/\/+$/, "")}/` : null;
   let key: string | null = null;
-  if (base && url.startsWith(base)) key = url.slice(base.length);
-  else if (url.startsWith("/media/")) key = url.slice("/media/".length);
+  if (url.startsWith("/media/")) key = url.slice("/media/".length);
   else if (url.startsWith("/uploads/")) key = url.slice("/uploads/".length);
   if (!key) return null;
   try {
@@ -104,20 +112,28 @@ export async function readStored(url: string | null | undefined): Promise<Buffer
     }
     return null;
   }
+  // R2 first (durable backend), then the local disk — during/after a migration a file may live in
+  // either, so a miss in R2 falls back to the volume rather than failing.
+  const fromR2 = await getR2Object(key);
+  if (fromR2) return fromR2;
   try {
-    if (r2Configured) {
-      const { S3Client, GetObjectCommand } = await import("@aws-sdk/client-s3");
-      const s3 = new S3Client({
-        region: "auto",
-        endpoint: R2.endpoint,
-        credentials: { accessKeyId: R2.accessKeyId!, secretAccessKey: R2.secretAccessKey! },
-      });
-      const res = await s3.send(new GetObjectCommand({ Bucket: R2.bucket!, Key: key }));
-      const bytes = await res.Body?.transformToByteArray();
-      return bytes ? Buffer.from(bytes) : null;
-    }
     const root = UPLOAD_DIR ?? path.join(process.cwd(), "public", "uploads");
     return await readFile(path.join(root, key));
+  } catch {
+    return null;
+  }
+}
+
+/** Fetch an object's bytes from R2 by storage key. Null when R2 isn't configured or the key is
+ *  absent. Used by the /media route and readStored so the DB URL never encodes the backend. */
+export async function getR2Object(key: string): Promise<Buffer | null> {
+  if (!r2Configured || !KEY_RE.test(key) || path.normalize(key) !== key) return null;
+  try {
+    const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+    const s3 = await r2Client();
+    const res = await s3.send(new GetObjectCommand({ Bucket: R2.bucket!, Key: key }));
+    const bytes = await res.Body?.transformToByteArray();
+    return bytes ? Buffer.from(bytes) : null;
   } catch {
     return null;
   }
