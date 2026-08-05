@@ -12,7 +12,8 @@ export type ReorderResult = {
   win: Win;
   excl: number;
   override: boolean;
-  onHandCover: number; // months of cover at the sales channel
+  onHandCover: number; // months of SELLABLE cover at the channel (FBA only — AWD excluded)
+  awdCover: number; // months sitting in AWD — owned, but needs a replenishment to become sellable
   locCover: number; // months of cover at your own locations
   prodCover: number; // months of cover being made
   status: ReorderStatus;
@@ -31,7 +32,8 @@ export type ReorderResult = {
  * Turn one SKU's stock into a situation and the actions that fix it.
  *
  * The model is a timeline. Three moments matter, in months from today:
- *   - the channel runs out of what it holds (A)
+ *   - the channel runs out of what it can actually SELL (A = FBA incl. inbound; AWD is reserve
+ *     stock that still needs a shipDays replenishment, so it rides with warehouse stock)
  *   - a truck loaded today lands at the channel (shipM)
  *   - the next production lot becomes sellable (Tc for a lot already placed, otherwise
  *     lead + shipping for a run you'd start today)
@@ -68,12 +70,17 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
   const denomDays = hasDaily ? win - excl : win;
   const monthly = denomDays > 0 ? (units / denomDays) * MONTH : 0;
 
-  // Cover in months, by where the stock is.
-  const A = monthly > 0 ? r.onHand / monthly : r.onHand > 0 ? Infinity : 0;
+  // Cover in months, by where the stock is. AWD is Amazon's bulk reserve — those units must be
+  // replenished into FBA (a shipDays move) before anyone can buy them, so they count with your
+  // own locations as "owned, needs a truck", never as sellable channel stock. FBA's number keeps
+  // its inbound units: they're already on their way to the sellable pool.
+  const A = monthly > 0 ? r.fbaTotal / monthly : r.fbaTotal > 0 ? Infinity : 0;
+  const W = monthly > 0 ? r.awdTotal / monthly : r.awdTotal > 0 ? Infinity : 0;
   const L = monthly > 0 ? r.atLocations / monthly : r.atLocations > 0 ? Infinity : 0;
   const P = monthly > 0 ? r.inProduction / monthly : r.inProduction > 0 ? Infinity : 0;
+  const reserve = r.atLocations + r.awdTotal; // owned units a truck still has to move
   const hasPO = r.inProduction > 0;
-  const total = A + L + P;
+  const total = A + W + L + P;
 
   const shipM = r.shipDays / MONTH;
   const shipBuffer = shipM * r.shipBufferX;
@@ -109,15 +116,15 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
     // at the channel and ends the outage on its own. Without the cap, an overdue or nearly-landed
     // lot still charged the full wait-for-the-truck window and overstated the outage.
     const truckM = Math.min(shipM, nextArrival);
-    const gap1Days = r.atLocations > 0 ? Math.max(0, Math.round((truckM - A) * MONTH)) : 0;
-    const endOwn = r.atLocations > 0 ? Math.max(A, shipM) + L : A; // when everything you own is sold
+    const gap1Days = reserve > 0 ? Math.max(0, Math.round((truckM - A) * MONTH)) : 0;
+    const endOwn = reserve > 0 ? Math.max(A, shipM) + L + W : A; // when everything you own is sold
     const gap2Days = Math.max(0, Math.round((nextArrival - endOwn) * MONTH));
     dryDays = gap1Days + gap2Days;
     // The slice of the outage that ends only when the lot lands — the part arriving earlier
     // would shrink. When the lot beats the truck, that's the whole of gap1; otherwise gap2.
-    const arrivalGapDays = r.atLocations > 0 && nextArrival <= shipM ? gap1Days : gap2Days;
+    const arrivalGapDays = reserve > 0 && nextArrival <= shipM ? gap1Days : gap2Days;
 
-    ship = r.atLocations > 0 && (A <= shipBuffer || dryDays > 0);
+    ship = reserve > 0 && (A <= shipBuffer || dryDays > 0);
     // Expediting only helps with the arrival-bound slice; if the darkness is all truck-speed,
     // the lot already lands in time and expediting it would be pure noise.
     expedite = hasPO && arrivalGapDays > 0;
@@ -142,8 +149,9 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
     } else if (ship) {
       status = "channelLow";
       statusLabel = "Running low";
-    } else if (A + L >= r.minMonths) {
-      // Enough owned and already in your hands, without leaning on anything still being made.
+    } else if (A + W + L >= r.minMonths) {
+      // Enough owned and already in your hands (AWD included), without leaning on anything still
+      // being made.
       status = "ok";
       statusLabel = "Healthy";
     } else if (total >= r.minMonths) {
@@ -172,6 +180,7 @@ export function computeReorder(r: RestockRow, globalWin: Win, nowMs: number): Re
     excl,
     override,
     onHandCover: A,
+    awdCover: W,
     locCover: L,
     prodCover: P,
     status,

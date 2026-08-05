@@ -27,11 +27,13 @@ export async function getAlerts(rows: RestockRow[]): Promise<Alert[]> {
     // Independent, not a chain: a row can need a shipment *and* a PO *and* an expedite, and an
     // if/else here would silently drop the other two.
     if (c.ship) {
+      // AWD counts as ship-from stock too — reserve units that must be replenished into FBA.
+      const sources = [...(r.awdTotal > 0 ? ["AWD"] : []), ...r.atLocationsBy.map((x) => x.code)];
       alerts.push({
         key: `ship:${r.code}`,
         kind: "ship",
         title: `${r.name} — ship stock you already have`,
-        detail: `Waiting at ${r.atLocationsBy.map((x) => x.code).join(" / ") || "your locations"}${
+        detail: `Waiting at ${sources.join(" / ") || "your locations"}${
           c.shipWithinDays > 0 ? ` · within ${c.shipWithinDays}d` : ""
         }`,
         severity: "warn",

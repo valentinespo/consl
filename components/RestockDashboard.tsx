@@ -328,10 +328,16 @@ export function RestockDashboard({
                       if the line gets cut off halfway through "Reserved". */}
                   <div className="mt-1.5 text-[11px] tabular text-muted">{parts.join(" · ")}</div>
                 </div>
-                {/* Coverage: months on hand, then what's waiting at your locations and in production */}
+                {/* Coverage: months SELLABLE at the channel (FBA), then AWD reserve, then what's
+                    waiting at your locations and in production. */}
                 <div>
                   <div className="tabular text-[15px] font-medium leading-none text-ink">{mo(r.onHandCover)}<span className="text-[10.5px] font-normal text-muted"> mo</span></div>
                   <div className="mt-0.5 text-[10px] uppercase tracking-wide text-muted">On hand</div>
+                  {r.awdTotal > 0 && (
+                    <div className="mt-1.5 tabular text-[13px] font-medium leading-none" style={{ color: SEG.awd }}>
+                      +{mo(r.awdCover)}<span className="text-[10.5px] font-normal text-muted"> mo in AWD (needs shipping)</span>
+                    </div>
+                  )}
                   {r.atLocations > 0 && (
                     <div className="mt-1.5 tabular text-[13px] font-medium leading-none" style={{ color: SEG.locations }}>
                       +{mo(r.locCover)}<span className="text-[10.5px] font-normal text-muted"> mo at my locations</span>
@@ -340,7 +346,7 @@ export function RestockDashboard({
                   {r.inProduction > 0 ? (
                     <div className="mt-1.5 tabular text-[13px] font-medium leading-none" style={{ color: SEG.production }}>+{mo(r.prodCover)}<span className="text-[10.5px] font-normal text-muted"> mo in production</span></div>
                   ) : (
-                    r.atLocations === 0 && <div className="mt-1.5 text-[11px] text-muted">No production</div>
+                    r.atLocations === 0 && r.awdTotal === 0 && <div className="mt-1.5 text-[11px] text-muted">No production</div>
                   )}
                 </div>
                 {/* Status */}
@@ -360,14 +366,18 @@ export function RestockDashboard({
                       // forward, and still start a run. Showing only the first one was how the
                       // ship instruction used to vanish the moment a row turned red.
                       const acts: { label: string; sub: string; color?: string }[] = [];
-                      if (r.ship)
+                      if (r.ship) {
+                        // AWD leads the source list: replenishing FBA from AWD is the natural
+                        // first move before trucking stock in from your own locations.
+                        const sources = [...(r.awdTotal > 0 ? ["AWD"] : []), ...r.atLocationsBy.map((x) => x.code)];
                         acts.push({
                           label: "Ship units",
                           sub:
-                            `From ${r.atLocationsBy.map((x) => x.code).join(" / ") || "your locations"}` +
+                            `From ${sources.join(" / ") || "your locations"}` +
                             (r.shipWithinDays > 0 ? ` · within ${r.shipWithinDays}d` : ""),
                           color: SEG.locations,
                         });
+                      }
                       if (r.expedite) acts.push({ label: "Expedite", sub: "Incoming lot", color: "#b91c1c" });
                       if (r.recommendedQty > 0)
                         acts.push({ label: `Order ${n(r.recommendedQty)} units`, sub: "Recommended" });
