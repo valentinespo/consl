@@ -38,9 +38,8 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
     getCategoriesInUse(),
   ]);
   if (!lot) notFound();
-  const { money, qty, date } = await getFmt();
+  const { qty } = await getFmt();
 
-  const totalUnits = lot.lines.reduce((s, l) => s + l.units, 0);
   const totalCog = lot.lines.reduce((s, l) => s + l.cogPerUnit * l.units, 0);
 
   // Per-SKU shortfalls for the top banner.
@@ -86,13 +85,8 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
         </div>
       </PageHeader>
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <Meta label="Total units" value={qty(totalUnits)} />
-        <Meta label="Total COG" value={money(totalCog, 2)} />
-      </div>
-
       {hasShortfall && (
-        <div className="mt-5 flex items-start gap-2.5 rounded-[var(--radius-card)] border border-[#e7cfc8] bg-[#fbeae6] px-4 py-3">
+        <div className="mb-5 flex items-start gap-2.5 rounded-[var(--radius-card)] border border-[#e7cfc8] bg-[#fbeae6] px-4 py-3">
           <span className="text-[16px] leading-none">⚠️</span>
           <div className="text-[12.5px] text-negative">
             <span className="font-semibold">Not enough material purchased for this lot.</span>
@@ -128,6 +122,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
           products={products.map((p) => ({ id: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl }))}
           materialTypes={materialTypes}
           skuTxnCounts={skuTxnCounts}
+          totalCog={totalCog}
         />
       </div>
 
@@ -157,15 +152,5 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
 
       <DeleteLot lotId={lot.id} lotNr={lot.lotNr} />
     </>
-  );
-}
-
-
-function Meta({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-[var(--radius-card)] border border-border bg-surface p-4">
-      <div className="text-[12px] text-muted">{label}</div>
-      <div className="mt-1 font-semibold text-ink tabular">{value}</div>
-    </div>
   );
 }

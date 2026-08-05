@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Plus, X, AlertTriangle } from "@/components/icons";
+import { Plus, X, AlertTriangle, ChevronDown } from "@/components/icons";
 import { DatePicker } from "@/components/DatePicker";
 import { Card, SkuAvatar, SectionTitle } from "@/components/ui";
 import { StatusDropdown } from "@/components/StatusDropdown";
@@ -67,6 +67,7 @@ export function LotEditor({
   products,
   materialTypes,
   skuTxnCounts,
+  totalCog,
 }: {
   lotId: string;
   initial: {
@@ -85,8 +86,9 @@ export function LotEditor({
   products: Product[];
   materialTypes: MaterialType[];
   skuTxnCounts: Record<string, number>;
+  totalCog: number; // saved COG snapshot for the hero card (refreshes after a save)
 }) {
-  const { perUnit, qty } = useMoney();
+  const { money, perUnit, qty } = useMoney();
   const router = useRouter();
   const seed = useMemo(() => {
     const lines: StateLine[] = initialLines.map((l) => ({
@@ -258,29 +260,55 @@ export function LotEditor({
           pillSlot,
         )}
 
-      {/* Details */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
-        <Field label="PO number"><input value={poNumber} onChange={(e) => setPoNumber(e.target.value)} placeholder="#7-CCP" className={inputCls} /></Field>
-        <Field label="PO date"><DatePicker value={poDateISO} onChange={setPoDateISO} /></Field>
-        <Field label="Facility">
-          <select value={facilityId} onChange={(e) => setFacilityId(e.target.value)} className={inputCls}>
-            {facilities.map((f) => (<option key={f.id} value={f.id}>{f.code} — {f.name}</option>))}
-          </select>
-        </Field>
-        {status === "FINISHED" && (
-          <>
-            <Field label="Finished date">
-              <DatePicker value={finishedAtISO} onChange={setFinishedAtISO} clearable />
-            </Field>
-            <Field label="Expiry date">
-              <DatePicker value={expiryISO} onChange={setExpiryISO} clearable placeholder="Optional" />
-            </Field>
-            <Field label="Batch number">
-              <input value={batchNr} onChange={(e) => setBatchNr(e.target.value)} placeholder="e.g. B-24137" className={inputCls} />
-            </Field>
-          </>
-        )}
+      {/* Hero — the lot's key facts as cards. PO date / number / facility are editable in place
+          (borderless controls that read like the value); total units + COG are read-only stats. */}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
+        <HeroCard label="PO date">
+          <DatePicker
+            value={poDateISO}
+            onChange={setPoDateISO}
+            className="!h-auto !border-transparent !bg-transparent !px-0 !text-[16px] !font-semibold hover:!border-transparent focus-visible:!border-transparent"
+          />
+        </HeroCard>
+        <HeroCard label="PO number">
+          <input
+            value={poNumber}
+            onChange={(e) => setPoNumber(e.target.value)}
+            placeholder="#7-CCP"
+            className="w-full bg-transparent text-[16px] font-semibold text-ink outline-none placeholder:font-normal placeholder:text-muted"
+          />
+        </HeroCard>
+        <HeroCard label="Facility">
+          <div className="relative">
+            <select
+              value={facilityId}
+              onChange={(e) => setFacilityId(e.target.value)}
+              style={{ appearance: "none", backgroundImage: "none" }}
+              className="w-full cursor-pointer truncate bg-transparent pr-5 text-[16px] font-semibold text-ink outline-none"
+            >
+              {facilities.map((f) => (<option key={f.id} value={f.id}>{f.code} — {f.name}</option>))}
+            </select>
+            <ChevronDown size={14} className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-muted" />
+          </div>
+        </HeroCard>
+        <HeroCard label="Total units"><div className="text-[16px] font-semibold tabular text-ink">{qty(totalUnits)}</div></HeroCard>
+        <HeroCard label="Total COG"><div className="text-[16px] font-semibold tabular text-ink">{money(totalCog, 2)}</div></HeroCard>
       </div>
+
+      {/* Finished-only details */}
+      {status === "FINISHED" && (
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
+          <Field label="Finished date">
+            <DatePicker value={finishedAtISO} onChange={setFinishedAtISO} clearable />
+          </Field>
+          <Field label="Expiry date">
+            <DatePicker value={expiryISO} onChange={setExpiryISO} clearable placeholder="Optional" />
+          </Field>
+          <Field label="Batch number">
+            <input value={batchNr} onChange={(e) => setBatchNr(e.target.value)} placeholder="e.g. B-24137" className={inputCls} />
+          </Field>
+        </div>
+      )}
 
       {/* Cost breakdown + units + add/remove SKU */}
       <div className="mt-6">
@@ -403,5 +431,16 @@ function Field({ label, children, className = "" }: { label: string; children: R
       <span className="mb-1 block text-[12px] font-medium text-muted">{label}</span>
       {children}
     </label>
+  );
+}
+
+/** A hero stat card (matches the page's read-only cards) whose value slot can hold an editable
+ *  control — used for the PO date / number / facility fields at the top of the lot. */
+function HeroCard({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-[var(--radius-card)] border border-border bg-surface p-4">
+      <div className="text-[12px] text-muted">{label}</div>
+      <div className="mt-1">{children}</div>
+    </div>
   );
 }
