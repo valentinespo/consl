@@ -383,9 +383,9 @@ function RawMaterialRows({
         const sorted = [...g.pools].sort((a, b) => b.valueRemaining - a.valueRemaining);
         // The very last line of the whole table skips its bottom border — the card edge closes it.
         const isFinalRow = lastSection && lastGroup;
-        const img = g.sku ? (
-          <SkuAvatar code={g.sku} size={34} imageUrl={g.imageUrl} />
-        ) : s.imageUrl ? (
+        // Raw-material rows always show the MATERIAL's picture (e.g. the pouch), never the SKU's —
+        // even for SKU-stocked materials, where each row reads "<material> for <SKU code>".
+        const img = s.imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={s.imageUrl} alt={s.name} className="h-[34px] w-[34px] shrink-0 rounded-[10px] border border-border object-cover" />
         ) : (
@@ -400,8 +400,8 @@ function RawMaterialRows({
                 <div className="flex items-center gap-2.5">
                   {img}
                   <div className="min-w-0">
-                    <div className="truncate text-[13px] font-medium text-ink">{g.sku ? (g.productName ?? g.sku) : s.name}</div>
-                    <div className="truncate text-[11px] text-muted">{g.sku ? s.name : s.unitLabel}</div>
+                    <div className="truncate text-[13px] font-medium text-ink">{g.sku ? `${s.name} for ${g.sku}` : s.name}</div>
+                    <div className="truncate text-[11px] text-muted">{g.sku ? (g.productName ?? g.sku) : s.unitLabel}</div>
                   </div>
                 </div>
               </td>
