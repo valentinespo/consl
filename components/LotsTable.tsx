@@ -8,7 +8,18 @@ import { FacilityTag, SkuAvatar } from "@/components/ui";
 import { LotLineCards, type LotLineSummary } from "@/components/LotLineCards";
 import { LotDocsCell, type LotDoc } from "@/components/LotDocsCell";
 import { useMoney } from "@/components/CurrencyProvider";
-import { PRODUCTION_LABEL, PAYMENT_LABEL, DERIVED_PILL_CLS, type DerivedProduction, type DerivedPayment } from "@/lib/lot-status";
+import { HoverHint } from "@/components/HoverHint";
+import {
+  PRODUCTION_LABEL,
+  PAYMENT_LABEL,
+  DERIVED_PILL_CLS,
+  PRODUCTION_HELP,
+  PAYMENT_HELP,
+  PRODUCTION_ORDER,
+  PAYMENT_ORDER,
+  type DerivedProduction,
+  type DerivedPayment,
+} from "@/lib/lot-status";
 
 export type LotRow = {
   id: string;
@@ -34,6 +45,24 @@ function DerivedPill({ value, label }: { value: string; label: string }) {
     <span className={`${DERIVED_PILL_CLS[value] ?? "pill-neutral"} inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-medium`}>
       {label}
     </span>
+  );
+}
+
+/** Legend body for a status column's "?" hint — one row per status: a colour dot (same frosted
+ *  token as the pills and the picker) + its label + a one-line meaning. */
+function StatusLegend({ order, labels, help }: { order: string[]; labels: Record<string, string>; help: Record<string, string> }) {
+  return (
+    <div className="space-y-2 normal-case tracking-normal">
+      {order.map((k) => (
+        <div key={k} className="flex gap-2">
+          <span className={`${DERIVED_PILL_CLS[k] ?? "pill-neutral"} mt-[3px] h-2 w-2 shrink-0 rounded-full border`} />
+          <div className="leading-snug">
+            <span className="font-medium text-ink">{labels[k]}</span>
+            <span className="text-muted"> — {help[k]}</span>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -103,8 +132,26 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
               <th rowSpan={2} className="border-b border-line px-4 align-middle"></th>
             </tr>
             <tr className="text-left text-[11px] uppercase tracking-wide text-muted">
-              <th className="border-b border-l border-line bg-surface-2/60 px-3 pb-2 pt-0.5 text-center font-medium">Production</th>
-              <th className="border-b border-r border-line bg-surface-2/60 px-3 pb-2 pt-0.5 text-center font-medium">Payment</th>
+              <th className="border-b border-l border-line bg-surface-2/60 px-3 pb-2 pt-0.5 text-center font-medium">
+                <span className="inline-flex items-center justify-center gap-1">
+                  Production
+                  <HoverHint
+                    title="Production status"
+                    size={11}
+                    body={<StatusLegend order={PRODUCTION_ORDER} labels={PRODUCTION_LABEL} help={PRODUCTION_HELP} />}
+                  />
+                </span>
+              </th>
+              <th className="border-b border-r border-line bg-surface-2/60 px-3 pb-2 pt-0.5 text-center font-medium">
+                <span className="inline-flex items-center justify-center gap-1">
+                  Payment
+                  <HoverHint
+                    title="Payment status"
+                    size={11}
+                    body={<StatusLegend order={PAYMENT_ORDER} labels={PAYMENT_LABEL} help={PAYMENT_HELP} />}
+                  />
+                </span>
+              </th>
             </tr>
           </thead>
           <tbody>

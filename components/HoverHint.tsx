@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Info } from "@/components/icons";
 
@@ -25,7 +25,7 @@ export function HoverHint({
   className = "",
 }: {
   title?: string;
-  body: string;
+  body: ReactNode;
   size?: number;
   className?: string;
 }) {

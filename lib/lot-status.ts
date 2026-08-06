@@ -51,3 +51,18 @@ export const DERIVED_PILL_CLS: Record<string, string> = {
   DUE: "pill-chart",
   PAID: "pill-green",
 };
+
+/** One-line explanation of each derived status — powers the "?" legends on the table headers. */
+export const PRODUCTION_HELP: Record<DerivedProduction, string> = {
+  IN_PRODUCTION: "None of the lot's SKUs are finished yet — still being made.",
+  PARTIAL: "Some SKUs are finished, the rest are still in production.",
+  FINISHED: "Every SKU in the lot is finished.",
+};
+export const PAYMENT_HELP: Record<DerivedPayment, string> = {
+  DUE: "Nothing on this lot has been paid for yet.",
+  PARTIAL: "Some SKUs are paid, the rest are still due.",
+  PAID: "Every SKU in the lot has been paid.",
+};
+/** Legend order — violet → amber → green, matching the pills. */
+export const PRODUCTION_ORDER: DerivedProduction[] = ["IN_PRODUCTION", "PARTIAL", "FINISHED"];
+export const PAYMENT_ORDER: DerivedPayment[] = ["DUE", "PARTIAL", "PAID"];
