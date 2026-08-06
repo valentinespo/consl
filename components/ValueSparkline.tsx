@@ -61,7 +61,14 @@ export function ValueSparkline({ pts }: { pts: { day: string; total: number }[] 
   const n = pts.length;
   const axis = useMemo(() => {
     const vals = pts.map((p) => p.total);
-    return niceTicks(Math.min(...(vals.length ? vals : [0])), Math.max(...(vals.length ? vals : [1])), 4);
+    const lo = Math.min(...(vals.length ? vals : [0]));
+    const hi = Math.max(...(vals.length ? vals : [1]));
+    // Headroom: pad the data band before rounding to gridlines so a steep move — and the smooth
+    // curve's slight overshoot past the peak or trough — never reaches the top/bottom edge and gets
+    // clipped. A share of the span (with a small floor for near-flat series) keeps it proportional,
+    // so the axis grows and shrinks with whatever the line actually does.
+    const pad = (hi - lo) * 0.12 || Math.abs(hi) * 0.05 || 1;
+    return niceTicks(lo - pad, hi + pad, 4);
   }, [pts]);
 
   const span = axis.hi - axis.lo || 1;
