@@ -31,14 +31,26 @@ export function ProductCard({ product }: { product: { id: string; code: string; 
 export function MaterialCard({
   material,
 }: {
-  material: { id: string; code: string; name: string; unitLabel: string; lowStockThreshold: number | null; imageUrl: string | null };
+  material: { id: string; code: string; name: string; unitLabel: string; lowStockThreshold: number | null; skuSpecific: boolean; imageUrl: string | null };
 }) {
   return (
     <Link href={`/catalog/materials/${material.id}`} className="block">
       <Card className={CARD}>
         <Thumb url={material.imageUrl} alt={material.name} fallback={<Package size={26} className="text-muted" />} />
         <div className="min-w-0 flex-1">
-          <div className="truncate font-semibold text-ink">{material.name}</div>
+          <div className="flex items-center gap-2">
+            <span className="truncate font-semibold text-ink">{material.name}</span>
+            {/* Same quiet tag the facility cards use for their type — it states a property of the
+                material, not a status, so it stays neutral rather than taking a pill colour. */}
+            {material.skuSpecific && (
+              <span
+                title="Stocked separately for each product — every SKU has its own stock of this material, like printed pouches."
+                className="shrink-0 rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[10.5px] font-medium text-muted"
+              >
+                Per SKU
+              </span>
+            )}
+          </div>
           {/* The label is shown exactly as the tenant typed it — no pluralising, so "kg", "each"
               and non-English units all read correctly. */}
           <div className="truncate text-[12.5px] text-muted">
