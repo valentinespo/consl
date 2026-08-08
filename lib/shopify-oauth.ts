@@ -18,8 +18,10 @@ import { shopifyGraphQL } from "@/lib/shopify";
 export const APP_ORIGIN = process.env.APP_ORIGIN || "https://consl.ai";
 export const SHOPIFY_REDIRECT_URI = `${APP_ORIGIN}/api/integrations/shopify/callback`;
 
-/** Read-only v1: catalog + orders (velocity) + inventory by location. */
-export const SHOPIFY_SCOPES = "read_products,read_orders,read_inventory,read_locations";
+/** Read-only v1: catalog + orders (velocity, incl. >60d history for the 90-day window) +
+ *  inventory by location. Must match the scopes declared in the app's Partner-dashboard
+ *  configuration when the app uses Shopify-managed installation. */
+export const SHOPIFY_SCOPES = "read_products,read_orders,read_all_orders,read_inventory,read_locations";
 
 export function shopifyOAuthConfigured(): boolean {
   return Boolean(process.env.SHOPIFY_API_KEY && process.env.SHOPIFY_API_SECRET && process.env.INTEGRATION_ENC_KEY);
