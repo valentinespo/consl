@@ -66,3 +66,25 @@ export const PAYMENT_HELP: Record<DerivedPayment, string> = {
 /** Legend order — violet → amber → green, matching the pills. */
 export const PRODUCTION_ORDER: DerivedProduction[] = ["IN_PRODUCTION", "PARTIAL", "FINISHED"];
 export const PAYMENT_ORDER: DerivedPayment[] = ["DUE", "PARTIAL", "PAID"];
+
+const DAYS_PER_MONTH = 30.44;
+
+/**
+ * How far a still-running lot is through its expected production window: elapsed time since the
+ * PO date over the configured lead time. 100% is the day it was due, so past that the figure keeps
+ * climbing (125% = a quarter of the lead time late) — which is what flags it overdue. Null when
+ * there's nothing to measure against (no PO date, or no lead time configured).
+ */
+export function productionProgress(
+  poDateISO: string | null,
+  leadMonths: number | null | undefined,
+  nowMs: number,
+): { pct: number; overdue: boolean } | null {
+  if (!poDateISO || !leadMonths || leadMonths <= 0) return null;
+  const po = new Date(poDateISO).getTime();
+  if (!Number.isFinite(po)) return null;
+  const elapsedDays = (nowMs - po) / 86_400_000;
+  if (elapsedDays < 0) return null; // a future-dated PO hasn't started
+  const pct = Math.round((elapsedDays / (leadMonths * DAYS_PER_MONTH)) * 100);
+  return { pct, overdue: pct > 100 };
+}

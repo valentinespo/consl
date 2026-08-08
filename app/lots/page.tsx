@@ -1,4 +1,5 @@
 import { getLots, getPurchaseFormOptions } from "@/lib/queries";
+import { getOrgSettings } from "@/lib/settings";
 import { PageHeader } from "@/components/ui";
 import { LotsTable, type LotRow } from "@/components/LotsTable";
 import { NewLotButton } from "@/components/NewLotButton";
@@ -8,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export default async function LotsPage() {
   await requireView("lots");
-  const [lots, options] = await Promise.all([getLots(), getPurchaseFormOptions()]);
+  const [lots, options, settings] = await Promise.all([getLots(), getPurchaseFormOptions(), getOrgSettings()]);
   const rows: LotRow[] = lots.map((l) => ({
     id: l.id,
     lotNr: l.lotNr,
@@ -32,7 +33,7 @@ export default async function LotsPage() {
       <PageHeader title="Production Lots" subtitle="Every production batch, with live FIFO-costed COG. Open a lot for its cost breakdown and transactions.">
         <NewLotButton facilities={options.facilities} products={options.products} />
       </PageHeader>
-      <LotsTable lots={rows} facilities={facilities} />
+      <LotsTable lots={rows} facilities={facilities} leadMonths={settings.defaultLeadMonths} nowMs={Date.now()} />
     </>
   );
 }

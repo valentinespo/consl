@@ -17,6 +17,7 @@ import {
   PAYMENT_HELP,
   PRODUCTION_ORDER,
   PAYMENT_ORDER,
+  productionProgress,
   type DerivedProduction,
   type DerivedPayment,
 } from "@/lib/lot-status";
@@ -66,7 +67,19 @@ function StatusLegend({ order, labels, help }: { order: string[]; labels: Record
   );
 }
 
-export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: string[] }) {
+export function LotsTable({
+  lots,
+  facilities,
+  leadMonths,
+  nowMs,
+}: {
+  lots: LotRow[];
+  facilities: string[];
+  /** Configured production lead time (Reorder settings) — the yardstick for the progress figure. */
+  leadMonths: number | null;
+  /** Stamped on the server so the percentage renders identically on both sides of hydration. */
+  nowMs: number;
+}) {
   const { money, perUnit, qty, date } = useMoney();
   const [q, setQ] = useState("");
   const [facility, setFacility] = useState("ALL");
@@ -188,7 +201,26 @@ export function LotsTable({ lots, facilities }: { lots: LotRow[]; facilities: st
                 {/* Derived, display-only — per-SKU editing (and each SKU's own finished date)
                     lives on the lot page. */}
                 <td className="px-3 py-3 text-center">
-                  <DerivedPill value={l.status} label={PRODUCTION_LABEL[l.status]} />
+                  {(() => {
+                    // Progress only means something while a lot is still running.
+                    const prog = l.status === "FINISHED" ? null : productionProgress(l.poDate, leadMonths, nowMs);
+                    return (
+                      // The wrapper keeps its natural height, and "Overdue" is absolutely placed
+                      // beneath it — so the pill stays vertically centred in the row whether or not
+                      // the caption is there, and rows never shift height.
+                      <span className="relative inline-flex flex-col items-center">
+                        <DerivedPill
+                          value={l.status}
+                          label={prog ? `${PRODUCTION_LABEL[l.status]} · ${prog.pct}%` : PRODUCTION_LABEL[l.status]}
+                        />
+                        {prog?.overdue && (
+                          <span className="pointer-events-none absolute top-full mt-0.5 text-[10px] font-medium leading-none text-negative">
+                            Overdue
+                          </span>
+                        )}
+                      </span>
+                    );
+                  })()}
                 </td>
                 <td className="px-3 py-3 text-center">
                   <DerivedPill value={l.paymentStatus === "PARTIAL" ? "PARTIAL" : l.paymentStatus} label={PAYMENT_LABEL[l.paymentStatus]} />
