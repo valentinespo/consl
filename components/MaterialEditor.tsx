@@ -10,7 +10,6 @@ import { updateMaterial } from "@/app/catalog/actions";
 
 export type MaterialForEdit = {
   id: string;
-  code: string;
   name: string;
   unitLabel: string;
   lowStockThreshold: number | null;
@@ -21,7 +20,6 @@ export type MaterialForEdit = {
 /** `locked` = the material already has purchases/lots/movements, so per-SKU stocking can't change. */
 export function MaterialEditor({ material, locked }: { material: MaterialForEdit; locked: boolean }) {
   const router = useRouter();
-  const [code, setCode] = useState(material.code);
   const [name, setName] = useState(material.name);
   const [unitLabel, setUnitLabel] = useState(material.unitLabel);
   const [threshold, setThreshold] = useState(material.lowStockThreshold != null ? String(material.lowStockThreshold) : "");
@@ -32,14 +30,12 @@ export function MaterialEditor({ material, locked }: { material: MaterialForEdit
 
   const thresholdValue = threshold.trim() === "" ? null : Number(threshold);
   const dirty =
-    code.trim().toUpperCase() !== material.code ||
     name.trim() !== material.name ||
     unitLabel.trim() !== material.unitLabel ||
     thresholdValue !== material.lowStockThreshold ||
     skuSpecific !== material.skuSpecific;
 
   function reset() {
-    setCode(material.code);
     setName(material.name);
     setUnitLabel(material.unitLabel);
     setThreshold(material.lowStockThreshold != null ? String(material.lowStockThreshold) : "");
@@ -53,7 +49,6 @@ export function MaterialEditor({ material, locked }: { material: MaterialForEdit
     try {
       const res = await updateMaterial({
         id: material.id,
-        code,
         name,
         unitLabel,
         lowStockThreshold: thresholdValue,
@@ -88,14 +83,13 @@ export function MaterialEditor({ material, locked }: { material: MaterialForEdit
           <div className="mt-1.5 text-center text-[11px] text-muted">Photo</div>
         </div>
         <div className="min-w-0 flex-1 space-y-3">
-          <div className="grid gap-3 sm:grid-cols-[160px_1fr]">
-            <Field label="Code" hint="Short reference for this material.">
-              <input value={code} onChange={(e) => setCode(e.target.value)} className={`${inputCls} font-semibold uppercase`} />
-            </Field>
-            <Field label="Material name">
-              <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
-            </Field>
-          </div>
+          {/* No Code field: the material's code is an internal FIFO pool key, generated once at
+              creation and never shown — every surface displays the name instead. Leaving it
+              editable also risked a full cost recompute, since lot cost snapshots are labelled
+              by code. */}
+          <Field label="Material name">
+            <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
+          </Field>
           {/* Consumption rates live on each lot's bill of materials now (first lot sets the recipe,
               later lots inherit it), so there's no per-unit default here anymore. */}
           <div className="grid gap-3 sm:grid-cols-2">

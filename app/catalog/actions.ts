@@ -230,11 +230,11 @@ export async function updateProduct(input: { id: string; code: string; name: str
   return { ok: true as const };
 }
 
-/** Edit a raw material. The code is editable too — costs are keyed by material id, not code,
- *  so a rename is safe once the engine recomputes. */
+/** Edit a raw material. The `code` is deliberately NOT editable: it's the FIFO pool key and the
+ *  label on every stored lot cost snapshot, it never appears in the UI, and it stays unique per
+ *  org by DB constraint. It is generated once at creation and left alone from then on. */
 export async function updateMaterial(input: {
   id: string;
-  code?: string;
   name: string;
   unitLabel: string;
   lowStockThreshold: number | null;
@@ -247,13 +247,6 @@ export async function updateMaterial(input: {
 
   const current = await prisma.materialType.findFirst({ where: { id: input.id } });
   if (!current) return { ok: false as const, error: "Material not found" };
-
-  const code = (input.code ?? current.code).trim().toUpperCase().replace(/\s+/g, "");
-  if (!code) return { ok: false as const, error: "Code required" };
-  if (code !== current.code) {
-    const clash = await prisma.materialType.findFirst({ where: { code } });
-    if (clash) return { ok: false as const, error: `Code ${code} already exists` };
-  }
 
   // Whether it's stocked per-SKU is structural — it decides how FIFO pools are keyed. Once the
   // material has any history, switching it would scramble those pools, so it locks.
@@ -273,7 +266,6 @@ export async function updateMaterial(input: {
   await prisma.materialType.update({
     where: { id: input.id },
     data: {
-      code,
       name,
       unitLabel: input.unitLabel.trim() || "unit",
       lowStockThreshold: input.lowStockThreshold != null && input.lowStockThreshold > 0 ? input.lowStockThreshold : null,
@@ -281,7 +273,6 @@ export async function updateMaterial(input: {
       poolKey: skuSpecific ? "FACILITY_SKU" : "FACILITY",
     },
   });
-  if (code !== current.code) await recomputeAll(); // cost snapshots are labelled by code
   revalidatePath("/", "layout");
   return { ok: true as const };
 }

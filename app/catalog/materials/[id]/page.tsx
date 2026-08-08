@@ -23,14 +23,13 @@ export default async function MaterialDetailPage({ params }: { params: Promise<{
       <Link href="/catalog" className="mb-3 inline-block text-[12.5px] font-medium text-muted hover:text-ink-soft">
         ← Catalog
       </Link>
-      <PageHeader title={material.name} subtitle={`Raw material · ${material.code}`}>
+      <PageHeader title={material.name} subtitle="Raw material">
         <PrevNextNav {...nav} />
       </PageHeader>
 
       <MaterialEditor
         material={{
           id: material.id,
-          code: material.code,
           name: material.name,
           unitLabel: material.unitLabel,
           lowStockThreshold: material.lowStockThreshold,

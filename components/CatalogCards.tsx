@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { ChevronRight, Package } from "@/components/icons";
 import { Card, SkuAvatar } from "@/components/ui";
-import { plural } from "@/lib/format";
 
 const CARD = "flex items-center gap-3 transition-colors hover:border-accent-strong hover:bg-accent-soft/30";
 
@@ -20,8 +19,8 @@ export function ProductCard({ product }: { product: { id: string; code: string; 
       <Card className={CARD}>
         <Thumb url={product.imageUrl} alt={product.code} fallback={<SkuAvatar code={product.code} size={56} />} />
         <div className="min-w-0 flex-1">
-          <div className="font-semibold text-ink">{product.code}</div>
-          <div className="truncate text-[12.5px] text-muted">{product.name}</div>
+          <div className="truncate font-semibold text-ink">{product.name}</div>
+          <div className="truncate text-[12.5px] text-muted">{product.code}</div>
         </div>
         <ChevronRight size={16} className="shrink-0 text-muted" />
       </Card>
@@ -39,9 +38,11 @@ export function MaterialCard({
       <Card className={CARD}>
         <Thumb url={material.imageUrl} alt={material.name} fallback={<Package size={26} className="text-muted" />} />
         <div className="min-w-0 flex-1">
-          <div className="font-semibold text-ink">{material.name}</div>
+          <div className="truncate font-semibold text-ink">{material.name}</div>
+          {/* The label is shown exactly as the tenant typed it — no pluralising, so "kg", "each"
+              and non-English units all read correctly. */}
           <div className="truncate text-[12.5px] text-muted">
-            Counted in {plural(material.unitLabel)}
+            Unit label: {material.unitLabel}
             {material.lowStockThreshold != null && ` · alert < ${material.lowStockThreshold.toLocaleString()}`}
           </div>
         </div>
