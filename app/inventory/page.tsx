@@ -320,7 +320,7 @@ export default async function InventoryPage() {
                         g.pools.map((p, pi) => (
                           <tr
                             key={`${g.productId}-${p.facilityId}`}
-                            className={`text-[12px] ${pi === g.pools.length - 1 ? (lastSku ? "" : "border-b border-line") : "border-b border-line/60"}`}
+                            className={`bg-surface-2/60 text-[12px] ${pi === g.pools.length - 1 ? (lastSku ? "" : "border-b border-line") : "border-b border-line/60"}`}
                           >
                             <td className="py-1.5 pl-4 pr-3">
                               <span className="block pl-[46px] text-muted">↳</span>
@@ -375,7 +375,10 @@ function RawMaterialRows({
 }) {
   return (
     <>
-      <tr className="border-b border-line bg-surface-2/60">
+      {/* Two greys, two meanings: this section band is the darker one (the `border` token — a real
+          step away from the sub-rows in both themes, where surface-2 at full strength would have
+          been almost identical), and the ↳ detail rows below take the lighter surface-2 wash. */}
+      <tr className="border-b border-line bg-border">
         <td colSpan={5} className="px-4 py-2 text-[12px]">
           <span className="font-semibold text-ink">{s.name}</span>
           <span className="ml-2 tabular text-muted">
@@ -432,7 +435,7 @@ function RawMaterialRows({
               sorted.map((p, pi) => (
                 <tr
                   key={`${s.code}-${g.key}-${p.facility}`}
-                  className={`text-[12px] ${pi === sorted.length - 1 ? (isFinalRow ? "" : "border-b border-line") : "border-b border-line/60"}`}
+                  className={`bg-surface-2/60 text-[12px] ${pi === sorted.length - 1 ? (isFinalRow ? "" : "border-b border-line") : "border-b border-line/60"}`}
                 >
                   <td className="py-1.5 pl-4 pr-3">
                     <span className="block pl-[46px] text-muted">↳</span>
