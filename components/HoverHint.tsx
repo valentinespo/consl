@@ -74,6 +74,12 @@ export function HoverHint({
         onMouseLeave={() => setBox(null)}
         onFocus={place}
         onBlur={() => setBox(null)}
+        // The icon is purely informational, so it must never act as a control for whatever it sits
+        // inside — without this, one placed within a card-wide <Link> navigates when clicked.
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
         onKeyDown={(e) => {
           if (e.key === "Escape") setBox(null);
         }}

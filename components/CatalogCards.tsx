@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronRight, Package } from "@/components/icons";
 import { Card, SkuAvatar } from "@/components/ui";
+import { HoverHint } from "@/components/HoverHint";
 
 const CARD = "flex items-center gap-3 transition-colors hover:border-accent-strong hover:bg-accent-soft/30";
 
@@ -41,13 +42,16 @@ export function MaterialCard({
           <div className="flex items-center gap-2">
             <span className="truncate font-semibold text-ink">{material.name}</span>
             {/* Same quiet tag the facility cards use for their type — it states a property of the
-                material, not a status, so it stays neutral rather than taking a pill colour. */}
+                material, not a status, so it stays neutral rather than taking a pill colour. The
+                hint icon carries the explanation (a native title tooltip was unreliable). */}
             {material.skuSpecific && (
-              <span
-                title="Stocked separately for each product — every SKU has its own stock of this material, like printed pouches."
-                className="shrink-0 rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[10.5px] font-medium text-muted"
-              >
-                Per SKU
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[10.5px] font-medium text-muted">
+                SKU-Specific
+                <HoverHint
+                  title="SKU-specific material"
+                  size={11}
+                  body="Each product keeps its own stock of this material — like printed pouches, where every SKU has a different design. You pick the product when buying it, and each SKU's stock is costed from its own pool. Materials without this tag come from one shared pool used across all products, like plain tea bags."
+                />
               </span>
             )}
           </div>
