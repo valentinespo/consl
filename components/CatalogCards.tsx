@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronRight, Package } from "@/components/icons";
 import { Card, SkuAvatar } from "@/components/ui";
+import { plural } from "@/lib/format";
 
 const CARD = "flex items-center gap-3 transition-colors hover:border-accent-strong hover:bg-accent-soft/30";
 
@@ -31,7 +32,7 @@ export function ProductCard({ product }: { product: { id: string; code: string; 
 export function MaterialCard({
   material,
 }: {
-  material: { id: string; code: string; name: string; unitLabel: string; defaultPerUnit: number; lowStockThreshold: number | null; imageUrl: string | null };
+  material: { id: string; code: string; name: string; unitLabel: string; lowStockThreshold: number | null; imageUrl: string | null };
 }) {
   return (
     <Link href={`/catalog/materials/${material.id}`} className="block">
@@ -40,7 +41,7 @@ export function MaterialCard({
         <div className="min-w-0 flex-1">
           <div className="font-semibold text-ink">{material.name}</div>
           <div className="truncate text-[12.5px] text-muted">
-            {material.defaultPerUnit} {material.unitLabel}/unit default
+            Counted in {plural(material.unitLabel)}
             {material.lowStockThreshold != null && ` · alert < ${material.lowStockThreshold.toLocaleString()}`}
           </div>
         </div>

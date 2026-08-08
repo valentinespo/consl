@@ -165,7 +165,6 @@ export function NewMaterialButton() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [unitLabel, setUnitLabel] = useState("");
-  const [perUnit, setPerUnit] = useState("1");
   const [skuSpecific, setSkuSpecific] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -175,7 +174,7 @@ export function NewMaterialButton() {
   async function save() {
     setPending(true);
     setError(null);
-    const r = await createMaterial({ name, unitLabel, defaultPerUnit: Number(perUnit) || 1, skuSpecific });
+    const r = await createMaterial({ name, unitLabel, skuSpecific });
     setPending(false);
     if (!r.ok) {
       setError(r.error ?? "Failed");
@@ -184,7 +183,6 @@ export function NewMaterialButton() {
     setOpen(false);
     setName("");
     setUnitLabel("");
-    setPerUnit("1");
     setSkuSpecific(false);
     router.refresh();
   }
@@ -200,14 +198,11 @@ export function NewMaterialButton() {
             <Field label="Material name">
               <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Box sleeve" />
             </Field>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Unit label">
-                <input value={unitLabel} onChange={(e) => setUnitLabel(e.target.value)} className={inputCls} placeholder="unit / box / label" />
-              </Field>
-              <Field label="Default per finished unit">
-                <input type="number" step="any" value={perUnit} onChange={(e) => setPerUnit(e.target.value)} className={inputCls} />
-              </Field>
-            </div>
+            {/* Consumption rates are set on the first lot that uses the material and inherited by
+                later lots — no per-unit default at the catalog level. */}
+            <Field label="Unit label">
+              <input value={unitLabel} onChange={(e) => setUnitLabel(e.target.value)} className={inputCls} placeholder="unit / box / label" />
+            </Field>
             <label className="flex items-center gap-2 text-[12.5px] text-ink-soft">
               <input type="checkbox" checked={skuSpecific} onChange={(e) => setSkuSpecific(e.target.checked)} className="accent-[#1a2f18]" />
               SKU-specific (separate stock per product, like pouches)

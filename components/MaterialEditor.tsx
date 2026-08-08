@@ -13,7 +13,6 @@ export type MaterialForEdit = {
   code: string;
   name: string;
   unitLabel: string;
-  defaultPerUnit: number;
   lowStockThreshold: number | null;
   skuSpecific: boolean;
   imageUrl: string | null;
@@ -25,7 +24,6 @@ export function MaterialEditor({ material, locked }: { material: MaterialForEdit
   const [code, setCode] = useState(material.code);
   const [name, setName] = useState(material.name);
   const [unitLabel, setUnitLabel] = useState(material.unitLabel);
-  const [perUnit, setPerUnit] = useState(String(material.defaultPerUnit));
   const [threshold, setThreshold] = useState(material.lowStockThreshold != null ? String(material.lowStockThreshold) : "");
   const [skuSpecific, setSkuSpecific] = useState(material.skuSpecific);
   const [pending, setPending] = useState(false);
@@ -37,7 +35,6 @@ export function MaterialEditor({ material, locked }: { material: MaterialForEdit
     code.trim().toUpperCase() !== material.code ||
     name.trim() !== material.name ||
     unitLabel.trim() !== material.unitLabel ||
-    (Number(perUnit) || 0) !== material.defaultPerUnit ||
     thresholdValue !== material.lowStockThreshold ||
     skuSpecific !== material.skuSpecific;
 
@@ -45,7 +42,6 @@ export function MaterialEditor({ material, locked }: { material: MaterialForEdit
     setCode(material.code);
     setName(material.name);
     setUnitLabel(material.unitLabel);
-    setPerUnit(String(material.defaultPerUnit));
     setThreshold(material.lowStockThreshold != null ? String(material.lowStockThreshold) : "");
     setSkuSpecific(material.skuSpecific);
     setError(null);
@@ -60,7 +56,6 @@ export function MaterialEditor({ material, locked }: { material: MaterialForEdit
         code,
         name,
         unitLabel,
-        defaultPerUnit: Number(perUnit) || 1,
         lowStockThreshold: thresholdValue,
         skuSpecific,
       });
@@ -101,12 +96,11 @@ export function MaterialEditor({ material, locked }: { material: MaterialForEdit
               <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
             </Field>
           </div>
-          <div className="grid gap-3 sm:grid-cols-3">
+          {/* Consumption rates live on each lot's bill of materials now (first lot sets the recipe,
+              later lots inherit it), so there's no per-unit default here anymore. */}
+          <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Unit label" hint="How you count it.">
               <input value={unitLabel} onChange={(e) => setUnitLabel(e.target.value)} placeholder="unit" className={inputCls} />
-            </Field>
-            <Field label="Default per finished unit" hint={`${unitLabel || "unit"}s used per product unit.`}>
-              <input value={perUnit} onChange={(e) => setPerUnit(e.target.value)} type="number" step="any" min="0" className={`${inputCls} tabular`} />
             </Field>
             <Field label="Low-stock alert" hint="Blank turns the alert off.">
               <input value={threshold} onChange={(e) => setThreshold(e.target.value)} type="number" step="any" min="0" placeholder="off" className={`${inputCls} tabular`} />

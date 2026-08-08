@@ -33,7 +33,6 @@ export default async function MaterialDetailPage({ params }: { params: Promise<{
           code: material.code,
           name: material.name,
           unitLabel: material.unitLabel,
-          defaultPerUnit: material.defaultPerUnit,
           lowStockThreshold: material.lowStockThreshold,
           skuSpecific: material.skuSpecific,
           imageUrl: material.imageUrl,

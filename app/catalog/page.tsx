@@ -65,7 +65,6 @@ export default async function CatalogPage() {
                   code: m.code,
                   name: m.name,
                   unitLabel: m.unitLabel,
-                  defaultPerUnit: m.defaultPerUnit,
                   lowStockThreshold: m.lowStockThreshold,
                   imageUrl: m.imageUrl,
                 }}

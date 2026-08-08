@@ -436,7 +436,6 @@ export async function getMaterialTypes() {
     code: x.code,
     name: x.name,
     unitLabel: x.unitLabel,
-    defaultPerUnit: x.defaultPerUnit,
     lowStockThreshold: x.lowStockThreshold,
     skuSpecific: x.skuSpecific,
     imageUrl: x.imageUrl,

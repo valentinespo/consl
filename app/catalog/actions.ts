@@ -179,7 +179,6 @@ export async function createProduct(input: { code: string; name?: string }) {
 export async function createMaterial(input: {
   name: string;
   unitLabel?: string;
-  defaultPerUnit?: number;
   skuSpecific?: boolean;
 }) {
   const gate = await requirePermission("catalog", "create");
@@ -195,7 +194,6 @@ export async function createMaterial(input: {
       code,
       name,
       unitLabel: (input.unitLabel ?? "").trim() || "unit",
-      defaultPerUnit: input.defaultPerUnit && input.defaultPerUnit > 0 ? input.defaultPerUnit : 1,
       poolKey: skuSpecific ? "FACILITY_SKU" : "FACILITY",
       skuSpecific,
     },
@@ -239,7 +237,6 @@ export async function updateMaterial(input: {
   code?: string;
   name: string;
   unitLabel: string;
-  defaultPerUnit: number;
   lowStockThreshold: number | null;
   skuSpecific?: boolean;
 }) {
@@ -279,7 +276,6 @@ export async function updateMaterial(input: {
       code,
       name,
       unitLabel: input.unitLabel.trim() || "unit",
-      defaultPerUnit: input.defaultPerUnit > 0 ? input.defaultPerUnit : 1,
       lowStockThreshold: input.lowStockThreshold != null && input.lowStockThreshold > 0 ? input.lowStockThreshold : null,
       skuSpecific,
       poolKey: skuSpecific ? "FACILITY_SKU" : "FACILITY",

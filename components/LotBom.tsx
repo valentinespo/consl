@@ -5,7 +5,7 @@ import { SkuAvatar } from "@/components/ui";
 import { plural } from "@/lib/format";
 import { useMoney } from "@/components/CurrencyProvider";
 
-export type MaterialType = { id: string; code: string; name: string; unitLabel: string; defaultPerUnit: number };
+export type MaterialType = { id: string; code: string; name: string; unitLabel: string };
 export type Mat = { materialTypeId: string; perUnit: number };
 export type BomLine = { key: string; sku: string; productName: string; imageUrl: string | null; units: number };
 
@@ -41,8 +41,8 @@ export function LotBom({
   const setRate = (t: "shared" | string, i: number, v: number) => editMats(t, (m) => m.map((x, j) => (j === i ? { ...x, perUnit: v } : x)));
   const removeMat = (t: "shared" | string, i: number) => editMats(t, (m) => m.filter((_, j) => j !== i));
   const addMat = (t: "shared" | string, typeId: string) => {
-    const type = mt(typeId);
-    if (type) editMats(t, (m) => [...m, { materialTypeId: typeId, perUnit: type.defaultPerUnit }]);
+    // Starts at ×1 — the real rate is typed here and inherited by the SKU's future lots.
+    if (mt(typeId)) editMats(t, (m) => [...m, { materialTypeId: typeId, perUnit: 1 }]);
   };
   const startOverride = (key: string) => onOverridesChange({ ...overrides, [key]: shared.map((m) => ({ ...m })) });
   const revertOverride = (key: string) => {
@@ -194,7 +194,7 @@ function MatCard({
             <option value="">+ Add material…</option>
             {available.map((m) => (
               <option key={m.id} value={m.id}>
-                {m.name} ({m.defaultPerUnit} {plural(m.unitLabel)}/unit)
+                {m.name} (in {plural(m.unitLabel)})
               </option>
             ))}
           </select>
