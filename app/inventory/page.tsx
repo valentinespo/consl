@@ -375,10 +375,9 @@ function RawMaterialRows({
 }) {
   return (
     <>
-      {/* Two greys, two meanings: this section band is the darker one (the `border` token — a real
-          step away from the sub-rows in both themes, where surface-2 at full strength would have
-          been almost identical), and the ↳ detail rows below take the lighter surface-2 wash. */}
-      <tr className="border-b border-line bg-border">
+      {/* No fill here — the grey wash is reserved for the ↳ detail rows, so it means one thing in
+          this table. A section start is carried by its bold name and totals instead. */}
+      <tr className="border-b border-line">
         <td colSpan={5} className="px-4 py-2 text-[12px]">
           <span className="font-semibold text-ink">{s.name}</span>
           <span className="ml-2 tabular text-muted">
