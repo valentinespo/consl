@@ -17,7 +17,16 @@ export type Provider = "amazon" | "shopify" | "tiktok";
 
 export const PROVIDERS: Record<
   Provider,
-  { label: string; blurb: string; facilities: { channel: string; code: string; name: string }[] }
+  {
+    label: string;
+    blurb: string;
+    facilities: { channel: string; code: string; name: string }[];
+    /** Provider whose facilities are discovered from the platform (one per store location) rather
+     *  than being a fixed set — nothing to pre-create on connect. `channel` names the tag those
+     *  discovered facilities carry, since there's no fixed `facilities` entry to read it from. */
+    locationBased?: boolean;
+    channel?: string;
+  }
 > = {
   amazon: {
     label: "Amazon",
@@ -30,7 +39,12 @@ export const PROVIDERS: Record<
   shopify: {
     label: "Shopify",
     blurb: "Orders and inventory for your own storefront.",
-    facilities: [{ channel: "SHOPIFY", code: "SHOP", name: "Shopify" }],
+    // Discovered per store location by syncShopifyLocations() — one facility per real place,
+    // so restocking can be judged per selling facility. Amazon-MCF locations are skipped: that
+    // stock is the FBA pool, already counted from Amazon itself.
+    facilities: [],
+    locationBased: true,
+    channel: "SHOPIFY",
   },
   tiktok: {
     label: "TikTok Shop",
@@ -39,9 +53,13 @@ export const PROVIDERS: Record<
   },
 };
 
-/** Flat channel → display name map, for labelling a facility's origin anywhere in the UI. */
+/** Flat channel → display name map, for labelling a facility's origin anywhere in the UI.
+ *  Covers both fixed channel facilities and location-based providers' own channel tag. */
 export const CHANNEL_PROVIDER: Record<string, Provider> = Object.fromEntries(
-  (Object.keys(PROVIDERS) as Provider[]).flatMap((p) => PROVIDERS[p].facilities.map((f) => [f.channel, p])),
+  (Object.keys(PROVIDERS) as Provider[]).flatMap((p) => [
+    ...PROVIDERS[p].facilities.map((f) => [f.channel, p] as [string, Provider]),
+    ...(PROVIDERS[p].channel ? [[PROVIDERS[p].channel!, p] as [string, Provider]] : []),
+  ]),
 );
 
 /**

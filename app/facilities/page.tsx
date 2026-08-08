@@ -18,7 +18,7 @@ import { NewMovementPanel, type OnHandRow } from "@/components/MovementForm";
 import { MovementsLedger } from "@/components/MovementsLedger";
 import { StockSection } from "@/components/StockSection";
 import { facilityTypeLabel, isProductionSite } from "@/lib/facility-types";
-import { getChannelStock } from "@/lib/integrations";
+import { getChannelStock, PROVIDERS, CHANNEL_PROVIDER } from "@/lib/integrations";
 import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
@@ -197,13 +197,20 @@ export default async function FacilitiesPage() {
                       <Plug size={18} />
                     </span>
                     <div className="min-w-0 flex-1">
+                      {/* Channel facilities lead with the place ("638 Alton Place", "Amazon FBA")
+                          and name the platform underneath — the code is a pill-sized handle used
+                          in tables, not an identity anyone reads here. */}
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-ink">{f.code}</span>
-                        <span className="whitespace-nowrap rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[10.5px] font-medium text-muted">
-                          {facilityTypeLabel(f.type)}
-                        </span>
+                        <span className="truncate font-semibold text-ink">{f.name}</span>
+                        {f.inactive && (
+                          <span className="whitespace-nowrap rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[10.5px] font-medium text-muted">
+                            Inactive
+                          </span>
+                        )}
                       </div>
-                      <div className="truncate text-[12.5px] text-muted">{f.name}</div>
+                      <div className="truncate text-[12.5px] text-muted">
+                        {f.channel ? (PROVIDERS[CHANNEL_PROVIDER[f.channel]]?.label ?? facilityTypeLabel(f.type)) : facilityTypeLabel(f.type)}
+                      </div>
                     </div>
                     <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] text-muted">
                       <Lock size={12} /> Managed

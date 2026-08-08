@@ -143,6 +143,12 @@ model Facility {
   type            String          @default("co-packer") // co-packer | warehouse | 3pl | other | channel
   channel         String? // set when this facility mirrors a connected sales channel (AMAZON_FBA, AMAZON_AWD, SHOPIFY, TIKTOK)
   locked          Boolean         @default(false) // managed by an integration — not editable or deletable in-app
+  // The integration's own id for this place (e.g. a Shopify location gid). Matching on it means a
+  // rename on the platform updates this facility instead of spawning a duplicate.
+  externalId      String?
+  // The platform stopped reporting this place (location deactivated or deleted). Kept — it may
+  // carry lots and movements — but no longer synced, and hidden from pickers for NEW activity.
+  inactive        Boolean         @default(false)
   legalName       String? // vendor name printed on POs (falls back to name)
   address         String? // multiline vendor address for POs
   notes           String?
@@ -156,6 +162,7 @@ model Facility {
   updatedAt       DateTime        @updatedAt
 
   @@unique([orgId, code])
+  @@index([orgId, externalId])
 }
 
 /// A movement of stock out of one of your locations — either a transfer to another of your

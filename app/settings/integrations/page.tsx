@@ -95,6 +95,11 @@ export default async function IntegrationsSettingsPage({
               </div>
               <div className="mt-0.5 text-[12.5px] text-muted">{def.blurb}</div>
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                {def.locationBased && (
+                  <span className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[10.5px] font-medium text-ink-soft">
+                    <Lock size={10} className="text-muted" /> One facility per store location
+                  </span>
+                )}
                 {def.facilities.map((f) => (
                   <span
                     key={f.channel}

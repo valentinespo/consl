@@ -5,6 +5,8 @@ import { encryptSecret } from "@/lib/secret-box";
 import { ensureChannelFacilities } from "@/lib/integrations";
 import { makeState } from "@/lib/oauth-state";
 import { shopifyGraphQL } from "@/lib/shopify";
+import { syncShopifyLocations } from "@/lib/shopify-locations";
+import { runWithOrg } from "@/lib/tenant";
 
 /**
  * Shopify OAuth (authorization-code grant), server-only. Unlike Amazon, the flow STARTS at the
@@ -129,4 +131,18 @@ export async function completeShopifyConnection(orgId: string, shop: string, acc
   });
 
   await ensureChannelFacilities("shopify");
+
+  // Materialise the shop's locations as facilities straight away, so the connection lands with
+  // real places rather than an empty channel. The org is explicit here (the callback runs with a
+  // session, but this must be bound to the org the flow was started for), and a failure here must
+  // not undo an otherwise good connection — the next sync retries.
+  try {
+    const amazon = await prismaBase.integration.findFirst({
+      where: { orgId, provider: "amazon", status: "connected" },
+      select: { id: true },
+    });
+    await runWithOrg(orgId, () => syncShopifyLocations(shop, accessToken, { amazonConnected: !!amazon }));
+  } catch {
+    // leave the connection in place; locations sync again on the next run
+  }
 }
