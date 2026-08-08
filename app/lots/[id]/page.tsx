@@ -12,6 +12,7 @@ import {
   getCategoriesInUse,
 } from "@/lib/queries";
 import { getFmt } from "@/lib/fmt-server";
+import { inflectUnit } from "@/lib/format";
 import { buildCostChips } from "@/lib/lot-costs";
 import { PageHeader } from "@/components/ui";
 import { PrevNextNav, neighbours } from "@/components/PrevNextNav";
@@ -50,6 +51,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
   const hasShortfall = shortLineDetails.length > 0;
 
   const matName = (code: string) => materialTypes.find((m) => m.code === code)?.name ?? code;
+  const matUnit = (code: string) => materialTypes.find((m) => m.code === code)?.unitLabel ?? "unit";
   const initialLines: EditorLine[] = lot.lines.map((ln) => ({
     id: ln.id,
     productId: ln.productId,
@@ -98,7 +100,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
             <ul className="mt-1 list-disc space-y-0.5 pl-4">
               {shortLineDetails.map((s, i) => (
                 <li key={i}>
-                  <span className="font-medium">{s.sku}</span> needs {qty(s.shortBy)} more units of {matName(s.materialCode)}
+                  <span className="font-medium">{s.sku}</span> needs {qty(s.shortBy)} more {inflectUnit(matUnit(s.materialCode), s.shortBy)} of {matName(s.materialCode)}
                 </li>
               ))}
             </ul>

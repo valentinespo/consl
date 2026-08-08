@@ -10,6 +10,7 @@ import {
   getFacilities,
 } from "@/lib/queries";
 import { getFmt } from "@/lib/fmt-server";
+import { inflectUnit } from "@/lib/format";
 import { PageHeader, Card, SectionTitle, SkuAvatar } from "@/components/ui";
 import { EmptyState } from "@/components/EmptyState";
 import { NewFacilityButton } from "@/components/NewFacilityButton";
@@ -145,7 +146,7 @@ export default async function FacilitiesPage() {
                           <SkuAvatar code={s.code} size={22} imageUrl={s.imageUrl} />
                           <span className="text-[12px] font-medium text-ink-soft">{s.code}</span>
                           <span className="tabular ml-auto whitespace-nowrap text-[12px] text-muted">
-                            {qty(s.units)} units · {money(s.value)}
+                            {qty(s.units)} {inflectUnit("unit", s.units)} · {money(s.value)}
                           </span>
                         </div>
                       ))}
@@ -167,7 +168,7 @@ export default async function FacilitiesPage() {
                             {r.sku && <span className="text-muted"> · {r.sku}</span>}
                           </span>
                           <span className="tabular ml-auto whitespace-nowrap text-[12px] text-muted">
-                            {qty(r.units)} {materials.find((m) => m.code === r.code)?.unitLabel ?? "unit"} · {money(r.value)}
+                            {qty(r.units)} {inflectUnit(materials.find((m) => m.code === r.code)?.unitLabel ?? "unit", r.units)} · {money(r.value)}
                           </span>
                         </div>
                       ))}
@@ -216,7 +217,7 @@ export default async function FacilitiesPage() {
                           <SkuAvatar code={s.code} size={22} imageUrl={s.imageUrl} />
                           <span className="text-[12px] font-medium text-ink-soft">{s.code}</span>
                           <span className="tabular ml-auto whitespace-nowrap text-[12px] text-muted">
-                            {qty(s.units)} units · {money(s.value)}
+                            {qty(s.units)} {inflectUnit("unit", s.units)} · {money(s.value)}
                           </span>
                         </div>
                       ))}

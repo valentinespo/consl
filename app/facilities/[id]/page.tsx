@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getFacilityDetail, getFacilitiesDetailed, getFinishedStock, getRawStockByFacility, getMaterialTypes, getSupplierOptions } from "@/lib/queries";
 import { getFmt } from "@/lib/fmt-server";
+import { inflectUnit } from "@/lib/format";
 import { Package } from "@/components/icons";
 import { PageHeader, Card, SkuAvatar } from "@/components/ui";
 import { PrevNextNav, neighbours } from "@/components/PrevNextNav";
@@ -141,7 +142,7 @@ export default async function FacilityDetailPage({ params }: { params: Promise<{
                   </div>
                   <div className="text-right">
                     <div className="tabular text-[13px] font-medium text-ink">
-                      {qty(r.units)} <span className="text-[10.5px] font-normal text-muted">{unitLabelOf(r.code)}</span>
+                      {qty(r.units)} <span className="text-[10.5px] font-normal text-muted">{inflectUnit(unitLabelOf(r.code), r.units)}</span>
                     </div>
                     <div className="tabular text-[11px] text-muted">{money(r.value)}</div>
                   </div>

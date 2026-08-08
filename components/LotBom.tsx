@@ -88,7 +88,7 @@ export function LotBom({
               <MatCard
                 key={key}
                 title={line.sku}
-                subtitle={`${qty(line.units)} units · overrides default`}
+                subtitle={`${qty(line.units)} ${inflectUnit("unit", line.units)} · overrides default`}
                 avatar={<SkuAvatar code={line.sku} size={28} imageUrl={line.imageUrl} />}
                 action={
                   <button onClick={() => revertOverride(key)} className="inline-flex items-center gap-1 text-[11.5px] font-medium text-muted hover:text-ink-soft">

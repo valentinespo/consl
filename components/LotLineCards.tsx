@@ -3,6 +3,7 @@
 import { SkuAvatar } from "@/components/ui";
 import { AlertTriangle } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
+import { inflectUnit } from "@/lib/format";
 import type { CostChip } from "@/lib/lot-costs";
 
 export type LotLineSummary = {
@@ -36,7 +37,7 @@ export function LotLineCards({ lines }: { lines: LotLineSummary[] }) {
             <SkuAvatar code={ln.sku} size={30} imageUrl={ln.imageUrl} />
             <div className="min-w-0 flex-1">
               <div className="text-[12.5px] font-semibold text-ink">{ln.sku}</div>
-              <div className="truncate text-[11px] text-muted">{qty(ln.units)} units</div>
+              <div className="truncate text-[11px] text-muted">{qty(ln.units)} {inflectUnit("unit", ln.units)}</div>
             </div>
             <div className="text-right">
               <div className="text-[15px] font-semibold tabular text-ink">{perUnit(ln.cogPerUnit)}</div>

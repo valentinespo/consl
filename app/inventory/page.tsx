@@ -132,8 +132,8 @@ export default async function InventoryPage() {
   const productUnits = prodUnits + finishedUnits; // raw is in mixed units, so counted separately
   const tiles = [
     { ...CAT.raw, value: rawValue, sub: `${rawSections.length} ${rawSections.length === 1 ? "material" : "materials"}` },
-    { ...CAT.prod, value: prodValue, sub: `${qty(prodUnits, cur)} units · ${prodLots.length} ${prodLots.length === 1 ? "lot" : "lots"}` },
-    { ...CAT.finished, value: finishedValue, sub: `${qty(finishedUnits, cur)} units · ${finFacilities} ${finFacilities === 1 ? "facility" : "facilities"}` },
+    { ...CAT.prod, value: prodValue, sub: `${qty(prodUnits, cur)} ${inflectUnit("unit", prodUnits)} · ${prodLots.length} ${prodLots.length === 1 ? "lot" : "lots"}` },
+    { ...CAT.finished, value: finishedValue, sub: `${qty(finishedUnits, cur)} ${inflectUnit("unit", finishedUnits)} · ${finFacilities} ${finFacilities === 1 ? "facility" : "facilities"}` },
   ];
   const denom = totalValue || 1;
 
@@ -225,7 +225,7 @@ export default async function InventoryPage() {
 
       {/* ---- In production, by SKU ---- */}
       <section className="mt-9">
-        <SectionTitle action={<CatTotal color={CAT.prod.color} text={`${money(prodValue, 2, cur)} · ${qty(prodUnits, cur)} units`} />}>In production</SectionTitle>
+        <SectionTitle action={<CatTotal color={CAT.prod.color} text={`${money(prodValue, 2, cur)} · ${qty(prodUnits, cur)} ${inflectUnit("unit", prodUnits)}`} />}>In production</SectionTitle>
         {prodSkus.length === 0 ? (
           <EmptyState icon={Package} title="Nothing in production" body="Lots you've started but not yet finished will appear here, broken down by SKU." />
         ) : (
@@ -263,7 +263,9 @@ export default async function InventoryPage() {
                       </div>
                     </td>
                     <td className="px-3 py-2.5 text-right tabular text-ink-soft">{unitCost(r.value, r.units, cur)}</td>
-                    <td className="px-3 py-2.5 text-right font-medium tabular">{qty(r.units, cur)}</td>
+                    <td className="px-3 py-2.5 text-right font-medium tabular">
+                      {qty(r.units, cur)} <span className="text-[11.5px] font-normal text-muted">{inflectUnit("unit", r.units)}</span>
+                    </td>
                     <td className="py-2.5 pl-3 pr-4 text-right font-medium tabular">{money(r.value, 2, cur)}</td>
                   </tr>
                 ))}
@@ -275,7 +277,7 @@ export default async function InventoryPage() {
 
       {/* ---- Finished stock per facility ---- */}
       <section className="mt-9">
-        <SectionTitle action={<CatTotal color={CAT.finished.color} text={`${money(finishedValue, 2, cur)} · ${qty(finishedUnits, cur)} units`} />}>Finished stock by facility</SectionTitle>
+        <SectionTitle action={<CatTotal color={CAT.finished.color} text={`${money(finishedValue, 2, cur)} · ${qty(finishedUnits, cur)} ${inflectUnit("unit", finishedUnits)}`} />}>Finished stock by facility</SectionTitle>
         {finishedRows.length === 0 ? (
           <EmptyState icon={Package} title="No finished stock on hand" body="Once lots are finished, whatever hasn't shipped to Amazon or sold shows here — the sellable stock sitting at your own facilities." />
         ) : (
@@ -309,7 +311,9 @@ export default async function InventoryPage() {
                           )}
                         </td>
                         <td className="px-3 py-2.5 text-right tabular text-ink-soft">{unitCost(g.value, g.units, cur)}</td>
-                        <td className="px-3 py-2.5 text-right font-medium tabular">{qty(g.units, cur)}</td>
+                        <td className="px-3 py-2.5 text-right font-medium tabular">
+                          {qty(g.units, cur)} <span className="text-[11.5px] font-normal text-muted">{inflectUnit("unit", g.units)}</span>
+                        </td>
                         <td className="py-2.5 pl-3 pr-4 text-right font-medium tabular">{money(g.value, 2, cur)}</td>
                       </tr>
                       {multi &&
@@ -328,7 +332,9 @@ export default async function InventoryPage() {
                               </span>
                             </td>
                             <td className="px-3 py-1.5 text-right tabular text-muted">{unitCost(p.value, p.units, cur)}</td>
-                            <td className="px-3 py-1.5 text-right tabular text-ink-soft">{qty(p.units, cur)}</td>
+                            <td className="px-3 py-1.5 text-right tabular text-ink-soft">
+                              {qty(p.units, cur)} <span className="text-[11px] text-muted">{inflectUnit("unit", p.units)}</span>
+                            </td>
                             <td className="py-1.5 pl-3 pr-4 text-right tabular text-ink-soft">{money(p.value, 2, cur)}</td>
                           </tr>
                         ))}
@@ -415,7 +421,9 @@ function RawMaterialRows({
               <td className="px-3 py-2.5 text-right tabular text-ink-soft">
                 {unitCost(g.totalValue, g.totalQty, cur)} / {s.unitLabel}
               </td>
-              <td className="px-3 py-2.5 text-right font-medium tabular">{qty(g.totalQty, cur)}</td>
+              <td className="px-3 py-2.5 text-right font-medium tabular">
+                {qty(g.totalQty, cur)} <span className="text-[11.5px] font-normal text-muted">{inflectUnit(s.unitLabel, g.totalQty)}</span>
+              </td>
               <td className="py-2.5 pl-3 pr-4 text-right font-medium tabular">{money(g.totalValue, 2, cur)}</td>
             </tr>
             {/* A multi-location material breaks down into one quiet sub-row per facility, every
@@ -435,7 +443,9 @@ function RawMaterialRows({
                   <td className="px-3 py-1.5 text-right tabular text-muted">
                     {unitCost(p.valueRemaining, p.quantityRemaining, cur)} / {s.unitLabel}
                   </td>
-                  <td className="px-3 py-1.5 text-right tabular text-ink-soft">{qty(p.quantityRemaining, cur)}</td>
+                  <td className="px-3 py-1.5 text-right tabular text-ink-soft">
+                    {qty(p.quantityRemaining, cur)} <span className="text-[11px] text-muted">{inflectUnit(s.unitLabel, p.quantityRemaining)}</span>
+                  </td>
                   <td className="py-1.5 pl-3 pr-4 text-right tabular text-ink-soft">{money(p.valueRemaining, 2, cur)}</td>
                 </tr>
               ))}

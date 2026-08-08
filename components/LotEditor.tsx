@@ -8,6 +8,7 @@ import { DatePicker } from "@/components/DatePicker";
 import { Card, SkuAvatar, SectionTitle } from "@/components/ui";
 import { StatusDropdown } from "@/components/StatusDropdown";
 import { useMoney } from "@/components/CurrencyProvider";
+import { inflectUnit } from "@/lib/format";
 import { updateLot } from "@/app/lots/actions";
 import { deriveProduction, derivePayment, PRODUCTION_LABEL, PAYMENT_LABEL, DERIVED_PILL_CLS } from "@/lib/lot-status";
 import { LotBom, type MaterialType, type Mat } from "@/components/LotBom";
@@ -469,7 +470,7 @@ export function LotEditor({
         <div className="fixed inset-x-0 top-4 z-50 flex justify-center px-4">
           <div className="flex items-center gap-3 rounded-full border border-border bg-surface/95 px-4 py-2 shadow-lg backdrop-blur">
             <span className="text-[12.5px] font-medium text-ink-soft">
-              Unsaved changes · {lines.length} SKU{lines.length === 1 ? "" : "s"} · {qty(totalUnits)} units
+              Unsaved changes · {lines.length} SKU{lines.length === 1 ? "" : "s"} · {qty(totalUnits)} {inflectUnit("unit", totalUnits)}
             </span>
             {error && <span className="text-[12px] text-negative">{error}</span>}
             <button onClick={reset} disabled={pending} className="rounded-full border border-[#e7cfc8] px-3.5 py-1.5 text-[12.5px] font-medium text-negative hover:bg-[#fbf1ee] disabled:opacity-50">Discard</button>
