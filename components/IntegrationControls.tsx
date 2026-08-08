@@ -17,6 +17,7 @@ export function IntegrationControls({
 }) {
   const [pending, start] = useTransition();
   const [confirm, setConfirm] = useState(false);
+  const [shop, setShop] = useState("");
   const router = useRouter();
 
   if (connected) {
@@ -52,6 +53,29 @@ export function IntegrationControls({
   }
 
   if (canConnect) {
+    // Shopify's OAuth starts AT the merchant's shop, so the flow needs their myshopify domain
+    // first; every other provider starts from a plain link.
+    if (provider === "shopify") {
+      const ready = shop.trim().length > 0;
+      return (
+        <form action="/api/integrations/shopify/connect" method="GET" className="flex items-center gap-1.5">
+          <input
+            name="shop"
+            value={shop}
+            onChange={(e) => setShop(e.target.value)}
+            placeholder="yourstore.myshopify.com"
+            className="h-9 w-52 rounded-lg border border-border bg-surface px-2.5 text-[12.5px] text-ink outline-none placeholder:text-muted focus:border-accent-strong"
+          />
+          <button
+            type="submit"
+            disabled={!ready}
+            className="rounded-lg bg-accent-strong px-3.5 py-2 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+          >
+            Connect
+          </button>
+        </form>
+      );
+    }
     return (
       <a
         href={`/api/integrations/${provider}/connect`}

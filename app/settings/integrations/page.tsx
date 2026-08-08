@@ -5,6 +5,7 @@ import { Card } from "@/components/ui";
 import { PROVIDERS, type Provider } from "@/lib/integrations";
 import { IntegrationControls } from "@/components/IntegrationControls";
 import { amazonOAuthConfigured } from "@/lib/amazon-oauth";
+import { shopifyOAuthConfigured } from "@/lib/shopify-oauth";
 import { getFmt } from "@/lib/fmt-server";
 import { requireView } from "@/lib/membership";
 
@@ -36,7 +37,7 @@ export default async function IntegrationsSettingsPage({
 
   // Amazon "live" via a real per-tenant connection, or (legacy) the workspace-key sync that's
   // produced snapshots. Only providers with modelled data can connect.
-  const CONNECTABLE: Record<Provider, boolean> = { amazon: amazonReady, shopify: false, tiktok: false };
+  const CONNECTABLE: Record<Provider, boolean> = { amazon: amazonReady, shopify: shopifyOAuthConfigured(), tiktok: false };
 
   return (
     <div className="max-w-3xl space-y-3">

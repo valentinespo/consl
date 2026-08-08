@@ -1,9 +1,13 @@
 import "server-only";
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { prismaBase } from "@/lib/prisma-base";
 import { encryptSecret } from "@/lib/secret-box";
 import { ensureChannelFacilities } from "@/lib/integrations";
 import { getMarketplaceParticipations, chooseMarketplace } from "@/lib/spapi";
+import { makeState, verifyState } from "@/lib/oauth-state";
+
+// The signed-state helpers moved to lib/oauth-state.ts (shared with the Shopify flow); re-exported
+// so the Amazon routes keep importing them from here.
+export { makeState, verifyState };
 
 /**
  * Amazon SP-API "website authorization workflow" (per-seller OAuth), server-only.
@@ -23,51 +27,12 @@ const CONSENT_BASE: Record<string, string> = {
   fe: "https://sellercentral.amazon.co.jp/apps/authorize/consent",
 };
 
-const STATE_TTL_MS = 15 * 60 * 1000; // a consent flow older than 15 min is stale
-
 export const APP_ORIGIN = process.env.APP_ORIGIN || "https://consl.ai";
 export const AMAZON_REDIRECT_URI = `${APP_ORIGIN}/api/integrations/amazon/callback`;
 
 /** True when the Amazon app is wired up enough to attempt a connect (env + encryption key). */
 export function amazonOAuthConfigured(): boolean {
   return Boolean(process.env.SPAPI_APP_ID && process.env.SPAPI_CLIENT_ID && process.env.SPAPI_CLIENT_SECRET && process.env.INTEGRATION_ENC_KEY);
-}
-
-function hmacKey(): Buffer {
-  const b64 = process.env.INTEGRATION_ENC_KEY;
-  if (!b64) throw new Error("INTEGRATION_ENC_KEY is not set");
-  return Buffer.from(b64, "base64");
-}
-
-function sign(payload: string): string {
-  return createHmac("sha256", hmacKey()).update(payload).digest("base64url");
-}
-
-/** Signed, time-limited state binding this consent flow to one org. */
-export function makeState(orgId: string): string {
-  const payload = `${orgId}.${Date.now()}.${randomBytes(8).toString("hex")}`;
-  return Buffer.from(`${payload}.${sign(payload)}`).toString("base64url");
-}
-
-/** Returns the orgId if the state is authentic and fresh; null otherwise. */
-export function verifyState(state: string): string | null {
-  try {
-    const decoded = Buffer.from(state, "base64url").toString("utf8");
-    const i = decoded.lastIndexOf(".");
-    if (i < 0) return null;
-    const payload = decoded.slice(0, i);
-    const sig = decoded.slice(i + 1);
-    const expected = sign(payload);
-    const a = Buffer.from(sig);
-    const b = Buffer.from(expected);
-    if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-    const [orgId, tsStr] = payload.split(".");
-    if (!orgId || !tsStr) return null;
-    if (Date.now() - Number(tsStr) > STATE_TTL_MS) return null;
-    return orgId;
-  } catch {
-    return null;
-  }
 }
 
 /** The Amazon consent URL to send the seller to. `version=beta` is required while the SP-API app
