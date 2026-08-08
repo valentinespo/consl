@@ -18,6 +18,7 @@ import {
   PRODUCTION_ORDER,
   PAYMENT_ORDER,
   productionProgress,
+  monthsLabel,
   type DerivedProduction,
   type DerivedPayment,
 } from "@/lib/lot-status";
@@ -213,10 +214,26 @@ export function LotsTable({
                           value={l.status}
                           label={prog ? `${PRODUCTION_LABEL[l.status]} · ${prog.pct}%` : PRODUCTION_LABEL[l.status]}
                         />
-                        {prog?.overdue && (
-                          <span className="pointer-events-none absolute top-full mt-0.5 text-[10px] font-medium leading-none text-negative">
-                            Overdue
-                          </span>
+                        {prog && (
+                          // Elapsed against the target, so the pill's % has its raw numbers under
+                          // it; past the window that slot just reads "Overdue". Hovering either
+                          // gives the date the lot is due. Absolutely placed so the pill stays put.
+                          <HoverHint
+                            className="absolute top-full mt-0.5 whitespace-nowrap"
+                            title={prog.overdue ? "Past its expected finish" : "Expected completion"}
+                            body={`Due ${date(prog.dueISO)} — ${monthsLabel(leadMonths ?? 0)} months after the PO date, per your Reorder lead time.`}
+                          >
+                            <span className="text-[10px] leading-none text-muted">
+                              {prog.overdue ? (
+                                <span className="font-medium text-ink-soft">Overdue</span>
+                              ) : (
+                                <>
+                                  <span className="font-medium text-ink-soft">{prog.elapsedMonths.toFixed(1)}</span> of{" "}
+                                  {monthsLabel(leadMonths ?? 0)} mo
+                                </>
+                              )}
+                            </span>
+                          </HoverHint>
                         )}
                       </span>
                     );

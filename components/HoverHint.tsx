@@ -23,11 +23,14 @@ export function HoverHint({
   body,
   size = 12,
   className = "",
+  children,
 }: {
   title?: string;
   body: ReactNode;
   size?: number;
   className?: string;
+  /** Use this element as the trigger instead of the (i) icon — for hinting a label in place. */
+  children?: ReactNode;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
   const [mounted, setMounted] = useState(false);
@@ -83,9 +86,11 @@ export function HoverHint({
         onKeyDown={(e) => {
           if (e.key === "Escape") setBox(null);
         }}
-        className={`inline-flex cursor-help items-center rounded-full opacity-70 outline-none transition-opacity hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-accent-strong ${className}`}
+        className={`inline-flex cursor-help items-center outline-none focus-visible:ring-2 focus-visible:ring-accent-strong ${
+          children ? "" : "rounded-full opacity-70 transition-opacity hover:opacity-100 focus-visible:opacity-100"
+        } ${className}`}
       >
-        <Info size={size} />
+        {children ?? <Info size={size} />}
       </span>
 
       {mounted &&

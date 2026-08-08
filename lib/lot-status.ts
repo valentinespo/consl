@@ -79,12 +79,20 @@ export function productionProgress(
   poDateISO: string | null,
   leadMonths: number | null | undefined,
   nowMs: number,
-): { pct: number; overdue: boolean } | null {
+): { pct: number; overdue: boolean; elapsedMonths: number; dueISO: string } | null {
   if (!poDateISO || !leadMonths || leadMonths <= 0) return null;
   const po = new Date(poDateISO).getTime();
   if (!Number.isFinite(po)) return null;
   const elapsedDays = (nowMs - po) / 86_400_000;
   if (elapsedDays < 0) return null; // a future-dated PO hasn't started
-  const pct = Math.round((elapsedDays / (leadMonths * DAYS_PER_MONTH)) * 100);
-  return { pct, overdue: pct > 100 };
+  const windowDays = leadMonths * DAYS_PER_MONTH;
+  return {
+    pct: Math.round((elapsedDays / windowDays) * 100),
+    overdue: elapsedDays > windowDays,
+    elapsedMonths: elapsedDays / DAYS_PER_MONTH,
+    dueISO: new Date(po + windowDays * 86_400_000).toISOString(),
+  };
 }
+
+/** Months for display: whole numbers stay whole (4 mo), otherwise one decimal (3.5 mo). */
+export const monthsLabel = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
