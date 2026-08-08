@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getInventory } from "@/lib/queries";
 import { computeReorder } from "@/lib/reorder";
 import { getFmt } from "@/lib/fmt-server";
+import { inflectUnit } from "@/lib/format";
 import type { RestockRow } from "@/lib/restock";
 
 export type Alert = {
@@ -79,7 +80,7 @@ export async function getAlerts(rows: RestockRow[]): Promise<Alert[]> {
         key: `material:${m.code}`,
         kind: "material",
         title: `${m.name} low in stock`,
-        detail: `${num(avail)} ${m.unitLabel} left · below ${num(m.lowStockThreshold)}`,
+        detail: `${num(avail)} ${inflectUnit(m.unitLabel, avail)} left · below ${num(m.lowStockThreshold)}`,
         severity: "critical",
       });
     }

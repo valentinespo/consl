@@ -6,6 +6,8 @@ import { Package, Lock } from "@/components/icons";
 import { Card } from "@/components/ui";
 import { ImageUpload } from "@/components/ImageUpload";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
+import { SearchSelect } from "@/components/SearchSelect";
+import { COMMON_UNIT_LABELS } from "@/lib/format";
 import { updateMaterial } from "@/app/catalog/actions";
 
 export type MaterialForEdit = {
@@ -27,6 +29,11 @@ export function MaterialEditor({ material, locked }: { material: MaterialForEdit
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+
+  // The material's own label always appears in the list, so a custom one stays selectable.
+  const unitOptions = COMMON_UNIT_LABELS.includes(material.unitLabel)
+    ? COMMON_UNIT_LABELS
+    : [material.unitLabel, ...COMMON_UNIT_LABELS];
 
   const thresholdValue = threshold.trim() === "" ? null : Number(threshold);
   const dirty =
@@ -94,7 +101,14 @@ export function MaterialEditor({ material, locked }: { material: MaterialForEdit
               later lots inherit it), so there's no per-unit default here anymore. */}
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Unit label" hint="How you count it.">
-              <input value={unitLabel} onChange={(e) => setUnitLabel(e.target.value)} placeholder="unit" className={inputCls} />
+              <SearchSelect
+                value={unitLabel}
+                onChange={setUnitLabel}
+                options={unitOptions}
+                placeholder="unit"
+                createLabel="Use a different unit"
+                createPlaceholder="Type the unit, then press Enter"
+              />
             </Field>
             <Field label="Low-stock alert" hint="Blank turns the alert off.">
               <input value={threshold} onChange={(e) => setThreshold(e.target.value)} type="number" step="any" min="0" placeholder="off" className={`${inputCls} tabular`} />

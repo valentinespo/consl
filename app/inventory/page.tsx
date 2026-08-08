@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { getInventory, getMaterialTypes, getFinishedStock, type InventoryPool } from "@/lib/queries";
 import { getChannelStock } from "@/lib/integrations";
 import { SEG } from "@/lib/segments";
-import { money, qty, perUnit, costFine, type Currency } from "@/lib/format";
+import { money, qty, perUnit, costFine, inflectUnit, type Currency } from "@/lib/format";
 import { getCurrentOrg } from "@/lib/org";
 import { PageHeader, SectionTitle, FacilityTag, SkuAvatar } from "@/components/ui";
 import { InventoryMixDonut } from "@/components/InventoryMixDonut";
@@ -373,7 +373,7 @@ function RawMaterialRows({
         <td colSpan={5} className="px-4 py-2 text-[12px]">
           <span className="font-semibold text-ink">{s.name}</span>
           <span className="ml-2 tabular text-muted">
-            {qty(s.totalQty, cur)} {s.unitLabel} · {money(s.value, 2, cur)}
+            {qty(s.totalQty, cur)} {inflectUnit(s.unitLabel, s.totalQty)} · {money(s.value, 2, cur)}
           </span>
         </td>
       </tr>
@@ -401,7 +401,7 @@ function RawMaterialRows({
                   {img}
                   <div className="min-w-0">
                     <div className="truncate text-[13px] font-medium text-ink">{g.sku ? `${s.name} for ${g.sku}` : s.name}</div>
-                    <div className="truncate text-[11px] text-muted">{g.sku ? (g.productName ?? g.sku) : s.unitLabel}</div>
+                    <div className="truncate text-[11px] text-muted">{g.sku ? (g.productName ?? g.sku) : inflectUnit(s.unitLabel, g.totalQty)}</div>
                   </div>
                 </div>
               </td>

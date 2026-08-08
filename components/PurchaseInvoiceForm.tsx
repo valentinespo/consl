@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, X } from "@/components/icons";
 import { DatePicker } from "@/components/DatePicker";
 import { useMoney } from "@/components/CurrencyProvider";
+import { inflectUnit } from "@/lib/format";
 import { upsertPurchaseInvoice, deletePurchaseInvoice, type PurchaseLineInput } from "@/app/purchases/actions";
 import { SelectOrCreate, type Opt } from "@/components/SelectOrCreate";
 import { SearchSelect } from "@/components/SearchSelect";
@@ -223,7 +224,7 @@ export function PurchaseInvoiceForm({
                     </div>
                   </MiniField>
                 )}
-                <MiniField label={`Qty (${material.unitLabel}s)`} className="w-[100px]">
+                <MiniField label={`Qty (${inflectUnit(material.unitLabel, 2)})`} className="w-[100px]">
                   <input type="number" step="any" value={l.quantity} onChange={(e) => patch(l.key, { quantity: e.target.value })} placeholder="0" className={`${inputCls} text-right tabular`} />
                 </MiniField>
                 <MiniField label="Amount ($)" className="w-[120px]">

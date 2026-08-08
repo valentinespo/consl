@@ -4,6 +4,7 @@ import { Fragment, useState } from "react";
 import { Plus, ChevronRight, Package } from "@/components/icons";
 import { ExpandRow } from "@/components/animate";
 import { useMoney } from "@/components/CurrencyProvider";
+import { inflectUnit } from "@/lib/format";
 import { Card, FacilityTag, SkuAvatar, SupplierAvatar } from "@/components/ui";
 import { PurchaseInvoiceForm, type PurchaseInvoiceRow, type PurchaseOptions, type PurchaseMaterial } from "@/components/PurchaseInvoiceForm";
 import { DocumentList } from "@/components/DocumentList";
@@ -54,7 +55,7 @@ export function MaterialPurchaseInvoices({ group, options }: { group: Group; opt
         </div>
         <div className="flex items-center gap-3">
           <span className="text-[12.5px] text-muted">
-            {qty(group.totalQty)} {material.unitLabel}s · {money(group.totalSpend)} spent
+            {qty(group.totalQty)} {inflectUnit(material.unitLabel, group.totalQty)} · {money(group.totalSpend)} spent
           </span>
           {canCreate && (
             <button onClick={() => setAdding((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-bg hover:opacity-90">
@@ -112,7 +113,9 @@ export function MaterialPurchaseInvoices({ group, options }: { group: Group; opt
                           ))}
                         </div>
                       </td>
-                      <td className="px-3 py-3 text-right tabular align-middle">{qty(inv.totalQty)}</td>
+                      <td className="px-3 py-3 text-right tabular align-middle">
+                        {qty(inv.totalQty)} <span className="text-[11.5px] text-muted">{inflectUnit(material.unitLabel, inv.totalQty)}</span>
+                      </td>
                       <td className="px-4 py-3 text-right font-semibold tabular align-middle">
                         {money(inv.invoiceTotal)}
                         {inv.documents.length > 0 && (

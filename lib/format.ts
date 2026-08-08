@@ -52,6 +52,41 @@ export const qty = (n: number | null | undefined, cur: Currency = USD) =>
 /** Simple English pluralization for unit labels (bag→bags, pouch→pouches). */
 export const plural = (w: string) => w + (/(s|x|z|ch|sh)$/i.test(w) ? "es" : "s");
 
+/**
+ * Unit labels that never take a plural: metric/imperial measures ("2.5 kg", never "kgs") and
+ * count words that are already invariant ("12 each"). Matched case-insensitively on the whole
+ * label, so a material counted in "bags" is unaffected.
+ */
+const INVARIANT_UNITS = new Set([
+  // mass
+  "kg", "g", "mg", "t", "lb", "lbs", "oz",
+  // volume
+  "l", "ml", "cl", "dl", "gal", "qt", "pt", "fl oz",
+  // length / area / volume
+  "m", "cm", "mm", "km", "in", "ft", "yd", "mi", "m2", "m3", "sq ft", "sqft", "sqm",
+  // already-invariant count words
+  "each", "ea", "pcs", "pc",
+]);
+
+/** Suggestions for the material unit-label picker — measures first, then common containers.
+ *  A tenant can still type anything; this is only the shortlist. */
+export const COMMON_UNIT_LABELS = [
+  "unit", "each", "kg", "g", "lb", "oz", "L", "ml", "m", "cm", "ft", "in",
+  "bag", "box", "case", "pallet", "roll", "sheet", "piece",
+];
+
+/**
+ * A unit label written to agree with `count`: measures stay exactly as typed ("1 kg", "2.5 kg"),
+ * countable nouns pluralise only above one ("1 bag", "15 bags"). Use this anywhere a label is
+ * printed next to a number, so a tenant using "kg" never sees "kgs".
+ */
+export function inflectUnit(label: string | null | undefined, count: number): string {
+  const l = (label ?? "").trim();
+  if (!l) return "";
+  if (INVARIANT_UNITS.has(l.toLowerCase())) return l;
+  return Math.abs(count) === 1 ? l : plural(l);
+}
+
 export const perUnit = (n: number | null | undefined, cur: Currency = USD) => money(n, 2, cur);
 
 /** Finer precision for sub-cent unit costs — a $0.004 label reads as $0.00 at two decimals. */

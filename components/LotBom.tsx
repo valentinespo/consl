@@ -2,7 +2,7 @@
 
 import { X, Undo2 } from "@/components/icons";
 import { SkuAvatar } from "@/components/ui";
-import { plural } from "@/lib/format";
+import { inflectUnit } from "@/lib/format";
 import { useMoney } from "@/components/CurrencyProvider";
 
 export type MaterialType = { id: string; code: string; name: string; unitLabel: string };
@@ -173,9 +173,9 @@ function MatCard({
                 onChange={(e) => onRate(i, Number(e.target.value))}
                 className="h-8 w-20 rounded-lg border border-border bg-surface-2 px-2 text-right text-[13px] tabular text-ink outline-none focus:border-accent-strong"
               />
-              <span className="w-24 text-[11.5px] text-muted">
-                {(m.perUnit === 1 ? (type?.unitLabel ?? "unit") : plural(type?.unitLabel ?? "unit")) + " / unit"}
-              </span>
+              {/* Just the unit — the section subtitle already says "per finished unit", so a
+                  trailing "/ unit" only produced readings like "units / unit". */}
+              <span className="w-24 text-[11.5px] text-muted">{inflectUnit(type?.unitLabel ?? "unit", m.perUnit)}</span>
               <button onClick={() => onRemove(i)} className="text-muted hover:text-negative" title="Remove">
                 <X size={15} />
               </button>
@@ -194,7 +194,7 @@ function MatCard({
             <option value="">+ Add material…</option>
             {available.map((m) => (
               <option key={m.id} value={m.id}>
-                {m.name} (in {plural(m.unitLabel)})
+                {m.name} (in {inflectUnit(m.unitLabel, 2)})
               </option>
             ))}
           </select>

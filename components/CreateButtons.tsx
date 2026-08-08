@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X } from "@/components/icons";
 import { createProduct, createMaterial, importAmazonCatalog } from "@/app/catalog/actions";
+import { SearchSelect } from "@/components/SearchSelect";
+import { COMMON_UNIT_LABELS } from "@/lib/format";
 import { useCan } from "@/components/AccessProvider";
 
 /** Catalog bootstrap: pull the org's live FBA SKUs into the catalog — each mapped, given a unique
@@ -201,7 +203,14 @@ export function NewMaterialButton() {
             {/* Consumption rates are set on the first lot that uses the material and inherited by
                 later lots — no per-unit default at the catalog level. */}
             <Field label="Unit label">
-              <input value={unitLabel} onChange={(e) => setUnitLabel(e.target.value)} className={inputCls} placeholder="unit / box / label" />
+              <SearchSelect
+                value={unitLabel}
+                onChange={setUnitLabel}
+                options={COMMON_UNIT_LABELS}
+                placeholder="How you count it"
+                createLabel="Use a different unit"
+                createPlaceholder="Type the unit, then press Enter"
+              />
             </Field>
             <label className="flex items-center gap-2 text-[12.5px] text-ink-soft">
               <input type="checkbox" checked={skuSpecific} onChange={(e) => setSkuSpecific(e.target.checked)} className="accent-[#1a2f18]" />
