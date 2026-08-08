@@ -2,7 +2,7 @@
 
 import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronRight } from "@/components/icons";
+import { ChevronRight, Info } from "@/components/icons";
 import { ExpandRow } from "@/components/animate";
 import { FacilityTag, SkuAvatar } from "@/components/ui";
 import { LotLineCards, type LotLineSummary } from "@/components/LotLineCards";
@@ -219,19 +219,21 @@ export function LotsTable({
                           // it; past the window that slot just reads "Overdue". Hovering either
                           // gives the date the lot is due. Absolutely placed so the pill stays put.
                           <HoverHint
-                            className="absolute top-full mt-0.5 whitespace-nowrap"
+                            className="absolute top-full mt-1.5 whitespace-nowrap"
                             title={prog.overdue ? "Past its expected finish" : "Expected completion"}
                             body={`Due ${date(prog.dueISO)} — ${monthsLabel(leadMonths ?? 0)} months after the PO date, per your Reorder lead time.`}
                           >
-                            <span className="text-[10px] leading-none text-muted">
+                            <span className="inline-flex items-center gap-1 text-[10px] leading-none text-muted">
                               {prog.overdue ? (
                                 <span className="font-medium text-ink-soft">Overdue</span>
                               ) : (
-                                <>
+                                <span>
                                   <span className="font-medium text-ink-soft">{prog.elapsedMonths.toFixed(1)}</span> of{" "}
                                   {monthsLabel(leadMonths ?? 0)} mo
-                                </>
+                                </span>
                               )}
+                              {/* Signals the caption is hoverable — the bubble carries the due date. */}
+                              <Info size={10} className="shrink-0 opacity-60" />
                             </span>
                           </HoverHint>
                         )}
