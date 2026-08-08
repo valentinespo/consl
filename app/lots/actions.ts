@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { recomputeAll } from "@/lib/recompute";
 import { checkOwned, type OwnedModel } from "@/lib/ownership";
 import { requirePermission } from "@/lib/membership";
-import { createLotCore, defaultMaterialsFor } from "@/lib/lot-core";
+import { createLotCore, bomFromLatestLine } from "@/lib/lot-core";
 
 /** Permanently delete a lot (cascades its SKU lines, bill of materials and transactions). */
 export async function deleteLot(formData: FormData) {
@@ -98,7 +98,9 @@ export async function updateLot(payload: LotEditPayload) {
   ]);
   if (badRef) return badRef;
 
-  const defaults = await defaultMaterialsFor(payload.facilityId);
+  // Only NEW lines inherit a recipe, and the lookup runs before any row is written so a line
+  // added in this very save can't be its own "latest lot" source.
+  const inherited = await bomFromLatestLine(payload.lines.filter((l) => !l.id).map((l) => l.productId));
   // Per-product materials carry the SKU so they draw the right per-SKU FIFO pool.
   const allMaterials = await prisma.materialType.findMany({ select: { id: true, skuSpecific: true } });
   const skuSpecificIds = new Set(allMaterials.filter((m) => m.skuSpecific).map((m) => m.id));
@@ -162,9 +164,14 @@ export async function updateLot(payload: LotEditPayload) {
           lineId = created.id;
         }
         lineIds.push(lineId);
-        // A NEW line with no explicit BOM inherits the facility defaults; an existing line with an
-        // emptied BOM stays empty (the operator deleted its rows on purpose).
-        const mats = l.materials.length ? l.materials : l.id ? [] : defaults.map((m) => ({ materialTypeId: m.id, perUnit: m.defaultPerUnit || 1 }));
+        // A NEW line with no explicit BOM starts from its SKU's latest-lot recipe — empty when the
+        // SKU has never been in a lot. An existing line with an emptied BOM stays empty (the
+        // operator deleted its rows on purpose).
+        const mats = l.materials.length
+          ? l.materials
+          : l.id
+            ? []
+            : (inherited.get(l.productId) ?? []).map((m) => ({ materialTypeId: m.materialTypeId, perUnit: m.perUnit }));
         for (const m of mats) {
           if (!m.materialTypeId || !(m.perUnit > 0)) continue;
           matRows.push({

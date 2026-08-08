@@ -14,31 +14,45 @@ import { checkOwned, type OwnedModel } from "@/lib/ownership";
  * never here.
  */
 
-/** The default recipe for a new lot line: every material this facility actually stocks, at its
- *  default rate. Stock counts however it arrived — bought here, or transferred in from another
- *  facility. Deriving this from purchases alone gave a site fed only by transfers an empty bill
- *  of materials, so its lots recorded $0.00 material cost with nothing to raise a shortfall on. */
-export async function defaultMaterialsFor(facilityId: string) {
-  const [purchased, movedIn] = await Promise.all([
-    prisma.purchase.findMany({
-      where: { facilityId },
-      select: { materialTypeId: true },
-      distinct: ["materialTypeId"],
-    }),
-    prisma.stockMovement.findMany({
-      where: { itemType: "RAW", toFacilityId: facilityId, materialTypeId: { not: null } },
-      select: { materialTypeId: true },
-      distinct: ["materialTypeId"],
-    }),
-  ]);
-  const ids = [
-    ...new Set([
-      ...purchased.map((p) => p.materialTypeId),
-      ...movedIn.map((m) => m.materialTypeId).filter((id): id is string => !!id),
-    ]),
-  ];
-  if (ids.length === 0) return [];
-  return prisma.materialType.findMany({ where: { id: { in: ids } } });
+/** The recipe a NEW line for each product starts with: a copy of that SKU's most recent lot
+ *  line's bill of materials (same materials, same per-unit rates), or NOTHING when the SKU has
+ *  never been in a lot — the operator builds the first recipe by hand and every later lot
+ *  inherits it. "Most recent" = newest PO date (then creation time), across ALL facilities: the
+ *  recipe follows the SKU, not the building; missing stock at the new facility surfaces as a
+ *  normal shortfall. Replaces the old facility-defaults seeding, which stamped every material
+ *  the facility had ever stocked onto unrelated SKUs. */
+export async function bomFromLatestLine(
+  productIds: string[],
+): Promise<Map<string, { materialTypeId: string; perUnit: number; skuSpecific: boolean }[]>> {
+  const map = new Map<string, { materialTypeId: string; perUnit: number; skuSpecific: boolean }[]>();
+  const ids = [...new Set(productIds)].filter(Boolean);
+  if (ids.length === 0) return map;
+  const lines = await prisma.lotLine.findMany({
+    where: { productId: { in: ids } },
+    select: {
+      productId: true,
+      createdAt: true,
+      lot: { select: { poDate: true, createdAt: true } },
+      materials: { select: { materialTypeId: true, perUnit: true, materialType: { select: { skuSpecific: true } } } },
+    },
+  });
+  const stamp = (l: (typeof lines)[number]) =>
+    [l.lot.poDate?.getTime() ?? 0, l.lot.createdAt.getTime(), l.createdAt.getTime()] as const;
+  const newer = (a: readonly number[], b: readonly number[]) => {
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] > b[i];
+    return false;
+  };
+  const best = new Map<string, (typeof lines)[number]>();
+  for (const l of lines) {
+    const cur = best.get(l.productId);
+    if (!cur || newer(stamp(l), stamp(cur))) best.set(l.productId, l);
+  }
+  for (const [pid, l] of best)
+    map.set(
+      pid,
+      l.materials.map((m) => ({ materialTypeId: m.materialTypeId, perUnit: m.perUnit, skuSpecific: m.materialType.skuSpecific })),
+    );
+  return map;
 }
 
 /** Smallest positive lot number not in use — deleted numbers get reused (e.g. a scrapped PO #21). */
@@ -70,7 +84,9 @@ export async function createLotCore(input: {
 
   const lotNr = await nextFreeLotNr();
 
-  const defaults = await defaultMaterialsFor(input.facilityId);
+  // Resolved BEFORE the lot exists — otherwise each just-created (still material-less) line would
+  // itself be the SKU's "latest line" and every new lot would inherit an empty recipe.
+  const inherited = await bomFromLatestLine(lines.map((l) => l.productId));
 
   // Status lives on each LINE (SKUs finish independently); the lot columns are a derived cache.
   const finishedAt = input.status === "FINISHED" ? new Date() : null;
@@ -90,12 +106,12 @@ export async function createLotCore(input: {
   });
 
   for (const line of lot.lines) {
-    for (const m of defaults) {
+    for (const m of inherited.get(line.productId) ?? []) {
       await prisma.lotMaterial.create({
         data: {
           lotLineId: line.id,
-          materialTypeId: m.id,
-          perUnit: m.defaultPerUnit || 1,
+          materialTypeId: m.materialTypeId,
+          perUnit: m.perUnit,
           // Materials pooled per product (e.g. printed packaging) must carry the SKU.
           productId: m.skuSpecific ? line.productId : null,
         },
