@@ -13,7 +13,7 @@ import { getMyAccess } from "@/lib/membership";
 import { RESOURCE_KEYS, actionsOf } from "@/lib/permissions";
 
 /** Pages that must stay reachable before you belong to a company. */
-const NO_ORG_OK = ["/sign-in", "/sign-up", "/welcome", "/join"];
+const NO_ORG_OK = ["/sign-in", "/sign-up", "/welcome", "/join", "/home", "/privacy", "/terms"];
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });

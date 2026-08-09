@@ -42,7 +42,7 @@ export function AppShell({
   }, [pathname]);
 
   // Auth and onboarding screens render bare — there's no company yet to put in the chrome.
-  const BARE = ["/sign-in", "/sign-up", "/welcome", "/join"];
+  const BARE = ["/sign-in", "/sign-up", "/welcome", "/join", "/home", "/privacy", "/terms"];
   if (BARE.some((p) => pathname.startsWith(p))) return <>{children}</>;
 
   return (

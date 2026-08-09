@@ -1,9 +1,16 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
-// Only the auth screens are public; everything else requires a signed-in user. The Shopify
-// compliance webhook is server-to-server (no session) — it authenticates with its own HMAC.
-const isPublic = createRouteMatcher(["/sign-in(.*)", "/sign-up(.*)", "/api/integrations/shopify/compliance"]);
+// Auth screens plus the public marketing pages; everything else requires a signed-in user. The
+// Shopify compliance webhook is server-to-server (no session) — it authenticates with its own HMAC.
+const isPublic = createRouteMatcher([
+  "/sign-in(.*)",
+  "/sign-up(.*)",
+  "/home",
+  "/privacy",
+  "/terms",
+  "/api/integrations/shopify/compliance",
+]);
 
 // Legacy files used to sit in public/uploads and were served statically with no auth. They've been
 // moved out of public/; this sends any surviving "/uploads/..." URL (still stored in old DB rows)
@@ -17,6 +24,17 @@ function rewriteLegacyUploads(req: Request & { nextUrl: URL }): URL | null {
 }
 
 const enforced = clerkMiddleware(async (auth, req) => {
+  // A signed-out visitor to the root gets the marketing site; signed-in users keep the dashboard.
+  // Redirect rather than rewrite: the app shell decides bare-vs-chrome from the client pathname,
+  // which under a rewrite would still read "/" and wrap the landing page in app chrome.
+  if (req.nextUrl.pathname === "/") {
+    const { userId } = await auth();
+    if (!userId) {
+      const url = req.nextUrl.clone();
+      url.pathname = "/home";
+      return NextResponse.redirect(url);
+    }
+  }
   if (!isPublic(req)) await auth.protect();
   const legacy = rewriteLegacyUploads(req);
   if (legacy) return NextResponse.rewrite(legacy);
