@@ -18,7 +18,7 @@ import { NewMovementPanel, type OnHandRow } from "@/components/MovementForm";
 import { MovementsLedger } from "@/components/MovementsLedger";
 import { StockSection } from "@/components/StockSection";
 import { facilityTypeLabel, isProductionSite } from "@/lib/facility-types";
-import { getChannelStock, PROVIDERS, CHANNEL_PROVIDER } from "@/lib/integrations";
+import { getChannelStock, PROVIDERS, CHANNEL_PROVIDER, CHANNEL_LOGO } from "@/lib/integrations";
 import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
@@ -193,9 +193,18 @@ export default async function FacilitiesPage() {
               <Link key={f.id} href={`/facilities/${f.id}`} className="block">
                 <Card className="flex h-full flex-col gap-3 transition-colors hover:border-accent-strong hover:bg-accent-soft/30">
                   <div className="flex items-center gap-3">
-                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
-                      <Plug size={18} />
-                    </span>
+                    {f.channel && CHANNEL_LOGO[f.channel] ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={CHANNEL_LOGO[f.channel]}
+                        alt=""
+                        className="h-11 w-11 shrink-0 rounded-xl border border-border bg-white object-contain p-1"
+                      />
+                    ) : (
+                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
+                        <Plug size={18} />
+                      </span>
+                    )}
                     <div className="min-w-0 flex-1">
                       {/* Channel facilities lead with the place ("638 Alton Place", "Amazon FBA")
                           and name the platform underneath — the code is a pill-sized handle used

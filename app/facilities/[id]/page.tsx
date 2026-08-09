@@ -8,7 +8,7 @@ import { PageHeader, Card, SkuAvatar } from "@/components/ui";
 import { PrevNextNav, neighbours } from "@/components/PrevNextNav";
 import { FacilityEditor } from "@/components/FacilityEditor";
 import { Lock } from "@/components/icons";
-import { CHANNEL_PROVIDER, PROVIDERS, getChannelStock } from "@/lib/integrations";
+import { CHANNEL_PROVIDER, PROVIDERS, CHANNEL_LOGO, getChannelStock } from "@/lib/integrations";
 import { DeleteEntity } from "@/components/DeleteEntity";
 import { deleteFacility } from "@/app/facilities/actions";
 import { facilityTypeLabel } from "@/lib/facility-types";
@@ -51,9 +51,18 @@ export default async function FacilityDetailPage({ params }: { params: Promise<{
 
       {facility.locked ? (
         <Card className="flex items-start gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
-            <Lock size={17} />
-          </span>
+          {facility.channel && CHANNEL_LOGO[facility.channel] ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={CHANNEL_LOGO[facility.channel]}
+              alt=""
+              className="h-10 w-10 shrink-0 rounded-xl border border-border bg-white object-contain p-1"
+            />
+          ) : (
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
+              <Lock size={17} />
+            </span>
+          )}
           <div className="text-[13px] leading-relaxed text-ink-soft">
             <div className="font-semibold text-ink">Managed by your {channelProviderLabel(facility.channel)} connection</div>
             This facility mirrors a connected sales channel, so its details can&apos;t be edited or deleted here — it lives and
