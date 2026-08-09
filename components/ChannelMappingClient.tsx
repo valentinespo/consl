@@ -22,6 +22,9 @@ type PickerProduct = { id: string; code: string; name: string; takenExternalId: 
 
 type Stage = { action: "map"; productId: string } | { action: "import" } | { action: "ignore" } | { action: "unmap" } | { action: "restore" } | null;
 
+// The app-wide pill shape — the .pill-* classes only supply the frosted colors.
+const PILL = "inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-medium";
+
 /** The mapping worklist for one channel: suggestions arrive pre-selected, every row can be
  *  flipped to map / import / ignore, and nothing commits until Save. */
 export function ChannelMappingClient({
@@ -183,10 +186,10 @@ export function ChannelMappingClient({
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[13px] font-medium text-ink">{r.title}</div>
                     <div className="mt-0.5 flex items-center gap-2 text-[11.5px] text-ink-soft">
-                      {r.sku ? <span className="pill-neutral">{r.sku}</span> : <span className="italic">no SKU</span>}
+                      {r.sku ? <span className={`pill-neutral ${PILL}`}>{r.sku}</span> : <span className="italic">no SKU</span>}
                       {r.price != null && <span>${r.price.toFixed(2)}</span>}
                       {r.suggestion && stage?.action === "map" && (
-                        <span className="pill-chart">{r.suggestion.confidence === "exact" ? "Exact match" : "Suggested"}</span>
+                        <span className={`pill-chart ${PILL}`}>{r.suggestion.confidence === "exact" ? "Exact match" : "Suggested"}</span>
                       )}
                     </div>
                   </div>
@@ -261,8 +264,8 @@ export function ChannelMappingClient({
                       <span className="text-ink-soft"> · {r.mapped!.name}</span>
                     </div>
                     <div className="mt-0.5 flex items-center gap-2 text-[11.5px] text-ink-soft">
-                      {r.sku && <span className="pill-neutral">{r.sku}</span>}
-                      {staged ? <span className="pill-amber">Will unmap on save</span> : <span className="pill-green">Mapped</span>}
+                      {r.sku && <span className={`pill-neutral ${PILL}`}>{r.sku}</span>}
+                      {staged ? <span className={`pill-amber ${PILL}`}>Will unmap on save</span> : <span className={`pill-green ${PILL}`}>Mapped</span>}
                     </div>
                   </div>
                   {canEdit && (
@@ -300,8 +303,8 @@ export function ChannelMappingClient({
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[13px] text-ink-soft">{r.title}</div>
                     <div className="mt-0.5 flex items-center gap-2 text-[11.5px] text-ink-soft">
-                      {r.sku && <span className="pill-neutral">{r.sku}</span>}
-                      {staged && <span className="pill-chart">Will restore on save</span>}
+                      {r.sku && <span className={`pill-neutral ${PILL}`}>{r.sku}</span>}
+                      {staged && <span className={`pill-chart ${PILL}`}>Will restore on save</span>}
                     </div>
                   </div>
                   {canEdit && (
