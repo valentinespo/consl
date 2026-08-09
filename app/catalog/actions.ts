@@ -387,3 +387,99 @@ export async function removeEntityImage(formData: FormData) {
   }
   revalidatePath("/", "layout");
 }
+
+// ---------- Channel product mapping (the mapping screen's actions) ----------
+
+/** Re-pull a channel's live catalog and auto-map the no-judgement-needed exact matches. */
+export async function refreshChannelListings(channel: "SHOPIFY" | "AMAZON") {
+  const gate = await requirePermission("catalog", "create");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  const { refreshChannelListingsCore, autoMapExact } = await import("@/lib/channel-catalog");
+  try {
+    const { seen } = await refreshChannelListingsCore(channel);
+    const autoMapped = await autoMapExact(channel);
+    revalidatePath("/", "layout");
+    return { ok: true as const, seen, autoMapped };
+  } catch (e) {
+    return { ok: false as const, error: (e as Error).message.slice(0, 200) };
+  }
+}
+
+export type MappingActionItem =
+  | { listingId: string; action: "map"; productId: string }
+  | { listingId: string; action: "import" }
+  | { listingId: string; action: "ignore" }
+  | { listingId: string; action: "restore" }
+  | { listingId: string; action: "unmap" };
+
+/**
+ * Commit the staged decisions from the mapping screen in one save. Each item is guarded on its
+ * own (a bad row reports, the rest still land). Mapping only writes Product identifier columns —
+ * costing data is untouched, so no recompute.
+ */
+export async function applyChannelMappings(channel: "SHOPIFY" | "AMAZON", items: MappingActionItem[]) {
+  const gate = await requirePermission("catalog", "create");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  const { mappingData, unmappingData, mappedExternalId, PRODUCT_MATCH_SELECT } = await import("@/lib/channel-catalog");
+
+  const results: Array<{ listingId: string; ok: boolean; error?: string }> = [];
+  for (const item of items) {
+    try {
+      const listing = await prisma.channelListing.findFirst({ where: { id: item.listingId, channel } });
+      if (!listing) throw new Error("Listing not found");
+
+      if (item.action === "ignore" || item.action === "restore") {
+        await prisma.channelListing.update({ where: { id: listing.id }, data: { ignored: item.action === "ignore" } });
+      } else if (item.action === "unmap") {
+        const products = await prisma.product.findMany({ select: PRODUCT_MATCH_SELECT });
+        const owner = products.find((p) => mappedExternalId(p, channel) === listing.externalId);
+        if (owner) await prisma.product.update({ where: { id: owner.id }, data: unmappingData(channel) });
+      } else if (item.action === "map") {
+        const products = await prisma.product.findMany({ select: PRODUCT_MATCH_SELECT });
+        const target = products.find((p) => p.id === item.productId);
+        if (!target) throw new Error("Product not found");
+        const takenBy = mappedExternalId(target, channel);
+        if (takenBy && takenBy !== listing.externalId) throw new Error(`${target.code} is already mapped on this channel`);
+        const current = products.find((p) => mappedExternalId(p, channel) === listing.externalId);
+        if (current && current.id !== target.id)
+          await prisma.product.update({ where: { id: current.id }, data: unmappingData(channel) });
+        await prisma.product.update({ where: { id: target.id }, data: mappingData(channel, listing) });
+        if (listing.ignored) await prisma.channelListing.update({ where: { id: listing.id }, data: { ignored: false } });
+      } else if (item.action === "import") {
+        const existing = await prisma.product.findMany({ select: { code: true } });
+        const used = new Set(existing.map((p) => p.code));
+        const code = uniqueProductCode(listing.title, used);
+
+        // Best-effort listing image → product photo; failure never blocks the import.
+        let imageUrl: string | null = null;
+        if (listing.imageUrl) {
+          try {
+            const resp = await fetch(listing.imageUrl);
+            if (resp.ok) {
+              const buf = Buffer.from(await resp.arrayBuffer());
+              const ext = (listing.imageUrl.split("?")[0].split(".").pop() ?? "jpg").toLowerCase();
+              const safeExt = ["jpg", "jpeg", "png", "webp", "gif"].includes(ext) ? ext : "jpg";
+              const key = `product/import-${safeKeySegment(listing.id)}-${Date.now()}.${safeExt}`;
+              imageUrl = await saveImage(key, buf, `image/${safeExt === "jpg" ? "jpeg" : safeExt}`);
+            }
+          } catch {
+            /* image is decoration */
+          }
+        }
+
+        const { mappingData: md } = await import("@/lib/channel-catalog");
+        await prisma.product.create({
+          data: { code, name: listing.title, imageUrl, ...md(channel, listing) },
+        });
+        if (listing.ignored) await prisma.channelListing.update({ where: { id: listing.id }, data: { ignored: false } });
+      }
+      results.push({ listingId: item.listingId, ok: true });
+    } catch (e) {
+      results.push({ listingId: item.listingId, ok: false, error: (e as Error).message.slice(0, 160) });
+    }
+  }
+
+  revalidatePath("/", "layout");
+  const failed = results.filter((r) => !r.ok);
+  return { ok: true as const, applied: results.length - failed.length, failed };
+}

@@ -52,6 +52,7 @@ model Organization {
   dismissedNotifications  DismissedNotification[]
   inventoryValueSnapshots InventoryValueSnapshot[]
   settings                Settings[]
+  channelListings         ChannelListing[]
   materialTypes           MaterialType[]
   purchaseInvoices        PurchaseInvoice[]
   purchases               Purchase[]
@@ -634,4 +635,28 @@ model Transaction {
 
   @@index([lotId])
   @@index([invoiceId])
+}
+
+/// One listing (product/variant) in a connected sales channel's catalog — the raw material the
+/// mapping screen works from. The actual mapping lives on Product's per-channel identifier
+/// columns; this row only remembers what the platform has, plus the founder's "ignore" choice,
+/// so disconnect/reconnect restores the exact same picture.
+model ChannelListing {
+  id                String        @id @default(cuid())
+  orgId             String?
+  organization      Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  channel           String // AMAZON | SHOPIFY | TIKTOK (same keys as Facility.channel)
+  externalId        String // immutable platform id (Shopify variant gid; Amazon seller SKU)
+  externalProductId String? // parent/container id (Shopify product gid; Amazon ASIN)
+  sku               String?
+  title             String
+  imageUrl          String? // platform CDN url — display only, downloaded on import
+  price             Float?
+  ignored           Boolean       @default(false)
+  lastSeenAt        DateTime      @default(now())
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@unique([orgId, channel, externalId])
+  @@index([orgId, channel, ignored])
 }

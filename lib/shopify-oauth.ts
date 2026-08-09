@@ -145,4 +145,16 @@ export async function completeShopifyConnection(orgId: string, shop: string, acc
   } catch {
     // leave the connection in place; locations sync again on the next run
   }
+
+  // Pull the shop's catalog and auto-map exact matches, so the mapping screen the merchant lands
+  // on is already pre-populated. Same failure posture: never undo a good connection.
+  try {
+    const { refreshShopifyListings, autoMapExact } = await import("@/lib/channel-catalog");
+    await runWithOrg(orgId, async () => {
+      await refreshShopifyListings();
+      await autoMapExact("SHOPIFY");
+    });
+  } catch {
+    // the Refresh button on the mapping screen retries
+  }
 }

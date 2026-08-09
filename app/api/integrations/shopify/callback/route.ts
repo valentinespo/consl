@@ -34,7 +34,8 @@ export async function GET(request: Request) {
   try {
     const { accessToken, scope } = await exchangeShopifyCode(shop, code);
     await completeShopifyConnection(stateOrg, shop, accessToken, scope);
-    return back("connected=shopify");
+    // Land on the mapping screen: a fresh channel's catalog is waiting to be reviewed.
+    return NextResponse.redirect(`${APP_ORIGIN}/catalog/mapping?channel=SHOPIFY&connected=1`);
   } catch (e) {
     return back(`error=${encodeURIComponent(e instanceof Error ? e.message : "Connection failed.")}`);
   }

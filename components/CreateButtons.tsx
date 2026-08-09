@@ -3,76 +3,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X } from "@/components/icons";
-import { createProduct, createMaterial, importAmazonCatalog } from "@/app/catalog/actions";
+import { createProduct, createMaterial } from "@/app/catalog/actions";
 import { SearchSelect } from "@/components/SearchSelect";
 import { COMMON_UNIT_LABELS } from "@/lib/format";
 import { useCan } from "@/components/AccessProvider";
 
-/** Catalog bootstrap: pull the org's live FBA SKUs into the catalog — each mapped, given a unique
- *  3-letter abbreviation, and (best-effort) Amazon's main image. Idempotent server-side. */
-export function ImportAmazonCatalogButton() {
-  const [pending, setPending] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
-  const router = useRouter();
-  const canCreate = useCan("catalog", "create");
-  if (!canCreate) return null;
-
-  async function run() {
-    setPending(true);
-    setConfirming(false);
-    setNote(null);
-    try {
-      const r = await importAmazonCatalog();
-      if (!r.ok) {
-        setNote(r.error ?? "Import failed");
-        return;
-      }
-      setNote(
-        r.created > 0
-          ? `Imported ${r.created} product${r.created > 1 ? "s" : ""}${r.images > 0 ? ` (${r.images} with photos)` : ""}.`
-          : "Nothing new — every Amazon SKU is already in the catalog.",
-      );
-      router.refresh();
-    } catch {
-      setNote("Couldn't reach the server — reload and check the catalog.");
-    } finally {
-      setPending(false);
-    }
-  }
-
-  // Two-step: the first click asks to confirm (a stray click can't import a pile of listings), the
-  // second actually runs it.
-  if (confirming) {
-    return (
-      <span className="inline-flex items-center gap-2">
-        <span className="text-[12px] text-ink-soft">Import every Amazon SKU not already in your catalog?</span>
-        <button
-          onClick={run}
-          disabled={pending}
-          className="rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-bg hover:opacity-90 disabled:opacity-40"
-        >
-          {pending ? "Importing…" : "Yes, import"}
-        </button>
-        <button onClick={() => setConfirming(false)} disabled={pending} className="rounded-lg px-2.5 py-1.5 text-[12.5px] text-muted hover:text-ink disabled:opacity-40">
-          Cancel
-        </button>
-      </span>
-    );
-  }
-
-  return (
-    <span className="inline-flex items-center gap-2">
-      {note && <span className="text-[12px] text-muted">{note}</span>}
-      <button
-        onClick={() => { setNote(null); setConfirming(true); }}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12.5px] font-medium text-ink-soft hover:bg-surface-2"
-      >
-        Import from Amazon
-      </button>
-    </span>
-  );
-}
 
 const inputCls = "h-9 w-full rounded-lg border border-border bg-surface px-2.5 text-[13px] text-ink outline-none focus:border-accent-strong";
 

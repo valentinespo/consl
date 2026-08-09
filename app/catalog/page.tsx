@@ -1,8 +1,9 @@
-import { Boxes, Package } from "@/components/icons";
+import Link from "next/link";
+import { ArrowLeftRight, Boxes, Package } from "@/components/icons";
 import { getProducts, getMaterialTypes } from "@/lib/queries";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionTitle } from "@/components/ui";
-import { NewProductButton, NewMaterialButton, ImportAmazonCatalogButton } from "@/components/CreateButtons";
+import { NewProductButton, NewMaterialButton } from "@/components/CreateButtons";
 import { ProductCard, MaterialCard } from "@/components/CatalogCards";
 import { EmptyState } from "@/components/EmptyState";
 import { requireView } from "@/lib/membership";
@@ -11,15 +12,26 @@ export const dynamic = "force-dynamic";
 
 export default async function CatalogPage() {
   await requireView("catalog");
-  const [products, materials, amazonConn] = await Promise.all([
+  const [products, materials, channelConn] = await Promise.all([
     getProducts(),
     getMaterialTypes(),
-    prisma.integration.findFirst({ where: { provider: "amazon", status: "connected" }, select: { id: true } }),
+    prisma.integration.findFirst({
+      where: { provider: { in: ["amazon", "shopify"] }, status: "connected" },
+      select: { id: true },
+    }),
   ]);
 
   const productActions = (
     <span className="inline-flex items-center gap-2">
-      {amazonConn && <ImportAmazonCatalogButton />}
+      {channelConn && (
+        <Link
+          href="/catalog/mapping"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-panel px-3 py-1.5 text-[12.5px] font-medium text-ink hover:bg-panel-2"
+        >
+          <ArrowLeftRight size={13} />
+          Product mapping
+        </Link>
+      )}
       <NewProductButton />
     </span>
   );
