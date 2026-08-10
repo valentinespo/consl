@@ -3,10 +3,11 @@
 import Image from "next/image";
 import { useState, useTransition } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { RefreshCw, ChevronRight } from "@/components/icons";
+import { RefreshCw, ChevronRight, Search } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { importOrders, setSourceExcluded } from "@/app/orders/actions";
 import type { OrdersSummary, OrdersPage } from "@/lib/order-metrics";
+import { inputCls } from "@/components/FormKit";
 
 const CHANNEL_LOGO: Record<string, string> = {
   AMAZON: "/integrations/amazon-fba.png",
@@ -30,7 +31,17 @@ function Toggle({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean
   );
 }
 
-export function OrdersClient({ summary, orders, canImport }: { summary: OrdersSummary; orders: OrdersPage; canImport: boolean }) {
+export function OrdersClient({
+  summary,
+  orders,
+  canImport,
+  filter,
+}: {
+  summary: OrdersSummary;
+  orders: OrdersPage;
+  canImport: boolean;
+  filter: { channel: string; range: string; q: string };
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -38,6 +49,7 @@ export function OrdersClient({ summary, orders, canImport }: { summary: OrdersSu
   const [importing, startImport] = useTransition();
   const [savingSource, setSavingSource] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [search, setSearch] = useState(filter.q);
 
   function runImport() {
     setMsg(null);
@@ -56,6 +68,15 @@ export function OrdersClient({ summary, orders, canImport }: { summary: OrdersSu
     });
   }
 
+  /** Update one query param and reset to page 1 (a new filter restarts the walk). */
+  function setParam(key: string, value: string) {
+    const q = new URLSearchParams(params.toString());
+    if (value) q.set(key, value);
+    else q.delete(key);
+    q.delete("page");
+    router.push(`${pathname}?${q.toString()}`);
+  }
+
   function goToPage(p: number) {
     const q = new URLSearchParams(params.toString());
     q.set("page", String(p));
@@ -66,6 +87,7 @@ export function OrdersClient({ summary, orders, canImport }: { summary: OrdersSu
   const { page, pageCount, total, pageSize } = orders;
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const to = Math.min(page * pageSize, total);
+  const selectCls = `${inputCls} w-auto`;
 
   return (
     <div className="flex flex-col gap-5">
@@ -131,31 +153,77 @@ export function OrdersClient({ summary, orders, canImport }: { summary: OrdersSu
         </div>
       )}
 
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-center gap-2">
+        <select value={filter.range} onChange={(e) => setParam("range", e.target.value)} className={selectCls} aria-label="Time range">
+          <option value="">All time</option>
+          <option value="30d">Last 30 days</option>
+          <option value="90d">Last 90 days</option>
+          <option value="12m">Last 12 months</option>
+        </select>
+        <select value={filter.channel} onChange={(e) => setParam("channel", e.target.value)} className={selectCls} aria-label="Sales channel">
+          <option value="">All channels</option>
+          <option value="AMAZON">Amazon</option>
+          <option value="SHOPIFY">Shopify</option>
+          <option value="TIKTOK">TikTok</option>
+        </select>
+        <form
+          className="relative min-w-[220px] flex-1 sm:max-w-[280px]"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setParam("q", search.trim());
+          }}
+        >
+          <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onBlur={() => search.trim() !== filter.q && setParam("q", search.trim())}
+            placeholder="Search order # or amount"
+            className={`${inputCls} pl-8`}
+          />
+        </form>
+        {(filter.channel || filter.range || filter.q) && (
+          <button
+            onClick={() => router.push(pathname)}
+            className="text-[12.5px] font-medium text-muted underline-offset-2 hover:text-ink-soft hover:underline"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
       {/* Orders table */}
       {orders.rows.length === 0 ? (
         <div className="rounded-[var(--radius-card)] border border-dashed border-border bg-surface-2/40 px-6 py-10 text-center">
-          <div className="text-[14px] font-semibold text-ink">No orders yet</div>
+          <div className="text-[14px] font-semibold text-ink">No orders found</div>
           <p className="mt-1 text-[12.5px] text-muted">
-            {canImport ? "Hit “Import orders” to pull your order history." : "Connect a sales channel to see orders here."}
+            {filter.channel || filter.range || filter.q
+              ? "Nothing matches these filters."
+              : canImport
+                ? "Hit “Import orders” to pull your order history."
+                : "Connect a sales channel to see orders here."}
           </p>
         </div>
       ) : (
         <div>
           <div className="overflow-x-auto rounded-[var(--radius-card)] border border-border">
-            <table className="w-full min-w-[720px] border-collapse text-[13px]">
+            <table className="w-full min-w-[860px] border-collapse text-[13px]">
               <thead>
                 <tr className="border-b border-border bg-surface-2/50 text-[11px] font-medium uppercase tracking-wide text-muted">
-                  <th className="px-4 py-2.5 text-left font-medium">Order</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Channel</th>
+                  <th className="px-4 py-2.5 text-left font-medium">Date</th>
+                  <th className="px-4 py-2.5 text-left font-medium">Order #</th>
+                  <th className="px-4 py-2.5 text-left font-medium">Source</th>
+                  <th className="px-4 py-2.5 text-left font-medium">Sales channel</th>
                   <th className="px-4 py-2.5 text-left font-medium">Fulfilled at</th>
                   <th className="px-4 py-2.5 text-right font-medium">Units</th>
                   <th className="px-4 py-2.5 text-right font-medium">Total</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Date</th>
                 </tr>
               </thead>
               <tbody>
                 {orders.rows.map((o) => (
                   <tr key={o.id} className={`border-b border-line last:border-0 ${o.excluded || o.cancelled ? "opacity-45" : ""}`}>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-[12px] text-muted">{fmtDate(o.orderedAt)}</td>
                     <td className="px-4 py-2.5">
                       <span className="font-medium text-ink">{o.orderNumber ?? "—"}</span>
                       {o.excluded && <span className={`${PILL} pill-neutral ml-2`}>not counted</span>}
@@ -165,13 +233,12 @@ export function OrdersClient({ summary, orders, canImport }: { summary: OrdersSu
                       <span className="flex items-center gap-2">
                         {CHANNEL_LOGO[o.channel] && <Image src={CHANNEL_LOGO[o.channel]} alt="" width={16} height={16} className="shrink-0 rounded-[3px]" />}
                         <span className="text-ink-soft">{o.channelLabel}</span>
-                        {o.sourceLabel && o.sourceLabel !== o.channelLabel && <span className="text-[12px] text-muted">· {o.sourceLabel}</span>}
                       </span>
                     </td>
+                    <td className="px-4 py-2.5 text-ink-soft">{o.sourceLabel ?? "—"}</td>
                     <td className="px-4 py-2.5 text-ink-soft">{o.fulfillmentLabel ?? "—"}</td>
                     <td className="px-4 py-2.5 text-right tabular text-ink-soft">{o.units.toLocaleString()}</td>
                     <td className="px-4 py-2.5 text-right tabular text-ink-soft">{money(o.total)}</td>
-                    <td className="px-4 py-2.5 text-right text-[12px] text-muted">{fmtDate(o.orderedAt)}</td>
                   </tr>
                 ))}
               </tbody>

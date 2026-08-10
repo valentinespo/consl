@@ -4,14 +4,19 @@ import { getCurrentOrgId } from "@/lib/tenant";
 import { getOrgSettings } from "@/lib/settings";
 
 /**
- * Read side of the orders feed. The dedup rule lives HERE, not in the importer: a Shopify order
- * whose originating channel is on the org's exclusion list is dropped from Shopify totals, so a
- * mirrored order (TikTok selling through Shopify) is counted once — on the TikTok side once that
- * shop is connected. Applying it at read time keeps the toggle instant and reversible.
+ * Read side of the orders feed.
  *
- * The summary is aggregated in SQL (scales to a full multi-year history); the table is a paged
- * skip/take query. Revenue is summed from LINE prices, not SalesOrder.total: channel-mirrored
- * orders record a $0 order total in Shopify while the line prices are the real (discounted) ones.
+ * The dedup rule lives HERE, not in the importer: a Shopify order whose originating channel is on
+ * the org's exclusion list is dropped from totals, so a mirrored order (TikTok selling through
+ * Shopify) is counted once. Applied at read time so the toggle is instant and reversible.
+ *
+ * Money: `SalesOrder.total` is what the buyer actually PAID — shipping, taxes and discounts all
+ * applied (a 100%-discounted sample order is $0). That is what the Total column and the revenue
+ * tiles show. The per-SKU LINES carry net product revenue instead, for velocity/profit later.
+ *
+ * The summary aggregates in SQL (scales to a full multi-year history); the table is a paged
+ * skip/take query. Both accept the same time/channel filters; the free-text search (order # or
+ * amount) applies to the table only.
  */
 
 const CHANNEL_LABEL: Record<string, string> = { AMAZON: "Amazon", SHOPIFY: "Shopify", TIKTOK: "TikTok" };
@@ -26,6 +31,16 @@ function mirrorChannel(source: string | null): string | null {
   if (!source) return null;
   const key = Object.keys(MIRROR_TO_CHANNEL).find((k) => source.toLowerCase().includes(k));
   return key ? MIRROR_TO_CHANNEL[key] : null;
+}
+
+export type OrdersFilter = {
+  channel?: string; // AMAZON | SHOPIFY | TIKTOK
+  sinceDays?: number; // 30 | 90 | 365; undefined = all time
+  q?: string; // search: order number substring, or an amount
+};
+
+function sinceDate(f: OrdersFilter): Date | null {
+  return f.sinceDays ? new Date(Date.now() - f.sinceDays * 86_400_000) : null;
 }
 
 export type OrderRow = {
@@ -58,38 +73,50 @@ export type OrdersSummary = {
 export type OrdersPage = { rows: OrderRow[]; total: number; page: number; pageSize: number; pageCount: number };
 
 /** Channel totals + the exclusion toggles, aggregated in SQL so it scales to full history. */
-export async function getOrdersSummary(connectedChannels: string[] = []): Promise<OrdersSummary> {
+export async function getOrdersSummary(connectedChannels: string[] = [], filter: OrdersFilter = {}): Promise<OrdersSummary> {
   const orgId = await getCurrentOrgId();
   if (!orgId) return { channels: [], totalOrders: 0, totalUnits: 0, totalRevenue: 0, currency: "USD", sources: [] };
   const settings = await getOrgSettings();
   const excluded = settings.excludedShopifySources ?? [];
   const connected = new Set(connectedChannels);
+  const since = sinceDate(filter);
+  const channelFilter = filter.channel ?? null;
 
-  // Per-channel counted totals (drop cancelled + excluded Shopify sources).
-  const rows = await prisma.$queryRaw<
-    { channel: string; orders: bigint; units: bigint | null; revenue: number | null }[]
-  >`
-    SELECT o.channel,
-           COUNT(DISTINCT o.id) AS orders,
-           SUM(l.quantity) AS units,
-           SUM(l.quantity * l."unitPrice") AS revenue
+  // Two aggregations: revenue/orders straight off SalesOrder (joining lines would multiply an
+  // order's total once per line), units from a joined pass.
+  const rows = await prisma.$queryRaw<{ channel: string; orders: bigint; revenue: number | null }[]>`
+    SELECT o.channel, COUNT(*) AS orders, SUM(o.total) AS revenue
+    FROM "SalesOrder" o
+    WHERE o."orgId" = ${orgId}
+      AND o.cancelled = false
+      AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excluded}))
+      AND (${since}::timestamp IS NULL OR o."orderedAt" >= ${since})
+      AND (${channelFilter}::text IS NULL OR o.channel = ${channelFilter})
+    GROUP BY o.channel`;
+  const unitRows = await prisma.$queryRaw<{ channel: string; units: bigint | null }[]>`
+    SELECT o.channel, SUM(l.quantity) AS units
     FROM "SalesOrder" o
     JOIN "SalesOrderLine" l ON l."orderId" = o.id
     WHERE o."orgId" = ${orgId}
       AND o.cancelled = false
       AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excluded}))
-    GROUP BY o.channel
-    ORDER BY revenue DESC NULLS LAST`;
+      AND (${since}::timestamp IS NULL OR o."orderedAt" >= ${since})
+      AND (${channelFilter}::text IS NULL OR o.channel = ${channelFilter})
+    GROUP BY o.channel`;
+  const unitsByChannel = new Map(unitRows.map((r) => [r.channel, Number(r.units ?? 0)]));
 
-  const channels: ChannelSummary[] = rows.map((r) => ({
-    channel: r.channel,
-    label: CHANNEL_LABEL[r.channel] ?? r.channel,
-    orders: Number(r.orders),
-    units: Number(r.units ?? 0),
-    revenue: Number(r.revenue ?? 0),
-  }));
+  const channels: ChannelSummary[] = rows
+    .map((r) => ({
+      channel: r.channel,
+      label: CHANNEL_LABEL[r.channel] ?? r.channel,
+      orders: Number(r.orders),
+      units: unitsByChannel.get(r.channel) ?? 0,
+      revenue: Number(r.revenue ?? 0),
+    }))
+    .sort((a, b) => b.revenue - a.revenue);
 
-  // Distinct mirrored Shopify sources whose channel is connected → exclusion toggles.
+  // Distinct mirrored Shopify sources whose channel is connected → exclusion toggles (always global,
+  // so the toggle doesn't vanish when a filter hides Shopify).
   const srcRows = await prisma.$queryRaw<{ source: string; count: bigint }[]>`
     SELECT o.source, COUNT(*) AS count
     FROM "SalesOrder" o
@@ -111,16 +138,35 @@ export async function getOrdersSummary(connectedChannels: string[] = []): Promis
   };
 }
 
-/** One page of orders, newest first. Excluded/cancelled orders still show (dimmed) for transparency. */
-export async function getOrdersPage(page = 1, pageSize = 50): Promise<OrdersPage> {
+/** One page of orders, newest first, honouring the filters + search. Excluded/cancelled orders
+ *  still show (dimmed) for transparency. */
+export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilter = {}): Promise<OrdersPage> {
   const settings = await getOrgSettings();
   const excluded = new Set(settings.excludedShopifySources ?? []);
+  const since = sinceDate(filter);
 
-  const total = await prisma.salesOrder.count();
+  const q = filter.q?.trim();
+  const amount = q && /^[0-9]+([.,][0-9]{1,2})?$/.test(q) ? Number(q.replace(",", ".")) : null;
+  const where = {
+    ...(filter.channel ? { channel: filter.channel } : {}),
+    ...(since ? { orderedAt: { gte: since } } : {}),
+    ...(q
+      ? {
+          OR: [
+            { orderNumber: { contains: q, mode: "insensitive" as const } },
+            // An amount searches the paid total within a cent, so "23.4" finds $23.40.
+            ...(amount != null ? [{ total: { gte: amount - 0.005, lte: amount + 0.005 } }] : []),
+          ],
+        }
+      : {}),
+  };
+
+  const total = await prisma.salesOrder.count({ where });
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const current = Math.min(Math.max(1, page), pageCount);
 
   const orders = await prisma.salesOrder.findMany({
+    where,
     orderBy: { orderedAt: "desc" },
     skip: (current - 1) * pageSize,
     take: pageSize,
@@ -132,9 +178,10 @@ export async function getOrdersPage(page = 1, pageSize = 50): Promise<OrdersPage
       sourceLabel: true,
       fulfillmentLabel: true,
       orderedAt: true,
+      total: true,
       currency: true,
       cancelled: true,
-      lines: { select: { quantity: true, unitPrice: true } },
+      lines: { select: { quantity: true } },
     },
   });
 
@@ -147,7 +194,7 @@ export async function getOrdersPage(page = 1, pageSize = 50): Promise<OrdersPage
     fulfillmentLabel: o.fulfillmentLabel,
     orderedAt: o.orderedAt.toISOString(),
     units: o.lines.reduce((s, l) => s + l.quantity, 0),
-    total: o.lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0),
+    total: o.total,
     currency: o.currency,
     cancelled: o.cancelled,
     excluded: o.channel === "SHOPIFY" && !!o.source && excluded.has(o.source),

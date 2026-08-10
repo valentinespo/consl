@@ -258,7 +258,9 @@ export async function importTikTokOrders(): Promise<OrderImportResult> {
         cancelled,
         fulfillment: byTikTok ? "TIKTOK" : o.fulfillment_type ? "SELLER" : null,
         fulfillmentLabel: label,
-        total: money(o.payment?.sub_total ?? o.payment?.total_amount), // sub_total = product revenue, excl shipping
+        // The order's Total is what the buyer actually PAID — shipping, taxes and discounts all
+        // applied (a 100%-discounted sample is $0). Product-only revenue lives on the lines.
+        total: money(o.payment?.total_amount ?? o.payment?.sub_total),
         currency: o.payment?.currency ?? "USD",
         lines: (o.line_items ?? []).map((l) => ({
           sku: l.seller_sku?.trim() || null,
@@ -306,7 +308,8 @@ export async function importAmazonOrders(window: { start: Date; end: Date } | nu
   const iso = (d: Date) => d.toISOString().slice(0, 19) + "Z";
   const rows = await getAllOrderRows(client, iso(start), iso(end));
 
-  // Group item rows → orders → per-SKU lines. Revenue is net of item-promotion-discount.
+  // Group item rows → orders → per-SKU lines. The order's `total` is what the buyer PAID
+  // (items + taxes + shipping, net of all promotions); the lines carry net product revenue.
   const byOrder = new Map<string, Fetched & { _skus: Map<string, { sku: string; qty: number; amt: number }> }>();
   for (const row of rows) {
     let o = byOrder.get(row.orderId);
@@ -328,11 +331,11 @@ export async function importAmazonOrders(window: { start: Date; end: Date } | nu
       };
       byOrder.set(row.orderId, o);
     }
-    const net = row.itemPrice - row.promotionDiscount;
-    o.total += net;
+    const netProduct = row.itemPrice - row.promotionDiscount;
+    o.total += netProduct + row.itemTax + row.shippingPrice + row.shippingTax - row.shipPromotionDiscount;
     const agg = o._skus.get(row.sku) ?? { sku: row.sku, qty: 0, amt: 0 };
     agg.qty += row.quantity;
-    agg.amt += net;
+    agg.amt += netProduct;
     o._skus.set(row.sku, agg);
   }
   const fetched: Fetched[] = [...byOrder.values()].map((o) => ({

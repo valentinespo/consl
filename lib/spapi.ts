@@ -243,7 +243,12 @@ export type AmazonOrderRow = {
   sku: string;
   quantity: number;
   itemPrice: number;
-  promotionDiscount: number; // item-promotion-discount — subtract for net revenue
+  promotionDiscount: number; // item-promotion-discount — subtract for net product revenue
+  // Everything else the buyer was charged, so the order's "amount paid" = items + these, net of promos.
+  itemTax: number;
+  shippingPrice: number;
+  shippingTax: number;
+  shipPromotionDiscount: number;
   currency: string;
 };
 
@@ -281,7 +286,12 @@ export async function getAllOrderRows(client: SpApiClient, startISO: string, end
     const iQty = h.indexOf("quantity");
     const iPrice = h.indexOf("item-price");
     const iPromo = h.indexOf("item-promotion-discount");
+    const iItemTax = h.indexOf("item-tax");
+    const iShip = h.indexOf("shipping-price");
+    const iShipTax = h.indexOf("shipping-tax");
+    const iShipPromo = h.indexOf("ship-promotion-discount");
     const iCur = h.indexOf("currency");
+    const num = (idx: number, c: string[]) => (idx >= 0 ? Number(c[idx]) || 0 : 0);
     for (let i = 1; i < lines.length; i++) {
       const c = lines[i].split("\t");
       if (c.length <= iQty || iId < 0) continue;
@@ -296,8 +306,12 @@ export async function getAllOrderRows(client: SpApiClient, startISO: string, end
         fulfillment: iFC >= 0 ? c[iFC] || "" : "",
         sku,
         quantity: qty,
-        itemPrice: iPrice >= 0 ? Number(c[iPrice]) || 0 : 0,
-        promotionDiscount: iPromo >= 0 ? Math.abs(Number(c[iPromo]) || 0) : 0,
+        itemPrice: num(iPrice, c),
+        promotionDiscount: Math.abs(num(iPromo, c)),
+        itemTax: num(iItemTax, c),
+        shippingPrice: num(iShip, c),
+        shippingTax: num(iShipTax, c),
+        shipPromotionDiscount: Math.abs(num(iShipPromo, c)),
         currency: iCur >= 0 ? c[iCur] || "USD" : "USD",
       });
     }
