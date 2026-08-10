@@ -4,6 +4,7 @@ import { runWithOrg } from "@/lib/tenant";
 import { prisma } from "@/lib/prisma";
 import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
 import { syncAmazonCore } from "@/lib/sync";
+import { syncShopifyStock, syncTikTokStock } from "@/lib/channel-stock";
 import { getRestock } from "@/lib/restock";
 import { deleteStored } from "@/lib/storage";
 import { DELETE_GRACE_DAYS } from "@/lib/constants";
@@ -81,6 +82,43 @@ async function runOrgDaily(orgId: string): Promise<void> {
 }
 
 /**
+ * Refresh Shopify + TikTok stock. Unlike the Amazon leg this runs on EVERY tick, not once a day,
+ * because it is cheap: both are plain authenticated reads that answer immediately. The Amazon pull
+ * is daily because its sales half is a *report job* — create it, poll for minutes, download a file
+ * — which is both slow and quota-limited, so it can't run on a short loop.
+ *
+ * Deliberately does not record a value snapshot: that belongs to the daily run, and this loop
+ * fires often enough that re-costing the whole catalogue each time would be wasted work.
+ *
+ * Isolated three ways — a bad org can't stop other orgs, and a bad channel can't stop the other
+ * channel or the daily sync.
+ */
+async function runOrgChannelStock(orgId: string): Promise<void> {
+  try {
+    await runWithOrg(orgId, async () => {
+      const s = await getOrgSettings();
+      if (!s.syncEnabled) return;
+      const conns = await prisma.integration.findMany({
+        where: { provider: { in: ["shopify", "tiktok"] }, status: "connected" },
+        select: { provider: true },
+      });
+      for (const c of conns) {
+        try {
+          const r = c.provider === "shopify" ? await syncShopifyStock() : await syncTikTokStock();
+          if (r.skipped > 0) {
+            console.log(`[scheduler] ${c.provider} stock for org ${orgId}: ${r.skipped} quantities skipped (unmapped SKU or warehouse)`);
+          }
+        } catch (e) {
+          console.error(`[scheduler] ${c.provider} stock failed for org ${orgId}:`, (e as Error).message);
+        }
+      }
+    });
+  } catch (e) {
+    console.error(`[scheduler] channel stock errored for org ${orgId}:`, (e as Error).message);
+  }
+}
+
+/**
  * Permanently delete companies whose grace period has elapsed. Deleting an org cascades across
  * every tenant table (verified), but stored files live outside the database, so gather and remove
  * those first. Best-effort per org: one failure must not stop the rest or the sync loop.
@@ -121,7 +159,8 @@ async function purgeExpiredOrgs(): Promise<void> {
   }
 }
 
-/** One scheduler tick: purge expired companies, then run each live org's daily sync if due. */
+/** One scheduler tick: purge expired companies, refresh every org's channel stock, then run each
+ *  live org's daily sync if it's due. */
 async function tick(): Promise<void> {
   if (running) return;
   running = true;
@@ -129,7 +168,8 @@ async function tick(): Promise<void> {
     await purgeExpiredOrgs();
     // Only live orgs sync; a deactivated one is on its way out.
     const orgs = await prismaBase.organization.findMany({ where: { deactivatedAt: null }, select: { id: true } });
-    // One org's failure must never stop the others; runOrgDaily already swallows its own errors.
+    // One org's failure must never stop the others; both helpers swallow their own errors.
+    await Promise.allSettled(orgs.map((o) => runOrgChannelStock(o.id)));
     await Promise.allSettled(orgs.map((o) => runOrgDaily(o.id)));
   } catch (e) {
     console.error("[scheduler] tick failed:", (e as Error).message);
@@ -144,7 +184,9 @@ let started = false;
 export function startDailyScheduler(): void {
   if (started) return;
   started = true;
-  const TICK_MS = 5 * 60 * 1000; // check every 5 min; the DB guard keeps it once-per-day
+  // Every 5 min: Shopify/TikTok stock refreshes on each tick, while the DB day-claim keeps the
+  // heavier Amazon report pull to once per day.
+  const TICK_MS = 5 * 60 * 1000;
   setInterval(() => void tick().catch(() => {}), TICK_MS);
   setTimeout(() => void tick().catch(() => {}), 30_000); // catch-up shortly after boot
   console.log("[scheduler] daily sync scheduler started");
