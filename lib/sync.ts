@@ -22,6 +22,68 @@ function windowStats(days: Record<string, number> | undefined, end: Date, n: num
 }
 
 /**
+ * Refresh ONLY Amazon's stock numbers, leaving the sales figures untouched.
+ *
+ * Amazon's two halves have wildly different costs. Inventory is a plain API read that answers in
+ * one round trip, so it can run as often as Shopify and TikTok do. Sales is a *report job* —
+ * request it, poll for minutes, download a file, all under a tight quota — which is why the full
+ * sync stays daily. Splitting them lets stock be near-live without touching the report at all.
+ *
+ * Updates the newest snapshot per SKU IN PLACE rather than appending. `getRestock` only ever reads
+ * the newest row per product, so a new row every five minutes would add ~288 rows per SKU per day
+ * that nothing reads, and slow the `distinct on` that finds the newest.
+ *
+ * Never flips the connection to "error": a blip on a five-minute loop would flap the status badge.
+ * The daily sync is what judges the connection's health.
+ */
+export async function syncAmazonStockCore(): Promise<{ ok: true; count: number } | { ok: false; error: string; nothingToSync?: true }> {
+  const orgId = await getCurrentOrgId();
+  if (!orgId) return { ok: false, error: "No organization in context.", nothingToSync: true };
+
+  const conn = await prisma.integration.findFirst({ where: { provider: "amazon", status: "connected" } });
+  if (!conn?.refreshTokenEnc) return { ok: false, error: "Amazon isn't connected.", nothingToSync: true };
+
+  const products = await prisma.product.findMany({ where: { asin: { not: null } } });
+  if (products.length === 0) return { ok: false, error: "No SKUs are mapped to Amazon ASINs yet.", nothingToSync: true };
+
+  const client = makeClient({
+    refreshToken: decryptSecret(conn.refreshTokenEnc),
+    marketplaceId: conn.marketplaceId ?? "ATVPDKIKX0DER",
+    region: conn.region ?? "na",
+  });
+  const inv = await getFbaInventory(client);
+  const awd = await getAwdInventory(client);
+
+  const latest = await prisma.skuSnapshot.findMany({ distinct: ["productId"], orderBy: { capturedAt: "desc" } });
+  const latestByProduct = new Map(latest.map((s) => [s.productId, s]));
+
+  let count = 0;
+  for (const p of products) {
+    const row = inv.find((x) => x.asin === p.asin) ?? inv.find((x) => x.sellerSku === p.sellerSku);
+    const a = awd.find((x) => x.sku === p.sellerSku);
+    const stock = {
+      fbaAvailable: row?.available ?? 0,
+      fbaInbound: row?.inbound ?? 0,
+      fbaReserved: row ? Math.max(0, row.total - row.available - row.inbound) : 0,
+      fbaUnfulfillable: row?.unfulfillable ?? 0,
+      fbaTotal: row?.total ?? 0,
+      awdOnhand: a?.onhand ?? 0,
+      awdInbound: a?.inbound ?? 0,
+      inStock: (row?.available ?? 0) > 0,
+    };
+    // capturedAt moves with the refresh: it drives the "Updated …" label, and after a stock pull
+    // the units on screen genuinely are current. The sales half keeps its own anchor in `salesEnd`.
+    const existing = latestByProduct.get(p.id);
+    if (existing) await prisma.skuSnapshot.update({ where: { id: existing.id }, data: { ...stock, capturedAt: new Date() } });
+    // No snapshot yet means the daily sync has never run for this SKU — seed one with zero sales
+    // so its stock is visible immediately; the daily run fills the sales side in.
+    else await prisma.skuSnapshot.create({ data: { productId: p.id, dailySales: {}, ...stock } });
+    count++;
+  }
+  return { ok: true, count };
+}
+
+/**
  * Pull FBA + AWD inventory + per-day sales (All Orders) for the CURRENT org and store a fresh
  * snapshot per SKU. Each org syncs its OWN Amazon connection (the encrypted token on its
  * Integration row) — no shared env token, no owner guard. Runs in the caller's org context

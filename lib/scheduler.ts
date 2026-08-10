@@ -3,7 +3,7 @@ import { prismaBase } from "@/lib/prisma-base";
 import { runWithOrg } from "@/lib/tenant";
 import { prisma } from "@/lib/prisma";
 import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
-import { syncAmazonCore } from "@/lib/sync";
+import { syncAmazonCore, syncAmazonStockCore } from "@/lib/sync";
 import { syncShopifyStock, syncTikTokStock } from "@/lib/channel-stock";
 import { getRestock } from "@/lib/restock";
 import { deleteStored } from "@/lib/storage";
@@ -82,16 +82,18 @@ async function runOrgDaily(orgId: string): Promise<void> {
 }
 
 /**
- * Refresh Shopify + TikTok stock. Unlike the Amazon leg this runs on EVERY tick, not once a day,
- * because it is cheap: both are plain authenticated reads that answer immediately. The Amazon pull
- * is daily because its sales half is a *report job* — create it, poll for minutes, download a file
- * — which is both slow and quota-limited, so it can't run on a short loop.
+ * Refresh stock from every connected channel — Amazon included. Runs on EVERY tick, not once a
+ * day, because stock everywhere is a plain API read that answers in one round trip.
+ *
+ * What stays daily is Amazon's SALES half: a report job you request, poll for minutes, then
+ * download, under a tight quota. `syncAmazonStockCore` deliberately skips it, which is what lets
+ * Amazon's stock keep pace with Shopify's and TikTok's.
  *
  * Deliberately does not record a value snapshot: that belongs to the daily run, and this loop
  * fires often enough that re-costing the whole catalogue each time would be wasted work.
  *
  * Isolated three ways — a bad org can't stop other orgs, and a bad channel can't stop the other
- * channel or the daily sync.
+ * channels or the daily sync.
  */
 async function runOrgChannelStock(orgId: string): Promise<void> {
   try {
@@ -99,11 +101,15 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
       const s = await getOrgSettings();
       if (!s.syncEnabled) return;
       const conns = await prisma.integration.findMany({
-        where: { provider: { in: ["shopify", "tiktok"] }, status: "connected" },
+        where: { provider: { in: ["amazon", "shopify", "tiktok"] }, status: "connected" },
         select: { provider: true },
       });
       for (const c of conns) {
         try {
+          if (c.provider === "amazon") {
+            await syncAmazonStockCore();
+            continue;
+          }
           const r = c.provider === "shopify" ? await syncShopifyStock() : await syncTikTokStock();
           if (r.skipped > 0) {
             console.log(`[scheduler] ${c.provider} stock for org ${orgId}: ${r.skipped} quantities skipped (unmapped SKU or warehouse)`);
