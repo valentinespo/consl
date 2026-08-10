@@ -2,7 +2,8 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
 // Auth screens plus the public marketing pages; everything else requires a signed-in user. The
-// Shopify compliance webhook is server-to-server (no session) — it authenticates with its own HMAC.
+// Shopify compliance webhook and the order webhooks are server-to-server (no session) — each
+// authenticates with its own HMAC inside the route.
 const isPublic = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
@@ -10,6 +11,7 @@ const isPublic = createRouteMatcher([
   "/privacy",
   "/terms",
   "/api/integrations/shopify/compliance",
+  "/api/webhooks/(.*)",
 ]);
 
 // Legacy files used to sit in public/uploads and were served statically with no auth. They've been
