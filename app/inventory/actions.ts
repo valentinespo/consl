@@ -2,8 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { saveOrgSettings } from "@/lib/settings";
-import { syncAmazonCore } from "@/lib/sync";
-import { syncShopifyStock, syncTikTokStock } from "@/lib/channel-stock";
+import { syncAllChannelsCore } from "@/lib/sync";
 import { getRestock } from "@/lib/restock";
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/membership";
@@ -26,27 +25,7 @@ export async function syncChannels(): Promise<{
   const gate = await requirePermission("inventory", "edit");
   if (!gate.ok) return { ok: false, synced: [], failed: [], salesOk: true, error: gate.error };
 
-  const amazon = await syncAmazonCore().catch((e) => ({
-    ok: false as const,
-    error: e instanceof Error ? e.message : "Amazon sync failed.",
-  }));
-
-  const done: string[] = [];
-  const failed: string[] = [];
-  if (amazon.ok) done.push("Amazon");
-  else if (!("nothingToSync" in amazon && amazon.nothingToSync)) failed.push("Amazon");
-
-  for (const [label, run] of [
-    ["Shopify", syncShopifyStock],
-    ["TikTok", syncTikTokStock],
-  ] as const) {
-    try {
-      const r = await run();
-      if (r.facilities > 0) done.push(label);
-    } catch {
-      failed.push(label);
-    }
-  }
+  const { synced: done, failed, salesOk } = await syncAllChannelsCore();
 
   // Snapshot after every channel has landed, so the day's value includes all of them.
   await getRestock();
@@ -62,7 +41,7 @@ export async function syncChannels(): Promise<{
     ok: failed.length === 0,
     synced: done,
     failed,
-    salesOk: amazon.ok ? amazon.salesOk : true,
+    salesOk,
     error: failed.length ? `Couldn't reach ${failed.join(" and ")}.` : undefined,
   };
 }

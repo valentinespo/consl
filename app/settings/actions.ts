@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { prismaBase } from "@/lib/prisma-base";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
-import { syncAmazonCore } from "@/lib/sync";
+import { syncAllChannelsCore } from "@/lib/sync";
 import { getRestock } from "@/lib/restock";
 import { revalidatePath } from "next/cache";
 import { requireOwner, requirePermission, getMyAccess } from "@/lib/membership";
@@ -170,19 +170,27 @@ export async function saveDashboardLayout(layout: { id: string; x: number; y: nu
   return { ok: true as const };
 }
 
-/** Manual "Run now" from the settings panel: sync Amazon + record the value snapshot immediately. */
+/** Manual "Run now" from the settings panel. Runs exactly what the Reorder page's "Sync channels"
+ *  button runs — every connected channel — so the two can't quietly mean different things. */
 export async function runSyncNow() {
   const gate = await requirePermission("settings", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };
   try {
-    const r = await syncAmazonCore();
-    if (r.ok) {
+    const { synced, failed, salesOk } = await syncAllChannelsCore();
+    if (synced.length > 0) {
       await getRestock();
       await saveOrgSettings({ lastSyncAt: new Date() });
     }
     revalidatePath("/");
     revalidatePath("/inventory");
-    return r;
+    revalidatePath("/facilities");
+    revalidatePath("/reorder");
+    if (synced.length === 0 && failed.length === 0) {
+      return { ok: false as const, error: "No sales channel is connected yet." };
+    }
+    return failed.length
+      ? { ok: false as const, error: `Synced ${synced.join(", ") || "nothing"}. Couldn't reach ${failed.join(" and ")}.` }
+      : { ok: true as const, count: synced.length, salesOk };
   } catch (e) {
     // Returned values are NOT redacted the way thrown errors are, so the raw message would reach
     // the browser — Amazon error bodies and Prisma messages name tables, columns and request ids.

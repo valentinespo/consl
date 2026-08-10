@@ -22,6 +22,40 @@ function windowStats(days: Record<string, number> | undefined, end: Date, n: num
 }
 
 /**
+ * Sync every connected channel on demand: Amazon's full pull (stock AND the sales report) plus
+ * the other channels' stock. This is what both manual buttons run, so "Sync channels" in Reorder
+ * and "Run sync now" in Settings can never drift apart.
+ *
+ * Legs are independent — Shopify being down must not stop TikTok — and only Amazon counts toward
+ * failure, because it alone carries the sales history the reorder engine needs.
+ */
+export async function syncAllChannelsCore(): Promise<{ synced: string[]; failed: string[]; salesOk: boolean }> {
+  const { syncShopifyStock, syncTikTokStock } = await import("@/lib/channel-stock");
+  const synced: string[] = [];
+  const failed: string[] = [];
+
+  const amazon = await syncAmazonCore().catch((e) => ({
+    ok: false as const,
+    error: e instanceof Error ? e.message : "Amazon sync failed.",
+  }));
+  if (amazon.ok) synced.push("Amazon");
+  else if (!("nothingToSync" in amazon && amazon.nothingToSync)) failed.push("Amazon");
+
+  for (const [label, run] of [
+    ["Shopify", syncShopifyStock],
+    ["TikTok", syncTikTokStock],
+  ] as const) {
+    try {
+      const r = await run();
+      if (r.facilities > 0) synced.push(label);
+    } catch {
+      failed.push(label);
+    }
+  }
+  return { synced, failed, salesOk: amazon.ok ? amazon.salesOk : true };
+}
+
+/**
  * Refresh ONLY Amazon's stock numbers, leaving the sales figures untouched.
  *
  * Amazon's two halves have wildly different costs. Inventory is a plain API read that answers in
