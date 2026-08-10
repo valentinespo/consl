@@ -25,6 +25,7 @@ type Item = { id: string; x: number; y: number; w: number; h: number };
 export type DashboardData = {
   totals: RestockTotals;
   history: ValueHistoryPoint[];
+  connected: string[]; // connected sales-channel providers ("amazon" | "shopify" | "tiktok")
   facility: { code: string; value: number }[]; // produced (lot) value per producing facility
   prodTotal: number;
   spentBySupplier: Slice[]; // purchases + COG transactions per supplier
@@ -345,7 +346,7 @@ export function DashboardGrid({
 function renderContent(id: string, d: DashboardData) {
   switch (id) {
     case "totalValue":
-      return <TotalValueCard totals={d.totals} history={d.history} className="h-full" />;
+      return <TotalValueCard totals={d.totals} history={d.history} connected={d.connected} className="h-full" />;
     case "producedValue":
       return (
         <RingWidget
@@ -367,7 +368,7 @@ function renderContent(id: string, d: DashboardData) {
             <span className="text-[11px] text-muted">{d.history.length >= 2 ? `${d.history.length}d` : "grows daily"}</span>
           </div>
           <div className="min-h-0 flex-1">
-            <ValueStackedChart data={d.history} />
+            <ValueStackedChart data={d.history} connected={d.connected} />
           </div>
         </Card>
       );

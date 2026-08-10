@@ -7,7 +7,7 @@ import { ValueSparkline } from "@/components/ValueSparkline";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
 import { TrendingUp, TrendingDown } from "@/components/icons";
 import { RANGES, sliceRange } from "@/lib/chart";
-import { BUCKETS } from "@/lib/segments";
+import { bucketsFor } from "@/lib/segments";
 
 /** The headline inventory-value card: total across FBA + AWD + production + raw materials.
  *  Pass `history` (dashboard only) to render the value-over-time chart inside the card.
@@ -16,10 +16,12 @@ import { BUCKETS } from "@/lib/segments";
 export function TotalValueCard({
   totals,
   history,
+  connected = [],
   className = "",
 }: {
   totals: RestockTotals;
   history?: { day: string; total: number }[];
+  connected?: string[]; // connected providers — channel pills only show while theirs is live
   className?: string;
 }) {
   const { money, locale } = useMoney();
@@ -67,7 +69,7 @@ export function TotalValueCard({
       </div>
 
       <div className="mt-3.5 flex flex-wrap gap-2">
-        {BUCKETS.map((p) => (
+        {bucketsFor(connected).map((p) => (
           <span key={p.label} className="inline-flex items-center gap-2 rounded-[10px] border border-border bg-surface px-3 py-1 text-[13px]">
             <span className="h-1.5 w-1.5 rounded-full" style={{ background: p.color }} />
             {p.label} <span className="font-medium tabular text-ink">{money(totals[p.key])}</span>

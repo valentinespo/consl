@@ -2,15 +2,16 @@
 
 import { useMoney } from "@/components/CurrencyProvider";
 import type { ValueHistoryPoint } from "@/lib/restock";
-import { BUCKETS as SERIES } from "@/lib/segments";
+import { bucketsFor } from "@/lib/segments";
 
 const W = 1000;
 const H = 150;
 
 
 /** Stacked area of inventory value split by bucket over time. */
-export function ValueStackedChart({ data }: { data: ValueHistoryPoint[] }) {
+export function ValueStackedChart({ data, connected = [] }: { data: ValueHistoryPoint[]; connected?: string[] }) {
   const { money } = useMoney();
+  const SERIES = bucketsFor(connected);
   // A brand-new org has no history yet (the first snapshot is written at the end of the day's
   // first sync), so the widget must survive an empty array — the value-per-bucket legend below
   // reads the last point and would otherwise crash the whole dashboard on a company's first load.

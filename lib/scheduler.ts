@@ -73,6 +73,14 @@ async function runOrgDaily(orgId: string): Promise<void> {
       if (!(await claimDay(orgId, day))) return; // another replica got there first
 
       const r = await syncAmazonCore(); // no-op for orgs with no Amazon-mapped SKUs
+      // Amazon's recent ORDERS ride the daily run too: one extra 3-day report keeps the Orders tab
+      // current without burning quota (the data lags ~2 days at the source regardless).
+      try {
+        const { importAmazonOrders } = await import("@/lib/orders");
+        await importAmazonOrders(3);
+      } catch (e) {
+        console.error(`[scheduler] amazon orders failed for org ${orgId}:`, (e as Error).message);
+      }
       await getRestock(); // records today's inventory-value snapshot with fresh numbers
 
       if (r.ok) {
@@ -131,11 +139,37 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
           console.error(`[scheduler] ${c.provider} stock failed for org ${orgId}:`, (e as Error).message);
         }
       }
+
+      // Recent ORDERS refresh: pull the last few days from Shopify + TikTok every quarter hour, so
+      // new sales, edits and cancellations land without anyone pressing the button. A 3-day window
+      // re-covers late edits; the upsert makes re-pulls free. Amazon's recent orders ride on the
+      // daily sync (they come from the slow report and lag ~2 days anyway) — and the platforms
+      // TELLING us instead (webhooks) is the profit-tracking build, not this loop.
+      const last = lastOrdersRefresh.get(orgId) ?? 0;
+      if (Date.now() - last >= ORDERS_REFRESH_MS) {
+        lastOrdersRefresh.set(orgId, Date.now());
+        const { importShopifyOrders, importTikTokOrders } = await import("@/lib/orders");
+        for (const [provider, run] of [
+          ["shopify", () => importShopifyOrders(3)],
+          ["tiktok", () => importTikTokOrders(3)],
+        ] as const) {
+          if (!conns.some((c) => c.provider === provider)) continue;
+          try {
+            await run();
+          } catch (e) {
+            console.error(`[scheduler] ${provider} orders failed for org ${orgId}:`, (e as Error).message);
+          }
+        }
+      }
     });
   } catch (e) {
     console.error(`[scheduler] channel stock errored for org ${orgId}:`, (e as Error).message);
   }
 }
+
+const ORDERS_REFRESH_MS = 15 * 60 * 1000;
+// In-process per-org timestamps; a restart just refreshes once immediately, which is harmless.
+const lastOrdersRefresh = new Map<string, number>();
 
 let backfilling = false;
 

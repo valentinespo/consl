@@ -60,6 +60,8 @@ export type RestockTotals = {
   fba: number;
   awd: number;
   amazon: number;
+  shopify: number; // stock the Shopify locations report holding, valued at newest lot cost
+  tiktok: number; // stock the TikTok warehouses report holding, valued at newest lot cost
   atLocations: number; // finished goods held at your own facilities / 3PLs
   total: number;
   fbaUnits: number;
@@ -237,13 +239,31 @@ export async function getRestock(): Promise<{
     };
   });
 
-  const grandTotal = rawInv.totalValue + inProductionValue + fbaValue + awdValue + atLocationsValue;
+  // Stock the other channels report holding (synced into ChannelStock per facility), valued at
+  // each product's newest lot cost — the same fallback Amazon's valuation uses beyond recorded
+  // shipments. Grouped under the channel root so Shopify's many locations still read as one pill.
+  const unitCostByProduct = new Map(rows.map((r) => [r.id, r.unitCost]));
+  const channelHeld = await prisma.channelStock.findMany({
+    where: { units: { gt: 0 } },
+    select: { productId: true, units: true, facility: { select: { channel: true } } },
+  });
+  let shopifyValue = 0;
+  let tiktokValue = 0;
+  for (const c of channelHeld) {
+    const value = c.units * (unitCostByProduct.get(c.productId) ?? 0);
+    if (c.facility.channel === "SHOPIFY") shopifyValue += value;
+    else if (c.facility.channel === "TIKTOK") tiktokValue += value;
+  }
+
+  const grandTotal = rawInv.totalValue + inProductionValue + fbaValue + awdValue + shopifyValue + tiktokValue + atLocationsValue;
   const totals: RestockTotals = {
     raw: rawInv.totalValue,
     inProduction: inProductionValue,
     fba: fbaValue,
     awd: awdValue,
     amazon: fbaValue + awdValue,
+    shopify: shopifyValue,
+    tiktok: tiktokValue,
     atLocations: atLocationsValue,
     total: grandTotal,
     fbaUnits,
@@ -279,6 +299,8 @@ export type ValueHistoryPoint = {
   inProduction: number;
   fba: number;
   awd: number;
+  shopify: number;
+  tiktok: number;
   atLocations: number;
 };
 
@@ -286,7 +308,7 @@ export type ValueHistoryPoint = {
 export async function getInventoryValueHistory(): Promise<ValueHistoryPoint[]> {
   return prisma.inventoryValueSnapshot.findMany({
     orderBy: { day: "asc" },
-    select: { day: true, total: true, raw: true, inProduction: true, fba: true, awd: true, atLocations: true },
+    select: { day: true, total: true, raw: true, inProduction: true, fba: true, awd: true, shopify: true, tiktok: true, atLocations: true },
   });
 }
 
@@ -296,7 +318,7 @@ export async function getInventoryValueHistory(): Promise<ValueHistoryPoint[]> {
  *  ahead of its own clock. */
 async function recordDailyInventoryValue(t: RestockTotals, tz: string) {
   const day = localDay(tz);
-  const values = { raw: t.raw, inProduction: t.inProduction, fba: t.fba, awd: t.awd, atLocations: t.atLocations, total: t.total };
+  const values = { raw: t.raw, inProduction: t.inProduction, fba: t.fba, awd: t.awd, shopify: t.shopify, tiktok: t.tiktok, atLocations: t.atLocations, total: t.total };
   try {
     const existing = await prisma.inventoryValueSnapshot.findFirst({ where: { day } }); // auto-scoped to org
     if (existing) {

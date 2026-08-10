@@ -329,6 +329,8 @@ model InventoryValueSnapshot {
   inProduction Float
   fba          Float
   awd          Float
+  shopify      Float         @default(0) // channel-held stock value (Shopify locations)
+  tiktok       Float         @default(0) // channel-held stock value (TikTok warehouses)
   atLocations  Float         @default(0) // finished goods held at your own facilities / 3PLs
   total        Float
 

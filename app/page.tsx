@@ -1,5 +1,6 @@
 import { getDashboard, getLeadTimes, getLots, getSetupProgress, SETUP_DISMISS_KEY } from "@/lib/queries";
 import { getRestock, getInventoryValueHistory } from "@/lib/restock";
+import { prisma } from "@/lib/prisma";
 import { getAlerts } from "@/lib/alerts";
 import { getOrgSettings } from "@/lib/settings";
 import { getCurrentOrg } from "@/lib/org";
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   await requireView("dashboard");
-  const [d, lots, restock, history, settings, setup, org, leadTimes] = await Promise.all([
+  const [d, lots, restock, history, settings, setup, org, leadTimes, connections] = await Promise.all([
     getDashboard(),
     getLots(),
     getRestock(),
@@ -20,6 +21,7 @@ export default async function DashboardPage() {
     getSetupProgress(),
     getCurrentOrg(),
     getLeadTimes(),
+    prisma.integration.findMany({ where: { status: "connected" }, select: { provider: true } }),
   ]);
   const alerts = await getAlerts(restock.rows);
 
@@ -38,6 +40,7 @@ export default async function DashboardPage() {
   const data: DashboardData = {
     totals: restock.totals,
     history,
+    connected: connections.map((c) => c.provider),
     facility: d.byFacility,
     prodTotal: d.productionCOGValue,
     spentBySupplier: d.spentBySupplier,

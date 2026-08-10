@@ -216,8 +216,9 @@ type TikTokOrder = {
 };
 
 /** TikTok Shop orders. Today this is the sandbox test store (a couple of orders); when the real
- *  shop is connected it replaces the sandbox by the same (channel, externalId) upsert. */
-export async function importTikTokOrders(): Promise<OrderImportResult> {
+ *  shop is connected it replaces the sandbox by the same (channel, externalId) upsert.
+ *  `sinceDays` bounds the pull for the recurring refresh; omit for a full-history import. */
+export async function importTikTokOrders(sinceDays?: number): Promise<OrderImportResult> {
   const conn = await prisma.integration.findFirst({ where: { provider: "tiktok", status: "connected" } });
   if (!conn?.marketplaceId) return { channel: "TIKTOK", orders: 0, lines: 0 };
   const { getTikTokAccessToken } = await import("@/lib/tiktok-oauth");
@@ -241,7 +242,7 @@ export async function importTikTokOrders(): Promise<OrderImportResult> {
       path: `/order/${TIKTOK_API_VERSION}/orders/search`,
       accessToken: token,
       query,
-      body: {},
+      body: sinceDays ? { create_time_ge: Math.floor(Date.now() / 1000) - sinceDays * 86_400 } : {},
     });
     for (const o of data.orders ?? []) {
       const status = o.status ?? o.order_status ?? null;
