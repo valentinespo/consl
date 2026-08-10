@@ -190,9 +190,11 @@ let started = false;
 export function startDailyScheduler(): void {
   if (started) return;
   started = true;
-  // Every 5 min: Shopify/TikTok stock refreshes on each tick, while the DB day-claim keeps the
-  // heavier Amazon report pull to once per day.
-  const TICK_MS = 5 * 60 * 1000;
+  // Every minute: stock refreshes on each tick, while the DB day-claim keeps the heavier Amazon
+  // report pull to once per day. Stock reads are single round trips well inside every platform's
+  // rate limit at this cadence — but that budget is PER TENANT, so this interval will need to
+  // become a stagger (or a per-org offset) once many companies are connected.
+  const TICK_MS = 60 * 1000;
   setInterval(() => void tick().catch(() => {}), TICK_MS);
   setTimeout(() => void tick().catch(() => {}), 30_000); // catch-up shortly after boot
   console.log("[scheduler] daily sync scheduler started");

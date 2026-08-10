@@ -127,7 +127,7 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
     setMsg(null);
     startSync(async () => {
       const r = await runSyncNow();
-      setMsg(r.ok ? "Synced with Amazon just now." : r.error);
+      setMsg(r.ok ? "Synced every connected channel just now." : r.error);
       router.refresh();
     });
   }
@@ -143,16 +143,17 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
           <div>
             <div className="text-[12px] font-medium uppercase tracking-wide text-muted">Automatic sync</div>
             <p className="mt-1.5 max-w-[62ch] text-[12.5px] text-muted">
-              Keeps stock from every connected channel up to date every few minutes. Amazon sales come
-              from a report Amazon builds on request, so those are pulled once a day at the time below,
-              along with the day&apos;s inventory value — even if nobody opens the app.
+              Keeps stock from every connected channel up to date every minute. Amazon sales come from
+              a report Amazon builds on request and only covers days up to 48h ago, so those are pulled
+              once a day at the time below, along with the day&apos;s inventory value — even if nobody
+              opens the app.
             </p>
           </div>
           <Toggle on={s.syncEnabled} onChange={(v) => set("syncEnabled", v)} />
         </div>
 
         <div className={`grid gap-3 sm:grid-cols-[160px_1fr] ${s.syncEnabled ? "" : "pointer-events-none opacity-50"}`}>
-          <Field label="Sales report at" hint="Stock refreshes every few minutes regardless.">
+          <Field label="Sales report at" hint="Stock refreshes every minute regardless.">
             <input
               type="time"
               value={`${pad2(s.syncHour)}:${pad2(s.syncMinute)}`}
@@ -188,7 +189,7 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
           </button>
           <span className="inline-flex items-center gap-1.5 text-[11.5px] text-muted">
             <Clock size={12} />
-            Stock every 5 min · Amazon sales daily at {pad2(s.syncHour)}:{pad2(s.syncMinute)} · last synced {lastSynced}
+            Stock every minute · Amazon sales daily at {pad2(s.syncHour)}:{pad2(s.syncMinute)} · last synced {lastSynced}
           </span>
         </div>
         {msg && <div className="mt-2 text-[12px] text-muted">{msg}</div>}
