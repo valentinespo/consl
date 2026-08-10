@@ -1,25 +1,28 @@
 import { PageHeader } from "@/components/ui";
-import { EmptyState } from "@/components/EmptyState";
-import { OrdersFilled } from "@/components/icons";
 import { requireView } from "@/lib/membership";
+import { getOrdersOverview } from "@/lib/order-metrics";
+import { prisma } from "@/lib/prisma";
+import { OrdersClient } from "@/components/OrdersClient";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Orders — the Analytics section's landing. Empty for now: this is where channel orders and the
- * profit tracking built on top of them will live. Gated on "dashboard" (analytics-level visibility)
- * so it needs no new permission resource.
+ * Orders — the Analytics section's landing and the home for profit tracking to come. Shows every
+ * order pulled from the connected channels, with the double-count guard for channels that mirror
+ * into Shopify. Gated on "dashboard" (analytics-level visibility).
  */
 export default async function OrdersPage() {
   await requireView("dashboard");
+  const conns = await prisma.integration.findMany({
+    where: { status: "connected", provider: { in: ["amazon", "shopify", "tiktok"] } },
+    select: { provider: true },
+  });
+  const connectedChannels = conns.map((c) => c.provider.toUpperCase());
+  const overview = await getOrdersOverview(connectedChannels);
   return (
     <>
-      <PageHeader title="Orders" subtitle="Every sale across your connected channels — coming soon." />
-      <EmptyState
-        icon={OrdersFilled}
-        title="Orders are on the way"
-        body="Soon this is where every order from Amazon, Shopify and TikTok lands — and the profit on each one."
-      />
+      <PageHeader title="Orders" subtitle="Every sale across your connected channels." />
+      <OrdersClient overview={overview} canImport={conns.length > 0} />
     </>
   );
 }

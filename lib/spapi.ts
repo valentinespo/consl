@@ -172,7 +172,10 @@ export async function getAllOrders(client: SpApiClient, startISO: string, endISO
   return merged;
 }
 
-async function oneOrdersChunk(client: SpApiClient, startISO: string, endISO: string): Promise<Record<string, Record<string, number>>> {
+/** Request the All Orders report for a window, poll until ready, download and decompress the TSV.
+ *  Shared by the velocity rollup (oneOrdersChunk) and the order-level importer (getAllOrderRows)
+ *  so a window is only ever pulled once per caller. */
+async function fetchOrdersReportTsv(client: SpApiClient, startISO: string, endISO: string): Promise<string> {
   let r = await sp(client, "/reports/2021-06-30/reports", {
     method: "POST",
     body: JSON.stringify({
@@ -204,7 +207,11 @@ async function oneOrdersChunk(client: SpApiClient, startISO: string, endISO: str
   j = await r.json();
   const dl = await fetch(j.url);
   const buf = Buffer.from(await dl.arrayBuffer());
-  const text = j.compressionAlgorithm === "GZIP" ? gunzipSync(buf).toString("utf8") : buf.toString("utf8");
+  return j.compressionAlgorithm === "GZIP" ? gunzipSync(buf).toString("utf8") : buf.toString("utf8");
+}
+
+async function oneOrdersChunk(client: SpApiClient, startISO: string, endISO: string): Promise<Record<string, Record<string, number>>> {
+  const text = await fetchOrdersReportTsv(client, startISO, endISO);
   const lines = text.split("\n");
   const h = lines[0].split("\t");
   const iDate = h.indexOf("purchase-date");
@@ -226,6 +233,73 @@ async function oneOrdersChunk(client: SpApiClient, startISO: string, endISO: str
     out[sku][day] = (out[sku][day] ?? 0) + qty;
   }
   return out;
+}
+
+export type AmazonOrderRow = {
+  orderId: string;
+  purchaseDate: string; // ISO
+  status: string;
+  fulfillment: string; // "Amazon" (FBA/MCF) | "Merchant"
+  sku: string;
+  quantity: number;
+  itemPrice: number;
+  currency: string;
+};
+
+/** Per-order-item rows from the All Orders report — the order-level feed for the Orders tab
+ *  (versus getAllOrders, which rolls the same report up per SKU per day for velocity). Chunked
+ *  ≤30 days like the rollup. Keeps every fulfillment channel; the caller decides what to show. */
+export async function getAllOrderRows(client: SpApiClient, startISO: string, endISO: string): Promise<AmazonOrderRow[]> {
+  const start = new Date(startISO);
+  const end = new Date(endISO);
+  const chunks: [Date, Date][] = [];
+  let s = new Date(start);
+  while (s < end) {
+    const e = new Date(Math.min(s.getTime() + 30 * 86_400_000, end.getTime()));
+    chunks.push([new Date(s), e]);
+    s = e;
+  }
+  const iso = (d: Date) => d.toISOString().slice(0, 19) + "Z";
+  // Amazon rate-limits report creation hard — firing every 30-day chunk at once (a year = 12) trips
+  // the quota. Run them in small parallel batches so a long backfill stays under the limit.
+  const CONCURRENCY = 2;
+  const texts: string[] = [];
+  for (let i = 0; i < chunks.length; i += CONCURRENCY) {
+    const batch = chunks.slice(i, i + CONCURRENCY);
+    texts.push(...(await Promise.all(batch.map(([cs, ce]) => fetchOrdersReportTsv(client, iso(cs), iso(ce))))));
+  }
+  const rows: AmazonOrderRow[] = [];
+  for (const text of texts) {
+    const lines = text.split("\n");
+    const h = lines[0].split("\t");
+    const iId = h.indexOf("amazon-order-id");
+    const iDate = h.indexOf("purchase-date");
+    const iStatus = h.indexOf("order-status");
+    const iFC = h.indexOf("fulfillment-channel");
+    const iSku = h.indexOf("sku");
+    const iQty = h.indexOf("quantity");
+    const iPrice = h.indexOf("item-price");
+    const iCur = h.indexOf("currency");
+    for (let i = 1; i < lines.length; i++) {
+      const c = lines[i].split("\t");
+      if (c.length <= iQty || iId < 0) continue;
+      const orderId = c[iId];
+      const sku = c[iSku];
+      const qty = parseInt(c[iQty], 10) || 0;
+      if (!orderId || !sku || qty <= 0) continue;
+      rows.push({
+        orderId,
+        purchaseDate: c[iDate] || "",
+        status: c[iStatus] || "",
+        fulfillment: iFC >= 0 ? c[iFC] || "" : "",
+        sku,
+        quantity: qty,
+        itemPrice: iPrice >= 0 ? Number(c[iPrice]) || 0 : 0,
+        currency: iCur >= 0 ? c[iCur] || "USD" : "USD",
+      });
+    }
+  }
+  return rows;
 }
 
 // ── Per-seller (multi-tenant) helpers ─────────────────────────────────────────────────────────

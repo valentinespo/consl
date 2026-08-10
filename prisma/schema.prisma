@@ -54,6 +54,8 @@ model Organization {
   settings                Settings[]
   channelListings         ChannelListing[]
   channelStock            ChannelStock[]
+  salesOrders             SalesOrder[]
+  salesOrderLines         SalesOrderLine[]
   materialTypes           MaterialType[]
   purchaseInvoices        PurchaseInvoice[]
   purchases               Purchase[]
@@ -266,6 +268,7 @@ model Product {
   purchaseOrderLines PurchaseOrderLine[]
   snapshots          SkuSnapshot[]
   channelStock       ChannelStock[]
+  salesOrderLines    SalesOrderLine[]
   movements          StockMovement[]
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
@@ -354,6 +357,9 @@ model Settings {
   // Round every order up to a multiple of this. 0 = order any quantity. Per-SKU `batchSize` wins.
   defaultBatchSize  Int           @default(0)
   sortMode          String        @default("sales") // inventory dashboard sort: sales | available | manual
+  // Order sources to drop from Shopify totals so channel-mirrored orders (e.g. TikTok selling
+  // through Shopify) aren't counted twice. Values are Shopify `source` keys, e.g. ["tiktok"].
+  excludedShopifySources String[]  @default([])
   // Labels of the "key documents" every lot is expected to carry (e.g. BOL, COA). Each shows as a
   // pill on the lots table — purple when a matching-label document is attached, grey when missing.
   // Operator-editable per org; empty = the Documents column shows nothing.
@@ -696,4 +702,60 @@ model ChannelStock {
   @@unique([orgId, facilityId, productId])
   @@index([orgId, productId])
   @@index([facilityId])
+}
+
+/// A sale pulled from a connected channel — the raw material for velocity and, later, profit.
+/// One row per order per channel; `SalesOrderLine` holds its per-SKU quantities and prices.
+///
+/// Dedup lives at the SOURCE, like the MCF stock rule: a channel that mirrors its orders into
+/// Shopify (TikTok is the live example — 32 of Herbl's last 40 Shopify orders came from TikTok)
+/// would be counted twice if we took the Shopify copy AND the channel's own copy. So each Shopify
+/// order records where it originated (`source`, e.g. "tiktok"/"web"), and Settings.excludedShopifySources
+/// lists the sources to drop from Shopify totals — applied at read time, so toggling it needs no
+/// re-import. Default empty: Herbl's real TikTok history lives in Shopify today while consl only
+/// holds the TikTok sandbox, so nothing is excluded until the real TikTok shop is connected.
+model SalesOrder {
+  id           String          @id @default(cuid())
+  orgId        String?
+  organization Organization?   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  channel      String // AMAZON | SHOPIFY | TIKTOK (same keys as Facility.channel roots)
+  externalId   String // the platform's own order id — the upsert key, so re-imports don't duplicate
+  orderedAt    DateTime
+  // Shopify only: which sales channel/app created the order ("web", "tiktok", app handle). The
+  // dedup signal. Null for Amazon/TikTok (their whole feed IS that channel).
+  source       String?
+  sourceLabel  String? // human label for `source` ("Online Store", "TikTok")
+  status       String? // platform status; a cancelled/refunded order is kept but flagged out of velocity
+  cancelled    Boolean         @default(false)
+  // How it was fulfilled, when the platform tells us — drives which stock pool drains later.
+  // Amazon: "Amazon" (FBA) | "Merchant". TikTok: "TIKTOK" | "SELLER". Shopify: null (seller-fulfilled).
+  fulfillment  String?
+  total        Float           @default(0) // order revenue in `currency`, for profit later
+  currency     String          @default("USD")
+  lines        SalesOrderLine[]
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@unique([orgId, channel, externalId])
+  @@index([orgId, channel, orderedAt])
+  @@index([orgId, source])
+}
+
+/// One SKU line of a `SalesOrder`. `productId` is the mapped consl product (null when the channel
+/// SKU isn't mapped yet — the sale still counts toward channel totals, just not to a product).
+model SalesOrderLine {
+  id         String     @id @default(cuid())
+  orgId      String?
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  order      SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId    String
+  product    Product?   @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productId  String?
+  sku        String? // the channel's SKU as sold, kept even when unmapped
+  quantity   Int        @default(0)
+  unitPrice  Float      @default(0)
+  createdAt  DateTime   @default(now())
+
+  @@index([orgId, productId])
+  @@index([orderId])
 }
