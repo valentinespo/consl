@@ -87,7 +87,8 @@ export function OrdersClient({
   const { page, pageCount, total, pageSize } = orders;
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const to = Math.min(page * pageSize, total);
-  const selectCls = `${inputCls} w-auto`;
+  // inputCls carries w-full for form layouts; cap these so the filter bar reads as one row.
+  const selectCls = `${inputCls} sm:max-w-[170px]`;
 
   return (
     <div className="flex flex-col gap-5">
