@@ -29,6 +29,20 @@ function nowInTz(tz: string): { day: string; minutes: number } {
   }
 }
 
+/**
+ * The overnight minute this org's Amazon sales report runs at, in its own timezone.
+ *
+ * Derived from the org id rather than chosen by the customer: the report only covers days up to
+ * ~48h old, so the hour cannot change a single figure — there is nothing to tune, and asking is
+ * just a setting to get wrong. Spreading orgs deterministically across a three-hour window also
+ * stops every tenant hammering the platforms in the same minute as the customer base grows.
+ */
+function nightlySlotMinutes(orgId: string): number {
+  let h = 0;
+  for (let i = 0; i < orgId.length; i++) h = (h * 31 + orgId.charCodeAt(i)) >>> 0;
+  return 2 * 60 + (h % 180); // 02:00–04:59, local to the org's timezone
+}
+
 let running = false;
 
 /**
@@ -54,8 +68,7 @@ async function runOrgDaily(orgId: string): Promise<void> {
       const s = await getOrgSettings();
       if (!s.syncEnabled) return;
       const { day, minutes } = nowInTz(s.syncTz);
-      const due = s.syncHour * 60 + s.syncMinute;
-      if (minutes < due) return; // not yet time today
+      if (minutes < nightlySlotMinutes(orgId)) return; // not yet this org's slot today
       if (s.lastSyncRun === day) return; // already ran today (cheap pre-check)
       if (!(await claimDay(orgId, day))) return; // another replica got there first
 

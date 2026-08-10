@@ -11,8 +11,6 @@ import { BATCH_HELP, BUFFER_HELP, FLOOR_HELP, LEAD_HELP, REORDER_TO_HELP, SHIP_H
 
 export type AppSettings = {
   syncEnabled: boolean;
-  syncHour: number;
-  syncMinute: number;
   syncTz: string;
   lastSyncAt: string | null;
   defaultMinMonths: number;
@@ -22,8 +20,6 @@ export type AppSettings = {
   defaultReorderTo: number;
   defaultBatchSize: number;
 };
-
-const pad2 = (n: number) => String(n).padStart(2, "0");
 
 /** "GMT-03:00" for a zone, as of right now — offsets shift with daylight saving, so this is
  *  computed rather than stored. */
@@ -93,8 +89,6 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
 
   const dirty =
     s.syncEnabled !== initial.syncEnabled ||
-    s.syncHour !== initial.syncHour ||
-    s.syncMinute !== initial.syncMinute ||
     s.syncTz !== initial.syncTz ||
     s.defaultMinMonths !== initial.defaultMinMonths ||
     s.defaultLeadMonths !== initial.defaultLeadMonths ||
@@ -108,8 +102,6 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
     startSave(async () => {
       await saveSettings({
         syncEnabled: s.syncEnabled,
-        syncHour: s.syncHour,
-        syncMinute: s.syncMinute,
         syncTz: s.syncTz,
         defaultMinMonths: s.defaultMinMonths,
         defaultLeadMonths: s.defaultLeadMonths,
@@ -143,31 +135,18 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
           <div>
             <div className="text-[12px] font-medium uppercase tracking-wide text-muted">Automatic sync</div>
             <p className="mt-1.5 max-w-[62ch] text-[12.5px] text-muted">
-              Keeps stock from every connected channel up to date every minute. Amazon sales come from
-              a report Amazon builds on request and only covers days up to 48h ago, so those are pulled
-              once a day at the time below, along with the day&apos;s inventory value — even if nobody
-              opens the app.
+              Stock from your connected channels updates every minute. Sales figures are pulled once
+              overnight, automatically — even if nobody opens the app.
             </p>
           </div>
           <Toggle on={s.syncEnabled} onChange={(v) => set("syncEnabled", v)} />
         </div>
 
-        <div className={`grid gap-3 sm:grid-cols-[160px_1fr] ${s.syncEnabled ? "" : "pointer-events-none opacity-50"}`}>
-          <Field label="Sales report at" hint="Stock refreshes every minute regardless.">
-            <input
-              type="time"
-              value={`${pad2(s.syncHour)}:${pad2(s.syncMinute)}`}
-              onChange={(e) => {
-                const [h, m] = e.target.value.split(":");
-                // An empty time input yields "", which would otherwise store NaN.
-                if (h === undefined || m === undefined || e.target.value === "") return;
-                setS((p) => ({ ...p, syncHour: Number(h), syncMinute: Number(m) }));
-                setSaved(false);
-              }}
-              className={`${inputCls} tabular`}
-            />
-          </Field>
-          <Field label="Timezone" hint={`Which clock that time follows — currently ${gmtLabel(s.syncTz)}.`}>
+        <div className={s.syncEnabled ? "" : "pointer-events-none opacity-50"}>
+          <Field
+            label="Your timezone"
+            hint={`Sets where your day starts and ends, so daily sales and inventory value land on the right date — currently ${gmtLabel(s.syncTz)}.`}
+          >
             <select value={s.syncTz} onChange={(e) => set("syncTz", e.target.value)} className={inputCls}>
               {zones.map((z) => (
                 <option key={z.tz} value={z.tz}>
@@ -189,7 +168,7 @@ export function SyncSettings({ initial }: { initial: AppSettings }) {
           </button>
           <span className="inline-flex items-center gap-1.5 text-[11.5px] text-muted">
             <Clock size={12} />
-            Stock every minute · Amazon sales daily at {pad2(s.syncHour)}:{pad2(s.syncMinute)} · last synced {lastSynced}
+            Stock every minute · sales overnight · last synced {lastSynced}
           </span>
         </div>
         {msg && <div className="mt-2 text-[12px] text-muted">{msg}</div>}

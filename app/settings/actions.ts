@@ -79,8 +79,6 @@ export async function getAppSettings() {
   const s = await getOrgSettings();
   return {
     syncEnabled: s.syncEnabled,
-    syncHour: s.syncHour,
-    syncMinute: s.syncMinute,
     syncTz: s.syncTz,
     lastSyncAt: s.lastSyncAt ? s.lastSyncAt.toISOString() : null,
     defaultMinMonths: s.defaultMinMonths,
@@ -101,8 +99,6 @@ function clampNum(v: number, lo: number, hi: number, fallback: number): number {
 
 export async function saveSettings(input: {
   syncEnabled: boolean;
-  syncHour: number;
-  syncMinute: number;
   syncTz: string;
   defaultMinMonths: number;
   defaultLeadMonths: number;
@@ -115,8 +111,6 @@ export async function saveSettings(input: {
   if (!gate.ok) return { ok: false as const, error: gate.error };
   const data = {
     syncEnabled: !!input.syncEnabled,
-    syncHour: clamp(input.syncHour, 0, 23),
-    syncMinute: clamp(input.syncMinute, 0, 59),
     syncTz: input.syncTz.trim() || "America/Argentina/Buenos_Aires",
     // Clamp to sane ranges but honour a real 0 where it's meaningful (floor/lead/ship can be 0);
     // only fall back to a default when the value is missing/NaN, matching the Inventory gear so the
