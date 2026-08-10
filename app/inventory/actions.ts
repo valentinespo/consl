@@ -3,19 +3,68 @@
 import { prisma } from "@/lib/prisma";
 import { saveOrgSettings } from "@/lib/settings";
 import { syncAmazonCore } from "@/lib/sync";
+import { syncShopifyStock, syncTikTokStock } from "@/lib/channel-stock";
 import { getRestock } from "@/lib/restock";
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/membership";
 
-/** Manual "Sync Amazon" button: pull fresh Amazon data, record the value snapshot, revalidate. */
-export async function syncAmazon() {
+/**
+ * Manual "Sync channels" button: pull fresh stock from every connected sales channel, record the
+ * value snapshot, revalidate.
+ *
+ * Each channel is independent — one being disconnected or erroring must not stop the others, so
+ * every leg is caught and reported separately. Amazon carries the sales history the reorder engine
+ * needs, so its failure is the only one that counts as an overall failure.
+ */
+export async function syncChannels(): Promise<{
+  ok: boolean;
+  synced: string[];
+  failed: string[];
+  salesOk: boolean;
+  error?: string;
+}> {
   const gate = await requirePermission("inventory", "edit");
-  if (!gate.ok) return { ok: false as const, error: gate.error };
-  const r = await syncAmazonCore();
-  if (r.ok) await getRestock(); // records today's inventory-value snapshot with fresh numbers
+  if (!gate.ok) return { ok: false, synced: [], failed: [], salesOk: true, error: gate.error };
+
+  const amazon = await syncAmazonCore().catch((e) => ({
+    ok: false as const,
+    error: e instanceof Error ? e.message : "Amazon sync failed.",
+  }));
+
+  const done: string[] = [];
+  const failed: string[] = [];
+  if (amazon.ok) done.push("Amazon");
+  else if (!("nothingToSync" in amazon && amazon.nothingToSync)) failed.push("Amazon");
+
+  for (const [label, run] of [
+    ["Shopify", syncShopifyStock],
+    ["TikTok", syncTikTokStock],
+  ] as const) {
+    try {
+      const r = await run();
+      if (r.facilities > 0) done.push(label);
+    } catch {
+      failed.push(label);
+    }
+  }
+
+  // Snapshot after every channel has landed, so the day's value includes all of them.
+  await getRestock();
   revalidatePath("/inventory");
+  revalidatePath("/facilities");
+  revalidatePath("/reorder");
   revalidatePath("/");
-  return r;
+
+  if (done.length === 0 && failed.length === 0) {
+    return { ok: false, synced: [], failed: [], salesOk: true, error: "No sales channel is connected yet." };
+  }
+  return {
+    ok: failed.length === 0,
+    synced: done,
+    failed,
+    salesOk: amazon.ok ? amazon.salesOk : true,
+    error: failed.length ? `Couldn't reach ${failed.join(" and ")}.` : undefined,
+  };
 }
 
 /** Update the org-wide restock defaults (each is a per-SKU-overridable fallback). */

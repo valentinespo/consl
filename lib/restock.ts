@@ -25,6 +25,7 @@ export type RestockRow = {
   awdTotal: number;
   awdValue: number;
   inProduction: number;
+  unitCost: number; // newest finished-lot cost per unit — what channel-held stock is valued at
   atLocations: number; // finished units sitting at your own facilities — made, just not shipped
   atLocationsBy: { code: string; units: number }[]; // where those units are, biggest first
   onHand: number; // fbaTotal + awdTotal (everything at Amazon, excluding production)
@@ -206,6 +207,7 @@ export async function getRestock(): Promise<{
       awdTotal,
       awdValue: awdVal,
       inProduction,
+      unitCost: fb,
       atLocations: heldBySku.get(p.id)?.units ?? 0,
       atLocationsBy: heldBySku.get(p.id)?.by ?? [],
       onHand: fbaTotal + awdTotal,

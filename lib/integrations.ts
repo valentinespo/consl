@@ -109,11 +109,29 @@ export async function getChannelStock(): Promise<{ rows: ChannelStockRow[]; tota
   const facilities = await prisma.facility.findMany({ where: { channel: { not: null } } });
   if (facilities.length === 0) return { rows: [], totalUnits: 0, totalValue: 0 };
   const { rows: restock } = await getRestock();
+
+  // Amazon's units come off its own snapshot (inside getRestock); every other channel reports a
+  // plain quantity per warehouse, stored per facility by lib/channel-stock.ts.
+  const stored = await prisma.channelStock.findMany({ where: { units: { gt: 0 } } });
+  const byFacility = new Map<string, Map<string, number>>();
+  for (const s of stored) {
+    const perFacility = byFacility.get(s.facilityId) ?? new Map<string, number>();
+    perFacility.set(s.productId, s.units);
+    byFacility.set(s.facilityId, perFacility);
+  }
+
   const rows: ChannelStockRow[] = [];
   for (const f of facilities) {
     for (const r of restock) {
+      // Channel stock is valued at the newest finished-lot cost — the same fallback Amazon uses
+      // for units beyond what we recorded shipping. Shipment-layer valuation needs movements
+      // recorded INTO the channel facility, which these channels don't give us.
       const [units, value] =
-        f.channel === "AMAZON_FBA" ? [r.fbaTotal, r.fbaValue] : f.channel === "AMAZON_AWD" ? [r.awdTotal, r.awdValue] : [0, 0];
+        f.channel === "AMAZON_FBA"
+          ? [r.fbaTotal, r.fbaValue]
+          : f.channel === "AMAZON_AWD"
+            ? [r.awdTotal, r.awdValue]
+            : [byFacility.get(f.id)?.get(r.id) ?? 0, (byFacility.get(f.id)?.get(r.id) ?? 0) * r.unitCost];
       if (units <= 0) continue;
       rows.push({
         productId: r.id,

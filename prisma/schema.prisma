@@ -53,6 +53,7 @@ model Organization {
   inventoryValueSnapshots InventoryValueSnapshot[]
   settings                Settings[]
   channelListings         ChannelListing[]
+  channelStock            ChannelStock[]
   materialTypes           MaterialType[]
   purchaseInvoices        PurchaseInvoice[]
   purchases               Purchase[]
@@ -162,6 +163,7 @@ model Facility {
   purchases       Purchase[]
   purchaseOrders  PurchaseOrder[]
   supplierProfile Supplier?
+  channelStock    ChannelStock[]
   movementsOut    StockMovement[] @relation("MovementFrom")
   movementsIn     StockMovement[] @relation("MovementTo")
   createdAt       DateTime        @default(now())
@@ -263,6 +265,7 @@ model Product {
   lotMaterials       LotMaterial[]
   purchaseOrderLines PurchaseOrderLine[]
   snapshots          SkuSnapshot[]
+  channelStock       ChannelStock[]
   movements          StockMovement[]
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
@@ -664,4 +667,33 @@ model ChannelListing {
 
   @@unique([orgId, channel, externalId])
   @@index([orgId, channel, ignored])
+}
+
+/// Finished units a sales channel reports holding, per SKU × channel facility. The channel is the
+/// source of truth for its own stock, so each sync REPLACES the rows for the facilities it covers
+/// rather than adjusting them.
+///
+/// Amazon deliberately does NOT live here — its stock stays on SkuSnapshot, which carries the
+/// richer FBA/AWD split (available / inbound / reserved / unfulfillable) the reorder engine reads.
+/// This table is for channels that report a single quantity per warehouse: Shopify and TikTok.
+///
+/// A facility only exists for warehouses we chose to mirror, which is what keeps Shopify's
+/// "Amazon Fulfillment" (MCF) location out: those units are the SAME physical Amazon stock already
+/// counted under FBA, and importing them would double-count it.
+model ChannelStock {
+  id         String   @id @default(cuid())
+  orgId      String?
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  facility   Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  facilityId String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId  String
+  units      Int      @default(0)
+  syncedAt   DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([orgId, facilityId, productId])
+  @@index([orgId, productId])
+  @@index([facilityId])
 }

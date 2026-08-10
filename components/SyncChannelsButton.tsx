@@ -3,11 +3,11 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { RefreshCw } from "@/components/icons";
-import { syncAmazon } from "@/app/inventory/actions";
+import { syncChannels } from "@/app/inventory/actions";
 
-/** Pull Amazon stock and sales on demand. Lives beside the Inventory tabs so the value card
- *  below can use the full width. */
-export function SyncAmazonButton({ lastSync }: { lastSync: string | null }) {
+/** Pull stock and sales from every connected sales channel on demand. Lives beside the Inventory
+ *  tabs so the value card below can use the full width. */
+export function SyncChannelsButton({ lastSync }: { lastSync: string | null }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
@@ -15,15 +15,22 @@ export function SyncAmazonButton({ lastSync }: { lastSync: string | null }) {
   function sync() {
     setMsg(null);
     start(async () => {
-      const r = await syncAmazon();
-      setMsg(
-        r.ok
-          ? r.salesOk
-            ? "Synced with Amazon."
-            : "Inventory synced (sales lagging — kept last velocity)."
-          : r.error,
-      );
-      router.refresh();
+      try {
+        const r = await syncChannels();
+        if (r.synced.length === 0 && r.error) setMsg(r.error);
+        else {
+          const names = r.synced.join(", ");
+          setMsg(
+            r.error
+              ? `Synced ${names}. ${r.error}`
+              : r.salesOk
+                ? `Synced ${names}.`
+                : `Synced ${names} (sales lagging — kept last velocity).`,
+          );
+        }
+      } finally {
+        router.refresh();
+      }
     });
   }
 
@@ -38,7 +45,7 @@ export function SyncAmazonButton({ lastSync }: { lastSync: string | null }) {
         className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-bg transition-opacity hover:opacity-90 disabled:opacity-60"
       >
         <RefreshCw size={14} className={pending ? "animate-spin" : ""} />
-        {pending ? "Syncing…" : "Sync Amazon"}
+        {pending ? "Syncing…" : "Sync channels"}
       </button>
     </div>
   );
