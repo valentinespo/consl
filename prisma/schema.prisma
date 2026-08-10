@@ -371,6 +371,9 @@ model Settings {
   syncTz            String        @default("America/Argentina/Buenos_Aires")
   lastSyncRun       String? // last completed run, "YYYY-MM-DD" in syncTz (idempotency guard)
   lastSyncAt        DateTime? // exact timestamp of the last completed run
+  // How far back Amazon orders have been backfilled ("YYYY-MM-DD"). The scheduler walks this cursor
+  // backward one window per tick until it hits the report's ~2-year retention floor. Null = not started.
+  ordersBackfillCursor String?
   // Editable dashboard: [{ id, x, y, w, h }] of placed widgets (12-col grid). null = default layout.
   dashboardLayout   Json?
 
@@ -720,6 +723,7 @@ model SalesOrder {
   organization Organization?   @relation(fields: [orgId], references: [id], onDelete: Cascade)
   channel      String // AMAZON | SHOPIFY | TIKTOK (same keys as Facility.channel roots)
   externalId   String // the platform's own order id — the upsert key, so re-imports don't duplicate
+  orderNumber  String? // human order number shown to the merchant (Shopify #name, Amazon order id, TikTok id)
   orderedAt    DateTime
   // Shopify only: which sales channel/app created the order ("web", "tiktok", app handle). The
   // dedup signal. Null for Amazon/TikTok (their whole feed IS that channel).
@@ -730,6 +734,9 @@ model SalesOrder {
   // How it was fulfilled, when the platform tells us — drives which stock pool drains later.
   // Amazon: "Amazon" (FBA) | "Merchant". TikTok: "TIKTOK" | "SELLER". Shopify: null (seller-fulfilled).
   fulfillment  String?
+  // Human label of WHERE it shipped from, for the "Fulfilled at" column: a Shopify location name
+  // ("638 Alton Place", "Amazon Fulfillment"), "Amazon FBA"/"Merchant", or a TikTok warehouse name.
+  fulfillmentLabel String?
   total        Float           @default(0) // order revenue in `currency`, for profit later
   currency     String          @default("USD")
   lines        SalesOrderLine[]

@@ -137,6 +137,42 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
   }
 }
 
+let backfilling = false;
+
+/**
+ * Walk each org's Amazon order history backward, one window per pass, until it reaches the report's
+ * ~2-year retention floor. Runs on its OWN loop with its own guard — decoupled from the 1-minute
+ * stock tick so a slow order report (minutes) never stalls stock freshness, and serialized so we
+ * never fire more Amazon reports than the quota allows. Once every org's cursor hits the floor this
+ * does nothing, so it's self-terminating after the initial backfill.
+ */
+async function backfillTick(): Promise<void> {
+  if (backfilling) return;
+  backfilling = true;
+  try {
+    const orgs = await prismaBase.organization.findMany({ where: { deactivatedAt: null }, select: { id: true } });
+    for (const orgId of orgs.map((o) => o.id)) {
+      try {
+        await runWithOrg(orgId, async () => {
+          const s = await getOrgSettings();
+          if (!s.syncEnabled) return;
+          const conn = await prisma.integration.findFirst({ where: { provider: "amazon", status: "connected" }, select: { id: true } });
+          if (!conn) return;
+          const { backfillAmazonOrdersStep } = await import("@/lib/orders");
+          const r = await backfillAmazonOrdersStep();
+          if (r.imported > 0) console.log(`[scheduler] amazon order backfill for ${orgId}: +${r.imported} (cursor ${r.cursor}${r.done ? ", done" : ""})`);
+        });
+      } catch (e) {
+        console.error(`[scheduler] backfill failed for org ${orgId}:`, (e as Error).message);
+      }
+    }
+  } catch (e) {
+    console.error("[scheduler] backfill tick failed:", (e as Error).message);
+  } finally {
+    backfilling = false;
+  }
+}
+
 /**
  * Permanently delete companies whose grace period has elapsed. Deleting an org cascades across
  * every tenant table (verified), but stored files live outside the database, so gather and remove
@@ -210,5 +246,9 @@ export function startDailyScheduler(): void {
   const TICK_MS = 60 * 1000;
   setInterval(() => void tick().catch(() => {}), TICK_MS);
   setTimeout(() => void tick().catch(() => {}), 30_000); // catch-up shortly after boot
+  // The Amazon order backfill runs on its own guarded loop so a slow order report never stalls the
+  // stock tick; it self-terminates once every org has walked back to the retention floor.
+  setInterval(() => void backfillTick().catch(() => {}), TICK_MS);
+  setTimeout(() => void backfillTick().catch(() => {}), 45_000);
   console.log("[scheduler] daily sync scheduler started");
 }

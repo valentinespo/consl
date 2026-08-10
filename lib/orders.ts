@@ -19,12 +19,14 @@ export type OrderImportResult = { channel: string; orders: number; lines: number
 type FetchedLine = { sku: string | null; quantity: number; unitPrice: number; variantId?: string };
 type Fetched = {
   externalId: string;
+  orderNumber: string | null;
   orderedAt: Date;
   source: string | null;
   sourceLabel: string | null;
   status: string | null;
   cancelled: boolean;
   fulfillment: string | null;
+  fulfillmentLabel: string | null;
   total: number;
   currency: string;
   lines: FetchedLine[];
@@ -66,12 +68,14 @@ async function persist(
         select: { id: true },
       });
       const data = {
+        orderNumber: o.orderNumber,
         orderedAt: o.orderedAt,
         source: o.source,
         sourceLabel: o.sourceLabel,
         status: o.status,
         cancelled: o.cancelled,
         fulfillment: o.fulfillment,
+        fulfillmentLabel: o.fulfillmentLabel,
         total: o.total,
         currency: o.currency,
       };
@@ -119,6 +123,7 @@ export async function importShopifyOrders(sinceDays?: number): Promise<OrderImpo
         pageInfo: { hasNextPage: boolean; endCursor: string | null };
         nodes: Array<{
           id: string;
+          name: string | null;
           createdAt: string;
           sourceName: string | null;
           cancelledAt: string | null;
@@ -126,11 +131,14 @@ export async function importShopifyOrders(sinceDays?: number): Promise<OrderImpo
           app: { name: string | null } | null;
           channelInformation: { channelDefinition: { channelName: string | null } | null } | null;
           currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+          fulfillments: Array<{ location: { name: string | null } | null }>;
           lineItems: {
             nodes: Array<{
               sku: string | null;
               quantity: number;
               variant: { id: string } | null;
+              // discounted = net of line/order discounts (what the buyer actually paid per unit).
+              discountedUnitPriceSet: { shopMoney: { amount: string } } | null;
               originalUnitPriceSet: { shopMoney: { amount: string } } | null;
             }>;
           };
@@ -143,12 +151,13 @@ export async function importShopifyOrders(sinceDays?: number): Promise<OrderImpo
         orders(first: 100, after: $cursor, sortKey: CREATED_AT, query: $q) {
           pageInfo { hasNextPage endCursor }
           nodes {
-            id createdAt sourceName cancelledAt displayFinancialStatus
+            id name createdAt sourceName cancelledAt displayFinancialStatus
             app { name }
             channelInformation { channelDefinition { channelName } }
             currentTotalPriceSet { shopMoney { amount currencyCode } }
+            fulfillments(first: 3) { location { name } }
             lineItems(first: 100) {
-              nodes { sku quantity variant { id } originalUnitPriceSet { shopMoney { amount } } }
+              nodes { sku quantity variant { id } discountedUnitPriceSet { shopMoney { amount } } originalUnitPriceSet { shopMoney { amount } } }
             }
           }
         }
@@ -157,20 +166,24 @@ export async function importShopifyOrders(sinceDays?: number): Promise<OrderImpo
     );
 
     for (const o of data.orders.nodes) {
+      const location = o.fulfillments.map((f) => f.location?.name).find(Boolean);
       fetched.push({
         externalId: o.id,
+        orderNumber: o.name || null,
         orderedAt: new Date(o.createdAt),
         source: o.sourceName?.trim() || null,
         sourceLabel: o.channelInformation?.channelDefinition?.channelName || o.app?.name || o.sourceName || null,
         status: o.displayFinancialStatus,
         cancelled: Boolean(o.cancelledAt),
         fulfillment: null, // Shopify orders are seller-fulfilled from consl's perspective
+        fulfillmentLabel: location ?? "Unfulfilled",
         total: money(o.currentTotalPriceSet?.shopMoney.amount),
         currency: o.currentTotalPriceSet?.shopMoney.currencyCode ?? "USD",
         lines: o.lineItems.nodes.map((l) => ({
           sku: l.sku?.trim() || null,
           quantity: l.quantity,
-          unitPrice: money(l.originalUnitPriceSet?.shopMoney.amount),
+          // Prefer the discounted unit price so promo/coupon discounts are reflected in revenue.
+          unitPrice: money(l.discountedUnitPriceSet?.shopMoney.amount ?? l.originalUnitPriceSet?.shopMoney.amount),
           variantId: l.variant?.id ?? undefined,
         })),
       });
@@ -186,11 +199,20 @@ export async function importShopifyOrders(sinceDays?: number): Promise<OrderImpo
 
 type TikTokOrder = {
   id: string;
+  status?: string | null;
   order_status?: string | null;
   create_time?: number | null;
   fulfillment_type?: string | null; // FULFILLMENT_BY_TIKTOK | FULFILLMENT_BY_SELLER
-  payment?: { total_amount?: string | null; currency?: string | null } | null;
-  line_items?: Array<{ seller_sku?: string | null; sku_id?: string | null; sale_price?: string | null }> | null;
+  warehouse_id?: string | null;
+  payment?: { sub_total?: string | null; total_amount?: string | null; currency?: string | null } | null;
+  line_items?: Array<{
+    seller_sku?: string | null;
+    sku_id?: string | null;
+    sale_price?: string | null;
+    original_price?: string | null;
+    seller_discount?: string | null;
+    platform_discount?: string | null;
+  }> | null;
 };
 
 /** TikTok Shop orders. Today this is the sandbox test store (a couple of orders); when the real
@@ -202,10 +224,13 @@ export async function importTikTokOrders(): Promise<OrderImportResult> {
   const { tiktokApi, TIKTOK_API_VERSION } = await import("@/lib/tiktok");
   const token = await getTikTokAccessToken(conn);
   const map = await productMap("TIKTOK");
+  // warehouse_id → facility name, so the "Fulfilled at" column reads the real warehouse.
+  const warehouses = await prisma.facility.findMany({ where: { channel: "TIKTOK", externalId: { not: null } }, select: { externalId: true, name: true } });
+  const warehouseName = new Map(warehouses.map((f) => [f.externalId!, f.name]));
 
   const fetched: Fetched[] = [];
   let pageToken: string | null = null;
-  for (let page = 0; page < 40; page++) {
+  for (let page = 0; page < 200; page++) {
     const query: Record<string, string> = {
       shop_cipher: conn.marketplaceId,
       page_size: "50",
@@ -219,21 +244,27 @@ export async function importTikTokOrders(): Promise<OrderImportResult> {
       body: {},
     });
     for (const o of data.orders ?? []) {
-      const cancelled = (o.order_status ?? "").toUpperCase().includes("CANCEL");
+      const status = o.status ?? o.order_status ?? null;
+      const cancelled = (status ?? "").toUpperCase().includes("CANCEL");
+      const byTikTok = o.fulfillment_type?.includes("TIKTOK");
+      const label = (o.warehouse_id ? warehouseName.get(o.warehouse_id) : undefined) ?? (byTikTok ? "TikTok" : o.fulfillment_type ? "Seller" : null);
       fetched.push({
         externalId: o.id,
+        orderNumber: o.id,
         orderedAt: o.create_time ? new Date(o.create_time * 1000) : new Date(0),
         source: null,
         sourceLabel: null,
-        status: o.order_status ?? null,
+        status,
         cancelled,
-        fulfillment: o.fulfillment_type?.includes("TIKTOK") ? "TIKTOK" : o.fulfillment_type ? "SELLER" : null,
-        total: money(o.payment?.total_amount),
+        fulfillment: byTikTok ? "TIKTOK" : o.fulfillment_type ? "SELLER" : null,
+        fulfillmentLabel: label,
+        total: money(o.payment?.sub_total ?? o.payment?.total_amount), // sub_total = product revenue, excl shipping
         currency: o.payment?.currency ?? "USD",
         lines: (o.line_items ?? []).map((l) => ({
           sku: l.seller_sku?.trim() || null,
           quantity: 1, // TikTok returns one line_item per unit; grouped below
-          unitPrice: money(l.sale_price),
+          // Net of seller + platform discounts, so the total counts discounts (per the merchant's ask).
+          unitPrice: Math.max(0, money(l.sale_price ?? l.original_price) - money(l.seller_discount) - money(l.platform_discount)),
         })),
       });
     }
@@ -259,7 +290,7 @@ export async function importTikTokOrders(): Promise<OrderImportResult> {
 /** Amazon marketplace orders from the All Orders report, order-level. `fulfillment` keeps FBA vs
  *  merchant so pool attribution can use it later. No dedup vs Shopify — Amazon orders don't mirror
  *  into Shopify (an MCF order is a Shopify sale Amazon ships, and stays on the Shopify side). */
-export async function importAmazonOrders(sinceDays = 90): Promise<OrderImportResult> {
+export async function importAmazonOrders(window: { start: Date; end: Date } | number = 90): Promise<OrderImportResult> {
   const conn = await prisma.integration.findFirst({ where: { provider: "amazon", status: "connected" } });
   if (!conn?.refreshTokenEnc) return { channel: "AMAZON", orders: 0, lines: 0 };
   const { makeClient, getAllOrderRows } = await import("@/lib/spapi");
@@ -270,24 +301,26 @@ export async function importAmazonOrders(sinceDays = 90): Promise<OrderImportRes
   });
   const map = await productMap("AMAZON");
 
-  const end = new Date();
-  const start = new Date(end.getTime() - sinceDays * 86_400_000);
+  const end = typeof window === "number" ? new Date() : window.end;
+  const start = typeof window === "number" ? new Date(end.getTime() - window * 86_400_000) : window.start;
   const iso = (d: Date) => d.toISOString().slice(0, 19) + "Z";
   const rows = await getAllOrderRows(client, iso(start), iso(end));
 
-  // Group item rows → orders → per-SKU lines.
+  // Group item rows → orders → per-SKU lines. Revenue is net of item-promotion-discount.
   const byOrder = new Map<string, Fetched & { _skus: Map<string, { sku: string; qty: number; amt: number }> }>();
   for (const row of rows) {
     let o = byOrder.get(row.orderId);
     if (!o) {
       o = {
         externalId: row.orderId,
+        orderNumber: row.orderId,
         orderedAt: row.purchaseDate ? new Date(row.purchaseDate) : new Date(0),
         source: null,
         sourceLabel: null,
         status: row.status,
         cancelled: row.status === "Cancelled",
         fulfillment: row.fulfillment === "Amazon" ? "Amazon" : "Merchant",
+        fulfillmentLabel: row.fulfillment === "Amazon" ? "Amazon FBA" : "Merchant",
         total: 0,
         currency: row.currency,
         lines: [],
@@ -295,10 +328,11 @@ export async function importAmazonOrders(sinceDays = 90): Promise<OrderImportRes
       };
       byOrder.set(row.orderId, o);
     }
-    o.total += row.itemPrice;
+    const net = row.itemPrice - row.promotionDiscount;
+    o.total += net;
     const agg = o._skus.get(row.sku) ?? { sku: row.sku, qty: 0, amt: 0 };
     agg.qty += row.quantity;
-    agg.amt += row.itemPrice;
+    agg.amt += net;
     o._skus.set(row.sku, agg);
   }
   const fetched: Fetched[] = [...byOrder.values()].map((o) => ({
@@ -307,6 +341,36 @@ export async function importAmazonOrders(sinceDays = 90): Promise<OrderImportRes
   }));
 
   return persist("AMAZON", fetched, (l) => (l.sku ? map.bySku.get(l.sku) ?? null : null));
+}
+
+// Amazon's All Orders report retains ~2 years; don't walk the backfill cursor past this.
+const AMAZON_BACKFILL_FLOOR_DAYS = 760;
+// Per backfill step. getAllOrderRows splits this into ≤30-day reports internally (concurrency 2),
+// so a 90-day step is ~3 reports — fewer scheduler passes to cover the ~2-year history.
+const BACKFILL_WINDOW_DAYS = 90;
+
+/**
+ * One step of the Amazon lifetime backfill, driven by the scheduler so a multi-year history fills
+ * in over many ticks without a giant blocking pull or tripping the report quota. Walks
+ * Settings.ordersBackfillCursor backward one 30-day window per call; returns whether more remains.
+ * Idempotent (upsert), so a restart mid-backfill simply resumes from the stored cursor.
+ */
+export async function backfillAmazonOrdersStep(): Promise<{ done: boolean; imported: number; cursor: string }> {
+  const conn = await prisma.integration.findFirst({ where: { provider: "amazon", status: "connected" } });
+  if (!conn?.refreshTokenEnc) return { done: true, imported: 0, cursor: "" };
+
+  const { getOrgSettings, saveOrgSettings } = await import("@/lib/settings");
+  const s = await getOrgSettings();
+  const floor = new Date(Date.now() - AMAZON_BACKFILL_FLOOR_DAYS * 86_400_000);
+  // Start the cursor at "now" the first time; thereafter it's the oldest date already covered.
+  const cursorEnd = s.ordersBackfillCursor ? new Date(s.ordersBackfillCursor) : new Date();
+  if (cursorEnd <= floor) return { done: true, imported: 0, cursor: s.ordersBackfillCursor ?? "" };
+
+  const start = new Date(Math.max(floor.getTime(), cursorEnd.getTime() - BACKFILL_WINDOW_DAYS * 86_400_000));
+  const r = await importAmazonOrders({ start, end: cursorEnd });
+  const nextCursor = start.toISOString().slice(0, 10);
+  await saveOrgSettings({ ordersBackfillCursor: nextCursor });
+  return { done: start.getTime() <= floor.getTime(), imported: r.orders, cursor: nextCursor };
 }
 
 /** Import orders from every connected channel. Legs are independent — one failing never blocks the

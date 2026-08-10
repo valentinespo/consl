@@ -243,6 +243,7 @@ export type AmazonOrderRow = {
   sku: string;
   quantity: number;
   itemPrice: number;
+  promotionDiscount: number; // item-promotion-discount — subtract for net revenue
   currency: string;
 };
 
@@ -279,6 +280,7 @@ export async function getAllOrderRows(client: SpApiClient, startISO: string, end
     const iSku = h.indexOf("sku");
     const iQty = h.indexOf("quantity");
     const iPrice = h.indexOf("item-price");
+    const iPromo = h.indexOf("item-promotion-discount");
     const iCur = h.indexOf("currency");
     for (let i = 1; i < lines.length; i++) {
       const c = lines[i].split("\t");
@@ -295,6 +297,7 @@ export async function getAllOrderRows(client: SpApiClient, startISO: string, end
         sku,
         quantity: qty,
         itemPrice: iPrice >= 0 ? Number(c[iPrice]) || 0 : 0,
+        promotionDiscount: iPromo >= 0 ? Math.abs(Number(c[iPromo]) || 0) : 0,
         currency: iCur >= 0 ? c[iCur] || "USD" : "USD",
       });
     }
