@@ -9,10 +9,11 @@ import { ChannelMappingClient } from "@/components/ChannelMappingClient";
 
 export const dynamic = "force-dynamic";
 
-const PROVIDER_CHANNEL: Record<string, ChannelKey> = { shopify: "SHOPIFY", amazon: "AMAZON" };
+const PROVIDER_CHANNEL: Record<string, ChannelKey> = { shopify: "SHOPIFY", amazon: "AMAZON", tiktok: "TIKTOK" };
 const CHANNEL_TAB_LOGO: Record<ChannelKey, string> = {
   SHOPIFY: "/integrations/shopify.png",
   AMAZON: "/integrations/amazon-fba.png",
+  TIKTOK: "/integrations/tiktok.png",
 };
 
 export default async function MappingPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -20,7 +21,7 @@ export default async function MappingPage({ searchParams }: { searchParams: Prom
   const sp = await searchParams;
 
   const integrations = await prisma.integration.findMany({
-    where: { status: "connected", provider: { in: ["shopify", "amazon"] } },
+    where: { status: "connected", provider: { in: ["shopify", "amazon", "tiktok"] } },
     orderBy: { connectedAt: "asc" },
   });
   const channels = integrations.map((i) => PROVIDER_CHANNEL[i.provider]).filter(Boolean);

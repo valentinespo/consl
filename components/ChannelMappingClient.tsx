@@ -34,7 +34,7 @@ export function ChannelMappingClient({
   products,
   justConnected,
 }: {
-  channel: "SHOPIFY" | "AMAZON";
+  channel: "SHOPIFY" | "AMAZON" | "TIKTOK";
   tabs: Array<{ key: string; title: string; logo: string }>;
   rows: Row[];
   products: PickerProduct[];

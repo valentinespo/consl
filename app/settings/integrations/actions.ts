@@ -16,7 +16,7 @@ export async function disconnectIntegration(provider: Provider): Promise<{ ok: t
   try {
     await prismaBase.integration.updateMany({
       where: { orgId: gate.orgId, provider },
-      data: { status: "revoked", refreshTokenEnc: null, lastError: null },
+      data: { status: "revoked", refreshTokenEnc: null, accessTokenEnc: null, accessTokenExpiresAt: null, lastError: null },
     });
     revalidatePath("/settings/integrations");
     return { ok: true };

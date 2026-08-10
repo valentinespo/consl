@@ -82,9 +82,14 @@ model Integration {
   status       String        @default("connected") // connected | error | revoked
   // Encrypted refresh token (see lib/secret-box.ts). Null until the OAuth callback completes.
   refreshTokenEnc String?
-  sellerId        String? // platform's account id (Amazon selling-partner id, Shopify shop, …)
-  marketplaceId   String? // e.g. ATVPDKIKX0DER (Amazon US)
-  region          String? // na | eu | fe (Amazon endpoint group)
+  // Encrypted short-lived access token + its expiry, for platforms whose access tokens outlive a
+  // single request (TikTok: ~7 days) — cached so every call doesn't burn a refresh. Amazon keeps
+  // its per-request LWA tokens in memory and Shopify's offline token never expires; both stay null.
+  accessTokenEnc       String?
+  accessTokenExpiresAt DateTime?
+  sellerId        String? // platform's account id (Amazon selling-partner id, Shopify shop, TikTok shop id)
+  marketplaceId   String? // Amazon: e.g. ATVPDKIKX0DER (US); TikTok: the shop_cipher for shop-scoped calls
+  region          String? // Amazon: na | eu | fe (endpoint group); TikTok: shop region (e.g. US)
   scope           String? // granted OAuth scopes, if the platform returns them
   connectedAt     DateTime?
   lastSyncAt      DateTime?

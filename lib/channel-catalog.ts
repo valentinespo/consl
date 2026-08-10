@@ -14,11 +14,12 @@ import { shopifyGraphQL } from "@/lib/shopify";
  * their identifiers, listings keep their ignore flags.
  */
 
-export type ChannelKey = "SHOPIFY" | "AMAZON";
+export type ChannelKey = "SHOPIFY" | "AMAZON" | "TIKTOK";
 
 export const CHANNEL_TITLES: Record<ChannelKey, string> = {
   SHOPIFY: "Shopify",
   AMAZON: "Amazon",
+  TIKTOK: "TikTok Shop",
 };
 
 type ProductForMatch = {
@@ -45,21 +46,30 @@ export const PRODUCT_MATCH_SELECT = {
   tiktokSku: true,
 } as const;
 
-/** The product column that anchors a mapping for each channel. */
+/** The product column that anchors a mapping for each channel.
+ *  TIKTOK: Product has no column for TikTok's internal SKU id, so the seller SKU *is* the listing
+ *  identity (externalId = seller_sku, mirrored in tiktokSku) — same tradeoff Amazon already makes.
+ *  Renaming a seller SKU on TikTok therefore orphans the mapping until it's re-linked. */
 export function mappedExternalId(p: ProductForMatch, channel: ChannelKey): string | null {
-  return channel === "SHOPIFY" ? p.shopifyVariantId : p.sellerSku;
+  return channel === "SHOPIFY" ? p.shopifyVariantId : channel === "TIKTOK" ? p.tiktokSku : p.sellerSku;
 }
 
 export function mappingData(channel: ChannelKey, listing: { externalId: string; externalProductId: string | null; sku: string | null }) {
   return channel === "SHOPIFY"
     ? { shopifyVariantId: listing.externalId, shopifyProductId: listing.externalProductId, shopifySku: listing.sku }
-    : { sellerSku: listing.externalId, asin: listing.externalProductId };
+    : channel === "TIKTOK"
+      ? // externalId (not sku) is the anchor here — they hold the same seller SKU for TikTok, but
+        // only externalId is guaranteed non-null, and it's what mappedExternalId is compared against.
+        { tiktokSku: listing.externalId, tiktokProductId: listing.externalProductId }
+      : { sellerSku: listing.externalId, asin: listing.externalProductId };
 }
 
 export function unmappingData(channel: ChannelKey) {
   return channel === "SHOPIFY"
     ? { shopifyVariantId: null, shopifyProductId: null, shopifySku: null }
-    : { sellerSku: null, asin: null, fnsku: null };
+    : channel === "TIKTOK"
+      ? { tiktokSku: null, tiktokProductId: null }
+      : { sellerSku: null, asin: null, fnsku: null };
 }
 
 // ---------- refresh: pull the channel's live catalog into ChannelListing rows ----------
@@ -183,8 +193,74 @@ export async function refreshAmazonListings(): Promise<{ seen: number }> {
   return upsertListings("AMAZON", fetched);
 }
 
+type TikTokSearchProduct = {
+  id: string;
+  title?: string | null;
+  main_images?: Array<{ urls?: string[] | null; thumb_urls?: string[] | null }> | null;
+  skus?: Array<{
+    id: string;
+    seller_sku?: string | null;
+    price?: { sale_price?: string | null; tax_exclusive_price?: string | null } | null;
+  }> | null;
+};
+
+/**
+ * Pull every TikTok Shop product's SKUs. One ChannelListing per SKU — identity is the SELLER SKU
+ * (see mappedExternalId: Product has nowhere to hold TikTok's internal sku id), so SKUs the seller
+ * left blank can't be identified and are skipped, exactly like Amazon rows without a seller SKU.
+ */
+export async function refreshTikTokListings(): Promise<{ seen: number }> {
+  const conn = await prisma.integration.findFirst({ where: { provider: "tiktok", status: "connected" } });
+  if (!conn?.refreshTokenEnc || !conn.marketplaceId) throw new Error("TikTok Shop is not connected");
+  const { getTikTokAccessToken } = await import("@/lib/tiktok-oauth");
+  const { tiktokApi, TIKTOK_API_VERSION, TikTokError } = await import("@/lib/tiktok");
+  const token = await getTikTokAccessToken(conn);
+
+  const fetched: FetchedListing[] = [];
+  const seenIds = new Set<string>();
+  let pageToken: string | null = null;
+  for (let page = 0; page < 40; page++) {
+    const query: Record<string, string> = {
+      shop_cipher: conn.marketplaceId,
+      page_size: "100",
+      ...(pageToken ? { page_token: pageToken } : {}),
+    };
+    let data: { products?: TikTokSearchProduct[] | null; next_page_token?: string | null };
+    try {
+      data = await tiktokApi({ method: "POST", path: `/product/${TIKTOK_API_VERSION}/products/search`, accessToken: token, query, body: {} });
+    } catch (e) {
+      // Some API generations expose search as GET; fall back once rather than failing the refresh.
+      if (!(e instanceof TikTokError && e.status === 404)) throw e;
+      data = await tiktokApi({ method: "GET", path: `/product/${TIKTOK_API_VERSION}/products/search`, accessToken: token, query });
+    }
+    for (const p of data.products ?? []) {
+      const title = p.title?.trim() || p.id;
+      const image = p.main_images?.[0]?.thumb_urls?.[0] ?? p.main_images?.[0]?.urls?.[0] ?? null;
+      const skus = p.skus ?? [];
+      for (const s of skus) {
+        const sellerSku = s.seller_sku?.trim();
+        if (!sellerSku || seenIds.has(sellerSku)) continue; // no identity (or a duplicate) — unmappable
+        seenIds.add(sellerSku);
+        const rawPrice = s.price?.sale_price ?? s.price?.tax_exclusive_price;
+        fetched.push({
+          externalId: sellerSku,
+          externalProductId: p.id,
+          sku: sellerSku,
+          title: skus.length > 1 ? `${title} — ${sellerSku}` : title,
+          imageUrl: image,
+          price: rawPrice != null && rawPrice !== "" && !Number.isNaN(Number(rawPrice)) ? Number(rawPrice) : null,
+        });
+      }
+    }
+    pageToken = data.next_page_token || null;
+    if (!pageToken) break;
+  }
+
+  return upsertListings("TIKTOK", fetched);
+}
+
 export async function refreshChannelListingsCore(channel: ChannelKey): Promise<{ seen: number }> {
-  return channel === "SHOPIFY" ? refreshShopifyListings() : refreshAmazonListings();
+  return channel === "SHOPIFY" ? refreshShopifyListings() : channel === "TIKTOK" ? refreshTikTokListings() : refreshAmazonListings();
 }
 
 // ---------- suggestions: SKU first, then title similarity ----------

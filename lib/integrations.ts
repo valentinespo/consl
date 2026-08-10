@@ -49,7 +49,11 @@ export const PROVIDERS: Record<
   tiktok: {
     label: "TikTok Shop",
     blurb: "Orders and inventory for your TikTok Shop.",
-    facilities: [{ channel: "TIKTOK", code: "TTS", name: "TikTok Shop" }],
+    // Discovered per sales warehouse by syncTikTokWarehouses() — one facility per real place,
+    // matched by TikTok's warehouse id. Return warehouses are skipped: they hold no sellable stock.
+    facilities: [],
+    locationBased: true,
+    channel: "TIKTOK",
   },
 };
 
@@ -63,6 +67,7 @@ export const CHANNEL_LOGO: Record<string, string> = {
   AMAZON_FBA: "/integrations/amazon-fba.png",
   AMAZON_AWD: "/integrations/amazon-awd.png",
   SHOPIFY: "/integrations/shopify.png",
+  TIKTOK: "/integrations/tiktok.png",
 };
 
 /** Flat channel → display name map, for labelling a facility's origin anywhere in the UI.

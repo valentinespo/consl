@@ -391,7 +391,7 @@ export async function removeEntityImage(formData: FormData) {
 // ---------- Channel product mapping (the mapping screen's actions) ----------
 
 /** Re-pull a channel's live catalog and auto-map the no-judgement-needed exact matches. */
-export async function refreshChannelListings(channel: "SHOPIFY" | "AMAZON") {
+export async function refreshChannelListings(channel: "SHOPIFY" | "AMAZON" | "TIKTOK") {
   const gate = await requirePermission("catalog", "create");
   if (!gate.ok) return { ok: false as const, error: gate.error };
   const { refreshChannelListingsCore, autoMapExact } = await import("@/lib/channel-catalog");
@@ -417,7 +417,7 @@ export type MappingActionItem =
  * own (a bad row reports, the rest still land). Mapping only writes Product identifier columns —
  * costing data is untouched, so no recompute.
  */
-export async function applyChannelMappings(channel: "SHOPIFY" | "AMAZON", items: MappingActionItem[]) {
+export async function applyChannelMappings(channel: "SHOPIFY" | "AMAZON" | "TIKTOK", items: MappingActionItem[]) {
   const gate = await requirePermission("catalog", "create");
   if (!gate.ok) return { ok: false as const, error: gate.error };
   const { mappingData, unmappingData, mappedExternalId, PRODUCT_MATCH_SELECT } = await import("@/lib/channel-catalog");
