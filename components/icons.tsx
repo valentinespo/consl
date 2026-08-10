@@ -59,6 +59,9 @@ export const WarehouseFilled = regular(P.Warehouse);
 export const ImagesFilled = regular(P.Tag);
 /** Reorder / restock recommendations — a circular "order again" arrow. */
 export const ReorderFilled = regular(P.ArrowClockwise);
+/** Orders — incoming sales across the connected channels. A shopping bag, distinct from the
+ *  Purchases cart and the Purchase-Orders receipt. */
+export const OrdersFilled = regular(P.ShoppingBag);
 /** Integrations — two plugs meeting. */
 export const Plug = regular(P.Plugs);
 export const Download = regular(P.DownloadSimple);

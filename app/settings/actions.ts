@@ -97,9 +97,18 @@ function clampNum(v: number, lo: number, hi: number, fallback: number): number {
   return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback;
 }
 
-export async function saveSettings(input: {
-  syncEnabled: boolean;
-  syncTz: string;
+/** The company's timezone — sets where its day starts and ends, so daily figures land on the right
+ *  date. Its own tab now; sync itself is always on and needs no configuration. */
+export async function saveTimezone(syncTz: string) {
+  const gate = await requirePermission("settings", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  await saveOrgSettings({ syncTz: syncTz.trim() || "America/Argentina/Buenos_Aires" });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/** The org-wide restock defaults, its own tab. */
+export async function saveRestockDefaults(input: {
   defaultMinMonths: number;
   defaultLeadMonths: number;
   shipDays: number;
@@ -109,9 +118,7 @@ export async function saveSettings(input: {
 }) {
   const gate = await requirePermission("settings", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };
-  const data = {
-    syncEnabled: !!input.syncEnabled,
-    syncTz: input.syncTz.trim() || "America/Argentina/Buenos_Aires",
+  await saveOrgSettings({
     // Clamp to sane ranges but honour a real 0 where it's meaningful (floor/lead/ship can be 0);
     // only fall back to a default when the value is missing/NaN, matching the Inventory gear so the
     // two editors don't disagree. reorderTo must stay positive (it's a divisor of the order).
@@ -121,8 +128,7 @@ export async function saveSettings(input: {
     shipBufferX: clampNum(input.shipBufferX, 0, 100, 3),
     defaultReorderTo: clampNum(input.defaultReorderTo, 0.1, 120, 8),
     defaultBatchSize: Math.max(0, Math.round(input.defaultBatchSize)) || 0,
-  };
-  await saveOrgSettings(data);
+  });
   revalidatePath("/", "layout");
   return { ok: true as const };
 }

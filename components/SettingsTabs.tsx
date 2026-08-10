@@ -5,7 +5,8 @@ import { usePathname } from "next/navigation";
 
 const TABS = [
   { href: "/settings/company", label: "Company & team" },
-  { href: "/settings/sync", label: "Sync & restock" },
+  { href: "/settings/timezone", label: "Time zone" },
+  { href: "/settings/restock", label: "Restock defaults" },
   { href: "/settings/integrations", label: "Integrations" },
 ];
 

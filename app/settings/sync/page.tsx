@@ -1,11 +1,7 @@
-import { getAppSettings } from "@/app/settings/actions";
-import { SyncSettings } from "@/components/SyncSettings";
-import { requireView } from "@/lib/membership";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
-export default async function SyncSettingsPage() {
-  await requireView("settings");
-  const settings = await getAppSettings();
-  return <SyncSettings initial={settings} />;
+/** The old combined "Sync & restock" tab split into "Time zone" and "Restock defaults". Keep this
+ *  path alive so any bookmark lands somewhere sensible. */
+export default function SyncSettingsRedirect() {
+  redirect("/settings/timezone");
 }
