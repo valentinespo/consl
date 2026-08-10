@@ -148,6 +148,15 @@ export async function completeShopifyConnection(orgId: string, shop: string, acc
 
   // Pull the shop's catalog and auto-map exact matches, so the mapping screen the merchant lands
   // on is already pre-populated. Same failure posture: never undo a good connection.
+  // Order webhooks: subscribe this environment's URL as part of the connect, so pushes start
+  // flowing immediately. Failure must never undo a good connection — the daily ensure retries.
+  try {
+    const { ensureShopifyWebhooks } = await import("@/lib/shopify-webhooks");
+    await runWithOrg(orgId, () => ensureShopifyWebhooks());
+  } catch {
+    // retried daily
+  }
+
   try {
     const { refreshShopifyListings, autoMapExact } = await import("@/lib/channel-catalog");
     await runWithOrg(orgId, async () => {

@@ -235,6 +235,78 @@ async function oneOrdersChunk(client: SpApiClient, startISO: string, endISO: str
   return out;
 }
 
+export type LiveAmazonOrder = {
+  orderId: string;
+  purchaseDate: string;
+  status: string; // Pending | Unshipped | Shipped | Canceled …
+  fulfillment: string; // AFN (FBA) | MFN (merchant)
+  total: number; // OrderTotal — the buyer's grand total (items + tax + shipping, net of promos)
+  currency: string;
+};
+
+export type LiveAmazonOrderItem = { sku: string; quantity: number; itemPrice: number; promotionDiscount: number };
+
+/**
+ * Orders updated since `sinceISO`, from the live Orders API — the near-real-time feed. Amazon has
+ * no plain-HTTPS webhooks (their push is SQS/EventBridge only), so a cursored poll of this endpoint
+ * is the practical equivalent: cheap single GETs, minutes of latency, no AWS infrastructure.
+ */
+export async function getOrdersUpdatedSince(client: SpApiClient, sinceISO: string): Promise<LiveAmazonOrder[]> {
+  const out: LiveAmazonOrder[] = [];
+  let next: string | null = null;
+  for (let page = 0; page < 10; page++) {
+    const params = new URLSearchParams(
+      next
+        ? { NextToken: next, MarketplaceIds: client.marketplaceId }
+        : { MarketplaceIds: client.marketplaceId, LastUpdatedAfter: sinceISO, MaxResultsPerPage: "100" },
+    );
+    const r = await sp(client, `/orders/v0/orders?${params.toString()}`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(`orders poll: ${JSON.stringify(j).slice(0, 160)}`);
+    type ApiOrder = {
+      AmazonOrderId: string;
+      PurchaseDate?: string;
+      OrderStatus?: string;
+      FulfillmentChannel?: string;
+      OrderTotal?: { Amount?: string; CurrencyCode?: string };
+    };
+    for (const o of (j.payload?.Orders ?? []) as ApiOrder[]) {
+      out.push({
+        orderId: o.AmazonOrderId,
+        purchaseDate: o.PurchaseDate ?? "",
+        status: o.OrderStatus ?? "",
+        fulfillment: o.FulfillmentChannel ?? "",
+        total: Number(o.OrderTotal?.Amount) || 0,
+        currency: o.OrderTotal?.CurrencyCode ?? "USD",
+      });
+    }
+    next = j.payload?.NextToken ?? null;
+    if (!next) break;
+  }
+  return out;
+}
+
+/** Line items for one live order. Rate-limited hard by Amazon (0.5 rps) — the caller paces. */
+export async function getOrderItems(client: SpApiClient, orderId: string): Promise<LiveAmazonOrderItem[]> {
+  const r = await sp(client, `/orders/v0/orders/${orderId}/orderItems`);
+  const j = await r.json();
+  if (!r.ok) throw new Error(`order items: ${JSON.stringify(j).slice(0, 160)}`);
+  type ApiItem = {
+    SellerSKU?: string;
+    QuantityOrdered?: number;
+    ItemPrice?: { Amount?: string };
+    PromotionDiscount?: { Amount?: string };
+  };
+  return ((j.payload?.OrderItems ?? []) as ApiItem[])
+    .filter((i) => i.SellerSKU)
+    .map((i) => ({
+      sku: i.SellerSKU!,
+      quantity: i.QuantityOrdered ?? 0,
+      itemPrice: Number(i.ItemPrice?.Amount) || 0,
+      promotionDiscount: Math.abs(Number(i.PromotionDiscount?.Amount) || 0),
+    }));
+}
+
 export type AmazonOrderRow = {
   orderId: string;
   purchaseDate: string; // ISO

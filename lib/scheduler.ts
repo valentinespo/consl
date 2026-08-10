@@ -72,6 +72,15 @@ async function runOrgDaily(orgId: string): Promise<void> {
       if (s.lastSyncRun === day) return; // already ran today (cheap pre-check)
       if (!(await claimDay(orgId, day))) return; // another replica got there first
 
+      // Self-healing webhook registration: (re)subscribe this environment's URL for the org's
+      // shop. Idempotent; also how production registers itself after a promote.
+      try {
+        const { ensureShopifyWebhooks } = await import("@/lib/shopify-webhooks");
+        await ensureShopifyWebhooks();
+      } catch (e) {
+        console.error(`[scheduler] shopify webhook ensure failed for org ${orgId}:`, (e as Error).message);
+      }
+
       const r = await syncAmazonCore(); // no-op for orgs with no Amazon-mapped SKUs
       // Amazon's recent ORDERS ride the daily run too: one extra 3-day report keeps the Orders tab
       // current without burning quota (the data lags ~2 days at the source regardless).
@@ -161,6 +170,23 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
           }
         }
       }
+
+      // Amazon's near-real-time leg: a cursored sweep of the live Orders API every few minutes.
+      // Amazon has no plain webhooks (their push needs AWS queues), so this poll IS the instant
+      // path for Amazon; Shopify and TikTok get true webhooks and use this loop only as backstop.
+      if (conns.some((c) => c.provider === "amazon")) {
+        const lastPoll = lastAmazonPoll.get(orgId) ?? 0;
+        if (Date.now() - lastPoll >= AMAZON_POLL_MS) {
+          lastAmazonPoll.set(orgId, Date.now());
+          try {
+            const { pollAmazonOrders } = await import("@/lib/orders");
+            const r = await pollAmazonOrders();
+            if (r.orders > 0) console.log(`[scheduler] amazon live orders for ${orgId}: ${r.orders} updated`);
+          } catch (e) {
+            console.error(`[scheduler] amazon orders poll failed for org ${orgId}:`, (e as Error).message);
+          }
+        }
+      }
     });
   } catch (e) {
     console.error(`[scheduler] channel stock errored for org ${orgId}:`, (e as Error).message);
@@ -168,8 +194,10 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
 }
 
 const ORDERS_REFRESH_MS = 15 * 60 * 1000;
+const AMAZON_POLL_MS = 5 * 60 * 1000;
 // In-process per-org timestamps; a restart just refreshes once immediately, which is harmless.
 const lastOrdersRefresh = new Map<string, number>();
+const lastAmazonPoll = new Map<string, number>();
 
 let backfilling = false;
 

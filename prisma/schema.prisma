@@ -376,6 +376,9 @@ model Settings {
   // How far back Amazon orders have been backfilled ("YYYY-MM-DD"). The scheduler walks this cursor
   // backward one window per tick until it hits the report's ~2-year retention floor. Null = not started.
   ordersBackfillCursor String?
+  // Forward cursor for the near-real-time Amazon Orders API poll (ISO datetime of the last
+  // LastUpdatedAfter sweep). Null = start from a few hours back on first poll.
+  ordersPollCursor String?
   // Editable dashboard: [{ id, x, y, w, h }] of placed widgets (12-col grid). null = default layout.
   dashboardLayout   Json?
 

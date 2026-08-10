@@ -102,6 +102,67 @@ async function persist(
 
 const money = (v?: string | null) => (v != null && v !== "" && !Number.isNaN(Number(v)) ? Number(v) : 0);
 
+type ShopifyOrderNode = {
+  id: string;
+  name: string | null;
+  createdAt: string;
+  sourceName: string | null;
+  cancelledAt: string | null;
+  displayFinancialStatus: string | null;
+  app: { name: string | null } | null;
+  channelInformation: { channelDefinition: { channelName: string | null } | null } | null;
+  currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+  fulfillments: Array<{ location: { name: string | null } | null }>;
+  lineItems: {
+    nodes: Array<{
+      sku: string | null;
+      quantity: number;
+      variant: { id: string } | null;
+      discountedUnitPriceSet: { shopMoney: { amount: string } } | null;
+      originalUnitPriceSet: { shopMoney: { amount: string } } | null;
+    }>;
+  };
+};
+
+// One field list shared by the paged importer and the webhook's single-order refetch, so the two
+// can never drift apart on what an order means.
+const SHOPIFY_ORDER_FIELDS = `
+  id name createdAt sourceName cancelledAt displayFinancialStatus
+  app { name }
+  channelInformation { channelDefinition { channelName } }
+  currentTotalPriceSet { shopMoney { amount currencyCode } }
+  fulfillments(first: 3) { location { name } }
+  lineItems(first: 100) {
+    nodes { sku quantity variant { id } discountedUnitPriceSet { shopMoney { amount } } originalUnitPriceSet { shopMoney { amount } } }
+  }`;
+
+function mapShopifyOrder(o: ShopifyOrderNode): Fetched {
+  const location = o.fulfillments.map((f) => f.location?.name).find(Boolean);
+  return {
+    externalId: o.id,
+    orderNumber: o.name || null,
+    orderedAt: new Date(o.createdAt),
+    source: o.sourceName?.trim() || null,
+    sourceLabel: o.channelInformation?.channelDefinition?.channelName || o.app?.name || o.sourceName || null,
+    status: o.displayFinancialStatus,
+    cancelled: Boolean(o.cancelledAt),
+    fulfillment: null, // Shopify orders are seller-fulfilled from consl's perspective
+    fulfillmentLabel: location ?? "Unfulfilled",
+    total: money(o.currentTotalPriceSet?.shopMoney.amount),
+    currency: o.currentTotalPriceSet?.shopMoney.currencyCode ?? "USD",
+    lines: o.lineItems.nodes.map((l) => ({
+      sku: l.sku?.trim() || null,
+      quantity: l.quantity,
+      // Prefer the discounted unit price so promo/coupon discounts are reflected in revenue.
+      unitPrice: money(l.discountedUnitPriceSet?.shopMoney.amount ?? l.originalUnitPriceSet?.shopMoney.amount),
+      variantId: l.variant?.id ?? undefined,
+    })),
+  };
+}
+
+const shopifyResolver = (map: Awaited<ReturnType<typeof productMap>>) => (l: FetchedLine) =>
+  (l.variantId ? map.byVariant.get(l.variantId) : undefined) ?? (l.sku ? map.bySku.get(l.sku) ?? null : null);
+
 /**
  * Shopify orders — the dedup centerpiece. `sourceName` / app / channel tells us which sales
  * channel created each order ("web", "tiktok", …); we keep it so mirrored orders (TikTok selling
@@ -119,82 +180,42 @@ export async function importShopifyOrders(sinceDays?: number): Promise<OrderImpo
 
   for (let page = 0; page < 60; page++) {
     const data: {
-      orders: {
-        pageInfo: { hasNextPage: boolean; endCursor: string | null };
-        nodes: Array<{
-          id: string;
-          name: string | null;
-          createdAt: string;
-          sourceName: string | null;
-          cancelledAt: string | null;
-          displayFinancialStatus: string | null;
-          app: { name: string | null } | null;
-          channelInformation: { channelDefinition: { channelName: string | null } | null } | null;
-          currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
-          fulfillments: Array<{ location: { name: string | null } | null }>;
-          lineItems: {
-            nodes: Array<{
-              sku: string | null;
-              quantity: number;
-              variant: { id: string } | null;
-              // discounted = net of line/order discounts (what the buyer actually paid per unit).
-              discountedUnitPriceSet: { shopMoney: { amount: string } } | null;
-              originalUnitPriceSet: { shopMoney: { amount: string } } | null;
-            }>;
-          };
-        }>;
-      };
+      orders: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: ShopifyOrderNode[] };
     } = await shopifyGraphQL(
       conn.sellerId,
       token,
       `query($cursor: String, $q: String) {
         orders(first: 100, after: $cursor, sortKey: CREATED_AT, query: $q) {
           pageInfo { hasNextPage endCursor }
-          nodes {
-            id name createdAt sourceName cancelledAt displayFinancialStatus
-            app { name }
-            channelInformation { channelDefinition { channelName } }
-            currentTotalPriceSet { shopMoney { amount currencyCode } }
-            fulfillments(first: 3) { location { name } }
-            lineItems(first: 100) {
-              nodes { sku quantity variant { id } discountedUnitPriceSet { shopMoney { amount } } originalUnitPriceSet { shopMoney { amount } } }
-            }
-          }
+          nodes { ${SHOPIFY_ORDER_FIELDS} }
         }
       }`,
       { cursor, q: filter },
     );
-
-    for (const o of data.orders.nodes) {
-      const location = o.fulfillments.map((f) => f.location?.name).find(Boolean);
-      fetched.push({
-        externalId: o.id,
-        orderNumber: o.name || null,
-        orderedAt: new Date(o.createdAt),
-        source: o.sourceName?.trim() || null,
-        sourceLabel: o.channelInformation?.channelDefinition?.channelName || o.app?.name || o.sourceName || null,
-        status: o.displayFinancialStatus,
-        cancelled: Boolean(o.cancelledAt),
-        fulfillment: null, // Shopify orders are seller-fulfilled from consl's perspective
-        fulfillmentLabel: location ?? "Unfulfilled",
-        total: money(o.currentTotalPriceSet?.shopMoney.amount),
-        currency: o.currentTotalPriceSet?.shopMoney.currencyCode ?? "USD",
-        lines: o.lineItems.nodes.map((l) => ({
-          sku: l.sku?.trim() || null,
-          quantity: l.quantity,
-          // Prefer the discounted unit price so promo/coupon discounts are reflected in revenue.
-          unitPrice: money(l.discountedUnitPriceSet?.shopMoney.amount ?? l.originalUnitPriceSet?.shopMoney.amount),
-          variantId: l.variant?.id ?? undefined,
-        })),
-      });
-    }
+    fetched.push(...data.orders.nodes.map(mapShopifyOrder));
     if (!data.orders.pageInfo.hasNextPage) break;
     cursor = data.orders.pageInfo.endCursor;
   }
 
-  return persist("SHOPIFY", fetched, (l) =>
-    (l.variantId ? map.byVariant.get(l.variantId) : undefined) ?? (l.sku ? map.bySku.get(l.sku) ?? null : null),
+  return persist("SHOPIFY", fetched, shopifyResolver(map));
+}
+
+/** Refetch ONE Shopify order by gid and upsert it — the webhook handler's workhorse. The webhook
+ *  payload is treated as a doorbell only; the data always comes from the API, so a forged or stale
+ *  payload can never write anything. */
+export async function importShopifyOrderById(orderGid: string): Promise<OrderImportResult> {
+  const conn = await prisma.integration.findFirst({ where: { provider: "shopify", status: "connected" } });
+  if (!conn?.refreshTokenEnc || !conn.sellerId) return { channel: "SHOPIFY", orders: 0, lines: 0 };
+  const token = decryptSecret(conn.refreshTokenEnc);
+  const data: { node: ShopifyOrderNode | null } = await shopifyGraphQL(
+    conn.sellerId,
+    token,
+    `query($id: ID!) { node(id: $id) { ... on Order { ${SHOPIFY_ORDER_FIELDS} } } }`,
+    { id: orderGid },
   );
+  if (!data.node?.id) return { channel: "SHOPIFY", orders: 0, lines: 0 };
+  const map = await productMap("SHOPIFY");
+  return persist("SHOPIFY", [mapShopifyOrder(data.node)], shopifyResolver(map));
 }
 
 type TikTokOrder = {
@@ -244,49 +265,65 @@ export async function importTikTokOrders(sinceDays?: number): Promise<OrderImpor
       query,
       body: sinceDays ? { create_time_ge: Math.floor(Date.now() / 1000) - sinceDays * 86_400 } : {},
     });
-    for (const o of data.orders ?? []) {
-      const status = o.status ?? o.order_status ?? null;
-      const cancelled = (status ?? "").toUpperCase().includes("CANCEL");
-      const byTikTok = o.fulfillment_type?.includes("TIKTOK");
-      const label = (o.warehouse_id ? warehouseName.get(o.warehouse_id) : undefined) ?? (byTikTok ? "TikTok" : o.fulfillment_type ? "Seller" : null);
-      fetched.push({
-        externalId: o.id,
-        orderNumber: o.id,
-        orderedAt: o.create_time ? new Date(o.create_time * 1000) : new Date(0),
-        source: null,
-        sourceLabel: null,
-        status,
-        cancelled,
-        fulfillment: byTikTok ? "TIKTOK" : o.fulfillment_type ? "SELLER" : null,
-        fulfillmentLabel: label,
-        // The order's Total is what the buyer actually PAID — shipping, taxes and discounts all
-        // applied (a 100%-discounted sample is $0). Product-only revenue lives on the lines.
-        total: money(o.payment?.total_amount ?? o.payment?.sub_total),
-        currency: o.payment?.currency ?? "USD",
-        lines: (o.line_items ?? []).map((l) => ({
-          sku: l.seller_sku?.trim() || null,
-          quantity: 1, // TikTok returns one line_item per unit; grouped below
-          // Net of seller + platform discounts, so the total counts discounts (per the merchant's ask).
-          unitPrice: Math.max(0, money(l.sale_price ?? l.original_price) - money(l.seller_discount) - money(l.platform_discount)),
-        })),
-      });
-    }
+    fetched.push(...(data.orders ?? []).map((o) => mapTikTokOrder(o, warehouseName)));
     pageToken = data.next_page_token || null;
     if (!pageToken) break;
   }
 
-  // TikTok emits one line_item per unit — collapse same-SKU lines into a quantity.
-  for (const o of fetched) {
-    const bySku = new Map<string, { sku: string | null; quantity: number; unitPrice: number }>();
-    for (const l of o.lines) {
-      const key = l.sku ?? "";
-      const cur = bySku.get(key);
-      if (cur) cur.quantity += 1;
-      else bySku.set(key, { ...l });
-    }
-    o.lines = [...bySku.values()];
-  }
+  return persist("TIKTOK", fetched, (l) => (l.sku ? map.bySku.get(l.sku) ?? null : null));
+}
 
+function mapTikTokOrder(o: TikTokOrder, warehouseName: Map<string, string>): Fetched {
+  const status = o.status ?? o.order_status ?? null;
+  const byTikTok = o.fulfillment_type?.includes("TIKTOK");
+  // TikTok emits one line_item per unit — collapse same-SKU lines into a quantity.
+  const bySku = new Map<string, FetchedLine>();
+  for (const l of o.line_items ?? []) {
+    const sku = l.seller_sku?.trim() || null;
+    // Net of seller + platform discounts, so the total counts discounts (per the merchant's ask).
+    const unitPrice = Math.max(0, money(l.sale_price ?? l.original_price) - money(l.seller_discount) - money(l.platform_discount));
+    const cur = bySku.get(sku ?? "");
+    if (cur) cur.quantity += 1;
+    else bySku.set(sku ?? "", { sku, quantity: 1, unitPrice });
+  }
+  return {
+    externalId: o.id,
+    orderNumber: o.id,
+    orderedAt: o.create_time ? new Date(o.create_time * 1000) : new Date(0),
+    source: null,
+    sourceLabel: null,
+    status,
+    cancelled: (status ?? "").toUpperCase().includes("CANCEL"),
+    fulfillment: byTikTok ? "TIKTOK" : o.fulfillment_type ? "SELLER" : null,
+    fulfillmentLabel:
+      (o.warehouse_id ? warehouseName.get(o.warehouse_id) : undefined) ?? (byTikTok ? "TikTok" : o.fulfillment_type ? "Seller" : null),
+    // The order's Total is what the buyer actually PAID — shipping, taxes and discounts all
+    // applied (a 100%-discounted sample is $0). Product-only revenue lives on the lines.
+    total: money(o.payment?.total_amount ?? o.payment?.sub_total),
+    currency: o.payment?.currency ?? "USD",
+    lines: [...bySku.values()],
+  };
+}
+
+/** Refetch specific TikTok orders by id and upsert them — the webhook handler's workhorse. Like
+ *  Shopify's, the webhook is only a doorbell: the data always comes from the API. */
+export async function importTikTokOrderIds(ids: string[]): Promise<OrderImportResult> {
+  const conn = await prisma.integration.findFirst({ where: { provider: "tiktok", status: "connected" } });
+  if (!conn?.marketplaceId || ids.length === 0) return { channel: "TIKTOK", orders: 0, lines: 0 };
+  const { getTikTokAccessToken } = await import("@/lib/tiktok-oauth");
+  const { tiktokApi, TIKTOK_API_VERSION } = await import("@/lib/tiktok");
+  const token = await getTikTokAccessToken(conn);
+  const map = await productMap("TIKTOK");
+  const warehouses = await prisma.facility.findMany({ where: { channel: "TIKTOK", externalId: { not: null } }, select: { externalId: true, name: true } });
+  const warehouseName = new Map(warehouses.map((f) => [f.externalId!, f.name]));
+
+  const data = await tiktokApi<{ orders?: TikTokOrder[] | null }>({
+    method: "GET",
+    path: `/order/${TIKTOK_API_VERSION}/orders`,
+    accessToken: token,
+    query: { shop_cipher: conn.marketplaceId, ids: ids.slice(0, 50).join(",") },
+  });
+  const fetched = (data.orders ?? []).map((o) => mapTikTokOrder(o, warehouseName));
   return persist("TIKTOK", fetched, (l) => (l.sku ? map.bySku.get(l.sku) ?? null : null));
 }
 
@@ -395,4 +432,70 @@ export async function importAllOrders(amazonSinceDays = 90): Promise<OrderImport
     }
   }
   return out;
+}
+
+/**
+ * Near-real-time Amazon orders: a cursored sweep of the live Orders API (orders updated since the
+ * last sweep). Amazon offers no plain-HTTPS webhooks — their push needs AWS queues — so a
+ * few-minute poll of this feed is the practical equivalent and needs no extra infrastructure.
+ *
+ * The Orders API's OrderTotal is already the buyer's grand total (items + tax + shipping, net of
+ * promos), matching the report-based importer's math. Lines carry net product revenue. Pending
+ * orders often lack totals/items; they refresh on a later sweep once Amazon finalises them.
+ */
+export async function pollAmazonOrders(): Promise<OrderImportResult & { cursor?: string }> {
+  const conn = await prisma.integration.findFirst({ where: { provider: "amazon", status: "connected" } });
+  if (!conn?.refreshTokenEnc) return { channel: "AMAZON", orders: 0, lines: 0 };
+  const { makeClient, getOrdersUpdatedSince, getOrderItems } = await import("@/lib/spapi");
+  const { getOrgSettings, saveOrgSettings } = await import("@/lib/settings");
+  const client = makeClient({
+    refreshToken: decryptSecret(conn.refreshTokenEnc),
+    marketplaceId: conn.marketplaceId ?? "ATVPDKIKX0DER",
+    region: conn.region ?? "na",
+  });
+  const map = await productMap("AMAZON");
+
+  const s = await getOrgSettings();
+  // First sweep reaches back a few hours; afterwards, from just before the last sweep (2-min
+  // overlap so a clock skew can't drop an order — the upsert makes overlap free).
+  const since = s.ordersPollCursor
+    ? new Date(new Date(s.ordersPollCursor).getTime() - 2 * 60_000)
+    : new Date(Date.now() - 6 * 60 * 60_000);
+  const sweepStart = new Date();
+  const changed = await getOrdersUpdatedSince(client, since.toISOString());
+
+  const fetched: Fetched[] = [];
+  for (const o of changed.slice(0, 60)) {
+    let lines: FetchedLine[] = [];
+    try {
+      const items = await getOrderItems(client, o.orderId);
+      lines = items.map((i) => ({
+        sku: i.sku,
+        quantity: i.quantity,
+        unitPrice: i.quantity > 0 ? Math.max(0, i.itemPrice - i.promotionDiscount) / i.quantity : 0,
+      }));
+      // getOrderItems is hard-limited to ~0.5 req/s — pace bursts so a busy sweep can't 429.
+      if (changed.length > 10) await new Promise((r) => setTimeout(r, 2100));
+    } catch {
+      // items unavailable (fresh Pending order) — keep the order, lines arrive on a later sweep
+    }
+    fetched.push({
+      externalId: o.orderId,
+      orderNumber: o.orderId,
+      orderedAt: o.purchaseDate ? new Date(o.purchaseDate) : new Date(0),
+      source: null,
+      sourceLabel: null,
+      status: o.status,
+      cancelled: o.status === "Canceled",
+      fulfillment: o.fulfillment === "AFN" ? "Amazon" : "Merchant",
+      fulfillmentLabel: o.fulfillment === "AFN" ? "Amazon FBA" : "Merchant",
+      total: o.total,
+      currency: o.currency,
+      lines,
+    });
+  }
+
+  const result = await persist("AMAZON", fetched, (l) => (l.sku ? map.bySku.get(l.sku) ?? null : null));
+  await saveOrgSettings({ ordersPollCursor: sweepStart.toISOString() });
+  return { ...result, cursor: sweepStart.toISOString() };
 }
