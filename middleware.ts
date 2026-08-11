@@ -55,7 +55,13 @@ const devBypass = process.env.NODE_ENV === "development" && process.env.ALLOW_DE
 export default devBypass
   ? (req: Request & { nextUrl: URL }) => {
       const legacy = rewriteLegacyUploads(req);
-      return legacy ? NextResponse.rewrite(legacy) : NextResponse.next();
+      if (legacy) return NextResponse.rewrite(legacy);
+      // The layout reads x-pathname to know where it is (e.g. the onboarding gate deciding
+      // whether to redirect). Without it, an un-onboarded org redirect-loops on /onboarding —
+      // so the bypass branch must pass it through exactly like the enforced branch does.
+      const headers = new Headers(req.headers);
+      headers.set("x-pathname", req.nextUrl.pathname);
+      return NextResponse.next({ request: { headers } });
     }
   : enforced;
 

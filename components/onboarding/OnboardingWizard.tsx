@@ -162,7 +162,7 @@ export function OnboardingWizard(props: {
       <AccessProvider caps={props.caps}>
         <div className="min-h-dvh bg-header">
           {/* Top strip: the product mark, which company is being set up, and the only exits. */}
-          <div className="mx-auto flex max-w-[1180px] items-center gap-3 px-4 pb-2 pt-5 sm:px-6">
+          <div className="mx-auto flex max-w-[1040px] items-center gap-3 px-4 pb-2 pt-5 sm:px-6">
             <AppLogo className="iso-invert" />
             <span className="text-[14px] font-semibold text-ink">consl</span>
             <span className="text-[12.5px] text-muted">· setting up</span>
@@ -175,7 +175,7 @@ export function OnboardingWizard(props: {
           </div>
 
           {/* Progress rail */}
-          <div className="mx-auto max-w-[1180px] px-4 sm:px-6">
+          <div className="mx-auto max-w-[1040px] px-4 sm:px-6">
             {/* One line, always: the bar scrolls sideways before it ever wraps a step down. */}
             <div className="flex flex-nowrap items-center overflow-x-auto rounded-xl border border-border bg-surface px-3 py-2.5">
               {STEPS.map((title, i) => (
@@ -205,7 +205,7 @@ export function OnboardingWizard(props: {
           </div>
 
           {/* Step body */}
-          <main className="mx-auto max-w-[1180px] px-4 pb-28 pt-6 sm:px-6">
+          <main className="mx-auto max-w-[1040px] px-4 pb-28 pt-6 sm:px-6">
             {step === 0 && (
               <StepCompany company={props.company} isOwner={props.isOwner} syncTz={props.syncTz} companySaveRef={companySaveRef} tzSaveRef={tzSaveRef} />
             )}
@@ -242,7 +242,7 @@ export function OnboardingWizard(props: {
 
           {/* Footer nav — sticky so Continue is always in reach on long steps. */}
           <div className="fixed inset-x-0 bottom-0 border-t border-border bg-surface/95 backdrop-blur">
-            <div className="mx-auto flex max-w-[1180px] flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
+            <div className="mx-auto flex max-w-[1040px] flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
               {step > 0 && (
                 <button
                   onClick={back}

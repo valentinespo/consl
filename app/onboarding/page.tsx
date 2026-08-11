@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { currentUserId } from "@/lib/current-user";
 import { getCurrentOrg } from "@/lib/org";
 import { listMyOrgs } from "@/lib/orgs";
 import { currentRole, getMyAccess } from "@/lib/membership";
@@ -30,7 +29,8 @@ export default async function OnboardingPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  if (!(await currentUserId())) redirect("/sign-in");
+  // No explicit session check: the middleware already walls this route off for signed-out
+  // visitors, and the local-dev bypass (no Clerk) must still be able to render it.
   const org = await getCurrentOrg();
   if (!org) redirect("/welcome");
   if (org.onboardedAt) redirect("/");
