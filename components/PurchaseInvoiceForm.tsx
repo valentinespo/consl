@@ -7,6 +7,7 @@ import { DatePicker } from "@/components/DatePicker";
 import { useMoney } from "@/components/CurrencyProvider";
 import { inflectUnit } from "@/lib/format";
 import { upsertPurchaseInvoice, deletePurchaseInvoice, type PurchaseLineInput } from "@/app/purchases/actions";
+import { createFacility } from "@/app/facilities/actions";
 import { SelectOrCreate, type Opt } from "@/components/SelectOrCreate";
 import { SearchSelect } from "@/components/SearchSelect";
 import { SkuAvatar } from "@/components/ui";
@@ -110,6 +111,26 @@ export function PurchaseInvoiceForm({
   const dirty = !invoice || currentSnapshot !== originalSnapshot;
 
   const productOpts: Opt[] = options.products.map((p) => ({ value: p.id, label: p.code }));
+  const facilityOpts: Opt[] = options.facilities.map((f) => ({ value: f.id, label: f.code }));
+  // Which line's facility picker is in inline-create mode — that cell widens so the input fits.
+  const [creatingFacFor, setCreatingFacFor] = useState<string | null>(null);
+
+  /** Create a facility without leaving the purchase. The typed text is the NAME; the short code is
+   *  derived from its first word (how codes read app-wide), suffixed if taken. */
+  async function createFacilityInline(name: string): Promise<Opt | { error: string }> {
+    const base = (name.toUpperCase().replace(/[^A-Z0-9 ]/g, " ").trim().split(/\s+/)[0] ?? "").slice(0, 6) || "FAC";
+    let lastError = "Couldn't create";
+    for (const code of [base, ...Array.from({ length: 4 }, (_, i) => `${base}${i + 2}`.slice(0, 8))]) {
+      const res = await createFacility({ code, name, type: "co-packer" });
+      if (res.ok) {
+        router.refresh(); // the other lines' pickers pick the new facility up too
+        return { value: res.id, label: code };
+      }
+      lastError = res.error;
+      if (!res.error.includes("already exists")) break; // only a code clash is worth retrying
+    }
+    return { error: lastError };
+  }
 
   function patch(key: string, p: Partial<EditLine>) {
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...p } : l)));
@@ -205,14 +226,24 @@ export function PurchaseInvoiceForm({
           return (
             <div key={l.key} className="rounded-lg border border-border bg-surface p-2.5">
               <div className="flex flex-wrap items-end gap-2">
-                <MiniField label="Facility" className={material.skuSpecific ? "w-[88px]" : "min-w-[120px] flex-1"}>
-                  <select value={l.facilityId} onChange={(e) => patch(l.key, { facilityId: e.target.value })} className={inputCls}>
-                    {options.facilities.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.code}
-                      </option>
-                    ))}
-                  </select>
+                <MiniField
+                  label="Facility"
+                  className={
+                    creatingFacFor === l.key
+                      ? "min-w-[230px] flex-1"
+                      : material.skuSpecific
+                        ? "w-[88px]"
+                        : "min-w-[120px] flex-1"
+                  }
+                >
+                  <SelectOrCreate
+                    value={l.facilityId}
+                    onChange={(v) => patch(l.key, { facilityId: v })}
+                    options={facilityOpts}
+                    createPlaceholder="Name the facility, then press Enter"
+                    onCreate={createFacilityInline}
+                    onCreatingChange={(creating) => setCreatingFacFor(creating ? l.key : null)}
+                  />
                 </MiniField>
                 {material.skuSpecific && (
                   <MiniField label="SKU" className="min-w-[160px] flex-1">
