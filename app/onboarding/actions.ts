@@ -54,7 +54,7 @@ export async function advanceOnboarding(opts?: { skipChannels?: boolean }) {
 
   if (step === 0) {
     if (!org.name.trim() || !org.address?.trim() || !org.email?.trim()) {
-      return { ok: false as const, error: "Fill in your company name, address and email — and press Save — before continuing." };
+      return { ok: false as const, error: "Fill in your company name, address and email before continuing." };
     }
   }
 

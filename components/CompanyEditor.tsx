@@ -1,12 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui";
 import { BrandingCard, ImageSlot, type Branding } from "@/components/BrandingCard";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
 import { AddressInput } from "@/components/AddressField";
 import { updateCompanyProfile } from "@/app/settings/actions";
+
+/** Lets a parent trigger this editor's save (the onboarding wizard's Continue saves for the
+ *  user instead of making them find the Save button). Resolves true when there was nothing to
+ *  save or the save succeeded. */
+export type EditorSaveRef = React.MutableRefObject<(() => Promise<boolean>) | null>;
 
 export type CompanyForEdit = {
   name: string;
@@ -57,7 +62,7 @@ function sample(locale: string): string {
   }
 }
 
-export function CompanyEditor({ company, isOwner }: { company: CompanyForEdit; isOwner: boolean }) {
+export function CompanyEditor({ company, isOwner, saveRef }: { company: CompanyForEdit; isOwner: boolean; saveRef?: EditorSaveRef }) {
   const router = useRouter();
   const [name, setName] = useState(company.name);
   const [legalName, setLegalName] = useState(company.legalName ?? "");
@@ -99,18 +104,28 @@ export function CompanyEditor({ company, isOwner }: { company: CompanyForEdit; i
     setError(null);
   }
 
-  async function save() {
+  async function save(): Promise<boolean> {
     setError(null);
     setPending(true);
     const res = await updateCompanyProfile({ name, legalName, address, email, phone, currencySymbol, currencyCode, locale, brandInk, brandBand });
     setPending(false);
     if (!res.ok) {
       setError(res.error);
-      return;
+      return false;
     }
     setSaved(true);
     router.refresh();
+    return true;
   }
+
+  // Re-assigned every render so the parent always calls the latest state. Clean save = no-op.
+  useEffect(() => {
+    if (!saveRef) return;
+    saveRef.current = () => (dirty ? save() : Promise.resolve(true));
+    return () => {
+      saveRef.current = null;
+    };
+  });
 
   return (
     <>

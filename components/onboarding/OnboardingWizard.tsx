@@ -1,13 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SignOutButton } from "@clerk/nextjs";
 import { AppLogo } from "@/components/AppLogo";
 import { OrgSwitcher } from "@/components/OrgSwitcher";
 import { CurrencyProvider, useMoney } from "@/components/CurrencyProvider";
 import { AccessProvider } from "@/components/AccessProvider";
-import { CompanyEditor, type CompanyForEdit } from "@/components/CompanyEditor";
+import { CompanyEditor, type CompanyForEdit, type EditorSaveRef } from "@/components/CompanyEditor";
 import { TimezoneSettings } from "@/components/TimezoneSettings";
 import { IntegrationControls } from "@/components/IntegrationControls";
 import { ChannelMappingClient } from "@/components/ChannelMappingClient";
@@ -90,12 +90,28 @@ export function OnboardingWizard(props: {
 
   const anyConnected = props.providers.some((p) => p.connected);
   const ownFacilities = props.facilities.filter((f) => !f.channel);
+  // Step 0's editors save themselves when Continue is pressed — nobody should have to find the
+  // Save button to leave the first screen.
+  const companySaveRef: EditorSaveRef = useRef(null);
+  const tzSaveRef: EditorSaveRef = useRef(null);
 
   async function next() {
     setError(null);
     setWarning(null);
     setBusy(true);
     try {
+      if (step === 0) {
+        const savedCompany = companySaveRef.current ? await companySaveRef.current() : true;
+        if (!savedCompany) {
+          setError("Couldn't save your company details — check the form above.");
+          return;
+        }
+        const savedTz = tzSaveRef.current ? await tzSaveRef.current() : true;
+        if (!savedTz) {
+          setError("Couldn't save your time zone — check the form above.");
+          return;
+        }
+      }
       if (step === 2 && props.products.length > 0) {
         const entries = props.products.map((p) => {
           const v = cogValue(p).trim();
@@ -189,7 +205,9 @@ export function OnboardingWizard(props: {
 
           {/* Step body */}
           <main className="mx-auto max-w-[1020px] px-4 pb-28 pt-6 sm:px-6">
-            {step === 0 && <StepCompany company={props.company} isOwner={props.isOwner} syncTz={props.syncTz} />}
+            {step === 0 && (
+              <StepCompany company={props.company} isOwner={props.isOwner} syncTz={props.syncTz} companySaveRef={companySaveRef} tzSaveRef={tzSaveRef} />
+            )}
             {step === 1 && (
               <StepChannels
                 providers={props.providers}
@@ -267,15 +285,27 @@ function StepHeader({ title, body }: { title: string; body: string }) {
 
 /* ---------------------------------- Step 0: company ---------------------------------- */
 
-function StepCompany({ company, isOwner, syncTz }: { company: CompanyForEdit; isOwner: boolean; syncTz: string }) {
+function StepCompany({
+  company,
+  isOwner,
+  syncTz,
+  companySaveRef,
+  tzSaveRef,
+}: {
+  company: CompanyForEdit;
+  isOwner: boolean;
+  syncTz: string;
+  companySaveRef: EditorSaveRef;
+  tzSaveRef: EditorSaveRef;
+}) {
   return (
     <div className="space-y-4">
       <StepHeader
         title="Set up your company"
-        body="These details appear across the app and on the documents consl generates for you. Fill in at least your company name, address and email, press Save, then continue. The time zone decides when your business day starts and ends."
+        body="These details appear across the app and on the documents consl generates for you. Fill in at least your company name, address and email — Continue saves everything for you. The time zone decides when your business day starts and ends."
       />
-      <CompanyEditor company={company} isOwner={isOwner} />
-      <TimezoneSettings initialTz={syncTz} lastSyncAt={null} />
+      <CompanyEditor company={company} isOwner={isOwner} saveRef={companySaveRef} />
+      <TimezoneSettings initialTz={syncTz} lastSyncAt={null} saveRef={tzSaveRef} />
     </div>
   );
 }

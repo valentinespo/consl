@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { RefreshCw, Clock } from "@/components/icons";
 import { Card } from "@/components/ui";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
 import { useMoney } from "@/components/CurrencyProvider";
 import { saveTimezone, runSyncNow } from "@/app/settings/actions";
+import type { EditorSaveRef } from "@/components/CompanyEditor";
 
 /** "GMT-03:00" for a zone, as of right now — offsets shift with daylight saving, so this is
  *  computed rather than stored. */
@@ -42,7 +43,7 @@ function useZones(current: string) {
   }, [current]);
 }
 
-export function TimezoneSettings({ initialTz, lastSyncAt }: { initialTz: string; lastSyncAt: string | null }) {
+export function TimezoneSettings({ initialTz, lastSyncAt, saveRef }: { initialTz: string; lastSyncAt: string | null; saveRef?: EditorSaveRef }) {
   const router = useRouter();
   const { locale } = useMoney();
   const [tz, setTz] = useState(initialTz);
@@ -71,6 +72,26 @@ export function TimezoneSettings({ initialTz, lastSyncAt }: { initialTz: string;
       router.refresh();
     });
   }
+
+  // Parent-triggered save (the onboarding wizard's Continue) — a picked-but-unsaved zone must
+  // not be silently lost. Unchanged = nothing to do.
+  useEffect(() => {
+    if (!saveRef) return;
+    saveRef.current = async () => {
+      if (tz === initialTz) return true;
+      const r = await saveTimezone(tz);
+      if (!r.ok) {
+        setError(r.error);
+        return false;
+      }
+      setSaved(true);
+      router.refresh();
+      return true;
+    };
+    return () => {
+      saveRef.current = null;
+    };
+  });
 
   const lastSynced = lastSyncAt
     ? new Date(lastSyncAt).toLocaleString(locale, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
