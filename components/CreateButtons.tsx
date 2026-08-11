@@ -76,11 +76,11 @@ export function NewProductButton() {
       {open && (
         <Modal title="New SKU" onClose={() => setOpen(false)}>
           <div className="space-y-3">
-            <Field label="SKU code">
-              <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} className={inputCls} placeholder="Your internal code" />
-            </Field>
             <Field label="Product name">
               <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Lavender Hand Cream" />
+            </Field>
+            <Field label="Abbreviation">
+              <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} className={inputCls} placeholder="Your internal code, e.g. LAV" />
             </Field>
             {error && <div className="text-[12px] text-negative">{error}</div>}
             <div className="flex justify-end gap-2 pt-1">
