@@ -162,7 +162,7 @@ export function OnboardingWizard(props: {
       <AccessProvider caps={props.caps}>
         <div className="min-h-dvh bg-header">
           {/* Top strip: the product mark, which company is being set up, and the only exits. */}
-          <div className="mx-auto flex max-w-[1020px] items-center gap-3 px-4 pb-2 pt-5 sm:px-6">
+          <div className="mx-auto flex max-w-[1180px] items-center gap-3 px-4 pb-2 pt-5 sm:px-6">
             <AppLogo className="iso-invert" />
             <span className="text-[14px] font-semibold text-ink">consl</span>
             <span className="text-[12.5px] text-muted">· setting up</span>
@@ -175,13 +175,14 @@ export function OnboardingWizard(props: {
           </div>
 
           {/* Progress rail */}
-          <div className="mx-auto max-w-[1020px] px-4 sm:px-6">
-            <div className="flex flex-wrap items-center gap-y-1.5 rounded-xl border border-border bg-surface px-3 py-2.5">
+          <div className="mx-auto max-w-[1180px] px-4 sm:px-6">
+            {/* One line, always: the bar scrolls sideways before it ever wraps a step down. */}
+            <div className="flex flex-nowrap items-center overflow-x-auto rounded-xl border border-border bg-surface px-3 py-2.5">
               {STEPS.map((title, i) => (
-                <div key={title} className="flex items-center">
-                  {i > 0 && <span className="mx-2 h-px w-4 bg-border sm:w-6" />}
+                <div key={title} className="flex shrink-0 items-center">
+                  {i > 0 && <span className="mx-1.5 h-px w-3 shrink-0 bg-border sm:mx-2 sm:w-5" />}
                   <span
-                    className={`flex items-center gap-1.5 text-[12px] font-medium ${
+                    className={`flex items-center gap-1.5 whitespace-nowrap text-[12px] font-medium ${
                       i === step ? "text-ink" : i < step ? "text-accent" : "text-muted"
                     }`}
                   >
@@ -204,7 +205,7 @@ export function OnboardingWizard(props: {
           </div>
 
           {/* Step body */}
-          <main className="mx-auto max-w-[1020px] px-4 pb-28 pt-6 sm:px-6">
+          <main className="mx-auto max-w-[1180px] px-4 pb-28 pt-6 sm:px-6">
             {step === 0 && (
               <StepCompany company={props.company} isOwner={props.isOwner} syncTz={props.syncTz} companySaveRef={companySaveRef} tzSaveRef={tzSaveRef} />
             )}
@@ -241,7 +242,7 @@ export function OnboardingWizard(props: {
 
           {/* Footer nav — sticky so Continue is always in reach on long steps. */}
           <div className="fixed inset-x-0 bottom-0 border-t border-border bg-surface/95 backdrop-blur">
-            <div className="mx-auto flex max-w-[1020px] flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
+            <div className="mx-auto flex max-w-[1180px] flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
               {step > 0 && (
                 <button
                   onClick={back}
@@ -278,7 +279,7 @@ function StepHeader({ title, body }: { title: string; body: string }) {
   return (
     <div className="mb-5">
       <h1 className="text-[20px] font-semibold tracking-tight text-ink">{title}</h1>
-      <p className="mt-1 max-w-[72ch] text-[13px] leading-relaxed text-muted">{body}</p>
+      <p className="mt-1 text-[13px] leading-relaxed text-muted">{body}</p>
     </div>
   );
 }
@@ -423,9 +424,9 @@ function StepProducts({
           <h2 className="text-[14px] font-semibold text-ink">Starting cost per unit</h2>
           <NewProductButton />
         </div>
-        <p className="mb-4 max-w-[72ch] text-[12.5px] text-muted">
+        <p className="mb-4 text-[12.5px] text-muted">
           For each product: what does ONE unit cost you today, all-in (make or buy)? This average prices only the stock you already
-          hold — the day you produce through consl, every new unit gets its real, calculated cost instead.
+          hold — the day you produce through consl, every new unit gets its real, FIFO-calculated cost instead.
         </p>
         {products.length === 0 ? (
           <div className="rounded-lg border border-border bg-surface-2 px-4 py-6 text-center text-[13px] text-muted">
@@ -502,7 +503,7 @@ function StepFacilities({
           <h2 className="mb-1 flex items-center gap-1.5 text-[14px] font-semibold text-ink">
             <Lock size={13} className="text-muted" /> Sales channels — counted automatically
           </h2>
-          <p className="mb-3 max-w-[72ch] text-[12.5px] text-muted">
+          <p className="mb-3 text-[12.5px] text-muted">
             These are what your connected channels report holding right now. When you finish setup, consl records them as your
             starting balance at your starting cost — nothing to type here.
           </p>
@@ -904,19 +905,19 @@ function StepFinish({ anyConnected, channelCounts }: { anyConnected: boolean; ch
       />
       <div className={panelCls}>
         <h2 className="mb-2 text-[14px] font-semibold text-ink">Production already in progress?</h2>
-        <p className="max-w-[72ch] text-[13px] leading-relaxed text-ink-soft">
+        <p className="text-[13px] leading-relaxed text-ink-soft">
           If a co-packer is mid-run on a batch right now, rebuild it inside consl once you&apos;re in: open a production lot for it,
           create purchases for any materials it uses that you did NOT count in the previous step, and attach the payments you&apos;ve
           already made to it. The materials you DID count are consumed automatically when the lot is created — no double counting.
         </p>
-        <p className="mt-2 max-w-[72ch] text-[13px] leading-relaxed text-ink-soft">
+        <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
           This is the one fiddly part of getting started — your onboarding specialist will happily do it with you.
         </p>
       </div>
       {anyConnected && (
         <div className={panelCls}>
           <h2 className="mb-2 text-[14px] font-semibold text-ink">What happens when you finish</h2>
-          <p className="max-w-[72ch] text-[13px] leading-relaxed text-ink-soft">
+          <p className="text-[13px] leading-relaxed text-ink-soft">
             The {totalChannelUnits.toLocaleString()} units your channels report holding are recorded as your starting balance at the
             costs you entered, alongside the facility balances you saved. From here on, everything you buy, make, move and sell is
             tracked live — and your starting stock is simply the oldest layer, sold through first.
