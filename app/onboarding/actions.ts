@@ -6,6 +6,7 @@ import { prismaBase } from "@/lib/prisma-base";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { getCurrentOrg } from "@/lib/org";
 import { requirePermission } from "@/lib/membership";
+import { recomputeAll } from "@/lib/recompute";
 import { syncAllChannelsCore } from "@/lib/sync";
 import { refreshChannelListingsCore, autoMapExact, mappedExternalId, PRODUCT_MATCH_SELECT, type ChannelKey } from "@/lib/channel-catalog";
 
@@ -128,6 +129,63 @@ async function pendingListingCount(): Promise<number> {
     pending += listings.filter((l) => l.channel === ch && !taken.has(l.externalId)).length;
   }
   return pending;
+}
+
+/**
+ * Wizard-only deletes — undoing something created a step ago. A facility or material may already
+ * carry a starting balance; those OPENING rows are setup data, not history, so they're removed
+ * with the record. Anything REAL (lots, purchases, POs, standard movements) still blocks deletion,
+ * and neither action runs once the company is onboarded — the app's own guarded deletes take over.
+ */
+export async function deleteOnboardingFacility(id: string) {
+  const gate = await requirePermission("facilities", "delete");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  const org = await getCurrentOrg();
+  if (!org || org.onboardedAt) return { ok: false as const, error: "Only available during setup." };
+  const facility = await prisma.facility.findFirst({ where: { id } });
+  if (!facility) return { ok: false as const, error: "Facility not found" };
+  if (facility.locked || facility.channel) {
+    return { ok: false as const, error: "This facility belongs to a connected channel — disconnect the channel instead." };
+  }
+  const [lots, purchases, pos, realMoves] = await Promise.all([
+    prisma.lot.count({ where: { facilityId: id } }),
+    prisma.purchase.count({ where: { facilityId: id } }),
+    prisma.purchaseOrder.count({ where: { facilityId: id } }),
+    prisma.stockMovement.count({ where: { kind: { not: "OPENING" }, OR: [{ fromFacilityId: id }, { toFacilityId: id }] } }),
+  ]);
+  if (lots + purchases + pos + realMoves > 0) {
+    return { ok: false as const, error: "This facility already has real activity and can't be deleted." };
+  }
+  const rawOpenings = await prisma.stockMovement.count({ where: { kind: "OPENING", itemType: "RAW", toFacilityId: id } });
+  await prisma.stockMovement.deleteMany({ where: { kind: "OPENING", toFacilityId: id } });
+  await prisma.facility.delete({ where: { id } });
+  if (rawOpenings > 0) await recomputeAll();
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+export async function deleteOnboardingMaterial(id: string) {
+  const gate = await requirePermission("catalog", "delete");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  const org = await getCurrentOrg();
+  if (!org || org.onboardedAt) return { ok: false as const, error: "Only available during setup." };
+  const material = await prisma.materialType.findFirst({ where: { id } });
+  if (!material) return { ok: false as const, error: "Material not found" };
+  const [purchases, invoices, lotMaterials, realMoves] = await Promise.all([
+    prisma.purchase.count({ where: { materialTypeId: id } }),
+    prisma.purchaseInvoice.count({ where: { materialTypeId: id } }),
+    prisma.lotMaterial.count({ where: { materialTypeId: id } }),
+    prisma.stockMovement.count({ where: { materialTypeId: id, kind: { not: "OPENING" } } }),
+  ]);
+  if (purchases + invoices + lotMaterials + realMoves > 0) {
+    return { ok: false as const, error: "This material already has real activity and can't be deleted." };
+  }
+  const openings = await prisma.stockMovement.count({ where: { kind: "OPENING", materialTypeId: id } });
+  await prisma.stockMovement.deleteMany({ where: { kind: "OPENING", materialTypeId: id } });
+  await prisma.materialType.delete({ where: { id } });
+  if (openings > 0) await recomputeAll();
+  revalidatePath("/", "layout");
+  return { ok: true as const };
 }
 
 /** Save the per-SKU average COG for starting balances (wizard step 2's second half). */

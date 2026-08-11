@@ -18,7 +18,14 @@ import { FACILITY_TYPES } from "@/lib/facility-types";
 import { Plug, Check, AlertTriangle, ChevronLeft, Plus, X, Package, Lock } from "@/components/icons";
 import type { MyOrg } from "@/lib/orgs";
 import { createFacility, saveFinishedOpenings, saveRawOpenings } from "@/app/facilities/actions";
-import { advanceOnboarding, backToStep, completeOnboarding, saveOpeningCosts } from "@/app/onboarding/actions";
+import {
+  advanceOnboarding,
+  backToStep,
+  completeOnboarding,
+  deleteOnboardingFacility,
+  deleteOnboardingMaterial,
+  saveOpeningCosts,
+} from "@/app/onboarding/actions";
 
 /** The mapping payload for the active channel tab — null when no channel is connected. */
 export type WizardMapping = null | {
@@ -281,6 +288,57 @@ function StepHeader({ title, body }: { title: string; body: string }) {
       <h1 className="text-[20px] font-semibold tracking-tight text-ink">{title}</h1>
       <p className="mt-1 text-[13px] leading-relaxed text-muted">{body}</p>
     </div>
+  );
+}
+
+/** X → one confirm click → delete. Used on things created a step ago (facilities, materials). */
+function DeleteX({ label, onDelete }: { label: string; onDelete: () => Promise<{ ok: boolean; error?: string }> }) {
+  const router = useRouter();
+  const [confirm, setConfirm] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run() {
+    setPending(true);
+    setError(null);
+    try {
+      const r = await onDelete();
+      if (!r.ok) {
+        setError(r.error ?? "Couldn't delete.");
+        setConfirm(false);
+        return;
+      }
+      router.refresh();
+    } catch {
+      setError("Couldn't reach the server — try again.");
+      setConfirm(false);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <span className="flex items-center gap-1.5">
+      {error && <span className="text-[11.5px] text-negative">{error}</span>}
+      {confirm ? (
+        <>
+          <button
+            onClick={run}
+            disabled={pending}
+            className="rounded-lg bg-negative px-2.5 py-1 text-[12px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {pending ? "Deleting…" : `Delete ${label}`}
+          </button>
+          <button onClick={() => setConfirm(false)} disabled={pending} className="text-[12px] text-muted hover:text-ink-soft">
+            Cancel
+          </button>
+        </>
+      ) : (
+        <button onClick={() => setConfirm(true)} className="p-1 text-muted hover:text-negative" aria-label={`Delete ${label}`}>
+          <X size={15} />
+        </button>
+      )}
+    </span>
   );
 }
 
@@ -648,6 +706,9 @@ function FinishedBalanceCard({
         <h3 className="text-[13.5px] font-semibold text-ink">
           {facility.code} <span className="font-normal text-muted">· {facility.name}</span>
         </h3>
+        <span className="ml-auto">
+          <DeleteX label={facility.code} onDelete={() => deleteOnboardingFacility(facility.id)} />
+        </span>
       </div>
       <p className="mb-3 text-[12px] text-muted">Finished units sitting here today (leave 0 if none).</p>
       {products.length === 0 ? (
@@ -722,6 +783,7 @@ function StepMaterials({ materials }: { materials: WizardMaterial[] }) {
                     per-product stock
                   </span>
                 )}
+                <DeleteX label={m.name} onDelete={() => deleteOnboardingMaterial(m.id)} />
               </div>
             ))}
           </div>
