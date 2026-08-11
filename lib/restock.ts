@@ -54,6 +54,16 @@ export type RestockRow = {
   sortIndex: number | null;
 };
 
+/** One (facility, product) cell of Shopify/TikTok-reported stock, valued from its channel's
+ *  layer pool (opening balance + recorded shipments, newest first; overflow at newest lot cost). */
+export type ChannelStockValued = {
+  facilityId: string;
+  productId: string;
+  channel: string; // SHOPIFY | TIKTOK
+  units: number;
+  value: number;
+};
+
 export type RestockTotals = {
   raw: number;
   inProduction: number;
@@ -76,6 +86,7 @@ export async function getRestock(): Promise<{
   rows: RestockRow[];
   lastSync: Date | null;
   totals: RestockTotals;
+  channelStock: ChannelStockValued[]; // Shopify/TikTok stock per facility × SKU, layer-valued
   defaults: {
     minMonths: number;
     leadMonths: number;
@@ -133,27 +144,63 @@ export async function getRestock(): Promise<{
     }
   }
 
+  // Opening balances (kind OPENING) are day-zero layers, not movements. At one of YOUR facilities
+  // they are finished SUPPLY — like a lot line, at the operator-entered starting COG. At a sales
+  // channel they are a day-zero shipped layer: units already sitting there when consl started,
+  // which the newest-first valuation naturally consumes LAST — i.e. they're the first stock sold
+  // through, and once gone they never touch the value of real production that follows.
+  const openingChannelLayers: ShippedLayer[] = [];
+  for (const m of movements) {
+    if (m.kind !== "OPENING" || !m.productId || !(m.quantity > 0)) continue;
+    if (m.toFacilityId) {
+      supply.push({
+        sku: m.productId,
+        facilityId: m.toFacilityId,
+        units: m.quantity,
+        unitCost: m.unitCost ?? 0,
+        date: m.date.getTime(),
+        seq: supplySeq++,
+      });
+    } else if (m.toDestination) {
+      openingChannelLayers.push({ sku: m.productId, destination: m.toDestination, units: m.quantity, unitCost: m.unitCost ?? 0, date: m.date.getTime() });
+    }
+  }
+
   // Where finished stock physically sits, and what left the network (and at what cost).
-  const finishedMovements: FinishedMovement[] = movements.map((m, i) => ({
-    id: m.id,
-    sku: m.productId ?? "",
-    fromFacilityId: m.fromFacilityId,
-    toFacilityId: m.toFacilityId,
-    toDestination: m.toDestination,
-    quantity: m.quantity,
-    date: m.date.getTime(),
-    seq: i,
-  }));
+  const finishedMovements: FinishedMovement[] = movements
+    .filter((m) => m.kind !== "OPENING" && m.fromFacilityId)
+    .map((m, i) => ({
+      id: m.id,
+      sku: m.productId ?? "",
+      fromFacilityId: m.fromFacilityId!,
+      toFacilityId: m.toFacilityId,
+      toDestination: m.toDestination,
+      quantity: m.quantity,
+      date: m.date.getTime(),
+      seq: i,
+    }));
   const finished = runFinishedGoodsEngine(supply, finishedMovements);
 
-  // Amazon is valued from what was actually SHIPPED to Amazon — never from lots still sitting at
-  // your own locations or already sold direct, which would double-count the same units' cost.
-  const amazonLayers = new Map<string, ShippedLayer[]>();
-  for (const l of finished.shipped) {
-    if (l.destination !== "AMAZON") continue;
-    if (!amazonLayers.has(l.sku)) amazonLayers.set(l.sku, []);
-    amazonLayers.get(l.sku)!.push(l);
-  }
+  // A channel is valued from what actually ENTERED that channel — its day-zero opening layer plus
+  // every shipment recorded to it — never from lots still sitting at your own locations or already
+  // sold direct, which would double-count the same units' cost. One layer stack per channel per SKU.
+  const channelLayers = new Map<string, Map<string, ShippedLayer[]>>();
+  const addChannelLayer = (l: ShippedLayer) => {
+    const perSku = channelLayers.get(l.destination) ?? new Map<string, ShippedLayer[]>();
+    if (!channelLayers.has(l.destination)) channelLayers.set(l.destination, perSku);
+    const list = perSku.get(l.sku) ?? [];
+    if (!perSku.has(l.sku)) perSku.set(l.sku, list);
+    list.push(l);
+  };
+  for (const l of finished.shipped) addChannelLayer(l);
+  for (const l of openingChannelLayers) addChannelLayer(l);
+  const amazonLayers = channelLayers.get("AMAZON") ?? new Map<string, ShippedLayer[]>();
+
+  // Newest-lot cost per product, falling back to the onboarding COG until the first real lot
+  // exists — the unit cost channel stock beyond recorded layers is valued at. Covers EVERY
+  // product (a Shopify-only SKU has no ASIN but still holds channel stock).
+  const openingCostById = new Map(allProducts.map((p) => [p.id, p.openingUnitCost]));
+  const costFor = (productId: string) => finishedLots.get(productId)?.[0]?.cog ?? openingCostById.get(productId) ?? 0;
 
   // Finished goods still held at your own facilities — the bucket that was previously invisible.
   const atLocationsValue = finished.pools.reduce((s, p) => s + p.value, 0);
@@ -188,7 +235,7 @@ export async function getRestock(): Promise<{
     // Value Amazon's reported units from what was actually shipped to Amazon, newest first —
     // FBA is filled before AWD from one shared pass so they can't draw the same units twice.
     // Anything beyond what we recorded shipping falls back to the newest lot cost.
-    const fb = finishedLots.get(p.id)?.[0]?.cog ?? 0;
+    const fb = costFor(p.id);
     const [fbaVal, awdVal] = valueChannelStock(amazonLayers.get(p.id) ?? [], [fbaTotal, awdTotal], fb);
     fbaValue += fbaVal;
     awdValue += awdVal;
@@ -239,20 +286,42 @@ export async function getRestock(): Promise<{
     };
   });
 
-  // Stock the other channels report holding (synced into ChannelStock per facility), valued at
-  // each product's newest lot cost — the same fallback Amazon's valuation uses beyond recorded
-  // shipments. Grouped under the channel root so Shopify's many locations still read as one pill.
-  const unitCostByProduct = new Map(rows.map((r) => [r.id, r.unitCost]));
+  // Stock the other channels report holding (synced into ChannelStock per facility), valued
+  // exactly like Amazon: from the layers that actually entered THAT channel (starting balance +
+  // recorded shipments), newest first. One shared pass per channel × SKU, so a channel's several
+  // facilities can never draw the same layer twice — the whole channel is ONE pool, per the
+  // founder's design. Units beyond any recorded layer fall back to the newest lot cost.
   const channelHeld = await prisma.channelStock.findMany({
     where: { units: { gt: 0 } },
-    select: { productId: true, units: true, facility: { select: { channel: true } } },
+    select: { productId: true, facilityId: true, units: true, facility: { select: { channel: true, code: true } } },
+    orderBy: [{ facility: { code: "asc" } }, { productId: "asc" }],
   });
+  const channelGroups = new Map<string, { channel: string; productId: string; cells: { facilityId: string; units: number }[] }>();
+  for (const c of channelHeld) {
+    const ch = c.facility.channel;
+    if (ch !== "SHOPIFY" && ch !== "TIKTOK") continue; // Amazon never lives in ChannelStock
+    const k = `${ch}|${c.productId}`;
+    const cur = channelGroups.get(k) ?? { channel: ch, productId: c.productId, cells: [] };
+    if (!channelGroups.has(k)) channelGroups.set(k, cur);
+    cur.cells.push({ facilityId: c.facilityId, units: c.units });
+  }
+  const channelStock: ChannelStockValued[] = [];
+  for (const g of channelGroups.values()) {
+    const layers = channelLayers.get(g.channel)?.get(g.productId) ?? [];
+    const values = valueChannelStock(
+      layers,
+      g.cells.map((c) => c.units),
+      costFor(g.productId),
+    );
+    g.cells.forEach((c, i) =>
+      channelStock.push({ facilityId: c.facilityId, productId: g.productId, channel: g.channel, units: c.units, value: values[i] }),
+    );
+  }
   let shopifyValue = 0;
   let tiktokValue = 0;
-  for (const c of channelHeld) {
-    const value = c.units * (unitCostByProduct.get(c.productId) ?? 0);
-    if (c.facility.channel === "SHOPIFY") shopifyValue += value;
-    else if (c.facility.channel === "TIKTOK") tiktokValue += value;
+  for (const v of channelStock) {
+    if (v.channel === "SHOPIFY") shopifyValue += v.value;
+    else tiktokValue += v.value;
   }
 
   const grandTotal = rawInv.totalValue + inProductionValue + fbaValue + awdValue + shopifyValue + tiktokValue + atLocationsValue;
@@ -279,6 +348,7 @@ export async function getRestock(): Promise<{
   return {
     rows,
     lastSync,
+    channelStock,
     sortMode: settings.sortMode,
     defaults: {
       minMonths: settings.defaultMinMonths,

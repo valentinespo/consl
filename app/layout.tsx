@@ -33,6 +33,17 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     if (await currentUserId()) redirect("/welcome");
   }
   const org = await getCurrentOrg().catch(() => null);
+  // A company that hasn't finished onboarding sees ONLY the setup wizard — every app path lands
+  // there until the wizard completes. The auth/marketing pages above stay reachable (sign out,
+  // invite links), and the wizard page itself must not redirect to itself.
+  if (
+    org &&
+    !org.onboardedAt &&
+    !pathname.startsWith("/onboarding") &&
+    !NO_ORG_OK.some((p) => pathname.startsWith(p))
+  ) {
+    redirect("/onboarding");
+  }
   const orgs = await listMyOrgs().catch(() => []);
   // Which sections this member may see, so the sidebar only shows what they can open. Owners get
   // everything; a resolution failure leaves this null and the nav falls open (page guards still

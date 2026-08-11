@@ -7,12 +7,13 @@ export type MovementRow = {
   id: string;
   date: Date;
   itemType: string; // FINISHED | RAW
+  kind?: string; // STANDARD | OPENING (a starting-balance layer, no source)
   code: string;
   itemName: string;
   poolSku: string | null; // for sku-specific raw materials
   imageUrl: string | null;
   quantity: number;
-  fromCode: string;
+  fromCode: string | null; // null on OPENING rows — day-zero stock comes from nowhere
   toCode: string | null;
   toDestination: string | null;
   notes: string | null;
@@ -71,7 +72,13 @@ export function MovementsLedger({
                 </td>
                 <td className="tabular px-3 py-2.5 text-right font-medium">{qty(m.quantity)}</td>
                 <td className="px-3 py-2.5">
-                  <FacilityTag code={m.fromCode} />
+                  {m.fromCode ? (
+                    <FacilityTag code={m.fromCode} />
+                  ) : (
+                    <span className="pill-chart inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium">
+                      Starting balance
+                    </span>
+                  )}
                 </td>
                 <td className="px-3 py-2.5">
                   {m.toCode ? <FacilityTag code={m.toCode} /> : <span className="text-ink-soft">{destinationLabel(m.toDestination)}</span>}

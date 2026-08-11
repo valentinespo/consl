@@ -108,42 +108,49 @@ export type ChannelStockRow = {
 export async function getChannelStock(): Promise<{ rows: ChannelStockRow[]; totalUnits: number; totalValue: number }> {
   const facilities = await prisma.facility.findMany({ where: { channel: { not: null } } });
   if (facilities.length === 0) return { rows: [], totalUnits: 0, totalValue: 0 };
-  const { rows: restock } = await getRestock();
-
-  // Amazon's units come off its own snapshot (inside getRestock); every other channel reports a
-  // plain quantity per warehouse, stored per facility by lib/channel-stock.ts.
-  const stored = await prisma.channelStock.findMany({ where: { units: { gt: 0 } } });
-  const byFacility = new Map<string, Map<string, number>>();
-  for (const s of stored) {
-    const perFacility = byFacility.get(s.facilityId) ?? new Map<string, number>();
-    perFacility.set(s.productId, s.units);
-    byFacility.set(s.facilityId, perFacility);
-  }
+  // Amazon's units come off its own snapshot; Shopify/TikTok cells arrive already valued from
+  // their channel's layer pool (starting balance + recorded shipments) — see lib/restock.ts.
+  const { rows: restock, channelStock } = await getRestock();
+  const products = await prisma.product.findMany({ select: { id: true, code: true, name: true, imageUrl: true } });
+  const productById = new Map(products.map((p) => [p.id, p]));
 
   const rows: ChannelStockRow[] = [];
   for (const f of facilities) {
-    for (const r of restock) {
-      // Channel stock is valued at the newest finished-lot cost — the same fallback Amazon uses
-      // for units beyond what we recorded shipping. Shipment-layer valuation needs movements
-      // recorded INTO the channel facility, which these channels don't give us.
-      const [units, value] =
-        f.channel === "AMAZON_FBA"
-          ? [r.fbaTotal, r.fbaValue]
-          : f.channel === "AMAZON_AWD"
-            ? [r.awdTotal, r.awdValue]
-            : [byFacility.get(f.id)?.get(r.id) ?? 0, (byFacility.get(f.id)?.get(r.id) ?? 0) * r.unitCost];
-      if (units <= 0) continue;
+    if (f.channel === "AMAZON_FBA" || f.channel === "AMAZON_AWD") {
+      const fba = f.channel === "AMAZON_FBA";
+      for (const r of restock) {
+        const units = fba ? r.fbaTotal : r.awdTotal;
+        if (units <= 0) continue;
+        rows.push({
+          productId: r.id,
+          code: r.code,
+          name: r.name,
+          imageUrl: r.imageUrl,
+          facilityId: f.id,
+          facilityCode: f.code,
+          facilityName: f.name,
+          channel: f.channel!,
+          units,
+          value: fba ? r.fbaValue : r.awdValue,
+        });
+      }
+      continue;
+    }
+    // A Shopify/TikTok product needs no ASIN — read the valued cells, not the Amazon rows.
+    for (const v of channelStock) {
+      if (v.facilityId !== f.id || v.units <= 0) continue;
+      const p = productById.get(v.productId);
       rows.push({
-        productId: r.id,
-        code: r.code,
-        name: r.name,
-        imageUrl: r.imageUrl,
+        productId: v.productId,
+        code: p?.code ?? "?",
+        name: p?.name ?? "",
+        imageUrl: p?.imageUrl ?? null,
         facilityId: f.id,
         facilityCode: f.code,
         facilityName: f.name,
         channel: f.channel!,
-        units,
-        value,
+        units: v.units,
+        value: v.value,
       });
     }
   }

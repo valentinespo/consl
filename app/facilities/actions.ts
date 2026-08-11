@@ -6,6 +6,7 @@ import { computeFinishedGoods, getInventory } from "@/lib/queries";
 import { allowedDestinations } from "@/lib/destinations";
 import { checkOwned } from "@/lib/ownership";
 import { requirePermission } from "@/lib/membership";
+import { recomputeAll } from "@/lib/recompute";
 
 /** Create a facility — a co-packer, warehouse, 3PL or anywhere else stock lives. */
 export async function createFacility(input: { code: string; name: string; type: string }) {
@@ -209,7 +210,103 @@ export async function createMovement(input: MovementInput) {
 export async function deleteMovement(id: string) {
   const gate = await requirePermission("facilities", "delete");
   if (!gate.ok) return { ok: false as const, error: gate.error };
+  const row = await prisma.stockMovement.findFirst({ where: { id }, select: { kind: true, itemType: true } });
   await prisma.stockMovement.delete({ where: { id } });
+  // Removing a raw opening layer changes what production consumed — refresh the cost snapshots.
+  if (row?.kind === "OPENING" && row.itemType === "RAW") await recomputeAll();
   revalidatePath("/", "layout");
   return { ok: true as const };
+}
+
+/**
+ * Starting balances — day-zero FIFO layers created during onboarding (or corrected later).
+ *
+ * Each call REPLACES the opening rows of that item type at that facility, so the wizard's grid is
+ * idempotent: re-saving with edited numbers rewrites the balance instead of stacking layers.
+ * Finished units are costed at each SKU's onboarding COG (Product.openingUnitCost); raw materials
+ * carry the cost entered on each line, since they never came from a purchase.
+ */
+export async function saveFinishedOpenings(facilityId: string, rows: { productId: string; units: number }[]) {
+  const gate = await requirePermission("facilities", "create");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  const facility = await prisma.facility.findFirst({ where: { id: facilityId } });
+  if (!facility) return { ok: false as const, error: "Facility not found" };
+  if (facility.channel) return { ok: false as const, error: "Channel stock is counted automatically — starting balances only apply to your own facilities." };
+
+  const products = await prisma.product.findMany({ select: { id: true, openingUnitCost: true } });
+  const costById = new Map(products.map((p) => [p.id, p.openingUnitCost ?? 0]));
+  const clean = rows
+    .map((r) => ({ productId: r.productId, units: Math.floor(Number(r.units) || 0) }))
+    .filter((r) => costById.has(r.productId) && r.units > 0);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.stockMovement.deleteMany({ where: { kind: "OPENING", itemType: "FINISHED", toFacilityId: facilityId } });
+    for (const r of clean) {
+      await tx.stockMovement.create({
+        data: {
+          kind: "OPENING",
+          itemType: "FINISHED",
+          productId: r.productId,
+          quantity: r.units,
+          unitCost: costById.get(r.productId) ?? 0,
+          date: new Date(),
+          toFacilityId: facilityId,
+          notes: "Starting balance",
+        },
+      });
+    }
+  });
+  revalidatePath("/", "layout");
+  return { ok: true as const, saved: clean.length };
+}
+
+export async function saveRawOpenings(
+  facilityId: string,
+  rows: { materialTypeId: string; productId: string | null; quantity: number; unitCost: number }[],
+) {
+  const gate = await requirePermission("facilities", "create");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  const facility = await prisma.facility.findFirst({ where: { id: facilityId } });
+  if (!facility) return { ok: false as const, error: "Facility not found" };
+  if (facility.channel) return { ok: false as const, error: "Raw materials can't sit at a sales channel." };
+
+  const materials = await prisma.materialType.findMany({ select: { id: true, skuSpecific: true } });
+  const products = await prisma.product.findMany({ select: { id: true } });
+  const matById = new Map(materials.map((m) => [m.id, m]));
+  const productIds = new Set(products.map((p) => p.id));
+  const clean = rows
+    .map((r) => ({
+      materialTypeId: r.materialTypeId,
+      productId: r.productId && productIds.has(r.productId) ? r.productId : null,
+      quantity: Number(r.quantity) || 0,
+      unitCost: Number(r.unitCost) || 0,
+    }))
+    .filter((r) => {
+      const mat = matById.get(r.materialTypeId);
+      if (!mat || !(r.quantity > 0) || r.unitCost < 0) return false;
+      return mat.skuSpecific ? !!r.productId : true; // per-SKU materials need their pool SKU
+    });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.stockMovement.deleteMany({ where: { kind: "OPENING", itemType: "RAW", toFacilityId: facilityId } });
+    for (const r of clean) {
+      await tx.stockMovement.create({
+        data: {
+          kind: "OPENING",
+          itemType: "RAW",
+          materialTypeId: r.materialTypeId,
+          productId: r.productId,
+          quantity: r.quantity,
+          unitCost: r.unitCost,
+          date: new Date(),
+          toFacilityId: facilityId,
+          notes: "Starting balance",
+        },
+      });
+    }
+  });
+  // Raw layers feed production costing — refresh the persisted snapshots.
+  await recomputeAll();
+  revalidatePath("/", "layout");
+  return { ok: true as const, saved: clean.length };
 }

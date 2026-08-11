@@ -31,7 +31,7 @@ One shared database; **every business row carries `orgId`** and belongs to exact
 
 `lib/recompute.ts`: `computeEngineResult()` is read-only; `recomputeAll()` persists snapshots. **Server actions that change purchases, transactions, or lots must call `recomputeAll()`** then `revalidatePath("/", "layout")`. Regression anchors live in memory — a cost-total change is a red flag unless intended.
 
-Downstream: `lib/restock.ts` + `lib/reorder.ts` (velocity model, months-of-cover, per-SKU window overrides → the Reorder page), `lib/finished-goods.ts` (finished-stock engine + `valueChannelStock`), `lib/sync.ts` + `lib/spapi.ts` (Amazon SP-API pull; interim workspace-key auth — see Integrations).
+Downstream: `lib/restock.ts` + `lib/reorder.ts` (velocity model, months-of-cover, per-SKU window overrides → the Reorder page), `lib/finished-goods.ts` (finished-stock engine + `valueChannelStock`), `lib/sync.ts` + `lib/spapi.ts` (Amazon SP-API pull, per-tenant OAuth tokens — see Integrations).
 
 ## The model (Prisma)
 
@@ -39,7 +39,7 @@ Downstream: `lib/restock.ts` + `lib/reorder.ts` (velocity model, months-of-cover
 
 ## Facilities & channel integrations
 
-A **Facility** is anywhere stock lives or is made (co-packer, warehouse, 3PL). **Connected sales platforms become LOCKED channel facilities** (Amazon → FBA + AWD; Shopify → SHOP; TikTok → TTS) — see `lib/integrations.ts`. Locked facilities are integration-owned: not editable/deletable in-app, hidden from vendor/lot/movement pickers (`getFacilities` etc. filter `channel: null`), shown in their own "Sales channels" section, and they hold finished channel stock (valued via `getChannelStock`). **The future per-tenant OAuth connect flow just calls `ensureChannelFacilities(provider)`** — everything downstream is already channel-aware. Today Amazon runs on workspace-wide SP-API env keys (one owner org may sync); real per-tenant OAuth is the next build.
+A **Facility** is anywhere stock lives or is made (co-packer, warehouse, 3PL). **Connected sales platforms become LOCKED channel facilities** (Amazon → FBA + AWD; Shopify → SHOP; TikTok → TTS) — see `lib/integrations.ts`. Locked facilities are integration-owned: not editable/deletable in-app, hidden from vendor/lot/movement pickers (`getFacilities` etc. filter `channel: null`), shown in their own "Sales channels" section, and they hold finished channel stock (valued via `getChannelStock`). All three providers connect **per-tenant via OAuth** from the Integrations page (each org's tokens encrypted on its own `Integration` row; connect calls `ensureChannelFacilities(provider)`). New companies go through the **onboarding wizard** (`/onboarding`, gated by `Organization.onboardedAt`) which builds their day-zero starting balances as OPENING `StockMovement` layers.
 
 ## Design system
 

@@ -307,16 +307,31 @@ export async function computeFinishedGoods() {
       });
     }
   }
-  const mv: FinishedMovement[] = movements.map((m, i) => ({
-    id: m.id,
-    sku: m.productId ?? "",
-    fromFacilityId: m.fromFacilityId,
-    toFacilityId: m.toFacilityId,
-    toDestination: m.toDestination,
-    quantity: m.quantity,
-    date: m.date.getTime(),
-    seq: i,
-  }));
+  // Opening balances at your own facilities are day-zero supply — stock that existed before consl,
+  // at the operator-entered starting COG (see lib/restock.ts for the full story).
+  for (const m of movements) {
+    if (m.kind !== "OPENING" || !m.productId || !m.toFacilityId || !(m.quantity > 0)) continue;
+    supply.push({
+      sku: m.productId,
+      facilityId: m.toFacilityId,
+      units: m.quantity,
+      unitCost: m.unitCost ?? 0,
+      date: m.date.getTime(),
+      seq: seq++,
+    });
+  }
+  const mv: FinishedMovement[] = movements
+    .filter((m) => m.kind !== "OPENING" && m.fromFacilityId)
+    .map((m, i) => ({
+      id: m.id,
+      sku: m.productId ?? "",
+      fromFacilityId: m.fromFacilityId!,
+      toFacilityId: m.toFacilityId,
+      toDestination: m.toDestination,
+      quantity: m.quantity,
+      date: m.date.getTime(),
+      seq: i,
+    }));
   return runFinishedGoodsEngine(supply, mv);
 }
 
@@ -368,13 +383,14 @@ export async function getMovements() {
       id: m.id,
       date: m.date,
       itemType: m.itemType,
+      kind: m.kind, // OPENING rows render as "Starting balance" (no source facility)
       // Raw: the material (with the SKU pool it belongs to, if any). Finished: the product.
       code: raw ? m.materialType?.code ?? "?" : m.product?.code ?? "?",
       itemName: raw ? m.materialType?.name ?? "" : m.product?.name ?? "",
       poolSku: raw ? m.product?.code ?? null : null,
       imageUrl: raw ? m.materialType?.imageUrl ?? null : m.product?.imageUrl ?? null,
       quantity: m.quantity,
-      fromCode: m.fromFacility.code,
+      fromCode: m.fromFacility?.code ?? null,
       toCode: m.toFacility?.code ?? null,
       toDestination: m.toDestination,
       notes: m.notes,

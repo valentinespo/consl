@@ -50,6 +50,25 @@ export async function computeEngineResult() {
     isAdjustment: p.isAdjustment,
   }));
 
+  // Opening balances (kind OPENING) are day-zero FIFO layers, not movements: stock that already
+  // existed when the company joined consl, at an operator-entered cost. They enter the engine as
+  // purchase-shaped supply at the receiving facility — dated at the balance date, so production
+  // consumes them oldest-first exactly like bought stock, and they never touch later real costs.
+  for (const [i, m] of rawMovesRaw.filter((m) => m.kind === "OPENING").entries()) {
+    if (!m.toFacility || !m.materialType || !(m.quantity > 0)) continue;
+    purchases.push({
+      materialCode: m.materialType.code,
+      facility: m.toFacility.code,
+      sku: m.materialType.skuSpecific ? (m.product?.code ?? null) : null,
+      date: m.date.getTime(),
+      seq: 0,
+      order: purchasesRaw.length + i,
+      quantity: m.quantity,
+      unitCost: m.unitCost ?? 0,
+      isAdjustment: false,
+    });
+  }
+
   const lines: EngineLotLine[] = [];
   for (const lot of lotsRaw) {
     for (const ln of lot.lines) {
@@ -85,15 +104,17 @@ export async function computeEngineResult() {
     appliesToCog: t.appliesToCog,
   }));
 
-  const rawMovements: EngineRawMovement[] = rawMovesRaw.map((m, i) => ({
-    materialCode: m.materialType?.code ?? "",
-    fromFacility: m.fromFacility.code,
-    toFacility: m.toFacility?.code ?? null, // null = a loss (LOSS destination)
-    sku: m.product?.code ?? null, // set for sku-specific materials
-    quantity: m.quantity,
-    date: m.date.getTime(),
-    seq: i,
-  }));
+  const rawMovements: EngineRawMovement[] = rawMovesRaw
+    .filter((m) => m.kind !== "OPENING" && m.fromFacility)
+    .map((m, i) => ({
+      materialCode: m.materialType?.code ?? "",
+      fromFacility: m.fromFacility!.code,
+      toFacility: m.toFacility?.code ?? null, // null = a loss (LOSS destination)
+      sku: m.product?.code ?? null, // set for sku-specific materials
+      quantity: m.quantity,
+      date: m.date.getTime(),
+      seq: i,
+    }));
 
   const result = runEngine(purchases, lines, transactions, rawMovements);
   return { result, lines, lotsRaw, purchasesRaw };

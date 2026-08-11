@@ -17,6 +17,8 @@ export type OrgProfile = {
   currencyCode: string;
   currencySymbol: string;
   locale: string;
+  onboardedAt: Date | null; // null = the setup wizard still gates the app
+  onboardingStep: number;
 };
 
 /** The signed-in user's company profile. Cached per request — this is read by the layout,
@@ -40,6 +42,8 @@ export const getCurrentOrg = cache(async (): Promise<OrgProfile | null> => {
     currencyCode: org.currencyCode,
     currencySymbol: org.currencySymbol,
     locale: org.locale,
+    onboardedAt: org.onboardedAt,
+    onboardingStep: org.onboardingStep,
   };
 });
 

@@ -33,12 +33,15 @@ export function ChannelMappingClient({
   rows,
   products,
   justConnected,
+  hrefBase = "/catalog/mapping",
 }: {
   channel: "SHOPIFY" | "AMAZON" | "TIKTOK";
   tabs: Array<{ key: string; title: string; logo: string }>;
   rows: Row[];
   products: PickerProduct[];
   justConnected: boolean;
+  /** Where the channel tabs link to — the onboarding wizard embeds this screen on its own page. */
+  hrefBase?: string;
 }) {
   const router = useRouter();
   const canEdit = useCan("catalog", "create");
@@ -114,7 +117,7 @@ export function ChannelMappingClient({
           {tabs.map((t) => (
             <Link
               key={t.key}
-              href={`/catalog/mapping?channel=${t.key}`}
+              href={`${hrefBase}?channel=${t.key}`}
               className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-[12.5px] font-medium ${
                 t.key === channel ? "bg-ink text-bg" : "text-ink-soft hover:text-ink"
               }`}

@@ -42,6 +42,10 @@ model Organization {
   // Soft delete: set when the owner deletes the company. It goes dark immediately and is purged
   // for good after a grace period (see the scheduler). Null = active.
   deactivatedAt DateTime?
+  // --- Onboarding. Null = the setup wizard still gates the whole app for this company; set once
+  // the wizard finishes (existing companies were backfilled as onboarded at migration time).
+  onboardedAt    DateTime?
+  onboardingStep Int       @default(0) // where the wizard resumes (0–6)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -185,6 +189,14 @@ model StockMovement {
   orgId          String?
   organization   Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
   itemType       String        @default("FINISHED") // FINISHED | RAW
+  // STANDARD = stock leaving somewhere. OPENING = a day-zero starting balance: stock that already
+  // existed when the company joined consl, entering as the OLDEST FIFO layer at `unitCost`. An
+  // OPENING row has no source — `fromFacilityId` is null and either `toFacilityId` (a facility's
+  // opening stock) or `toDestination` (units already sitting at a sales channel) is set.
+  kind           String        @default("STANDARD") // STANDARD | OPENING
+  // OPENING only: the operator-entered cost per unit of the day-zero layer. Never set on STANDARD
+  // movements — real stock always carries the cost FIFO computed for it.
+  unitCost       Float?
   // FINISHED: the SKU moved. RAW sku-specific (e.g. printed pouches): the SKU whose pool this draws.
   product        Product?      @relation(fields: [productId], references: [id])
   productId      String?
@@ -193,8 +205,8 @@ model StockMovement {
   materialTypeId String?
   quantity       Float // units moved (always positive; Float so weight/volume works too)
   date           DateTime
-  fromFacility   Facility      @relation("MovementFrom", fields: [fromFacilityId], references: [id])
-  fromFacilityId String
+  fromFacility   Facility?     @relation("MovementFrom", fields: [fromFacilityId], references: [id])
+  fromFacilityId String? // null only on OPENING rows — day-zero stock comes from nowhere
   toFacility     Facility?     @relation("MovementTo", fields: [toFacilityId], references: [id])
   toFacilityId   String? // set for a transfer between your own facilities
   toDestination  String? // set when stock leaves your network: AMAZON | SHOPIFY | TIKTOK | CUSTOMER | LOSS
@@ -251,6 +263,9 @@ model Product {
   // --- TikTok Shop mapping (identifiers only for now; live sync comes later) ---
   tiktokProductId    String?
   tiktokSku          String?
+  // Average cost of goods entered during onboarding for this SKU's starting balance. Only ever
+  // read to stamp OPENING movements (the day-zero FIFO layers) — real production never uses it.
+  openingUnitCost    Float?
   // --- Per-SKU restock policy (null = use the global default) ---
   minMonths          Float? // floor: months of stock to never fall below
   leadMonths         Float? // production only: placing a run → finished units in hand
