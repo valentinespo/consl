@@ -18,7 +18,6 @@ export function SelectOrCreate({
   placeholder,
   createPlaceholder = "Type a name…",
   onCreate,
-  onCreatingChange,
 }: {
   name?: string;
   value: string;
@@ -27,20 +26,13 @@ export function SelectOrCreate({
   placeholder?: string;
   createPlaceholder?: string;
   // When omitted, the "Create new…" option is hidden — the control becomes a plain picker.
-  // May return { error } to surface a real reason (e.g. "Code CCP already exists") inline.
-  onCreate?: (text: string) => Promise<Opt | { error: string } | null>;
-  // Fires when the inline-create input opens/closes, so a tight parent cell can widen itself.
-  onCreatingChange?: (creating: boolean) => void;
+  onCreate?: (text: string) => Promise<Opt | null>;
 }) {
   // Locally-created options are kept separately so the list stays reactive to `options`
   // changing (e.g. SKU choices update when the selected lot changes).
   const [created, setCreated] = useState<Opt[]>([]);
   const opts = [...options, ...created.filter((c) => !options.some((o) => o.value === c.value))];
-  const [creating, setCreatingRaw] = useState(false);
-  const setCreating = (v: boolean) => {
-    setCreatingRaw(v);
-    onCreatingChange?.(v);
-  };
+  const [creating, setCreating] = useState(false);
   const [text, setText] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,8 +43,8 @@ export function SelectOrCreate({
     setError(null);
     const opt = await onCreate(text.trim());
     setPending(false);
-    if (!opt || "error" in opt) {
-      setError(opt && "error" in opt ? opt.error : "Couldn't create");
+    if (!opt) {
+      setError("Couldn't create");
       return;
     }
     setCreated((prev) => (prev.some((o) => o.value === opt.value) ? prev : [...prev, opt]));
