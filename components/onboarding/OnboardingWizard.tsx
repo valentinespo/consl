@@ -410,7 +410,8 @@ function StepProducts({
                   <span className="text-[13px] font-medium text-ink">{p.code}</span>
                   <span className="ml-2 truncate text-[12.5px] text-muted">{p.name}</span>
                 </div>
-                <div className="flex items-center gap-1.5">
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {/* inputCls carries w-full — cap with max-w or the field swallows the row */}
                   <input
                     type="number"
                     min="0"
@@ -418,7 +419,7 @@ function StepProducts({
                     value={cogValue(p)}
                     onChange={(e) => setCog(p.id, e.target.value)}
                     placeholder="0.00"
-                    className={`${inputCls} tabular w-28 text-right`}
+                    className={`${inputCls} tabular max-w-28 text-right`}
                   />
                   <span className="w-14 text-[11.5px] text-muted">per unit</span>
                 </div>
@@ -636,7 +637,7 @@ function FinishedBalanceCard({
                 value={value(p)}
                 onChange={(e) => setDraft((d) => ({ ...d, [p.id]: e.target.value }))}
                 placeholder="0"
-                className={`${inputCls} tabular w-28 text-right`}
+                className={`${inputCls} tabular max-w-28 shrink-0 text-right`}
               />
             </div>
           ))}
@@ -798,7 +799,7 @@ function RawBalanceCard({
               <select
                 value={l.materialTypeId}
                 onChange={(e) => update(i, { materialTypeId: e.target.value, productId: "" })}
-                className={`${inputCls} w-auto min-w-[160px] flex-1`}
+                className={`${inputCls} min-w-[160px] flex-1 basis-40`}
               >
                 {materials.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -807,7 +808,11 @@ function RawBalanceCard({
                 ))}
               </select>
               {mat?.skuSpecific && (
-                <select value={l.productId} onChange={(e) => update(i, { productId: e.target.value })} className={`${inputCls} w-auto min-w-[120px]`}>
+                <select
+                  value={l.productId}
+                  onChange={(e) => update(i, { productId: e.target.value })}
+                  className={`${inputCls} max-w-[170px] shrink-0`}
+                >
                   <option value="">For which product?</option>
                   {products.map((p) => (
                     <option key={p.id} value={p.id}>
@@ -822,7 +827,7 @@ function RawBalanceCard({
                 value={l.quantity}
                 onChange={(e) => update(i, { quantity: e.target.value })}
                 placeholder="Qty"
-                className={`${inputCls} tabular w-24 text-right`}
+                className={`${inputCls} tabular max-w-24 shrink-0 text-right`}
               />
               <input
                 type="number"
@@ -831,7 +836,7 @@ function RawBalanceCard({
                 value={l.unitCost}
                 onChange={(e) => update(i, { unitCost: e.target.value })}
                 placeholder="Cost/unit"
-                className={`${inputCls} tabular w-28 text-right`}
+                className={`${inputCls} tabular max-w-28 shrink-0 text-right`}
               />
               <button onClick={() => remove(i)} className="p-1 text-muted hover:text-negative" aria-label="Remove line">
                 <X size={14} />
