@@ -13,7 +13,8 @@ export type MovementRow = {
   poolSku: string | null; // for sku-specific raw materials
   imageUrl: string | null;
   quantity: number;
-  fromCode: string | null; // null on OPENING rows — day-zero stock comes from nowhere
+  fromCode: string | null; // null on OPENING rows and channel pull-backs
+  fromDestination?: string | null; // set when the stock came back from a sales channel
   toCode: string | null;
   toDestination: string | null;
   notes: string | null;
@@ -74,6 +75,8 @@ export function MovementsLedger({
                 <td className="px-3 py-2.5">
                   {m.fromCode ? (
                     <FacilityTag code={m.fromCode} />
+                  ) : m.fromDestination ? (
+                    <span className="text-ink-soft">{destinationLabel(m.fromDestination)}</span>
                   ) : (
                     <span className="pill-chart inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium">
                       Starting balance

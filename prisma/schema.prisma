@@ -206,7 +206,10 @@ model StockMovement {
   quantity       Float // units moved (always positive; Float so weight/volume works too)
   date           DateTime
   fromFacility   Facility?     @relation("MovementFrom", fields: [fromFacilityId], references: [id])
-  fromFacilityId String? // null only on OPENING rows — day-zero stock comes from nowhere
+  fromFacilityId String? // null on OPENING rows and on stock coming back from a channel
+  // Set when finished stock comes BACK from a sales channel (an Amazon removal order to your own
+  // warehouse). The units re-enter carrying the FIFO cost they left with — see lib/finished-goods.
+  fromDestination String? // AMAZON | SHOPIFY | TIKTOK
   toFacility     Facility?     @relation("MovementTo", fields: [toFacilityId], references: [id])
   toFacilityId   String? // set for a transfer between your own facilities
   toDestination  String? // set when stock leaves your network: AMAZON | SHOPIFY | TIKTOK | CUSTOMER | LOSS

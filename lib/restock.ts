@@ -166,41 +166,43 @@ export async function getRestock(): Promise<{
     }
   }
 
-  // Where finished stock physically sits, and what left the network (and at what cost).
+  // Newest-lot cost per product, falling back to the onboarding COG until the first real lot
+  // exists — the unit cost channel stock beyond recorded layers is valued at. Covers EVERY
+  // product (a Shopify-only SKU has no ASIN but still holds channel stock).
+  const openingCostById = new Map(allProducts.map((p) => [p.id, p.openingUnitCost]));
+  const costFor = (productId: string) => finishedLots.get(productId)?.[0]?.cog ?? openingCostById.get(productId) ?? 0;
+  const fallbackCostBySku = new Map(allProducts.map((p) => [p.id, costFor(p.id)]));
+
+  // Where finished stock physically sits, and what left the network (and at what cost). Movements
+  // FROM a channel (fromDestination — e.g. an Amazon removal order) ride through too: the engine
+  // consumes that channel's layers and re-lands the units at the facility carrying their cost.
   const finishedMovements: FinishedMovement[] = movements
-    .filter((m) => m.kind !== "OPENING" && m.fromFacilityId)
+    .filter((m) => m.kind !== "OPENING" && (m.fromFacilityId || m.fromDestination))
     .map((m, i) => ({
       id: m.id,
       sku: m.productId ?? "",
-      fromFacilityId: m.fromFacilityId!,
+      fromFacilityId: m.fromFacilityId,
+      fromDestination: m.fromDestination,
       toFacilityId: m.toFacilityId,
       toDestination: m.toDestination,
       quantity: m.quantity,
       date: m.date.getTime(),
       seq: i,
     }));
-  const finished = runFinishedGoodsEngine(supply, finishedMovements);
+  const finished = runFinishedGoodsEngine(supply, finishedMovements, openingChannelLayers, fallbackCostBySku);
 
-  // A channel is valued from what actually ENTERED that channel — its day-zero opening layer plus
-  // every shipment recorded to it — never from lots still sitting at your own locations or already
-  // sold direct, which would double-count the same units' cost. One layer stack per channel per SKU.
+  // A channel is valued from what actually ENTERED it and is still recorded as being there —
+  // day-zero opening layers plus shipments, minus anything pulled back out. One stack per
+  // channel per SKU; never lots still sitting at your own locations or already sold direct.
   const channelLayers = new Map<string, Map<string, ShippedLayer[]>>();
-  const addChannelLayer = (l: ShippedLayer) => {
+  for (const l of finished.shipped) {
     const perSku = channelLayers.get(l.destination) ?? new Map<string, ShippedLayer[]>();
     if (!channelLayers.has(l.destination)) channelLayers.set(l.destination, perSku);
     const list = perSku.get(l.sku) ?? [];
     if (!perSku.has(l.sku)) perSku.set(l.sku, list);
     list.push(l);
-  };
-  for (const l of finished.shipped) addChannelLayer(l);
-  for (const l of openingChannelLayers) addChannelLayer(l);
+  }
   const amazonLayers = channelLayers.get("AMAZON") ?? new Map<string, ShippedLayer[]>();
-
-  // Newest-lot cost per product, falling back to the onboarding COG until the first real lot
-  // exists — the unit cost channel stock beyond recorded layers is valued at. Covers EVERY
-  // product (a Shopify-only SKU has no ASIN but still holds channel stock).
-  const openingCostById = new Map(allProducts.map((p) => [p.id, p.openingUnitCost]));
-  const costFor = (productId: string) => finishedLots.get(productId)?.[0]?.cog ?? openingCostById.get(productId) ?? 0;
 
   // Finished goods still held at your own facilities — the bucket that was previously invisible.
   const atLocationsValue = finished.pools.reduce((s, p) => s + p.value, 0);

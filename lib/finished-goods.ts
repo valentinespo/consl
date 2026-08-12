@@ -24,11 +24,15 @@ export interface FinishedSupply {
   seq: number; // stable tie-breaker
 }
 
-/** Units leaving one of your facilities. Exactly one of toFacilityId / toDestination is set. */
+/** Units moving between places. Exactly one SOURCE (fromFacilityId | fromDestination) and one
+ *  TARGET (toFacilityId | toDestination) is set. A fromDestination source is stock coming BACK
+ *  from a sales channel (an Amazon removal order being the archetype) — it consumes that
+ *  channel's shipped layers oldest-first, so the units re-enter carrying the cost they left with. */
 export interface FinishedMovement {
   id: string;
   sku: string;
-  fromFacilityId: string;
+  fromFacilityId: string | null;
+  fromDestination?: string | null; // AMAZON | SHOPIFY | TIKTOK — channel the stock returns from
   toFacilityId: string | null;
   toDestination: string | null; // AMAZON | SHOPIFY | TIKTOK | CUSTOMER | LOSS
   quantity: number;
@@ -104,9 +108,22 @@ class FinishedPoolStack {
     }
     return { units, value };
   }
+
+  /** The remaining layers themselves, oldest-first — channel ledgers read these back out. */
+  layers_(): { units: number; unitCost: number; date: number; seq: number }[] {
+    this.layers.sort((a, b) => a.date - b.date || a.seq - b.seq);
+    return this.layers.filter((l) => l.units > 1e-9);
+  }
 }
 
-export function runFinishedGoodsEngine(supply: FinishedSupply[], movements: FinishedMovement[]): FinishedResult {
+export function runFinishedGoodsEngine(
+  supply: FinishedSupply[],
+  movements: FinishedMovement[],
+  /** Day-zero layers already sitting AT a channel (onboarding starting balances). */
+  channelSeed: ShippedLayer[] = [],
+  /** Cost for units pulled back from a channel beyond its recorded layers (newest lot cost). */
+  fallbackCostBySku?: Map<string, number>,
+): FinishedResult {
   const pools = new Map<string, FinishedPoolStack>();
   const stackFor = (sku: string, facilityId: string) => {
     const k = key(sku, facilityId);
@@ -118,12 +135,49 @@ export function runFinishedGoodsEngine(supply: FinishedSupply[], movements: Fini
   // Seed every pool with what its facility produced.
   for (const s of supply) stackFor(s.sku, s.facilityId).add(s.units, s.unitCost, s.date, s.seq);
 
-  const shipped: ShippedLayer[] = [];
+  // Per (channel, SKU) ledger of everything that entered that channel — starting balances plus
+  // recorded shipments. Valuation covers the channel's reported count from the NEWEST of these;
+  // a movement back OUT of the channel consumes the OLDEST (the same end sales eat from), so the
+  // remaining layers stay consistent with "what's still there is the freshest stock".
+  const channelLedgers = new Map<string, FinishedPoolStack>();
+  const ledgerFor = (destination: string, sku: string) => {
+    const k = key(sku, destination);
+    let p = channelLedgers.get(k);
+    if (!p) channelLedgers.set(k, (p = new FinishedPoolStack()));
+    return p;
+  };
+  channelSeed.forEach((l, i) => ledgerFor(l.destination, l.sku).add(l.units, l.unitCost, l.date, -channelSeed.length + i));
+
   const shortfalls: MovementShortfall[] = [];
 
   // Replay movements in chronological order so transfers chain correctly.
   const ordered = [...movements].sort((a, b) => a.date - b.date || a.seq - b.seq);
   for (const m of ordered) {
+    // Stock coming BACK from a channel: consume its ledger, land at the facility with that cost.
+    if (m.fromDestination) {
+      if (!m.toFacilityId) continue; // channel → non-facility is meaningless
+      const ledger = ledgerFor(m.fromDestination, m.sku);
+      const { drawn, consumed } = ledger.take(m.quantity);
+      const to = stackFor(m.sku, m.toFacilityId);
+      for (const d of drawn) to.add(d.units, d.unitCost, m.date, m.seq);
+      const short = m.quantity - consumed;
+      if (short > 1e-6) {
+        // More units than we ever recorded entering the channel — take them at the fallback cost
+        // rather than losing them, and report the gap.
+        to.add(short, fallbackCostBySku?.get(m.sku) ?? 0, m.date, m.seq);
+        shortfalls.push({
+          movementId: m.id,
+          sku: m.sku,
+          facilityId: m.fromDestination,
+          requested: m.quantity,
+          available: consumed,
+          shortBy: short,
+        });
+      }
+      continue;
+    }
+
+    if (!m.fromFacilityId) continue; // openings are handled by the callers as supply/seed
     const from = stackFor(m.sku, m.fromFacilityId);
     const { drawn, consumed } = from.take(m.quantity);
 
@@ -143,10 +197,9 @@ export function runFinishedGoodsEngine(supply: FinishedSupply[], movements: Fini
       const to = stackFor(m.sku, m.toFacilityId);
       for (const d of drawn) to.add(d.units, d.unitCost, m.date, m.seq);
     } else if (m.toDestination) {
-      // Left the network — record what it cost us, per destination.
-      for (const d of drawn) {
-        shipped.push({ sku: m.sku, destination: m.toDestination, units: d.units, unitCost: d.unitCost, date: m.date });
-      }
+      // Left the network — its channel ledger records what those units cost us.
+      const ledger = ledgerFor(m.toDestination, m.sku);
+      for (const d of drawn) ledger.add(d.units, d.unitCost, m.date, m.seq);
     }
   }
 
@@ -155,6 +208,15 @@ export function runFinishedGoodsEngine(supply: FinishedSupply[], movements: Fini
     const [sku, facilityId] = k.split("|");
     const r = stack.remaining();
     if (r.units > 1e-6) out.push({ sku, facilityId, units: r.units, value: r.value });
+  }
+
+  // What's still recorded as being AT each channel (shipments minus pull-backs), for valuation.
+  const shipped: ShippedLayer[] = [];
+  for (const [k, stack] of channelLedgers) {
+    const [sku, destination] = k.split("|");
+    for (const l of stack.layers_()) {
+      shipped.push({ sku, destination, units: l.units, unitCost: l.unitCost, date: l.date });
+    }
   }
 
   return { pools: out, shipped, shortfalls };

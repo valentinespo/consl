@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { X, AlertTriangle } from "@/components/icons";
 import { DatePicker } from "@/components/DatePicker";
 import { Field, inputCls } from "@/components/FormKit";
-import { DESTINATIONS, RAW_DESTINATIONS } from "@/lib/destinations";
+import { DESTINATIONS, RAW_DESTINATIONS, destinationLabel } from "@/lib/destinations";
 import { createMovement } from "@/app/facilities/actions";
 
 export type MoveProduct = { id: string; code: string; name: string };
@@ -29,6 +29,7 @@ export function MovementForm({
   onHand,
   todayISO,
   onDone,
+  channels = [],
 }: {
   products: MoveProduct[];
   materials: MoveMaterial[];
@@ -36,13 +37,16 @@ export function MovementForm({
   onHand: OnHandRow[];
   todayISO: string;
   onDone: () => void;
+  /** Connected channel roots (AMAZON | SHOPIFY | TIKTOK) stock can be pulled BACK from. */
+  channels?: string[];
 }) {
   const router = useRouter();
   // The item is picked as "FINISHED:<productId>" or "RAW:<materialId>".
   const firstItem = products[0] ? `FINISHED:${products[0].id}` : materials[0] ? `RAW:${materials[0].id}` : "";
   const [item, setItem] = useState(firstItem);
   const [poolSku, setPoolSku] = useState(""); // only for sku-specific raw materials
-  const [fromFacilityId, setFromFacilityId] = useState(facilities[0]?.id ?? "");
+  // A facility id, or "channel:<ROOT>" when finished stock is coming back from a sales channel.
+  const [source, setSource] = useState(facilities[0]?.id ?? "");
   const [target, setTarget] = useState<string>("AMAZON"); // "facility:<id>" = transfer, else a destination
   const [quantity, setQuantity] = useState("");
   const [dateISO, setDateISO] = useState(todayISO);
@@ -55,18 +59,27 @@ export function MovementForm({
   const material = isRaw ? materials.find((m) => m.id === itemId) ?? null : null;
   const needsSku = isRaw && !!material?.skuSpecific;
 
+  // Raw materials never sit at a channel — flip the source back to a facility if the kind changes.
+  const channelFrom = !isRaw && source.startsWith("channel:") ? source.slice("channel:".length) : null;
+  const fromFacilityId = source.startsWith("channel:") ? "" : source;
+
   // A raw material can only move to another facility or be written off — never to a channel/customer.
-  const destinations = isRaw ? RAW_DESTINATIONS : DESTINATIONS;
-  // Keep the target valid when the item kind flips.
-  const validTarget = target.startsWith("facility:") || destinations.some((d) => d.value === target);
-  const effectiveTarget = validTarget ? target : destinations[0]?.value ?? "";
+  // Stock coming back FROM a channel can only land at one of your facilities.
+  const destinations = channelFrom ? [] : isRaw ? RAW_DESTINATIONS : DESTINATIONS;
+  // Keep the target valid when the item kind or source flips.
+  const validTarget = target.startsWith("facility:")
+    ? target.slice("facility:".length) !== fromFacilityId
+    : destinations.some((d) => d.value === target);
+  const effectiveTarget = validTarget
+    ? target
+    : destinations[0]?.value ?? (facilities.find((f) => f.id !== fromFacilityId) ? `facility:${facilities.find((f) => f.id !== fromFacilityId)!.id}` : "");
 
   const available =
     onHand.find(
       (r) => r.kind === kind && r.itemId === itemId && r.facilityId === fromFacilityId && (!needsSku || r.poolSku === (poolSku || null)),
     )?.units ?? 0;
   const q = Math.round(Number(quantity) || 0);
-  const short = q > available;
+  const short = !channelFrom && q > available;
 
   const skuOptions = useMemo(() => {
     if (!needsSku) return [] as { id: string; code: string }[];
@@ -88,7 +101,8 @@ export function MovementForm({
         materialTypeId: isRaw ? itemId : null,
         quantity: q,
         dateISO,
-        fromFacilityId,
+        fromFacilityId: channelFrom ? null : fromFacilityId,
+        fromDestination: channelFrom,
         toFacilityId: isTransfer ? effectiveTarget.slice("facility:".length) : null,
         toDestination: isTransfer ? null : effectiveTarget,
         notes,
@@ -106,13 +120,23 @@ export function MovementForm({
     }
   }
 
-  const canSave = q > 0 && !!fromFacilityId && !!itemId && (!needsSku || !!poolSku);
+  const canSave =
+    q > 0 && !!itemId && (!needsSku || !!poolSku) && (channelFrom ? effectiveTarget.startsWith("facility:") : !!fromFacilityId);
 
   return (
     <div className="space-y-3">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <Field label="What's moving?">
-          <select value={item} onChange={(e) => { setItem(e.target.value); setPoolSku(""); }} className={inputCls}>
+          <select
+            value={item}
+            onChange={(e) => {
+              setItem(e.target.value);
+              setPoolSku("");
+              // Raw materials never come back from a channel — snap the source to a facility.
+              if (e.target.value.startsWith("RAW:") && source.startsWith("channel:")) setSource(facilities[0]?.id ?? "");
+            }}
+            className={inputCls}
+          >
             {products.length > 0 && (
               <optgroup label="Finished products">
                 {products.map((p) => (
@@ -147,26 +171,46 @@ export function MovementForm({
           </Field>
         )}
 
-        <Field label="Moving from" hint={`${Math.round(available).toLocaleString()} on hand here`}>
-          <select value={fromFacilityId} onChange={(e) => setFromFacilityId(e.target.value)} className={inputCls}>
-            {facilities.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.code} — {f.name}
-              </option>
-            ))}
+        <Field
+          label="Moving from"
+          hint={
+            channelFrom
+              ? "The units re-enter at the cost they had when they went to the channel."
+              : `${Math.round(available).toLocaleString()} on hand here`
+          }
+        >
+          <select value={source} onChange={(e) => setSource(e.target.value)} className={inputCls}>
+            <optgroup label="Your facilities">
+              {facilities.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.code} — {f.name}
+                </option>
+              ))}
+            </optgroup>
+            {!isRaw && channels.length > 0 && (
+              <optgroup label="Back from a sales channel">
+                {channels.map((c) => (
+                  <option key={c} value={`channel:${c}`}>
+                    {destinationLabel(c)}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </Field>
 
         <Field label="Moving to">
           <select value={effectiveTarget} onChange={(e) => setTarget(e.target.value)} className={inputCls}>
-            <optgroup label={isRaw ? "Out of inventory" : "Out of your network"}>
-              {destinations.map((d) => (
-                <option key={d.value} value={d.value}>
-                  {d.label}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="Transfer to another facility">
+            {destinations.length > 0 && (
+              <optgroup label={isRaw ? "Out of inventory" : "Out of your network"}>
+                {destinations.map((d) => (
+                  <option key={d.value} value={d.value}>
+                    {d.label}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            <optgroup label={channelFrom ? "Into one of your facilities" : "Transfer to another facility"}>
               {facilities
                 .filter((f) => f.id !== fromFacilityId)
                 .map((f) => (
@@ -225,12 +269,14 @@ export function NewMovementPanel({
   facilities,
   onHand,
   todayISO,
+  channels = [],
 }: {
   products: MoveProduct[];
   materials: MoveMaterial[];
   facilities: MoveFacility[];
   onHand: OnHandRow[];
   todayISO: string;
+  channels?: string[];
 }) {
   const [open, setOpen] = useState(false);
   if (!open) {
@@ -251,7 +297,7 @@ export function NewMovementPanel({
           <X size={18} />
         </button>
       </div>
-      <MovementForm products={products} materials={materials} facilities={facilities} onHand={onHand} todayISO={todayISO} onDone={() => setOpen(false)} />
+      <MovementForm products={products} materials={materials} facilities={facilities} onHand={onHand} todayISO={todayISO} channels={channels} onDone={() => setOpen(false)} />
     </div>
   );
 }

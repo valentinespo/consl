@@ -2,7 +2,7 @@ import "server-only";
 import { prisma } from "./prisma";
 import { computeEngineResult } from "./recompute";
 import { buildCostChips } from "./lot-costs";
-import { runFinishedGoodsEngine, type FinishedSupply, type FinishedMovement } from "./finished-goods";
+import { runFinishedGoodsEngine, type FinishedSupply, type FinishedMovement, type ShippedLayer } from "./finished-goods";
 import { deriveProduction, derivePayment, deriveFinishedAt } from "./lot-status";
 
 export type InventoryPool = {
@@ -284,19 +284,28 @@ export async function getTransactionInvoices(lotId?: string) {
 /** Run the finished-goods engine: where finished units physically are and what they're worth.
  *  Supply is per LINE: a finished SKU feeds the pools even while its lot-mates are still cooking. */
 export async function computeFinishedGoods() {
-  const [lots, movements] = await Promise.all([
+  const [lots, movements, products] = await Promise.all([
     prisma.lot.findMany({
       where: { lines: { some: { status: "FINISHED" } } },
       include: { lines: true },
       orderBy: [{ poDate: "desc" }, { createdAt: "desc" }],
     }),
     prisma.stockMovement.findMany({ where: { itemType: "FINISHED" }, orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
+    prisma.product.findMany({ select: { id: true, openingUnitCost: true } }),
   ]);
   const supply: FinishedSupply[] = [];
   let seq = 0;
+  // Newest-lot cost per product (lots arrive newest-first), falling back to the onboarding COG —
+  // what a channel pull-back beyond recorded layers is costed at, mirroring lib/restock.ts.
+  const fallbackCostBySku = new Map<string, number>(products.map((p) => [p.id, p.openingUnitCost ?? 0]));
+  const seenNewest = new Set<string>();
   for (const lot of lots) {
     for (const ln of lot.lines) {
       if (ln.status !== "FINISHED") continue;
+      if (!seenNewest.has(ln.productId)) {
+        seenNewest.add(ln.productId);
+        fallbackCostBySku.set(ln.productId, ln.cogPerUnit);
+      }
       supply.push({
         sku: ln.productId,
         facilityId: lot.facilityId,
@@ -307,32 +316,38 @@ export async function computeFinishedGoods() {
       });
     }
   }
-  // Opening balances at your own facilities are day-zero supply — stock that existed before consl,
-  // at the operator-entered starting COG (see lib/restock.ts for the full story).
+  // Opening balances are day-zero layers: at your own facilities they're supply; at a channel
+  // they seed that channel's ledger so a pull-back can consume them (see lib/restock.ts).
+  const channelSeed: ShippedLayer[] = [];
   for (const m of movements) {
-    if (m.kind !== "OPENING" || !m.productId || !m.toFacilityId || !(m.quantity > 0)) continue;
-    supply.push({
-      sku: m.productId,
-      facilityId: m.toFacilityId,
-      units: m.quantity,
-      unitCost: m.unitCost ?? 0,
-      date: m.date.getTime(),
-      seq: seq++,
-    });
+    if (m.kind !== "OPENING" || !m.productId || !(m.quantity > 0)) continue;
+    if (m.toFacilityId) {
+      supply.push({
+        sku: m.productId,
+        facilityId: m.toFacilityId,
+        units: m.quantity,
+        unitCost: m.unitCost ?? 0,
+        date: m.date.getTime(),
+        seq: seq++,
+      });
+    } else if (m.toDestination) {
+      channelSeed.push({ sku: m.productId, destination: m.toDestination, units: m.quantity, unitCost: m.unitCost ?? 0, date: m.date.getTime() });
+    }
   }
   const mv: FinishedMovement[] = movements
-    .filter((m) => m.kind !== "OPENING" && m.fromFacilityId)
+    .filter((m) => m.kind !== "OPENING" && (m.fromFacilityId || m.fromDestination))
     .map((m, i) => ({
       id: m.id,
       sku: m.productId ?? "",
-      fromFacilityId: m.fromFacilityId!,
+      fromFacilityId: m.fromFacilityId,
+      fromDestination: m.fromDestination,
       toFacilityId: m.toFacilityId,
       toDestination: m.toDestination,
       quantity: m.quantity,
       date: m.date.getTime(),
       seq: i,
     }));
-  return runFinishedGoodsEngine(supply, mv);
+  return runFinishedGoodsEngine(supply, mv, channelSeed, fallbackCostBySku);
 }
 
 /** Finished stock on hand at your own facilities, with product + facility names attached. */
@@ -391,6 +406,7 @@ export async function getMovements() {
       imageUrl: raw ? m.materialType?.imageUrl ?? null : m.product?.imageUrl ?? null,
       quantity: m.quantity,
       fromCode: m.fromFacility?.code ?? null,
+      fromDestination: m.fromDestination,
       toCode: m.toFacility?.code ?? null,
       toDestination: m.toDestination,
       notes: m.notes,

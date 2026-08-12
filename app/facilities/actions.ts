@@ -115,12 +115,17 @@ export type MovementInput = {
   materialTypeId: string | null; // RAW only.
   quantity: number;
   dateISO: string | null;
-  fromFacilityId: string;
+  /** Where the stock comes from: one of your facilities, OR a sales channel it's being pulled
+   *  back from (an Amazon removal order into your own warehouse). Exactly one is set. */
+  fromFacilityId: string | null;
+  fromDestination?: string | null; // AMAZON | SHOPIFY | TIKTOK — finished goods only
   /** Either another of your facilities, or a destination outside your network — not both. */
   toFacilityId: string | null;
   toDestination: string | null;
   notes: string | null;
 };
+
+const CHANNEL_SOURCES = ["AMAZON", "SHOPIFY", "TIKTOK"];
 
 /** Record stock leaving one of your locations — finished goods or raw materials. */
 export async function createMovement(input: MovementInput) {
@@ -135,7 +140,16 @@ export async function createMovement(input: MovementInput) {
   if (!Number.isFinite(quantity) || quantity <= 0) {
     return { ok: false as const, error: "Enter how many units moved" };
   }
-  if (!input.fromFacilityId) return { ok: false as const, error: "Pick where the stock is moving from" };
+  const fromDestination = input.fromDestination || null;
+  if (fromDestination) {
+    // Stock coming BACK from a sales channel — finished goods only, must land at a facility.
+    if (raw) return { ok: false as const, error: "Raw materials never sit at a sales channel." };
+    if (!CHANNEL_SOURCES.includes(fromDestination)) return { ok: false as const, error: "Unknown channel" };
+    if (input.fromFacilityId) return { ok: false as const, error: "Pick either a facility or a channel as the source, not both" };
+    if (!input.toFacilityId) return { ok: false as const, error: "Stock pulled back from a channel must arrive at one of your facilities" };
+  } else if (!input.fromFacilityId) {
+    return { ok: false as const, error: "Pick where the stock is moving from" };
+  }
   if (raw && !input.materialTypeId) return { ok: false as const, error: "Pick a raw material" };
   if (!raw && !input.productId) return { ok: false as const, error: "Pick a product" };
 
@@ -164,12 +178,15 @@ export async function createMovement(input: MovementInput) {
   }
 
   // Warn (don't block) when the ledger doesn't show enough stock — the count may just be behind.
-  let onHand = 0;
-  if (raw) {
+  // Channel sources skip the check: the channel's own reported count is synced, not ledger-held.
+  let onHand = quantity;
+  if (fromDestination) {
+    // no ledger to check against
+  } else if (raw) {
     const { pools } = await getInventory();
     // materialCode is what pools key by; look it up from the material id.
     const mat = await prisma.materialType.findFirst({ where: { id: input.materialTypeId! }, select: { code: true } });
-    const fromFac = await prisma.facility.findFirst({ where: { id: input.fromFacilityId }, select: { code: true } });
+    const fromFac = await prisma.facility.findFirst({ where: { id: input.fromFacilityId! }, select: { code: true } });
     const poolSkuCode = input.productId
       ? (await prisma.product.findFirst({ where: { id: input.productId }, select: { code: true } }))?.code ?? null
       : null;
@@ -189,7 +206,8 @@ export async function createMovement(input: MovementInput) {
       materialTypeId: raw ? input.materialTypeId : null,
       quantity,
       date: input.dateISO ? new Date(input.dateISO) : new Date(),
-      fromFacilityId: input.fromFacilityId,
+      fromFacilityId: input.fromFacilityId || null,
+      fromDestination,
       toFacilityId,
       toDestination,
       notes: input.notes?.trim().slice(0, 500) || null,

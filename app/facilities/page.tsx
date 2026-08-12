@@ -53,6 +53,9 @@ export default async function FacilitiesPage() {
   const codeToId = new Map(facilityOptions.map((f) => [f.code, f.id]));
   const materialIdByCode = new Map(materials.map((m) => [m.code, m.id]));
   const productIdByCode = new Map(products.map((p) => [p.code, p.id]));
+  // Channels stock can be pulled BACK from in the movement form (Amazon removal orders etc.) —
+  // one root per connected platform (FBA + AWD collapse into AMAZON, matching the ledger pool).
+  const channelRoots = [...new Set(channels.map((f) => (f.channel!.startsWith("AMAZON") ? "AMAZON" : f.channel!)))];
 
   // On-hand for the movement form: finished (per SKU) + raw (per material, and pool-SKU where relevant).
   const onHand: OnHandRow[] = [
@@ -94,6 +97,7 @@ export default async function FacilitiesPage() {
               facilities={facilityOptions}
               onHand={onHand}
               todayISO={todayISO}
+              channels={channelRoots}
             />
           )}
           {facilities.length > 0 && <NewFacilityButton />}
