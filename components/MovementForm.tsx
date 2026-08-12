@@ -28,11 +28,13 @@ export type OnHandRow = {
 const rootOf = (channel: string) => (channel.startsWith("AMAZON") ? "AMAZON" : channel);
 const ROOT_LABEL: Record<string, string> = { AMAZON: "Amazon", SHOPIFY: "Shopify", TIKTOK: "TikTok Shop" };
 
-/** "Amazon — FBA", "Shopify — 638 Alton Place" — the provider, then the specific place. */
+/** "Amazon — FBA (Removal order)", "Shopify — 638 Alton Place" — the provider, then the specific
+ *  place. FBA is annotated because a removal order is the only way stock ever leaves it back to you. */
 function channelOptionLabel(f: MoveChannelFacility): string {
   const provider = ROOT_LABEL[rootOf(f.channel)] ?? rootOf(f.channel);
   const place = f.name.replace(new RegExp(`^${provider}\\s+`, "i"), "");
-  return `${provider} — ${place}`;
+  const suffix = f.channel === "AMAZON_FBA" ? " (Removal order)" : "";
+  return `${provider} — ${place}${suffix}`;
 }
 
 export function MovementForm({
