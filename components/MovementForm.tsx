@@ -64,8 +64,8 @@ export function MovementForm({
   const fromFacilityId = source.startsWith("channel:") ? "" : source;
 
   // A raw material can only move to another facility or be written off — never to a channel/customer.
-  // Stock coming back FROM a channel can only land at one of your facilities.
-  const destinations = channelFrom ? [] : isRaw ? RAW_DESTINATIONS : DESTINATIONS;
+  // Stock leaving a channel can go anywhere except back to the same channel.
+  const destinations = channelFrom ? DESTINATIONS.filter((d) => d.value !== channelFrom) : isRaw ? RAW_DESTINATIONS : DESTINATIONS;
   // Keep the target valid when the item kind or source flips.
   const validTarget = target.startsWith("facility:")
     ? target.slice("facility:".length) !== fromFacilityId
@@ -120,8 +120,7 @@ export function MovementForm({
     }
   }
 
-  const canSave =
-    q > 0 && !!itemId && (!needsSku || !!poolSku) && (channelFrom ? effectiveTarget.startsWith("facility:") : !!fromFacilityId);
+  const canSave = q > 0 && !!itemId && (!needsSku || !!poolSku) && !!effectiveTarget && (!!channelFrom || !!fromFacilityId);
 
   return (
     <div className="space-y-3">
@@ -202,7 +201,7 @@ export function MovementForm({
         <Field label="Moving to">
           <select value={effectiveTarget} onChange={(e) => setTarget(e.target.value)} className={inputCls}>
             {destinations.length > 0 && (
-              <optgroup label={isRaw ? "Out of inventory" : "Out of your network"}>
+              <optgroup label={channelFrom ? "To another channel / out of inventory" : isRaw ? "Out of inventory" : "Out of your network"}>
                 {destinations.map((d) => (
                   <option key={d.value} value={d.value}>
                     {d.label}

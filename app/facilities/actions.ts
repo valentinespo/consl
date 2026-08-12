@@ -142,11 +142,12 @@ export async function createMovement(input: MovementInput) {
   }
   const fromDestination = input.fromDestination || null;
   if (fromDestination) {
-    // Stock coming BACK from a sales channel — finished goods only, must land at a facility.
+    // Stock leaving a sales channel — finished goods only. It may land at one of your facilities,
+    // at ANOTHER channel (AWD → your Shopify 3PL), or leave inventory (disposal, wholesale).
     if (raw) return { ok: false as const, error: "Raw materials never sit at a sales channel." };
     if (!CHANNEL_SOURCES.includes(fromDestination)) return { ok: false as const, error: "Unknown channel" };
     if (input.fromFacilityId) return { ok: false as const, error: "Pick either a facility or a channel as the source, not both" };
-    if (!input.toFacilityId) return { ok: false as const, error: "Stock pulled back from a channel must arrive at one of your facilities" };
+    if (input.toDestination === fromDestination) return { ok: false as const, error: "Source and destination channel are the same" };
   } else if (!input.fromFacilityId) {
     return { ok: false as const, error: "Pick where the stock is moving from" };
   }

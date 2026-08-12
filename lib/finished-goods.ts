@@ -153,18 +153,19 @@ export function runFinishedGoodsEngine(
   // Replay movements in chronological order so transfers chain correctly.
   const ordered = [...movements].sort((a, b) => a.date - b.date || a.seq - b.seq);
   for (const m of ordered) {
-    // Stock coming BACK from a channel: consume its ledger, land at the facility with that cost.
+    // Stock leaving a channel: consume its ledger oldest-first, and land the drawn layers — with
+    // the cost they left with — wherever they're headed: one of your facilities, ANOTHER channel
+    // (an AWD shipment to your Shopify 3PL), or out of inventory entirely (a disposal removal,
+    // a wholesale order shipped straight from the channel).
     if (m.fromDestination) {
-      if (!m.toFacilityId) continue; // channel → non-facility is meaningless
+      if (m.toDestination === m.fromDestination) continue; // same-channel no-op
       const ledger = ledgerFor(m.fromDestination, m.sku);
       const { drawn, consumed } = ledger.take(m.quantity);
-      const to = stackFor(m.sku, m.toFacilityId);
-      for (const d of drawn) to.add(d.units, d.unitCost, m.date, m.seq);
       const short = m.quantity - consumed;
       if (short > 1e-6) {
-        // More units than we ever recorded entering the channel — take them at the fallback cost
+        // More units than we ever recorded entering the channel — carry them at the fallback cost
         // rather than losing them, and report the gap.
-        to.add(short, fallbackCostBySku?.get(m.sku) ?? 0, m.date, m.seq);
+        drawn.push({ units: short, unitCost: fallbackCostBySku?.get(m.sku) ?? 0 });
         shortfalls.push({
           movementId: m.id,
           sku: m.sku,
@@ -174,6 +175,14 @@ export function runFinishedGoodsEngine(
           shortBy: short,
         });
       }
+      if (m.toFacilityId) {
+        const to = stackFor(m.sku, m.toFacilityId);
+        for (const d of drawn) to.add(d.units, d.unitCost, m.date, m.seq);
+      } else if (m.toDestination && m.toDestination !== "CUSTOMER" && m.toDestination !== "LOSS") {
+        const to = ledgerFor(m.toDestination, m.sku);
+        for (const d of drawn) to.add(d.units, d.unitCost, m.date, m.seq);
+      }
+      // CUSTOMER / LOSS: the layers simply leave — consumed above, landed nowhere.
       continue;
     }
 
