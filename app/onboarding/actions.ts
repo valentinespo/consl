@@ -240,7 +240,8 @@ export async function completeOnboarding() {
   const openings: { productId: string; destination: string; units: number }[] = [];
   for (const s of snaps) {
     if (!costById.has(s.productId)) continue;
-    const units = s.fbaTotal + s.awdOnhand + s.awdInbound;
+    // Same de-dup rule as the dashboard: reserved-in-AWD units already live in fbaTotal.
+    const units = s.fbaTotal + Math.max(0, s.awdOnhand - s.awdReserved) + s.awdInbound;
     if (units > 0) openings.push({ productId: s.productId, destination: "AMAZON", units });
   }
   // Shopify/TikTok: one pool per channel — locations summed, matching how they're valued.

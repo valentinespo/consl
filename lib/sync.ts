@@ -103,6 +103,7 @@ export async function syncAmazonStockCore(): Promise<{ ok: true; count: number }
       fbaTotal: row?.total ?? 0,
       awdOnhand: a?.onhand ?? 0,
       awdInbound: a?.inbound ?? 0,
+      awdReserved: a?.reserved ?? 0,
       inStock: (row?.available ?? 0) > 0,
     };
     // capturedAt moves with the refresh: it drives the "Updated …" label, and after a stock pull
@@ -191,6 +192,7 @@ export async function syncAmazonCore(): Promise<
       fbaTotal: row?.total ?? 0,
       awdOnhand: a?.onhand ?? 0,
       awdInbound: a?.inbound ?? 0,
+      awdReserved: a?.reserved ?? 0,
       inStock: (row?.available ?? 0) > 0,
       units10d: w10?.units ?? last?.units10d ?? 0,
       units30d: w30?.units ?? last?.units30d ?? 0,

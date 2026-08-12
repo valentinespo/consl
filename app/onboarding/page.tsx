@@ -112,7 +112,7 @@ export default async function OnboardingPage({
   const channelCounts: { channel: string; label: string; skus: { code: string; units: number }[] }[] = [];
   if (connected.has("amazon")) {
     const skus = snaps
-      .map((s) => ({ code: codeById.get(s.productId) ?? "?", units: s.fbaTotal + s.awdOnhand + s.awdInbound }))
+      .map((s) => ({ code: codeById.get(s.productId) ?? "?", units: s.fbaTotal + Math.max(0, s.awdOnhand - s.awdReserved) + s.awdInbound }))
       .filter((s) => s.units > 0 && s.code !== "?")
       .sort((a, b) => b.units - a.units);
     channelCounts.push({ channel: "AMAZON", label: "Amazon (FBA + AWD)", skus });

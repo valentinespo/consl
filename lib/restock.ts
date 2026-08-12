@@ -226,7 +226,10 @@ export async function getRestock(): Promise<{
   const rows: RestockRow[] = products.map((p) => {
     const s = snapByProduct.get(p.id);
     const fbaTotal = s?.fbaTotal ?? 0;
-    const awdTotal = (s?.awdOnhand ?? 0) + (s?.awdInbound ?? 0);
+    // Reserved-in-AWD units are picked for an FBA replenishment, and Amazon creates the FBA
+    // inbound shipment the moment the replenishment exists — so they already sit in fbaTotal.
+    // Subtracting them here is what keeps a replenishment from counting twice while it's staged.
+    const awdTotal = Math.max(0, (s?.awdOnhand ?? 0) - (s?.awdReserved ?? 0)) + (s?.awdInbound ?? 0);
     const inProduction = inProdUnits.get(p.id) ?? 0;
     fbaUnits += fbaTotal;
     awdUnits += awdTotal;

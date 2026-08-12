@@ -122,7 +122,7 @@ export async function getCatalogImage(client: SpApiClient, asin: string): Promis
   return pool[0].link ?? null;
 }
 
-export type AwdRow = { sku: string; onhand: number; inbound: number };
+export type AwdRow = { sku: string; onhand: number; inbound: number; reserved: number };
 
 /** Amazon Warehousing & Distribution inventory per SKU (on-hand + inbound to AWD). */
 export async function getAwdInventory(client: SpApiClient): Promise<AwdRow[]> {
@@ -141,6 +141,9 @@ export async function getAwdInventory(client: SpApiClient): Promise<AwdRow[]> {
         sku: it.sku,
         onhand: it.totalOnhandQuantity ?? d.availableDistributableQuantity ?? 0,
         inbound: it.totalInboundQuantity ?? d.inboundQuantity ?? 0,
+        // Reserved = picked for an FBA replenishment; those units are simultaneously in FBA's
+        // inbound, so the counting side subtracts them. Missing field just means 0 (safe).
+        reserved: d.reservedDistributableQuantity ?? 0,
       });
     }
     next = j.nextToken || "";
