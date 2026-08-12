@@ -14,7 +14,7 @@ export function Field({
   help,
   children,
 }: {
-  label: string;
+  label: React.ReactNode;
   hint?: string;
   /** Optional "what is this?" bubble, shown as an icon before the label in the label's own colour. */
   help?: { title: string; body: string };

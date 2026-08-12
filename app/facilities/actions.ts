@@ -142,12 +142,22 @@ export async function createMovement(input: MovementInput) {
   }
   const fromDestination = input.fromDestination || null;
   if (fromDestination) {
-    // Stock leaving a sales channel — finished goods only. It may land at one of your facilities,
-    // at ANOTHER channel (AWD → your Shopify 3PL), or leave inventory (disposal, wholesale).
+    // Stock leaving a sales channel — finished goods only. It may land at one of your facilities
+    // or at ANOTHER channel (AWD → your Shopify 3PL). Sold/lost stock at a channel is NOT recorded
+    // here: the channel's own reported count already drops, so there's nothing to move.
     if (raw) return { ok: false as const, error: "Raw materials never sit at a sales channel." };
     if (!CHANNEL_SOURCES.includes(fromDestination)) return { ok: false as const, error: "Unknown channel" };
-    if (input.fromFacilityId) return { ok: false as const, error: "Pick either a facility or a channel as the source, not both" };
+    if (input.toDestination === "CUSTOMER" || input.toDestination === "LOSS") {
+      return { ok: false as const, error: "Stock sold or lost at a channel leaves its count on its own — nothing to record." };
+    }
     if (input.toDestination === fromDestination) return { ok: false as const, error: "Source and destination channel are the same" };
+    // An accompanying facility id names the SPECIFIC place at the channel ("Shopify — Alton
+    // Place") — history only; the cost still draws from the channel's shared pool.
+    if (input.fromFacilityId) {
+      const src = await prisma.facility.findFirst({ where: { id: input.fromFacilityId }, select: { channel: true } });
+      const root = src?.channel ? (src.channel.startsWith("AMAZON") ? "AMAZON" : src.channel) : null;
+      if (root !== fromDestination) return { ok: false as const, error: "That location doesn't belong to this channel." };
+    }
   } else if (!input.fromFacilityId) {
     return { ok: false as const, error: "Pick where the stock is moving from" };
   }
