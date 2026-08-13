@@ -6,7 +6,6 @@ import { allowedDestinations } from "@/lib/destinations";
 import { maxMovableOn } from "@/lib/availability";
 import { checkOwned } from "@/lib/ownership";
 import { requirePermission } from "@/lib/membership";
-import { isLayerKind } from "@/lib/constants";
 import { recomputeAll } from "@/lib/recompute";
 
 /** Create a facility — a co-packer, warehouse, 3PL or anywhere else stock lives. */
@@ -275,6 +274,10 @@ export async function createMovement(input: MovementInput) {
     },
   });
 
+  // Raw movements interleave with production on the engine's timeline — a backdated transfer can
+  // change which purchase layers later lots consumed, so the saved lot costs must re-derive now.
+  if (raw) await recomputeAll();
+
   revalidatePath("/", "layout");
   return { ok: true as const, warning: null };
 }
@@ -285,9 +288,9 @@ export async function deleteMovement(id: string) {
   if (!gate.ok) return { ok: false as const, error: gate.error };
   const row = await prisma.stockMovement.findFirst({ where: { id }, select: { kind: true, itemType: true } });
   await prisma.stockMovement.delete({ where: { id } });
-  // Removing a raw layer (starting balance / found stock) changes what production consumed —
+  // Removing ANY raw movement (layer or transfer/write-off) changes what production consumed —
   // refresh the cost snapshots so every lot's numbers re-derive without it.
-  if (row && isLayerKind(row.kind) && row.itemType === "RAW") await recomputeAll();
+  if (row && row.itemType === "RAW") await recomputeAll();
   revalidatePath("/", "layout");
   return { ok: true as const };
 }
