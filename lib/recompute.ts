@@ -13,9 +13,10 @@ import {
   type PoolKey,
 } from "./fifo";
 
-/** Loads data + runs the engine WITHOUT persisting. Used by read-only queries. */
-export async function computeEngineResult() {
-  const [purchasesRaw, lotsRaw, txRaw, rawMovesRaw] = await Promise.all([
+/** Loads data + runs the engine WITHOUT persisting. Used by read-only queries.
+ *  `excludeMovementId` runs the world WITHOUT one movement — a what-if for delete warnings. */
+export async function computeEngineResult(opts: { excludeMovementId?: string } = {}) {
+  const [purchasesRaw, lotsRaw, txRaw, rawMovesAll] = await Promise.all([
     prisma.purchase.findMany({
       include: { materialType: true, facility: true, product: true, invoice: { select: { createdAt: true } } },
       // FIFO consumes layers in this order, so it must be total and reproducible. Without an
@@ -36,6 +37,7 @@ export async function computeEngineResult() {
       orderBy: [{ date: "asc" }, { createdAt: "asc" }],
     }),
   ]);
+  const rawMovesRaw = opts.excludeMovementId ? rawMovesAll.filter((m) => m.id !== opts.excludeMovementId) : rawMovesAll;
 
   const purchases: EnginePurchase[] = purchasesRaw.map((p, i) => ({
     materialCode: p.materialType.code,

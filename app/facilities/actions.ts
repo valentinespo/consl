@@ -6,7 +6,7 @@ import { allowedDestinations } from "@/lib/destinations";
 import { maxMovableOn } from "@/lib/availability";
 import { checkOwned } from "@/lib/ownership";
 import { requirePermission } from "@/lib/membership";
-import { recomputeAll } from "@/lib/recompute";
+import { computeEngineResult, recomputeAll } from "@/lib/recompute";
 
 /** Create a facility — a co-packer, warehouse, 3PL or anywhere else stock lives. */
 export async function createFacility(input: { code: string; name: string; type: string }) {
@@ -280,6 +280,50 @@ export async function createMovement(input: MovementInput) {
 
   revalidatePath("/", "layout");
   return { ok: true as const, warning: null };
+}
+
+/**
+ * What deleting a movement would do to production, BEFORE it happens: runs the engine with and
+ * without the movement and reports any lot line that would go short of a raw material — e.g.
+ * deleting a transfer-in that a lot (finished or not) already consumed. Advisory only; the
+ * delete itself stays allowed so mistakes can always be unwound.
+ */
+export async function movementDeleteImpact(id: string) {
+  const gate = await requirePermission("facilities", "delete");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  const row = await prisma.stockMovement.findFirst({ where: { id }, select: { itemType: true } });
+  // Finished-goods movements never feed lots, so nothing to check.
+  if (!row || row.itemType !== "RAW") return { ok: true as const, warnings: [] as string[] };
+
+  const [current, without, materials] = await Promise.all([
+    computeEngineResult(),
+    computeEngineResult({ excludeMovementId: id }),
+    prisma.materialType.findMany({ select: { code: true, name: true } }),
+  ]);
+  const matName = new Map(materials.map((m) => [m.code, m.name]));
+  const lotLabel = new Map(current.lotsRaw.map((l) => [l.id, l.poNumber ?? `#${l.lotNr}`]));
+
+  const before = new Map<string, Map<string, number>>();
+  for (const [key, lc] of current.result.lines) {
+    before.set(key, new Map(lc.shortfalls.map((s) => [s.materialCode, s.shortBy])));
+  }
+
+  const warnings: string[] = [];
+  for (const line of current.lines) {
+    const lc = without.result.lines.get(line.key);
+    if (!lc) continue;
+    for (const s of lc.shortfalls) {
+      const extra = s.shortBy - (before.get(line.key)?.get(s.materialCode) ?? 0);
+      if (extra > 1e-6) {
+        warnings.push(
+          `Deleting this would leave lot ${lotLabel.get(line.lotId) ?? `#${line.lotNr}`} (${line.sku}) without ` +
+            `${Math.round(extra).toLocaleString()} ${matName.get(s.materialCode) ?? s.materialCode} — ` +
+            `it'd need another purchase to be covered.`,
+        );
+      }
+    }
+  }
+  return { ok: true as const, warnings };
 }
 
 /** Remove a movement (nothing depends on it — the engine just replays without it). */
