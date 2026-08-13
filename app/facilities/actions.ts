@@ -2,8 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { computeFinishedGoods, getInventory } from "@/lib/queries";
 import { allowedDestinations } from "@/lib/destinations";
+import { maxMovableOn } from "@/lib/availability";
 import { checkOwned } from "@/lib/ownership";
 import { requirePermission } from "@/lib/membership";
 import { isLayerKind } from "@/lib/constants";
@@ -237,26 +237,27 @@ export async function createMovement(input: MovementInput) {
     };
   }
 
-  // Warn (don't block) when the ledger doesn't show enough stock — the count may just be behind.
-  // Channel sources skip the check: the channel's own reported count is synced, not ledger-held.
-  let onHand = quantity;
-  if (fromDestination) {
-    // no ledger to check against
-  } else if (raw) {
-    const { pools } = await getInventory();
-    // materialCode is what pools key by; look it up from the material id.
-    const mat = await prisma.materialType.findFirst({ where: { id: input.materialTypeId! }, select: { code: true } });
-    const fromFac = await prisma.facility.findFirst({ where: { id: input.fromFacilityId! }, select: { code: true } });
-    const poolSkuCode = input.productId
-      ? (await prisma.product.findFirst({ where: { id: input.productId }, select: { code: true } }))?.code ?? null
-      : null;
-    onHand =
-      pools.find(
-        (p) => p.materialCode === mat?.code && p.facility === fromFac?.code && (p.sku ?? null) === poolSkuCode,
-      )?.quantityRemaining ?? 0;
-  } else {
-    const { pools } = await computeFinishedGoods();
-    onHand = pools.find((p) => p.sku === input.productId && p.facilityId === input.fromFacilityId)?.units ?? 0;
+  // Hard rule: a movement can only take what was actually at the source ON ITS DATE — and never
+  // units a later, already-recorded movement carried away. Channel sources skip the check: the
+  // channel's own reported count is synced, not ledger-held.
+  if (!fromDestination && input.fromFacilityId) {
+    const dateISO = (input.dateISO || new Date().toISOString()).slice(0, 10);
+    const cap = await maxMovableOn({
+      kind: raw ? "RAW" : "FINISHED",
+      itemId: raw ? input.materialTypeId! : input.productId!,
+      poolSku: raw ? input.productId || null : null,
+      facilityId: input.fromFacilityId,
+      dateISO,
+    });
+    if (quantity > cap + 1e-6) {
+      return {
+        ok: false as const,
+        error:
+          cap <= 1e-6
+            ? "That facility had no stock of this item on that date."
+            : `Only ${Math.floor(cap).toLocaleString()} units were available to move on that date.`,
+      };
+    }
   }
 
   await prisma.stockMovement.create({
@@ -275,13 +276,7 @@ export async function createMovement(input: MovementInput) {
   });
 
   revalidatePath("/", "layout");
-  return {
-    ok: true as const,
-    warning:
-      quantity > onHand
-        ? `Recorded, but that location only shows ${Math.round(onHand).toLocaleString()} on hand — it's now short by ${Math.round(quantity - onHand).toLocaleString()}.`
-        : null,
-  };
+  return { ok: true as const, warning: null };
 }
 
 /** Remove a movement (nothing depends on it — the engine just replays without it). */

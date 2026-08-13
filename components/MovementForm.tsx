@@ -8,6 +8,7 @@ import { Field, inputCls } from "@/components/FormKit";
 import { IconSelect, type IconGroup } from "@/components/IconSelect";
 import { SkuAvatar } from "@/components/ui";
 import { CHANNEL_LOGO, ROOT_LOGO } from "@/lib/channel-logos";
+import { buildTimeline, capOn, type AvailabilityEvent } from "@/lib/availability-math";
 import { createMovement } from "@/app/facilities/actions";
 
 export type MoveProduct = { id: string; code: string; name: string; imageUrl: string | null };
@@ -73,6 +74,7 @@ export function MovementForm({
   onDone,
   channelFacilities = [],
   costHints = { products: {}, materials: {} },
+  availability = [],
 }: {
   products: MoveProduct[];
   materials: MoveMaterial[];
@@ -83,6 +85,8 @@ export function MovementForm({
   /** Connected channels' locked facilities — the places finished stock can be pulled back from. */
   channelFacilities?: MoveChannelFacility[];
   costHints?: CostHints;
+  /** Dated stock changes per item × facility — drives the locked calendar and per-date caps. */
+  availability?: AvailabilityEvent[];
 }) {
   const router = useRouter();
   const canInflow = facilities.length > 0 && (products.length > 0 || materials.length > 0);
@@ -125,12 +129,19 @@ export function MovementForm({
 
   /* ------------------------------- option groups ------------------------------- */
 
-  const productOptions = products.map((p) => ({
+  // Outflows can only move what the source facility actually holds — anything with no stock
+  // there simply isn't offered. Inflows list everything (stock is arriving, not leaving).
+  const hasStockAt = (k: "FINISHED" | "RAW", id: string, facilityId: string) =>
+    onHand.some((r) => r.kind === k && r.itemId === id && r.facilityId === facilityId && r.units > 1e-9);
+  const pickableProducts = mode === "OUT" ? products.filter((p) => hasStockAt("FINISHED", p.id, fromFacilityId)) : products;
+  const pickableMaterials = mode === "OUT" ? materials.filter((m) => hasStockAt("RAW", m.id, fromFacilityId)) : materials;
+
+  const productOptions = pickableProducts.map((p) => ({
     value: `FINISHED:${p.id}`,
     label: `${p.code} — ${p.name}`,
     icon: <SkuAvatar code={p.code} size={20} imageUrl={p.imageUrl} />,
   }));
-  const materialOptions = materials.map((m) => ({
+  const materialOptions = pickableMaterials.map((m) => ({
     value: `RAW:${m.id}`,
     label: m.name,
     icon: <MaterialMark imageUrl={m.imageUrl} />,
@@ -142,6 +153,20 @@ export function MovementForm({
           { label: "Finished products", options: productOptions },
           { label: "Raw materials", options: materialOptions },
         ];
+  const nothingToMove = mode === "OUT" && productOptions.length === 0 && materialOptions.length === 0;
+
+  // Keep the picked item valid when the source facility changes underneath it.
+  useEffect(() => {
+    if (mode !== "OUT") return;
+    const stillValid =
+      (kind === "FINISHED" && pickableProducts.some((p) => p.id === itemId)) ||
+      (kind === "RAW" && pickableMaterials.some((m) => m.id === itemId));
+    if (!stillValid) {
+      setItem(pickableProducts[0] ? `FINISHED:${pickableProducts[0].id}` : pickableMaterials[0] ? `RAW:${pickableMaterials[0].id}` : "");
+      setPoolSku("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, fromFacilityId]);
 
   const facilityOption = (f: MoveFacility, prefix = "") => ({
     value: `${prefix}${f.id}`,
@@ -211,19 +236,49 @@ export function MovementForm({
       (r) => r.kind === kind && r.itemId === itemId && r.facilityId === fromFacilityId && (!needsSku || r.poolSku === (poolSku || null)),
     )?.units ?? 0;
   const q = Math.round(Number(quantity) || 0);
-  const short = mode === "OUT" && q > available;
 
-  // Pool-SKU options: existing pools when stock is moving; ANY product when stock is appearing
-  // (a found box of printed pouches may be for a SKU with no recorded pouch stock yet).
+  // What was here through time for the chosen item at the chosen source — locks the calendar to
+  // days the stock actually existed, and caps the units for whatever date is picked. The cap for
+  // a date also respects movements already recorded AFTER it, so backdating can never take units
+  // a later shipment already carried away.
+  const comboReady = mode === "OUT" && !!fromFacilityId && !!itemId && (!needsSku || !!poolSku);
+  const timeline = useMemo(
+    () =>
+      !comboReady
+        ? []
+        : buildTimeline(
+            availability.filter(
+              (e) =>
+                e.kind === kind &&
+                e.itemId === itemId &&
+                e.facilityId === fromFacilityId &&
+                (e.poolSku ?? null) === (needsSku ? poolSku || null : null),
+            ),
+          ),
+    [comboReady, availability, kind, itemId, fromFacilityId, needsSku, poolSku],
+  );
+  const dateCap = comboReady ? capOn(timeline, dateISO) : Infinity;
+  const overCap = comboReady && q > dateCap + 1e-9;
+
+  // A combo switch can leave the picked date on a day that had nothing — snap back to today.
+  useEffect(() => {
+    if (comboReady && dateISO !== todayISO && capOn(timeline, dateISO) <= 1e-9) setDateISO(todayISO);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comboReady, timeline]);
+
+  // Pool-SKU options: pools with stock at the source when stock is moving; ANY product when
+  // stock is appearing (a found box of pouches may be for a SKU with no recorded stock yet).
   const skuOptions = useMemo(() => {
     if (!needsSku) return [] as { id: string; code: string }[];
     if (adjReason) return products.map((p) => ({ id: p.id, code: p.code }));
     const seen = new Map<string, string>();
     for (const r of onHand) {
-      if (r.kind === "RAW" && r.itemId === itemId && r.poolSku) seen.set(r.poolSku, r.poolSkuCode ?? r.poolSku);
+      if (r.kind === "RAW" && r.itemId === itemId && r.poolSku && r.facilityId === fromFacilityId && r.units > 1e-9) {
+        seen.set(r.poolSku, r.poolSkuCode ?? r.poolSku);
+      }
     }
     return [...seen].map(([id, code]) => ({ id, code }));
-  }, [needsSku, adjReason, products, onHand, itemId]);
+  }, [needsSku, adjReason, products, onHand, itemId, fromFacilityId]);
 
   function pickMode(next: "OUT" | "IN") {
     setMode(next);
@@ -286,6 +341,7 @@ export function MovementForm({
     (!needsSku || !!poolSku) &&
     !!effectiveTarget &&
     costOk &&
+    !overCap &&
     (mode === "IN" ? !!fromRoot || !!adjReason : !!fromFacilityId);
 
   const modeBtn = (active: boolean, disabled = false) =>
@@ -325,13 +381,25 @@ export function MovementForm({
         <>
           <div className="sm:max-w-[220px]">
             <Field label="Date">
-              <DatePicker value={dateISO} onChange={setDateISO} />
+              <DatePicker
+                value={dateISO}
+                onChange={setDateISO}
+                isDayDisabled={comboReady ? (d) => capOn(timeline, d) <= 1e-9 : undefined}
+                dayTitle={
+                  comboReady
+                    ? (d) => {
+                        const c = Math.floor(capOn(timeline, d));
+                        return c > 0 ? `Up to ${c.toLocaleString()} units can move on this day` : "No stock here on this day";
+                      }
+                    : undefined
+                }
+              />
             </Field>
           </div>
 
           <div className="flex flex-wrap items-end gap-3">
             <div className="min-w-[240px] flex-1">
-              <Field label="What's moving?">
+              <Field label="What's moving?" hint={nothingToMove ? "Nothing is in stock at this facility — pick a different source." : undefined}>
                 <IconSelect value={item} onChange={(v) => { setItem(v); setPoolSku(""); }} groups={itemGroups} />
               </Field>
             </div>
@@ -351,7 +419,7 @@ export function MovementForm({
               </div>
             )}
 
-            <Field label="Units">
+            <Field label="Units" hint={comboReady ? `Up to ${Math.floor(dateCap).toLocaleString()} on this date` : undefined}>
               <input
                 type="number"
                 min="1"
@@ -392,7 +460,9 @@ export function MovementForm({
                     : "It re-enters your stock at the cost you set."
                   : mode === "IN"
                     ? "The units re-enter at the cost they had when they went to the channel."
-                    : `${Math.round(available).toLocaleString()} on hand here`
+                    : comboReady
+                      ? `${Math.floor(dateCap).toLocaleString()} available on this date`
+                      : `${Math.round(available).toLocaleString()} on hand here`
               }
             >
               <IconSelect value={source} onChange={pickSource} groups={sourceGroups} />
@@ -413,12 +483,12 @@ export function MovementForm({
             <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inputCls} placeholder="Reference / note" />
           </Field>
 
-          {short && q > 0 && (
+          {overCap && q > 0 && (
             <div className="flex items-start gap-1.5 rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-[12.5px] text-negative">
               <AlertTriangle size={14} className="mt-0.5 shrink-0" />
               <span>
-                That location only shows {Math.round(available).toLocaleString()} on hand. You can still record this — it&apos;ll be
-                flagged as short until an earlier movement, lot or purchase is corrected.
+                Only {Math.floor(dateCap).toLocaleString()} units were here on this date — the rest either arrived later or already
+                moved out.
               </span>
             </div>
           )}
@@ -451,6 +521,7 @@ export function NewMovementPanel({
   todayISO,
   channelFacilities = [],
   costHints,
+  availability = [],
 }: {
   products: MoveProduct[];
   materials: MoveMaterial[];
@@ -459,6 +530,7 @@ export function NewMovementPanel({
   todayISO: string;
   channelFacilities?: MoveChannelFacility[];
   costHints?: CostHints;
+  availability?: AvailabilityEvent[];
 }) {
   const [open, setOpen] = useState(false);
   if (!open) {
@@ -487,6 +559,7 @@ export function NewMovementPanel({
         todayISO={todayISO}
         channelFacilities={channelFacilities}
         costHints={costHints}
+        availability={availability}
         onDone={() => setOpen(false)}
       />
     </div>

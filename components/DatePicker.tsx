@@ -42,6 +42,8 @@ export function DatePicker({
   placeholder = "Select date",
   fullWidth = true,
   className = "",
+  isDayDisabled,
+  dayTitle,
 }: {
   value: string;
   onChange: (iso: string) => void;
@@ -49,6 +51,10 @@ export function DatePicker({
   placeholder?: string;
   fullWidth?: boolean;
   className?: string;
+  /** Lock individual days (greyed, unclickable) — e.g. days a facility had no stock. */
+  isDayDisabled?: (iso: string) => boolean;
+  /** Hover text per day — e.g. "Up to 300 units on this day" / "No stock to move on this day". */
+  dayTitle?: (iso: string) => string | undefined;
 }) {
   const { locale } = useMoney();
   const btn = useRef<HTMLButtonElement>(null);
@@ -167,17 +173,22 @@ export function DatePicker({
                 if (!day) return <div key={i} />;
                 const selected = day === value;
                 const isToday = day === today;
+                const disabled = isDayDisabled?.(day) ?? false;
                 return (
                   <button
                     key={i}
                     type="button"
-                    onClick={() => pick(day)}
+                    disabled={disabled}
+                    title={dayTitle?.(day)}
+                    onClick={() => !disabled && pick(day)}
                     className={`mx-auto flex h-8 w-8 items-center justify-center rounded-md text-[12.5px] transition-colors ${
-                      selected
-                        ? "bg-chart font-medium text-white"
-                        : isToday
-                          ? "font-medium text-chart hover:bg-surface-2"
-                          : "text-ink-soft hover:bg-surface-2"
+                      disabled
+                        ? "cursor-not-allowed text-muted/40"
+                        : selected
+                          ? "bg-chart font-medium text-white"
+                          : isToday
+                            ? "font-medium text-chart hover:bg-surface-2"
+                            : "text-ink-soft hover:bg-surface-2"
                     }`}
                   >
                     {Number(day.slice(8))}

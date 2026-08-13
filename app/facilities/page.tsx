@@ -21,13 +21,14 @@ import { StockSection } from "@/components/StockSection";
 import { facilityTypeLabel, isProductionSite } from "@/lib/facility-types";
 import { appearedAt } from "@/lib/lot-status";
 import { getChannelStock, PROVIDERS, CHANNEL_PROVIDER, CHANNEL_LOGO } from "@/lib/integrations";
+import { getAvailabilityEvents } from "@/lib/availability";
 import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
 
 export default async function FacilitiesPage() {
   await requireView("facilities");
-  const [facilities, stock, rawByFacilityCode, movements, products, materials, facilityOptions, channelStock, { money, qty, date }, finishedLines, latestPurchases, latestRawLayers] = await Promise.all([
+  const [facilities, stock, rawByFacilityCode, movements, products, materials, facilityOptions, channelStock, { money, qty, date }, availability, finishedLines, latestPurchases, latestRawLayers] = await Promise.all([
     getFacilitiesDetailed(),
     getFinishedStock(),
     getRawStockByFacility(),
@@ -37,6 +38,7 @@ export default async function FacilitiesPage() {
     getFacilities(),
     getChannelStock(),
     getFmt(),
+    getAvailabilityEvents(),
     // Cost prefills for the adjustment form: newest finished-lot cost per product…
     prisma.lotLine.findMany({
       where: { status: "FINISHED" },
@@ -135,6 +137,7 @@ export default async function FacilitiesPage() {
               todayISO={todayISO}
               channelFacilities={channelSources}
               costHints={{ products: productCost, materials: materialCost }}
+              availability={availability}
             />
           )}
           {facilities.length > 0 && <NewFacilityButton />}
