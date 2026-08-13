@@ -217,6 +217,19 @@ export function LotEditor({
     setError(null);
   }
   async function save() {
+    // Finished SKUs must carry a date, and never one before the lot's PO date — checked here for
+    // an instant message; the server enforces the same rule.
+    for (const l of lines) {
+      if (l.status !== "FINISHED") continue;
+      if (!l.finishedAtISO) {
+        setError(`${l.code} is finished — pick its finished date.`);
+        return;
+      }
+      if (poDateISO && l.finishedAtISO < poDateISO) {
+        setError(`${l.code}'s finished date is before the lot's PO date — it can't finish before the lot started.`);
+        return;
+      }
+    }
     setError(null);
     setPending(true);
     try {
@@ -417,8 +430,16 @@ export function LotEditor({
                     <tr className="border-b border-line bg-surface-2/60 last:border-0">
                       <td colSpan={6} className="px-4 py-2.5">
                         <div className="flex flex-wrap items-end gap-3 pl-[42px]">
+                          {/* Mandatory while finished (no Clear), and never before the lot's PO
+                              date — locked days explain themselves on hover, like the movement
+                              form's calendar. */}
                           <Field label="Finished date" className="w-[150px]">
-                            <DatePicker value={l.finishedAtISO} onChange={(v) => patchLine(l.key, { finishedAtISO: v })} clearable />
+                            <DatePicker
+                              value={l.finishedAtISO}
+                              onChange={(v) => patchLine(l.key, { finishedAtISO: v })}
+                              isDayDisabled={poDateISO ? (d) => d < poDateISO : undefined}
+                              dayTitle={poDateISO ? (d) => (d < poDateISO ? "The lot hadn't started yet on this day" : undefined) : undefined}
+                            />
                           </Field>
                           <Field label="Expiry date" className="w-[150px]">
                             <DatePicker value={l.expiryISO} onChange={(v) => patchLine(l.key, { expiryISO: v })} clearable placeholder="Optional" />

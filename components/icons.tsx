@@ -62,6 +62,10 @@ export const ReorderFilled = regular(P.ArrowClockwise);
 /** Orders — incoming sales across the connected channels. A shopping bag, distinct from the
  *  Purchases cart and the Purchase-Orders receipt. */
 export const OrdersFilled = regular(P.ShoppingBag);
+/** Sales & Profit — revenue climbing. */
+export const SalesProfitFilled = regular(P.ChartLineUp);
+/** P&L — the two sides of the ledger weighed against each other. */
+export const PnlFilled = regular(P.Scales);
 /** Integrations — two plugs meeting. */
 export const Plug = regular(P.Plugs);
 export const Download = regular(P.DownloadSimple);

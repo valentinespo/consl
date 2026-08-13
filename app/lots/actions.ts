@@ -98,6 +98,28 @@ export async function updateLot(payload: LotEditPayload) {
   ]);
   if (badRef) return badRef;
 
+  // A finished SKU MUST carry a finished date, and never one before the lot existed — the same
+  // rule the movement form enforces: units can't appear on a day their lot hadn't started.
+  const validISO = (s: string | null): s is string => !!s && !isNaN(Date.parse(s));
+  const poFloor = validISO(payload.poDateISO) ? payload.poDateISO.slice(0, 10) : null;
+  const noDate = lines.find((l) => l.status === "FINISHED" && !validISO(l.finishedAtISO));
+  const early = poFloor
+    ? lines.find((l) => l.status === "FINISHED" && validISO(l.finishedAtISO) && l.finishedAtISO.slice(0, 10) < poFloor)
+    : undefined;
+  if (noDate || early) {
+    const codes = new Map(
+      (await prisma.product.findMany({ where: { id: { in: lines.map((l) => l.productId) } }, select: { id: true, code: true } })).map(
+        (p) => [p.id, p.code],
+      ),
+    );
+    return noDate
+      ? { ok: false as const, error: `${codes.get(noDate.productId) ?? "A finished SKU"} needs a finished date.` }
+      : {
+          ok: false as const,
+          error: `${codes.get(early!.productId) ?? "A SKU"}'s finished date is before the lot's PO date — it can't finish before the lot started.`,
+        };
+  }
+
   // Only NEW lines inherit a recipe, and the lookup runs before any row is written so a line
   // added in this very save can't be its own "latest lot" source.
   const inherited = await bomFromLatestLine(payload.lines.filter((l) => !l.id).map((l) => l.productId));

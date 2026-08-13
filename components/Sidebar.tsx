@@ -15,6 +15,8 @@ import {
   ImagesFilled,
   ReorderFilled,
   OrdersFilled,
+  SalesProfitFilled,
+  PnlFilled,
   ChevronDown,
   Plug,
   Settings,
@@ -24,8 +26,12 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 
 type NavItem = { href: string; label: string; icon: LucideIcon; exact?: boolean; resource: string };
 
-// Analytics — sales and the profit tracking built on it. Sits above Production, never collapsed.
-const ANALYTICS_NAV: NavItem[] = [{ href: "/orders", label: "Orders", icon: OrdersFilled, resource: "dashboard" }];
+// Finances — sales, profit and the P&L built on the orders underneath. Collapsible as a group.
+const FINANCES_NAV: NavItem[] = [
+  { href: "/sales-profit", label: "Sales & Profit", icon: SalesProfitFilled, resource: "dashboard" },
+  { href: "/pnl", label: "P&L", icon: PnlFilled, resource: "dashboard" },
+  { href: "/orders", label: "Orders", icon: OrdersFilled, resource: "dashboard" },
+];
 
 // Production — the day-to-day operational tabs. Collapsible as a group.
 const PRODUCTION_NAV: NavItem[] = [
@@ -41,7 +47,7 @@ const PRODUCTION_NAV: NavItem[] = [
   { href: "/catalog", label: "Catalog", icon: ImagesFilled, resource: "catalog" },
 ];
 
-const COLLAPSE_KEY = "consl.nav.production.collapsed";
+const COLLAPSE_KEYS = { finances: "consl.nav.finances.collapsed", production: "consl.nav.production.collapsed" };
 
 function isActive(item: NavItem, pathname: string): boolean {
   return item.exact ? pathname === item.href : pathname.startsWith(item.href);
@@ -73,7 +79,7 @@ function SectionHeader({
           onClick={onToggle}
           disabled={disabled}
           aria-expanded={!collapsed}
-          title={disabled ? "Open a page outside Production to collapse it" : collapsed ? "Expand" : "Collapse"}
+          title={disabled ? `Open a page outside ${label} to collapse it` : collapsed ? "Expand" : "Collapse"}
           className={`flex items-center gap-1 rounded text-muted transition-colors ${
             disabled ? "cursor-default opacity-60" : "hover:text-ink-soft"
           }`}
@@ -105,27 +111,32 @@ export function Sidebar({
   // null = don't filter (owner or a resolution hiccup — page guards still enforce). Otherwise a
   // section only appears when the member may view it.
   const canView = (resource: string) => allowed === null || allowed.includes(resource);
-  const analytics = ANALYTICS_NAV.filter((item) => canView(item.resource));
+  const finances = FINANCES_NAV.filter((item) => canView(item.resource));
   const production = PRODUCTION_NAV.filter((item) => canView(item.resource));
 
-  // Whether the page you're on lives in the Production group — the group can only be collapsed when
-  // it doesn't, so collapsing never hides the tab you're currently viewing.
+  // Whether the page you're on lives in each group — a group can only be collapsed when it
+  // doesn't, so collapsing never hides the tab you're currently viewing.
+  const financesActive = finances.some((item) => isActive(item, pathname));
   const productionActive = production.some((item) => isActive(item, pathname));
 
-  // Persisted across reloads; starts expanded. Read after mount to avoid a server/client mismatch.
-  const [collapsed, setCollapsed] = useState(false);
+  // Persisted across reloads; start expanded. Read after mount to avoid a server/client mismatch.
+  const [collapsed, setCollapsed] = useState({ finances: false, production: false });
   useEffect(() => {
-    setCollapsed(localStorage.getItem(COLLAPSE_KEY) === "1");
+    setCollapsed({
+      finances: localStorage.getItem(COLLAPSE_KEYS.finances) === "1",
+      production: localStorage.getItem(COLLAPSE_KEYS.production) === "1",
+    });
   }, []);
-  function toggleCollapsed() {
-    if (productionActive) return; // guarded — the chevron is disabled in this state
+  function toggleCollapsed(group: "finances" | "production", active: boolean) {
+    if (active) return; // guarded — the chevron is disabled in this state
     setCollapsed((prev) => {
-      const next = !prev;
-      localStorage.setItem(COLLAPSE_KEY, next ? "1" : "0");
+      const next = { ...prev, [group]: !prev[group] };
+      localStorage.setItem(COLLAPSE_KEYS[group], next[group] ? "1" : "0");
       return next;
     });
   }
-  const showProduction = !collapsed || productionActive;
+  const showFinances = !collapsed.finances || financesActive;
+  const showProduction = !collapsed.production || productionActive;
 
   const renderLink = (item: NavItem) => {
     const active = isActive(item, pathname);
@@ -153,11 +164,17 @@ export function Sidebar({
       </div>
 
       <nav className="flex-1 px-3 py-2">
-        {/* Analytics — Orders and the profit tracking to come. Always visible, above Production. */}
-        {analytics.length > 0 && (
+        {/* Finances — Sales & Profit, P&L and Orders. Collapsible, above Production. */}
+        {finances.length > 0 && (
           <>
-            <SectionHeader label="Analytics" />
-            {analytics.map(renderLink)}
+            <SectionHeader
+              label="Finances"
+              collapsible
+              collapsed={collapsed.finances}
+              disabled={financesActive}
+              onToggle={() => toggleCollapsed("finances", financesActive)}
+            />
+            {showFinances && finances.map(renderLink)}
           </>
         )}
 
@@ -167,9 +184,9 @@ export function Sidebar({
             <SectionHeader
               label="Production"
               collapsible
-              collapsed={collapsed}
+              collapsed={collapsed.production}
               disabled={productionActive}
-              onToggle={toggleCollapsed}
+              onToggle={() => toggleCollapsed("production", productionActive)}
             />
             {showProduction && production.map(renderLink)}
           </>
