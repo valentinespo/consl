@@ -17,12 +17,15 @@ export function IconSelect({
   groups,
   placeholder = "Select…",
   disabled = false,
+  emptyNote = "Nothing to pick here.",
 }: {
   value: string;
   onChange: (value: string) => void;
   groups: IconGroup[];
   placeholder?: string;
   disabled?: boolean;
+  /** Shown inside the open dropdown when no group has any options. */
+  emptyNote?: string;
 }) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
@@ -58,6 +61,9 @@ export function IconSelect({
       </button>
       {open && (
         <div className="dropdown-in absolute left-0 right-0 top-full z-50 mt-1 max-h-72 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-xl">
+          {groups.every((g) => g.options.length === 0) && (
+            <div className="px-2.5 py-2 text-[12.5px] text-muted">{emptyNote}</div>
+          )}
           {groups
             .filter((g) => g.options.length > 0)
             .map((g, gi) => (

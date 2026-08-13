@@ -12,22 +12,39 @@ export function Field({
   label,
   hint,
   help,
+  floatHint = false,
+  hintSide = "left",
   children,
 }: {
   label: React.ReactNode;
   hint?: string;
   /** Optional "what is this?" bubble, shown as an icon before the label in the label's own colour. */
   help?: { title: string; body: string };
+  /** Hint hangs below without taking layout space, so fields sharing a row never shift. */
+  floatHint?: boolean;
+  /** Floating only: which edge the hint hangs from ("right" for inputs at a row's end). */
+  hintSide?: "left" | "right";
   children: React.ReactNode;
 }) {
   return (
-    <label className="block">
+    <label className={`block ${floatHint ? "relative" : ""}`}>
       <span className="mb-1 flex items-center gap-1 text-[12px] font-medium text-ink-soft">
         {help && <HoverHint {...help} size={12} />}
         {label}
       </span>
       {children}
-      {hint && <span className="mt-1 block text-[11px] text-muted">{hint}</span>}
+      {hint &&
+        (floatHint ? (
+          <span
+            className={`pointer-events-none absolute top-full mt-1 block whitespace-nowrap text-[11px] text-muted ${
+              hintSide === "right" ? "right-0 text-right" : "left-0"
+            }`}
+          >
+            {hint}
+          </span>
+        ) : (
+          <span className="mt-1 block text-[11px] text-muted">{hint}</span>
+        ))}
     </label>
   );
 }

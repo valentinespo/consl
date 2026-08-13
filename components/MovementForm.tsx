@@ -397,16 +397,27 @@ export function MovementForm({
             </Field>
           </div>
 
-          <div className="flex flex-wrap items-end gap-3">
+          {/* Hints in this row FLOAT (no layout space) so the inputs never shift; pb-4 reserves
+              the band they hang into. */}
+          <div className="flex flex-wrap items-end gap-3 pb-4">
             <div className="min-w-[240px] flex-1">
-              <Field label="What's moving?" hint={nothingToMove ? "Nothing is in stock at this facility — pick a different source." : undefined}>
-                <IconSelect value={item} onChange={(v) => { setItem(v); setPoolSku(""); }} groups={itemGroups} />
+              <Field
+                label="What's moving?"
+                floatHint
+                hint={nothingToMove ? "Nothing is in stock at this facility — pick a different source." : undefined}
+              >
+                <IconSelect
+                  value={item}
+                  onChange={(v) => { setItem(v); setPoolSku(""); }}
+                  groups={itemGroups}
+                  emptyNote="Nothing is in stock at this facility."
+                />
               </Field>
             </div>
 
             {needsSku && (
               <div className="min-w-[160px]">
-                <Field label="For which product?" hint="Stocked separately per product.">
+                <Field label="For which product?" floatHint hint="Stocked separately per product.">
                   <select value={poolSku} onChange={(e) => setPoolSku(e.target.value)} className={inputCls}>
                     <option value="">Select…</option>
                     {skuOptions.map((s) => (
@@ -419,7 +430,12 @@ export function MovementForm({
               </div>
             )}
 
-            <Field label="Units" hint={comboReady ? `Up to ${Math.floor(dateCap).toLocaleString()} on this date` : undefined}>
+            <Field
+              label="Units"
+              floatHint
+              hintSide="right"
+              hint={comboReady ? `Up to ${Math.floor(dateCap).toLocaleString()} on this date` : undefined}
+            >
               <input
                 type="number"
                 min="1"
@@ -432,7 +448,7 @@ export function MovementForm({
             </Field>
 
             {adjReason && (
-              <Field label="Cost per unit" hint="Prefilled with the newest cost — edit if you know better.">
+              <Field label="Cost per unit" floatHint hintSide="right" hint="Prefilled with the newest known cost.">
                 <input
                   type="number"
                   min="0"
