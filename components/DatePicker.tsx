@@ -71,6 +71,9 @@ export function DatePicker({
     const [y, m] = (value || localToday()).split("-").map(Number);
     return { y, m: m - 1 };
   });
+  // Instant per-day tooltip (viewport coords, portalled): the panel clips its children with
+  // overflow-hidden, and native `title` bubbles never show on un-hoverable disabled buttons.
+  const [dayTip, setDayTip] = useState<{ day: string; x: number; y: number } | null>(null);
 
   useEffect(() => setMounted(true), []);
 
@@ -114,6 +117,7 @@ export function DatePicker({
 
   function pick(day: string) {
     onChange(day);
+    setDayTip(null);
     setBox(null);
   }
 
@@ -154,16 +158,32 @@ export function DatePicker({
                 {monthName(month.y, month.m, locale)} {month.y}
               </div>
               <div className="flex gap-1">
-                <button type="button" aria-label="Previous month" onClick={() => setMonth(prevMonth)} className="rounded-md p-1 text-ink-soft hover:bg-surface-2">
+                <button
+                  type="button"
+                  aria-label="Previous month"
+                  onClick={() => {
+                    setMonth(prevMonth);
+                    setDayTip(null);
+                  }}
+                  className="rounded-md p-1 text-ink-soft hover:bg-surface-2"
+                >
                   <ChevronLeft size={15} />
                 </button>
-                <button type="button" aria-label="Next month" onClick={() => setMonth(nextMonth)} className="rounded-md p-1 text-ink-soft hover:bg-surface-2">
+                <button
+                  type="button"
+                  aria-label="Next month"
+                  onClick={() => {
+                    setMonth(nextMonth);
+                    setDayTip(null);
+                  }}
+                  className="rounded-md p-1 text-ink-soft hover:bg-surface-2"
+                >
                   <ChevronRight size={15} />
                 </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-7 gap-y-0.5 text-center">
+            <div className="grid grid-cols-7 gap-y-0.5 text-center" onMouseLeave={() => setDayTip(null)}>
               {DOW.map((d, i) => (
                 <div key={i} className="pb-1 text-[10px] font-medium text-muted">
                   {d}
@@ -174,12 +194,22 @@ export function DatePicker({
                 const selected = day === value;
                 const isToday = day === today;
                 const disabled = isDayDisabled?.(day) ?? false;
+                // mousemove too, not just enter: month navigation swaps the day under a resting
+                // cursor without a new mouseenter, which would leave the previous day's tip up.
+                const showTip = dayTitle
+                  ? (e: React.MouseEvent<HTMLButtonElement>) => {
+                      if (dayTip?.day === day) return;
+                      const r = e.currentTarget.getBoundingClientRect();
+                      setDayTip({ day, x: r.left + r.width / 2, y: r.top });
+                    }
+                  : undefined;
                 return (
                   <button
                     key={i}
                     type="button"
-                    disabled={disabled}
-                    title={dayTitle?.(day)}
+                    aria-disabled={disabled}
+                    onMouseEnter={showTip}
+                    onMouseMove={showTip}
                     onClick={() => !disabled && pick(day)}
                     className={`mx-auto flex h-8 w-8 items-center justify-center rounded-md text-[12.5px] transition-colors ${
                       disabled
@@ -216,6 +246,20 @@ export function DatePicker({
                 Today
               </button>
             </div>
+          </div>,
+          document.body,
+        )}
+
+      {mounted &&
+        open &&
+        dayTip &&
+        dayTitle?.(dayTip.day) &&
+        createPortal(
+          <div
+            style={{ position: "fixed", left: dayTip.x, top: dayTip.y - 6 }}
+            className="pointer-events-none z-[310] -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md bg-ink px-2 py-1 text-[10.5px] font-medium text-bg shadow-lg"
+          >
+            {dayTitle(dayTip.day)}
           </div>,
           document.body,
         )}

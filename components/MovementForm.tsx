@@ -417,7 +417,10 @@ export function MovementForm({
 
             {needsSku && (
               <div className="min-w-[160px]">
-                <Field label="For which product?" floatHint hint="Stocked separately per product.">
+                <Field
+                  label="For which product?"
+                  help={{ title: "Per-product stock", body: "This material is stocked separately for each product." }}
+                >
                   <select value={poolSku} onChange={(e) => setPoolSku(e.target.value)} className={inputCls}>
                     <option value="">Select…</option>
                     {skuOptions.map((s) => (
