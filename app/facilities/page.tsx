@@ -19,6 +19,7 @@ import { NewMovementPanel, type OnHandRow } from "@/components/MovementForm";
 import { MovementsLedger } from "@/components/MovementsLedger";
 import { StockSection } from "@/components/StockSection";
 import { facilityTypeLabel, isProductionSite } from "@/lib/facility-types";
+import { appearedAt } from "@/lib/lot-status";
 import { getChannelStock, PROVIDERS, CHANNEL_PROVIDER, CHANNEL_LOGO } from "@/lib/integrations";
 import { requireView } from "@/lib/membership";
 
@@ -39,7 +40,7 @@ export default async function FacilitiesPage() {
     // Cost prefills for the adjustment form: newest finished-lot cost per product…
     prisma.lotLine.findMany({
       where: { status: "FINISHED" },
-      select: { productId: true, cogPerUnit: true, lot: { select: { poDate: true, createdAt: true } } },
+      select: { productId: true, cogPerUnit: true, finishedAt: true, lot: { select: { poDate: true, createdAt: true } } },
     }),
     // …and the latest purchase price per material (with layer movements as a fallback).
     prisma.purchase.findMany({
@@ -54,11 +55,10 @@ export default async function FacilitiesPage() {
     }),
   ]);
 
-  // Newest known cost per item, for prefilling "Cost per unit" on found stock / returns.
+  // Newest known cost per item, for prefilling "Cost per unit" on found stock / returns. Newest
+  // = most recently FINISHED, not most recently ordered (lib/lot-status appearedAt).
   const productCost: Record<string, number> = {};
-  for (const l of [...finishedLines].sort(
-    (a, b) => (b.lot.poDate ?? b.lot.createdAt).getTime() - (a.lot.poDate ?? a.lot.createdAt).getTime(),
-  )) {
+  for (const l of [...finishedLines].sort((a, b) => appearedAt(b, b.lot).getTime() - appearedAt(a, a.lot).getTime())) {
     if (!(l.productId in productCost)) productCost[l.productId] = l.cogPerUnit;
   }
   for (const p of products) {

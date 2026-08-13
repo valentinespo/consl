@@ -4,7 +4,7 @@ import { isLayerKind } from "./constants";
 import { computeEngineResult } from "./recompute";
 import { buildCostChips } from "./lot-costs";
 import { runFinishedGoodsEngine, type FinishedSupply, type FinishedMovement, type ShippedLayer } from "./finished-goods";
-import { deriveProduction, derivePayment, deriveFinishedAt } from "./lot-status";
+import { deriveProduction, derivePayment, deriveFinishedAt, appearedAt } from "./lot-status";
 
 export type InventoryPool = {
   materialCode: string;
@@ -295,28 +295,27 @@ export async function computeFinishedGoods() {
     prisma.product.findMany({ select: { id: true, openingUnitCost: true } }),
   ]);
   const supply: FinishedSupply[] = [];
-  let seq = 0;
-  // Newest-lot cost per product (lots arrive newest-first), falling back to the onboarding COG —
-  // what a channel pull-back beyond recorded layers is costed at, mirroring lib/restock.ts.
+  // Finished lines dated by when their units APPEARED (the line's finish date, see
+  // lib/lot-status appearedAt), oldest first — so the pools consume in true chronological order
+  // and same-day layers break their tie by age rather than by query order.
+  const finished = lots
+    .flatMap((lot) => lot.lines.filter((ln) => ln.status === "FINISHED").map((ln) => ({ lot, ln, at: appearedAt(ln, lot).getTime() })))
+    .sort((a, b) => a.at - b.at || a.lot.lotNr - b.lot.lotNr || a.ln.seq - b.ln.seq);
+  finished.forEach((f, i) =>
+    supply.push({
+      sku: f.ln.productId,
+      facilityId: f.lot.facilityId,
+      units: f.ln.units,
+      unitCost: f.ln.cogPerUnit,
+      date: f.at,
+      seq: i,
+    }),
+  );
+  // Newest-FINISHED cost per product, falling back to the onboarding COG — what a channel
+  // pull-back beyond recorded layers is costed at, mirroring lib/restock.ts.
   const fallbackCostBySku = new Map<string, number>(products.map((p) => [p.id, p.openingUnitCost ?? 0]));
-  const seenNewest = new Set<string>();
-  for (const lot of lots) {
-    for (const ln of lot.lines) {
-      if (ln.status !== "FINISHED") continue;
-      if (!seenNewest.has(ln.productId)) {
-        seenNewest.add(ln.productId);
-        fallbackCostBySku.set(ln.productId, ln.cogPerUnit);
-      }
-      supply.push({
-        sku: ln.productId,
-        facilityId: lot.facilityId,
-        units: ln.units,
-        unitCost: ln.cogPerUnit,
-        date: (lot.poDate ?? lot.createdAt).getTime(),
-        seq: seq++,
-      });
-    }
-  }
+  for (let i = finished.length - 1; i >= 0; i--) fallbackCostBySku.set(finished[i].ln.productId, finished[i].ln.cogPerUnit);
+  let seq = finished.length;
   // Opening balances are day-zero layers: at your own facilities they're supply; at a channel
   // they seed that channel's ledger so a pull-back can consume them (see lib/restock.ts).
   const channelSeed: ShippedLayer[] = [];

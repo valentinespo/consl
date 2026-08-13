@@ -11,6 +11,16 @@
 export type DerivedProduction = "IN_PRODUCTION" | "PARTIAL" | "FINISHED";
 export type DerivedPayment = "DUE" | "PARTIAL" | "PAID";
 
+/**
+ * When a finished SKU's units actually APPEARED in stock: the date that line finished, not the
+ * date its run was ordered. A lot POed in April and finished in August is August's stock — it
+ * can't be the oldest layer in a warehouse, and it isn't the SKU's "newest cost" until it exists.
+ * Lots recorded before per-line finish dates existed fall back to the PO (then creation) date.
+ */
+export function appearedAt(line: { finishedAt: Date | null }, lot: { poDate: Date | null; createdAt: Date }): Date {
+  return line.finishedAt ?? lot.poDate ?? lot.createdAt;
+}
+
 export function deriveProduction(lines: { status: string }[]): DerivedProduction {
   if (lines.length === 0) return "IN_PRODUCTION";
   const finished = lines.filter((l) => l.status === "FINISHED").length;

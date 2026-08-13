@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { getInventory } from "@/lib/queries";
 import { getOrgSettings } from "@/lib/settings";
 import { isLayerKind } from "@/lib/constants";
+import { appearedAt } from "@/lib/lot-status";
 import { localDay } from "@/lib/tz";
 import {
   runFinishedGoodsEngine,
@@ -101,6 +102,8 @@ export async function getRestock(): Promise<{
   const [products, snaps, lots, rawInv, settings, allProducts, movements, allFacilities] = await Promise.all([
     prisma.product.findMany({ where: { asin: { not: null } }, orderBy: { code: "asc" } }),
     prisma.skuSnapshot.findMany({ distinct: ["productId"], orderBy: { capturedAt: "desc" } }),
+    // Order here is only a stable starting point — the finished lines are re-sorted by the date
+    // their units appeared (their finish date) before anything reads them.
     prisma.lot.findMany({ include: { lines: true }, orderBy: [{ poDate: "desc" }, { createdAt: "desc" }] }),
     getInventory(),
     getOrgSettings(),
@@ -120,7 +123,10 @@ export async function getRestock(): Promise<{
   let inProductionValue = 0;
   const finishedLots = new Map<string, { units: number; cog: number }[]>();
   const supply: FinishedSupply[] = [];
-  let supplySeq = 0;
+  // Finished lines, dated by when their units APPEARED (the line's finish date) — see
+  // lib/lot-status appearedAt. Collected first so both the FIFO order and the "newest cost"
+  // lookup below read the same chronology instead of the PO order the query happens to return.
+  const finishedLines: { lot: (typeof lots)[number]; ln: (typeof lots)[number]["lines"][number]; at: number }[] = [];
   for (const lot of lots) {
     const poDate = lot.poDate ?? lot.createdAt;
     for (const ln of lot.lines) {
@@ -131,19 +137,31 @@ export async function getRestock(): Promise<{
         const cur = soonestPo.get(ln.productId);
         if (!cur || poDate < cur) soonestPo.set(ln.productId, poDate);
       } else {
-        if (!finishedLots.has(ln.productId)) finishedLots.set(ln.productId, []);
-        finishedLots.get(ln.productId)!.push({ units: ln.units, cog: ln.cogPerUnit });
-        supply.push({
-          sku: ln.productId,
-          facilityId: lot.facilityId,
-          units: ln.units,
-          unitCost: ln.cogPerUnit,
-          date: poDate.getTime(),
-          seq: supplySeq++,
-        });
+        finishedLines.push({ lot, ln, at: appearedAt(ln, lot).getTime() });
       }
     }
   }
+  // Oldest first, so `seq` climbs with age: two layers landing on the same day then break their
+  // tie chronologically (lowest seq = oldest) instead of by whatever order the query returned.
+  finishedLines.sort((a, b) => a.at - b.at || a.lot.lotNr - b.lot.lotNr || a.ln.seq - b.ln.seq);
+  finishedLines.forEach((f, i) =>
+    supply.push({
+      sku: f.ln.productId,
+      facilityId: f.lot.facilityId,
+      units: f.ln.units,
+      unitCost: f.ln.cogPerUnit,
+      date: f.at,
+      seq: i,
+    }),
+  );
+  // Newest-finished first, so `finishedLots[0]` is the SKU's newest cost.
+  for (let i = finishedLines.length - 1; i >= 0; i--) {
+    const f = finishedLines[i];
+    if (!finishedLots.has(f.ln.productId)) finishedLots.set(f.ln.productId, []);
+    finishedLots.get(f.ln.productId)!.push({ units: f.ln.units, cog: f.ln.cogPerUnit });
+  }
+  // Layers added after production continue the same sequence.
+  let supplySeq = finishedLines.length;
 
   // Opening balances (kind OPENING) are day-zero layers, not movements. At one of YOUR facilities
   // they are finished SUPPLY — like a lot line, at the operator-entered starting COG. At a sales
