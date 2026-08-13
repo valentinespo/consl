@@ -9,6 +9,7 @@ import {
   getMaterialTypes,
   getFacilities,
 } from "@/lib/queries";
+import { prisma } from "@/lib/prisma";
 import { getFmt } from "@/lib/fmt-server";
 import { inflectUnit } from "@/lib/format";
 import { PageHeader, Card, SectionTitle, SkuAvatar } from "@/components/ui";
@@ -25,7 +26,7 @@ export const dynamic = "force-dynamic";
 
 export default async function FacilitiesPage() {
   await requireView("facilities");
-  const [facilities, stock, rawByFacilityCode, movements, products, materials, facilityOptions, channelStock, { money, qty, date }] = await Promise.all([
+  const [facilities, stock, rawByFacilityCode, movements, products, materials, facilityOptions, channelStock, { money, qty, date }, finishedLines, latestPurchases, latestRawLayers] = await Promise.all([
     getFacilitiesDetailed(),
     getFinishedStock(),
     getRawStockByFacility(),
@@ -35,7 +36,41 @@ export default async function FacilitiesPage() {
     getFacilities(),
     getChannelStock(),
     getFmt(),
+    // Cost prefills for the adjustment form: newest finished-lot cost per product…
+    prisma.lotLine.findMany({
+      where: { status: "FINISHED" },
+      select: { productId: true, cogPerUnit: true, lot: { select: { poDate: true, createdAt: true } } },
+    }),
+    // …and the latest purchase price per material (with layer movements as a fallback).
+    prisma.purchase.findMany({
+      where: { isAdjustment: false },
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+      select: { materialTypeId: true, unitCost: true },
+    }),
+    prisma.stockMovement.findMany({
+      where: { itemType: "RAW", unitCost: { not: null } },
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+      select: { materialTypeId: true, unitCost: true },
+    }),
   ]);
+
+  // Newest known cost per item, for prefilling "Cost per unit" on found stock / returns.
+  const productCost: Record<string, number> = {};
+  for (const l of [...finishedLines].sort(
+    (a, b) => (b.lot.poDate ?? b.lot.createdAt).getTime() - (a.lot.poDate ?? a.lot.createdAt).getTime(),
+  )) {
+    if (!(l.productId in productCost)) productCost[l.productId] = l.cogPerUnit;
+  }
+  for (const p of products) {
+    if (!(p.id in productCost) && p.openingUnitCost != null) productCost[p.id] = p.openingUnitCost;
+  }
+  const materialCost: Record<string, number> = {};
+  for (const r of latestPurchases) {
+    if (!(r.materialTypeId in materialCost)) materialCost[r.materialTypeId] = r.unitCost;
+  }
+  for (const r of latestRawLayers) {
+    if (r.materialTypeId && !(r.materialTypeId in materialCost) && r.unitCost != null) materialCost[r.materialTypeId] = r.unitCost;
+  }
   const todayISO = new Date().toISOString().slice(0, 10);
 
   // Channel facilities (Amazon FBA/AWD…) are integration-managed mirrors of a sales platform —
@@ -93,12 +128,13 @@ export default async function FacilitiesPage() {
         <div className="flex flex-wrap items-center gap-2">
           {facilities.length > 0 && (products.length > 0 || materials.length > 0) && (
             <NewMovementPanel
-              products={products.map((p) => ({ id: p.id, code: p.code, name: p.name }))}
-              materials={materials.map((m) => ({ id: m.id, code: m.code, name: m.name, skuSpecific: m.skuSpecific }))}
+              products={products.map((p) => ({ id: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl }))}
+              materials={materials.map((m) => ({ id: m.id, code: m.code, name: m.name, skuSpecific: m.skuSpecific, imageUrl: m.imageUrl }))}
               facilities={facilityOptions}
               onHand={onHand}
               todayISO={todayISO}
               channelFacilities={channelSources}
+              costHints={{ products: productCost, materials: materialCost }}
             />
           )}
           {facilities.length > 0 && <NewFacilityButton />}
@@ -275,7 +311,7 @@ export default async function FacilitiesPage() {
             body="When stock leaves the place it was made or received — to a 3PL, to Amazon, to a customer, or written off — record it here so your inventory always shows where things actually are."
           />
         ) : (
-          <MovementsLedger movements={movements} qty={qty} date={date} />
+          <MovementsLedger movements={movements} qty={qty} date={date} money={money} />
         )}
       </div>
     </>

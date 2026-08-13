@@ -7,17 +7,25 @@ export type MovementRow = {
   id: string;
   date: Date;
   itemType: string; // FINISHED | RAW
-  kind?: string; // STANDARD | OPENING (a starting-balance layer, no source)
+  kind?: string; // STANDARD | OPENING | ADJUST_FOUND | ADJUST_RETURN (layer rows have no source)
   code: string;
   itemName: string;
   poolSku: string | null; // for sku-specific raw materials
   imageUrl: string | null;
   quantity: number;
-  fromCode: string | null; // null on OPENING rows and channel pull-backs
+  fromCode: string | null; // null on layer rows and channel pull-backs
   fromDestination?: string | null; // set when the stock came back from a sales channel
   toCode: string | null;
   toDestination: string | null;
+  unitCost?: number | null; // the typed cost on layer rows; null = the units carried FIFO cost
   notes: string | null;
+};
+
+/** How a layer row (stock appearing with a typed cost) announces itself in the From column. */
+const LAYER_LABEL: Record<string, string> = {
+  OPENING: "Starting balance",
+  ADJUST_FOUND: "Found stock",
+  ADJUST_RETURN: "Customer return",
 };
 
 /** The movement history — finished goods and raw materials — showing what left where and when. */
@@ -25,10 +33,12 @@ export function MovementsLedger({
   movements,
   qty,
   date: fmtDate,
+  money,
 }: {
   movements: MovementRow[];
   qty: (n: number | null | undefined) => string;
   date: (d: Date | string | null | undefined) => string;
+  money: (n: number | null | undefined) => string;
 }) {
   return (
     <div className="overflow-x-auto rounded-[var(--radius-card)] border border-border bg-surface">
@@ -38,6 +48,7 @@ export function MovementsLedger({
             <th className="px-5 py-2.5 font-medium">Date</th>
             <th className="px-3 py-2.5 font-medium">Item</th>
             <th className="px-3 py-2.5 text-right font-medium">Units</th>
+            <th className="px-3 py-2.5 text-right font-medium">Cost/unit</th>
             <th className="px-3 py-2.5 font-medium">From</th>
             <th className="px-3 py-2.5 font-medium">To</th>
             <th className="px-3 py-2.5 font-medium">Note</th>
@@ -72,6 +83,10 @@ export function MovementsLedger({
                   </div>
                 </td>
                 <td className="tabular px-3 py-2.5 text-right font-medium">{qty(m.quantity)}</td>
+                {/* Layer rows carry the typed cost; everything else moved at whatever its FIFO layers cost. */}
+                <td className="tabular px-3 py-2.5 text-right">
+                  {m.unitCost != null ? money(m.unitCost) : <span className="text-[11px] text-muted">FIFO</span>}
+                </td>
                 <td className="px-3 py-2.5">
                   {m.fromCode ? (
                     <FacilityTag code={m.fromCode} />
@@ -79,7 +94,7 @@ export function MovementsLedger({
                     <span className="text-ink-soft">{destinationLabel(m.fromDestination)}</span>
                   ) : (
                     <span className="pill-chart inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium">
-                      Starting balance
+                      {LAYER_LABEL[m.kind ?? ""] ?? "Starting balance"}
                     </span>
                   )}
                 </td>

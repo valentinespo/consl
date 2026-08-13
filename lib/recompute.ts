@@ -3,6 +3,7 @@
  * snapshot back onto each LotLine. Call this after any purchase/lot/transaction change.
  */
 import { prisma } from "./prisma";
+import { isLayerKind } from "./constants";
 import {
   runEngine,
   type EnginePurchase,
@@ -50,11 +51,11 @@ export async function computeEngineResult() {
     isAdjustment: p.isAdjustment,
   }));
 
-  // Opening balances (kind OPENING) are day-zero FIFO layers, not movements: stock that already
-  // existed when the company joined consl, at an operator-entered cost. They enter the engine as
-  // purchase-shaped supply at the receiving facility — dated at the balance date, so production
-  // consumes them oldest-first exactly like bought stock, and they never touch later real costs.
-  for (const [i, m] of rawMovesRaw.filter((m) => m.kind === "OPENING").entries()) {
+  // Layer movements (starting balances, found-stock corrections) are FIFO layers, not movements:
+  // stock appearing at an operator-entered cost. They enter the engine as purchase-shaped supply
+  // at the receiving facility — dated at the movement date, so production consumes them in
+  // chronological order exactly like bought stock, and they never touch later real costs.
+  for (const [i, m] of rawMovesRaw.filter((m) => isLayerKind(m.kind)).entries()) {
     if (!m.toFacility || !m.materialType || !(m.quantity > 0)) continue;
     purchases.push({
       materialCode: m.materialType.code,
@@ -105,7 +106,7 @@ export async function computeEngineResult() {
   }));
 
   const rawMovements: EngineRawMovement[] = rawMovesRaw
-    .filter((m) => m.kind !== "OPENING" && m.fromFacility)
+    .filter((m) => !isLayerKind(m.kind) && m.fromFacility)
     .map((m, i) => ({
       materialCode: m.materialType?.code ?? "",
       fromFacility: m.fromFacility!.code,

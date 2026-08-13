@@ -57,18 +57,9 @@ export const PROVIDERS: Record<
   },
 };
 
-/**
- * Platform mark per channel — static app assets, keyed by channel rather than stored per facility,
- * so every location a provider discovers later carries its logo automatically with nothing to
- * backfill. The marks sit on a white tile: Amazon's are supplied on white, so this keeps them
- * identical in light and dark themes.
- */
-export const CHANNEL_LOGO: Record<string, string> = {
-  AMAZON_FBA: "/integrations/amazon-fba.png",
-  AMAZON_AWD: "/integrations/amazon-awd.png",
-  SHOPIFY: "/integrations/shopify.png",
-  TIKTOK: "/integrations/tiktok.png",
-};
+// Platform marks live in lib/channel-logos (client-safe); re-exported here for the server-side
+// callers that always imported them from this module.
+export { CHANNEL_LOGO } from "@/lib/channel-logos";
 
 /** Flat channel → display name map, for labelling a facility's origin anywhere in the UI.
  *  Covers both fixed channel facilities and location-based providers' own channel tag. */

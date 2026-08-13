@@ -93,6 +93,7 @@ export const ArrowOutbound = regular(P.ArrowCircleUpRight); // stock leaving (mo
 export const ArrowInbound = regular(P.ArrowCircleDownLeft); // stock arriving (movement form "to")
 export const CornerDownLeft = regular(P.KeyReturn);
 export const UserPlus = regular(P.UserPlus);
+export const User = regular(P.User);
 export const RefreshCw = regular(P.ArrowsClockwise);
 
 /* ---- Communication & places ---- */

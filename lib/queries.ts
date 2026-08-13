@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "./prisma";
+import { isLayerKind } from "./constants";
 import { computeEngineResult } from "./recompute";
 import { buildCostChips } from "./lot-costs";
 import { runFinishedGoodsEngine, type FinishedSupply, type FinishedMovement, type ShippedLayer } from "./finished-goods";
@@ -320,7 +321,7 @@ export async function computeFinishedGoods() {
   // they seed that channel's ledger so a pull-back can consume them (see lib/restock.ts).
   const channelSeed: ShippedLayer[] = [];
   for (const m of movements) {
-    if (m.kind !== "OPENING" || !m.productId || !(m.quantity > 0)) continue;
+    if (!isLayerKind(m.kind) || !m.productId || !(m.quantity > 0)) continue;
     if (m.toFacilityId) {
       supply.push({
         sku: m.productId,
@@ -335,7 +336,7 @@ export async function computeFinishedGoods() {
     }
   }
   const mv: FinishedMovement[] = movements
-    .filter((m) => m.kind !== "OPENING" && (m.fromFacilityId || m.fromDestination))
+    .filter((m) => !isLayerKind(m.kind) && (m.fromFacilityId || m.fromDestination))
     .map((m, i) => ({
       id: m.id,
       sku: m.productId ?? "",
@@ -409,6 +410,7 @@ export async function getMovements() {
       fromDestination: m.fromDestination,
       toCode: m.toFacility?.code ?? null,
       toDestination: m.toDestination,
+      unitCost: m.unitCost, // set on layer rows (starting balance / found stock / return)
       notes: m.notes,
     };
   });

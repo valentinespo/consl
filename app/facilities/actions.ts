@@ -6,6 +6,7 @@ import { computeFinishedGoods, getInventory } from "@/lib/queries";
 import { allowedDestinations } from "@/lib/destinations";
 import { checkOwned } from "@/lib/ownership";
 import { requirePermission } from "@/lib/membership";
+import { isLayerKind } from "@/lib/constants";
 import { recomputeAll } from "@/lib/recompute";
 
 /** Create a facility — a co-packer, warehouse, 3PL or anywhere else stock lives. */
@@ -122,6 +123,9 @@ export type MovementInput = {
   /** Either another of your facilities, or a destination outside your network — not both. */
   toFacilityId: string | null;
   toDestination: string | null;
+  /** Stock APPEARING at a facility with a typed cost — a found-stock correction or a customer
+   *  return. No source; becomes a FIFO layer exactly like an onboarding starting balance. */
+  adjustment?: { reason: "FOUND" | "RETURN"; unitCost: number } | null;
   notes: string | null;
 };
 
@@ -140,6 +144,51 @@ export async function createMovement(input: MovementInput) {
   if (!Number.isFinite(quantity) || quantity <= 0) {
     return { ok: false as const, error: "Enter how many units moved" };
   }
+  // Adjustments have no source — validate and record them on their own path.
+  const adjustment = input.adjustment ?? null;
+  if (adjustment) {
+    if (adjustment.reason !== "FOUND" && adjustment.reason !== "RETURN") {
+      return { ok: false as const, error: "Unknown adjustment type" };
+    }
+    if (raw && adjustment.reason === "RETURN") {
+      return { ok: false as const, error: "Customers only ever return finished products." };
+    }
+    if (raw && !input.materialTypeId) return { ok: false as const, error: "Pick a raw material" };
+    if (!raw && !input.productId) return { ok: false as const, error: "Pick a product" };
+    const unitCost = Number(adjustment.unitCost);
+    if (!Number.isFinite(unitCost) || unitCost < 0) {
+      return { ok: false as const, error: "Enter what one unit cost you" };
+    }
+    if (!input.toFacilityId) return { ok: false as const, error: "Pick which facility received the stock" };
+    const adjOwned = await checkOwned([
+      ["facility", input.toFacilityId],
+      ["product", input.productId],
+      ["material", raw ? input.materialTypeId : null],
+    ]);
+    if (adjOwned) return adjOwned;
+    const target = await prisma.facility.findFirst({ where: { id: input.toFacilityId }, select: { channel: true } });
+    if (target?.channel) {
+      return { ok: false as const, error: "Channel stock is counted by the platform itself — adjustments only apply to your own facilities." };
+    }
+    await prisma.stockMovement.create({
+      data: {
+        kind: adjustment.reason === "FOUND" ? "ADJUST_FOUND" : "ADJUST_RETURN",
+        itemType: input.itemType,
+        productId: input.productId || null,
+        materialTypeId: raw ? input.materialTypeId : null,
+        quantity,
+        unitCost,
+        date: input.dateISO ? new Date(input.dateISO) : new Date(),
+        toFacilityId: input.toFacilityId,
+        notes: input.notes?.trim().slice(0, 500) || null,
+      },
+    });
+    // A raw layer feeds production costing — refresh the persisted lot snapshots.
+    if (raw) await recomputeAll();
+    revalidatePath("/", "layout");
+    return { ok: true as const, warning: null };
+  }
+
   const fromDestination = input.fromDestination || null;
   if (fromDestination) {
     // Stock leaving a sales channel — finished goods only. It may land at one of your facilities
@@ -241,8 +290,9 @@ export async function deleteMovement(id: string) {
   if (!gate.ok) return { ok: false as const, error: gate.error };
   const row = await prisma.stockMovement.findFirst({ where: { id }, select: { kind: true, itemType: true } });
   await prisma.stockMovement.delete({ where: { id } });
-  // Removing a raw opening layer changes what production consumed — refresh the cost snapshots.
-  if (row?.kind === "OPENING" && row.itemType === "RAW") await recomputeAll();
+  // Removing a raw layer (starting balance / found stock) changes what production consumed —
+  // refresh the cost snapshots so every lot's numbers re-derive without it.
+  if (row && isLayerKind(row.kind) && row.itemType === "RAW") await recomputeAll();
   revalidatePath("/", "layout");
   return { ok: true as const };
 }

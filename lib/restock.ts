@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getInventory } from "@/lib/queries";
 import { getOrgSettings } from "@/lib/settings";
+import { isLayerKind } from "@/lib/constants";
 import { localDay } from "@/lib/tz";
 import {
   runFinishedGoodsEngine,
@@ -151,7 +152,7 @@ export async function getRestock(): Promise<{
   // through, and once gone they never touch the value of real production that follows.
   const openingChannelLayers: ShippedLayer[] = [];
   for (const m of movements) {
-    if (m.kind !== "OPENING" || !m.productId || !(m.quantity > 0)) continue;
+    if (!isLayerKind(m.kind) || !m.productId || !(m.quantity > 0)) continue;
     if (m.toFacilityId) {
       supply.push({
         sku: m.productId,
@@ -177,7 +178,7 @@ export async function getRestock(): Promise<{
   // FROM a channel (fromDestination — e.g. an Amazon removal order) ride through too: the engine
   // consumes that channel's layers and re-lands the units at the facility carrying their cost.
   const finishedMovements: FinishedMovement[] = movements
-    .filter((m) => m.kind !== "OPENING" && (m.fromFacilityId || m.fromDestination))
+    .filter((m) => !isLayerKind(m.kind) && (m.fromFacilityId || m.fromDestination))
     .map((m, i) => ({
       id: m.id,
       sku: m.productId ?? "",

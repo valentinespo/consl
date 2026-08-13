@@ -1,18 +1,22 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { X, AlertTriangle, ArrowOutbound, ArrowInbound } from "@/components/icons";
+import { X, AlertTriangle, ArrowOutbound, ArrowInbound, Warehouse, Package, Search, Undo2, User, Trash2 } from "@/components/icons";
 import { DatePicker } from "@/components/DatePicker";
 import { Field, inputCls } from "@/components/FormKit";
-import { DESTINATIONS, RAW_DESTINATIONS } from "@/lib/destinations";
+import { IconSelect, type IconGroup } from "@/components/IconSelect";
+import { SkuAvatar } from "@/components/ui";
+import { CHANNEL_LOGO, ROOT_LOGO } from "@/lib/channel-logos";
 import { createMovement } from "@/app/facilities/actions";
 
-export type MoveProduct = { id: string; code: string; name: string };
-export type MoveMaterial = { id: string; code: string; name: string; skuSpecific: boolean };
+export type MoveProduct = { id: string; code: string; name: string; imageUrl: string | null };
+export type MoveMaterial = { id: string; code: string; name: string; skuSpecific: boolean; imageUrl: string | null };
 export type MoveFacility = { id: string; code: string; name: string };
 /** A connected channel's locked facility — an inflow source ("Shopify — 638 Alton Place"). */
 export type MoveChannelFacility = { id: string; name: string; channel: string };
+/** Prefill for the adjustment cost field: newest known cost per product / material. */
+export type CostHints = { products: Record<string, number>; materials: Record<string, number> };
 // On-hand keyed loosely: finished uses productId+facility; raw uses materialId(+poolSku)+facility.
 // poolSku is the product ID (matches what the action stores); poolSkuCode is for display.
 export type OnHandRow = {
@@ -37,6 +41,29 @@ function channelOptionLabel(f: MoveChannelFacility): string {
   return `${provider} — ${place}${suffix}`;
 }
 
+/** A platform mark on a white tile (the logos are supplied on white). */
+function LogoTile({ src }: { src: string }) {
+  // eslint-disable-next-line @next/next/no-img-element
+  return (
+    <span className="grid h-5 w-5 place-items-center rounded bg-white p-0.5">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt="" className="max-h-full max-w-full object-contain" />
+    </span>
+  );
+}
+
+function MaterialMark({ imageUrl }: { imageUrl: string | null }) {
+  if (imageUrl) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={imageUrl} alt="" className="h-5 w-5 rounded border border-border object-cover" />;
+  }
+  return (
+    <span className="grid h-5 w-5 place-items-center rounded border border-border bg-surface-2 text-muted">
+      <Package size={12} />
+    </span>
+  );
+}
+
 export function MovementForm({
   products,
   materials,
@@ -45,6 +72,7 @@ export function MovementForm({
   todayISO,
   onDone,
   channelFacilities = [],
+  costHints = { products: {}, materials: {} },
 }: {
   products: MoveProduct[];
   materials: MoveMaterial[];
@@ -54,20 +82,21 @@ export function MovementForm({
   onDone: () => void;
   /** Connected channels' locked facilities — the places finished stock can be pulled back from. */
   channelFacilities?: MoveChannelFacility[];
+  costHints?: CostHints;
 }) {
   const router = useRouter();
-  // Inflow needs a channel to pull from and a product to pull — otherwise only outflow exists.
-  const canInflow = channelFacilities.length > 0 && products.length > 0 && facilities.length > 0;
+  const canInflow = facilities.length > 0 && (products.length > 0 || materials.length > 0);
   const [mode, setMode] = useState<"OUT" | "IN" | null>(null);
 
   // The item is picked as "FINISHED:<productId>" or "RAW:<materialId>".
   const firstItem = products[0] ? `FINISHED:${products[0].id}` : materials[0] ? `RAW:${materials[0].id}` : "";
   const [item, setItem] = useState(firstItem);
   const [poolSku, setPoolSku] = useState(""); // only for sku-specific raw materials
-  // OUT: a facility id. IN: "channel:<ROOT>:<facilityId>" — the specific place at the channel.
+  // OUT: a facility id. IN: "channel:<ROOT>:<facilityId>" or "adj:FOUND" / "adj:RETURN".
   const [source, setSource] = useState("");
   const [target, setTarget] = useState("");
   const [quantity, setQuantity] = useState("");
+  const [unitCost, setUnitCost] = useState(""); // adjustments only — what one unit cost
   const [dateISO, setDateISO] = useState(todayISO);
   const [notes, setNotes] = useState("");
   const [pending, setPending] = useState(false);
@@ -78,33 +107,104 @@ export function MovementForm({
   const material = isRaw ? materials.find((m) => m.id === itemId) ?? null : null;
   const needsSku = isRaw && !!material?.skuSpecific;
 
+  const adjReason = source === "adj:FOUND" ? "FOUND" : source === "adj:RETURN" ? "RETURN" : null;
   const channelSource = mode === "IN" && source.startsWith("channel:") ? source.split(":") : null;
   const fromRoot = channelSource ? channelSource[1] : null; // AMAZON | SHOPIFY | TIKTOK
   const fromChannelFacilityId = channelSource ? channelSource[2] : null;
   const fromFacilityId = mode === "OUT" ? source : "";
 
-  // What the target select offers, per mode. Outflow: out of the network + transfers.
-  // Inflow: into a facility, or over to another channel — never customer/loss (a channel's own
-  // count already handles stock that's sold or gone; there's nothing to record).
-  const destinations = useMemo(() => {
-    if (mode === "IN") {
-      const roots = [...new Set(channelFacilities.map((f) => rootOf(f.channel)))].filter((r) => r !== fromRoot);
-      return roots.map((r) => ({ value: r, label: `${ROOT_LABEL[r] ?? r} (channel stock)` }));
-    }
-    return (isRaw ? RAW_DESTINATIONS : DESTINATIONS).map((d) => ({ value: d.value, label: d.label }));
-  }, [mode, isRaw, channelFacilities, fromRoot]);
+  const connectedRoots = useMemo(() => [...new Set(channelFacilities.map((f) => rootOf(f.channel)))], [channelFacilities]);
+
+  // Prefill the adjustment cost with the newest cost we know for the picked item, still editable.
+  useEffect(() => {
+    if (!adjReason) return;
+    const hint = isRaw ? costHints.materials[itemId] : costHints.products[itemId];
+    setUnitCost(hint != null ? String(Math.round(hint * 10000) / 10000) : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adjReason, item]);
+
+  /* ------------------------------- option groups ------------------------------- */
+
+  const productOptions = products.map((p) => ({
+    value: `FINISHED:${p.id}`,
+    label: `${p.code} — ${p.name}`,
+    icon: <SkuAvatar code={p.code} size={20} imageUrl={p.imageUrl} />,
+  }));
+  const materialOptions = materials.map((m) => ({
+    value: `RAW:${m.id}`,
+    label: m.name,
+    icon: <MaterialMark imageUrl={m.imageUrl} />,
+  }));
+  const itemGroups: IconGroup[] =
+    mode === "IN" && adjReason !== "FOUND"
+      ? [{ label: "Finished products", options: productOptions }]
+      : [
+          { label: "Finished products", options: productOptions },
+          { label: "Raw materials", options: materialOptions },
+        ];
+
+  const facilityOption = (f: MoveFacility, prefix = "") => ({
+    value: `${prefix}${f.id}`,
+    label: `${f.code} — ${f.name}`,
+    icon: <Warehouse size={16} className="text-muted" />,
+  });
+
+  const sourceGroups: IconGroup[] =
+    mode === "OUT"
+      ? [{ label: "Your facilities", options: facilities.map((f) => facilityOption(f)) }]
+      : [
+          {
+            label: "Back from a sales channel",
+            options: channelFacilities.map((f) => ({
+              value: `channel:${rootOf(f.channel)}:${f.id}`,
+              label: channelOptionLabel(f),
+              icon: <LogoTile src={CHANNEL_LOGO[f.channel] ?? ROOT_LOGO[rootOf(f.channel)]} />,
+            })),
+          },
+          {
+            label: "Stock appearing",
+            options: [
+              { value: "adj:FOUND", label: "Found stock / correction", icon: <Search size={16} className="text-muted" /> },
+              { value: "adj:RETURN", label: "Customer return", icon: <Undo2 size={16} className="text-muted" /> },
+            ],
+          },
+        ];
 
   const targetFacilities = facilities.filter((f) => f.id !== fromFacilityId);
-  const validTarget = target.startsWith("facility:")
-    ? targetFacilities.some((f) => `facility:${f.id}` === target)
-    : destinations.some((d) => d.value === target);
-  const effectiveTarget = validTarget
-    ? target
-    : mode === "IN"
-      ? targetFacilities[0]
-        ? `facility:${targetFacilities[0].id}`
-        : ""
-      : destinations[0]?.value ?? (targetFacilities[0] ? `facility:${targetFacilities[0].id}` : "");
+  const targetGroups: IconGroup[] = useMemo(() => {
+    if (mode === "IN") {
+      const groups: IconGroup[] = [{ label: "Into one of your facilities", options: targetFacilities.map((f) => facilityOption(f, "facility:")) }];
+      if (fromRoot) {
+        const others = connectedRoots.filter((r) => r !== fromRoot);
+        if (others.length > 0) {
+          groups.push({
+            label: "Over to another channel",
+            options: others.map((r) => ({ value: r, label: `${ROOT_LABEL[r] ?? r} (channel stock)`, icon: <LogoTile src={ROOT_LOGO[r]} /> })),
+          });
+        }
+      }
+      return groups;
+    }
+    // Outflow: only channels that are actually connected, plus customer / write-off, plus transfers.
+    const channelDests = isRaw
+      ? []
+      : connectedRoots.map((r) => ({ value: r, label: `${ROOT_LABEL[r] ?? r} (channel stock)`, icon: <LogoTile src={ROOT_LOGO[r]} /> }));
+    const out = [
+      ...channelDests,
+      ...(isRaw
+        ? []
+        : [{ value: "CUSTOMER", label: "Sold / shipped to customer", icon: <User size={16} className="text-muted" /> }]),
+      { value: "LOSS", label: "Lost / damaged (write-off)", icon: <Trash2 size={16} className="text-muted" /> },
+    ];
+    return [
+      { label: isRaw ? "Out of inventory" : "Out of your network", options: out },
+      { label: "Transfer to another facility", options: targetFacilities.map((f) => facilityOption(f, "facility:")) },
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, isRaw, fromRoot, connectedRoots, facilities, fromFacilityId, adjReason]);
+
+  const flatTargets = targetGroups.flatMap((g) => g.options);
+  const effectiveTarget = flatTargets.some((o) => o.value === target) ? target : flatTargets[0]?.value ?? "";
 
   const available =
     onHand.find(
@@ -113,14 +213,17 @@ export function MovementForm({
   const q = Math.round(Number(quantity) || 0);
   const short = mode === "OUT" && q > available;
 
+  // Pool-SKU options: existing pools when stock is moving; ANY product when stock is appearing
+  // (a found box of printed pouches may be for a SKU with no recorded pouch stock yet).
   const skuOptions = useMemo(() => {
     if (!needsSku) return [] as { id: string; code: string }[];
+    if (adjReason) return products.map((p) => ({ id: p.id, code: p.code }));
     const seen = new Map<string, string>();
     for (const r of onHand) {
       if (r.kind === "RAW" && r.itemId === itemId && r.poolSku) seen.set(r.poolSku, r.poolSkuCode ?? r.poolSku);
     }
     return [...seen].map(([id, code]) => ({ id, code }));
-  }, [needsSku, onHand, itemId]);
+  }, [needsSku, adjReason, products, onHand, itemId]);
 
   function pickMode(next: "OUT" | "IN") {
     setMode(next);
@@ -132,10 +235,16 @@ export function MovementForm({
     } else {
       setItem(products[0] ? `FINISHED:${products[0].id}` : "");
       const f = channelFacilities[0];
-      setSource(f ? `channel:${rootOf(f.channel)}:${f.id}` : "");
+      setSource(f ? `channel:${rootOf(f.channel)}:${f.id}` : "adj:FOUND");
       setTarget(facilities[0] ? `facility:${facilities[0].id}` : "");
     }
     setPoolSku("");
+  }
+
+  function pickSource(next: string) {
+    setSource(next);
+    // A customer return (or a channel pull-back) can only be a finished product.
+    if (next !== "adj:FOUND" && isRaw && mode === "IN") setItem(products[0] ? `FINISHED:${products[0].id}` : "");
   }
 
   async function save() {
@@ -149,10 +258,11 @@ export function MovementForm({
         materialTypeId: isRaw ? itemId : null,
         quantity: q,
         dateISO,
-        fromFacilityId: mode === "IN" ? fromChannelFacilityId : fromFacilityId,
+        fromFacilityId: mode === "IN" ? fromChannelFacilityId : fromFacilityId || null,
         fromDestination: fromRoot,
         toFacilityId: isTransfer ? effectiveTarget.slice("facility:".length) : null,
         toDestination: isTransfer ? null : effectiveTarget,
+        adjustment: adjReason ? { reason: adjReason, unitCost: Number(unitCost) } : null,
         notes,
       });
       if (!res.ok) {
@@ -168,8 +278,15 @@ export function MovementForm({
     }
   }
 
+  const costOk = !adjReason || (unitCost.trim() !== "" && Number.isFinite(Number(unitCost)) && Number(unitCost) >= 0);
   const canSave =
-    !!mode && q > 0 && !!itemId && (!needsSku || !!poolSku) && !!effectiveTarget && (mode === "IN" ? !!fromRoot : !!fromFacilityId);
+    !!mode &&
+    q > 0 &&
+    !!itemId &&
+    (!needsSku || !!poolSku) &&
+    !!effectiveTarget &&
+    costOk &&
+    (mode === "IN" ? !!fromRoot || !!adjReason : !!fromFacilityId);
 
   const modeBtn = (active: boolean, disabled = false) =>
     `flex flex-1 items-start gap-2.5 rounded-xl border p-3 text-left transition-colors ${
@@ -196,11 +313,9 @@ export function MovementForm({
             <ArrowInbound size={20} />
           </span>
           <span>
-            <span className="block text-[13px] font-semibold text-ink">Inflow — bring stock back</span>
+            <span className="block text-[13px] font-semibold text-ink">Inflow — bring stock in</span>
             <span className="mt-0.5 block text-[11.5px] leading-snug text-muted">
-              {canInflow
-                ? "From a sales channel into one of your facilities, or over to another channel. Cost carries over automatically."
-                : "Needs a connected sales channel holding your products."}
+              Back from a sales channel, a customer return, or stock a recount found.
             </span>
           </span>
         </button>
@@ -217,33 +332,7 @@ export function MovementForm({
           <div className="flex flex-wrap items-end gap-3">
             <div className="min-w-[240px] flex-1">
               <Field label="What's moving?">
-                <select
-                  value={item}
-                  onChange={(e) => {
-                    setItem(e.target.value);
-                    setPoolSku("");
-                  }}
-                  className={inputCls}
-                >
-                  {products.length > 0 && (
-                    <optgroup label="Finished products">
-                      {products.map((p) => (
-                        <option key={p.id} value={`FINISHED:${p.id}`}>
-                          {p.code} — {p.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                  {mode === "OUT" && materials.length > 0 && (
-                    <optgroup label="Raw materials">
-                      {materials.map((m) => (
-                        <option key={m.id} value={`RAW:${m.id}`}>
-                          {m.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                </select>
+                <IconSelect value={item} onChange={(v) => { setItem(v); setPoolSku(""); }} groups={itemGroups} />
               </Field>
             </div>
 
@@ -273,6 +362,20 @@ export function MovementForm({
                 className={`${inputCls} tabular max-w-28 text-right`}
               />
             </Field>
+
+            {adjReason && (
+              <Field label="Cost per unit" hint="Prefilled with the newest cost — edit if you know better.">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.0001"
+                  value={unitCost}
+                  onChange={(e) => setUnitCost(e.target.value)}
+                  placeholder="0.00"
+                  className={`${inputCls} tabular max-w-32 text-right`}
+                />
+              </Field>
+            )}
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -283,26 +386,16 @@ export function MovementForm({
                 </span>
               }
               hint={
-                mode === "IN"
-                  ? "The units re-enter at the cost they had when they went to the channel."
-                  : `${Math.round(available).toLocaleString()} on hand here`
+                adjReason
+                  ? adjReason === "FOUND"
+                    ? "Stock the books didn't know about — it enters at the cost you set."
+                    : "It re-enters your stock at the cost you set."
+                  : mode === "IN"
+                    ? "The units re-enter at the cost they had when they went to the channel."
+                    : `${Math.round(available).toLocaleString()} on hand here`
               }
             >
-              <select value={source} onChange={(e) => setSource(e.target.value)} className={inputCls}>
-                {mode === "OUT" ? (
-                  facilities.map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.code} — {f.name}
-                    </option>
-                  ))
-                ) : (
-                  channelFacilities.map((f) => (
-                    <option key={f.id} value={`channel:${rootOf(f.channel)}:${f.id}`}>
-                      {channelOptionLabel(f)}
-                    </option>
-                  ))
-                )}
-              </select>
+              <IconSelect value={source} onChange={pickSource} groups={sourceGroups} />
             </Field>
 
             <Field
@@ -312,45 +405,7 @@ export function MovementForm({
                 </span>
               }
             >
-              <select value={effectiveTarget} onChange={(e) => setTarget(e.target.value)} className={inputCls}>
-                {mode === "IN" ? (
-                  <>
-                    <optgroup label="Into one of your facilities">
-                      {targetFacilities.map((f) => (
-                        <option key={f.id} value={`facility:${f.id}`}>
-                          {f.code} — {f.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                    {destinations.length > 0 && (
-                      <optgroup label="Over to another channel">
-                        {destinations.map((d) => (
-                          <option key={d.value} value={d.value}>
-                            {d.label}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <optgroup label={isRaw ? "Out of inventory" : "Out of your network"}>
-                      {destinations.map((d) => (
-                        <option key={d.value} value={d.value}>
-                          {d.label}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Transfer to another facility">
-                      {targetFacilities.map((f) => (
-                        <option key={f.id} value={`facility:${f.id}`}>
-                          {f.code} — {f.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  </>
-                )}
-              </select>
+              <IconSelect value={effectiveTarget} onChange={setTarget} groups={adjReason ? targetGroups.slice(0, 1) : targetGroups} />
             </Field>
           </div>
 
@@ -395,6 +450,7 @@ export function NewMovementPanel({
   onHand,
   todayISO,
   channelFacilities = [],
+  costHints,
 }: {
   products: MoveProduct[];
   materials: MoveMaterial[];
@@ -402,6 +458,7 @@ export function NewMovementPanel({
   onHand: OnHandRow[];
   todayISO: string;
   channelFacilities?: MoveChannelFacility[];
+  costHints?: CostHints;
 }) {
   const [open, setOpen] = useState(false);
   if (!open) {
@@ -429,6 +486,7 @@ export function NewMovementPanel({
         onHand={onHand}
         todayISO={todayISO}
         channelFacilities={channelFacilities}
+        costHints={costHints}
         onDone={() => setOpen(false)}
       />
     </div>
