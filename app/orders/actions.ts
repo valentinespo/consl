@@ -39,6 +39,15 @@ export async function setSourceExcluded(source: string, excluded: boolean) {
   return { ok: true as const };
 }
 
+/** Drop Amazon MCF orders from totals — the same sale already counts on its own channel. */
+export async function setMcfExcluded(excluded: boolean) {
+  const gate = await requirePermission("inventory", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  await saveOrgSettings({ excludeMcfOrders: excluded });
+  revalidatePath("/orders");
+  return { ok: true as const };
+}
+
 /** Whether any channel is connected — controls whether the Orders tab offers an import. */
 export async function anyChannelConnected() {
   await requireView("dashboard");

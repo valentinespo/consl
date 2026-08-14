@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { ChevronRight, Search } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
-import { setSourceExcluded } from "@/app/orders/actions";
+import { setSourceExcluded, setMcfExcluded } from "@/app/orders/actions";
 import type { OrdersSummary, OrdersPage, OrderRow } from "@/lib/order-metrics";
 import { inputCls } from "@/components/FormKit";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
@@ -80,6 +80,14 @@ export function OrdersClient({
     });
   }
 
+  function toggleMcf(excluded: boolean) {
+    setSavingSource("__mcf");
+    void setMcfExcluded(excluded).then(() => {
+      router.refresh();
+      setSavingSource(null);
+    });
+  }
+
   /** Update one query param and reset to page 1 (a new filter restarts the walk). */
   function setParam(key: string, value: string) {
     const q = new URLSearchParams(params.toString());
@@ -149,12 +157,12 @@ export function OrdersClient({
       )}
 
       {/* Exclusion settings strip */}
-      {summary.sources.length > 0 && (
+      {(summary.sources.length > 0 || summary.mcf.offered) && (
         <div className="rounded-[var(--radius-card)] border border-border bg-surface-2/40 p-4">
           <div className="text-[12px] font-medium uppercase tracking-wide text-muted">Avoid double-counting</div>
           <p className="mt-1 max-w-[70ch] text-[12.5px] text-muted">
-            These channels also record their orders inside Shopify. Turn one on to count those sales from
-            the channel itself instead of Shopify, so they aren&apos;t counted twice.
+            Some sales show up on two channels at once. Turn a toggle on to count each sale exactly once —
+            the dropped orders stay in the list, just greyed out.
           </p>
           <div className="mt-3 flex flex-col gap-2">
             {summary.sources.map((s) => (
@@ -166,6 +174,17 @@ export function OrdersClient({
                 <Toggle on={s.excluded} disabled={savingSource === s.source} onChange={(v) => toggleSource(s.source, v)} />
               </div>
             ))}
+            {summary.mcf.offered && (
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-bg px-3 py-2">
+                <div className="min-w-0">
+                  <span className="text-[13px] font-medium text-ink">Amazon MCF orders</span>
+                  <span className="ml-2 text-[11.5px] text-muted">
+                    {summary.mcf.count.toLocaleString()} found — Amazon shipping your other channels&apos; sales
+                  </span>
+                </div>
+                <Toggle on={summary.mcf.excluded} disabled={savingSource === "__mcf"} onChange={toggleMcf} />
+              </div>
+            )}
           </div>
         </div>
       )}

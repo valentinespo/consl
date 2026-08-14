@@ -69,6 +69,9 @@ export type OrderRow = {
 
 export type ChannelSummary = { channel: string; label: string; orders: number; units: number; revenue: number };
 export type SourceToggle = { source: string; label: string; count: number; excluded: boolean };
+/** The Amazon-MCF exclusion toggle — offered once a non-Amazon channel is connected, since the
+ *  same sale then counts on that channel's own order too. */
+export type McfToggle = { offered: boolean; count: number; excluded: boolean };
 
 export type OrdersSummary = {
   channels: ChannelSummary[];
@@ -77,6 +80,7 @@ export type OrdersSummary = {
   totalRevenue: number;
   currency: string;
   sources: SourceToggle[];
+  mcf: McfToggle;
 };
 
 export type OrdersPage = { rows: OrderRow[]; total: number; page: number; pageSize: number; pageCount: number };
@@ -84,9 +88,20 @@ export type OrdersPage = { rows: OrderRow[]; total: number; page: number; pageSi
 /** Channel totals + the exclusion toggles, aggregated in SQL so it scales to full history. */
 export async function getOrdersSummary(connectedChannels: string[] = [], filter: OrdersFilter = {}): Promise<OrdersSummary> {
   const orgId = await getCurrentOrgId();
-  if (!orgId) return { channels: [], totalOrders: 0, totalUnits: 0, totalRevenue: 0, currency: "USD", sources: [] };
+  if (!orgId) {
+    return {
+      channels: [],
+      totalOrders: 0,
+      totalUnits: 0,
+      totalRevenue: 0,
+      currency: "USD",
+      sources: [],
+      mcf: { offered: false, count: 0, excluded: false },
+    };
+  }
   const settings = await getOrgSettings();
   const excluded = settings.excludedShopifySources ?? [];
+  const excludeMcf = settings.excludeMcfOrders ?? false;
   const connected = new Set(connectedChannels);
   const { since, until } = bounds(filter);
   const channelFilter = filter.channel ?? null;
@@ -99,6 +114,7 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
     WHERE o."orgId" = ${orgId}
       AND o.cancelled = false
       AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excluded}))
+      AND NOT (${excludeMcf}::boolean AND o.mcf)
       AND (${since}::timestamp IS NULL OR o."orderedAt" >= ${since})
       AND (${until}::timestamp IS NULL OR o."orderedAt" <= ${until})
       AND (${channelFilter}::text IS NULL OR o.channel = ${channelFilter})
@@ -110,6 +126,7 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
     WHERE o."orgId" = ${orgId}
       AND o.cancelled = false
       AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excluded}))
+      AND NOT (${excludeMcf}::boolean AND o.mcf)
       AND (${since}::timestamp IS NULL OR o."orderedAt" >= ${since})
       AND (${until}::timestamp IS NULL OR o."orderedAt" <= ${until})
       AND (${channelFilter}::text IS NULL OR o.channel = ${channelFilter})
@@ -139,6 +156,17 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
     .map((r) => ({ source: r.source, label: CHANNEL_LABEL_FROM_KEY[r.ch!] ?? r.ch!, count: r.count, excluded: excluded.includes(r.source) }))
     .sort((a, b) => b.count - a.count);
 
+  // The mirror in the other direction: Amazon MCF rows are Amazon shipping another channel's
+  // sale. Offered (global count, like the source toggles) once any non-Amazon channel is
+  // connected — before that, the MCF rows are the only trace of those sales, so dropping them
+  // would just lose orders.
+  const mcfCount = await prisma.salesOrder.count({ where: { channel: "AMAZON", mcf: true } });
+  const mcf: McfToggle = {
+    offered: mcfCount > 0 && [...connected].some((c) => c !== "AMAZON"),
+    count: mcfCount,
+    excluded: excludeMcf,
+  };
+
   return {
     channels,
     totalOrders: channels.reduce((s, c) => s + c.orders, 0),
@@ -146,6 +174,7 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
     totalRevenue: channels.reduce((s, c) => s + c.revenue, 0),
     currency: "USD",
     sources,
+    mcf,
   };
 }
 
@@ -199,6 +228,7 @@ function searchWhere(raw: string): Record<string, unknown> {
 export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilter = {}): Promise<OrdersPage> {
   const settings = await getOrgSettings();
   const excluded = new Set(settings.excludedShopifySources ?? []);
+  const excludeMcf = settings.excludeMcfOrders ?? false;
   const { since, until } = bounds(filter);
 
   const q = filter.q?.trim();
@@ -257,7 +287,7 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
       !o.replacement &&
       !o.cancelled &&
       (o.status === "Shipped" || o.status === "PartiallyShipped"),
-    excluded: o.channel === "SHOPIFY" && !!o.source && excluded.has(o.source),
+    excluded: (o.channel === "SHOPIFY" && !!o.source && excluded.has(o.source)) || (excludeMcf && o.mcf),
   }));
 
   return { rows, total, page: current, pageSize, pageCount };

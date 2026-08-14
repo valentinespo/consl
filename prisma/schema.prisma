@@ -384,6 +384,9 @@ model Settings {
   // Order sources to drop from Shopify totals so channel-mirrored orders (e.g. TikTok selling
   // through Shopify) aren't counted twice. Values are Shopify `source` keys, e.g. ["tiktok"].
   excludedShopifySources String[]  @default([])
+  // Drop Amazon MCF orders (Amazon shipping another channel's sale, $0 rows) from totals — offered
+  // once a non-Amazon channel is connected, since that channel's own order carries the sale.
+  excludeMcfOrders  Boolean       @default(false)
   // Labels of the "key documents" every lot is expected to carry (e.g. BOL, COA). Each shows as a
   // pill on the lots table — purple when a matching-label document is attached, grey when missing.
   // Operator-editable per org; empty = the Documents column shows nothing.
