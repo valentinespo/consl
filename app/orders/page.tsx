@@ -51,7 +51,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
       <OrdersClient
         summary={summary}
         orders={orders}
-        canImport={conns.length > 0}
+        connected={conns.length > 0}
         filter={{
           channel: channel ?? "",
           range: { key: rangeKey, from: b.from ?? oldest, to: b.to ?? newest },

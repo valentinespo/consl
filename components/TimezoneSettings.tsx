@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { RefreshCw, Clock } from "@/components/icons";
+import { Clock } from "@/components/icons";
 import { Card } from "@/components/ui";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
 import { useMoney } from "@/components/CurrencyProvider";
-import { saveTimezone, runSyncNow } from "@/app/settings/actions";
+import { saveTimezone } from "@/app/settings/actions";
 import type { EditorSaveRef } from "@/components/CompanyEditor";
 
 /** "GMT-03:00" for a zone, as of right now — offsets shift with daylight saving, so this is
@@ -49,9 +49,7 @@ export function TimezoneSettings({ initialTz, lastSyncAt, saveRef }: { initialTz
   const [tz, setTz] = useState(initialTz);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
   const [saving, startSave] = useTransition();
-  const [syncing, startSync] = useTransition();
   const zones = useZones(tz);
 
   function save() {
@@ -60,15 +58,6 @@ export function TimezoneSettings({ initialTz, lastSyncAt, saveRef }: { initialTz
       const r = await saveTimezone(tz);
       if (r.ok) setSaved(true);
       else setError(r.error);
-      router.refresh();
-    });
-  }
-
-  function runNow() {
-    setMsg(null);
-    startSync(async () => {
-      const r = await runSyncNow();
-      setMsg(r.ok ? "Synced every connected channel just now." : r.error);
       router.refresh();
     });
   }
@@ -120,20 +109,11 @@ export function TimezoneSettings({ initialTz, lastSyncAt, saveRef }: { initialTz
         </Field>
 
         <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-line pt-4">
-          <button
-            onClick={runNow}
-            disabled={syncing}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-[12.5px] font-medium text-ink-soft hover:text-ink disabled:opacity-60"
-          >
-            <RefreshCw size={13} className={syncing ? "animate-spin" : ""} />
-            {syncing ? "Syncing…" : "Run sync now"}
-          </button>
           <span className="inline-flex items-center gap-1.5 text-[11.5px] text-muted">
             <Clock size={12} />
-            Stock every minute · sales overnight · last synced {lastSynced}
+            Everything syncs itself — stock every minute, orders live, sales overnight · last synced {lastSynced}
           </span>
         </div>
-        {msg && <div className="mt-2 text-[12px] text-muted">{msg}</div>}
       </Card>
 
       <SaveBar

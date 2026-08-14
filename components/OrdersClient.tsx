@@ -1,11 +1,11 @@
 "use client";
 
 import Image from "next/image";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { RefreshCw, ChevronRight, Search } from "@/components/icons";
+import { ChevronRight, Search } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
-import { importOrders, setSourceExcluded } from "@/app/orders/actions";
+import { setSourceExcluded } from "@/app/orders/actions";
 import type { OrdersSummary, OrdersPage, OrderRow } from "@/lib/order-metrics";
 import { inputCls } from "@/components/FormKit";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
@@ -54,13 +54,14 @@ function Toggle({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean
 export function OrdersClient({
   summary,
   orders,
-  canImport,
+  connected,
   filter,
   dataBounds,
 }: {
   summary: OrdersSummary;
   orders: OrdersPage;
-  canImport: boolean;
+  /** Whether any sales channel is connected — drives the empty-state copy only. */
+  connected: boolean;
   filter: { channel: string; range: Range; q: string };
   dataBounds: { newest: string; oldest: string };
 }) {
@@ -68,19 +69,8 @@ export function OrdersClient({
   const pathname = usePathname();
   const params = useSearchParams();
   const { money, locale } = useMoney();
-  const [importing, startImport] = useTransition();
   const [savingSource, setSavingSource] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
   const [search, setSearch] = useState(filter.q);
-
-  function runImport() {
-    setMsg(null);
-    startImport(async () => {
-      const r = await importOrders();
-      setMsg(r.ok ? `Imported ${r.summary}.` : r.error ?? "Import failed.");
-      router.refresh();
-    });
-  }
 
   function toggleSource(source: string, excluded: boolean) {
     setSavingSource(source);
@@ -130,26 +120,14 @@ export function OrdersClient({
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Header: totals + import */}
+      {/* Header: totals. No manual import — orders arrive on their own (webhooks, live polls,
+          report refreshes) per the always-live rule. */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-wrap gap-6">
           <Stat label="Orders" value={summary.totalOrders.toLocaleString()} />
           <Stat label="Units sold" value={summary.totalUnits.toLocaleString()} />
           <Stat label="Revenue" value={money(summary.totalRevenue)} />
         </div>
-        {canImport && (
-          <div className="flex items-center gap-2.5">
-            {msg && <span className="hidden text-[11.5px] text-muted sm:inline">{msg}</span>}
-            <button
-              onClick={runImport}
-              disabled={importing}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-bg transition-opacity hover:opacity-90 disabled:opacity-60"
-            >
-              <RefreshCw size={14} className={importing ? "animate-spin" : ""} />
-              {importing ? "Importing…" : "Import orders"}
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Per-channel split */}
@@ -240,8 +218,8 @@ export function OrdersClient({
           <p className="mt-1 text-[12.5px] text-muted">
             {filter.channel || filter.range.key !== "all" || filter.q
               ? "Nothing matches these filters."
-              : canImport
-                ? "Hit “Import orders” to pull your order history."
+              : connected
+                ? "Your order history is importing itself — check back in a few minutes."
                 : "Connect a sales channel to see orders here."}
           </p>
         </div>

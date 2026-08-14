@@ -3,7 +3,6 @@ import { getOrgSettings } from "@/lib/settings";
 import { getCurrentOrg } from "@/lib/org";
 import { PageHeader } from "@/components/ui";
 import { RestockDashboard } from "@/components/RestockDashboard";
-import { SyncChannelsButton } from "@/components/SyncChannelsButton";
 import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +30,8 @@ export default async function ReorderPage() {
   return (
     <>
       <PageHeader title="Reorder" subtitle="Restock recommendations — what to reship to Amazon and what to reorder.">
-        <SyncChannelsButton lastSync={synced} />
+        {/* No sync button — stock and sales refresh themselves (always-live rule). */}
+        <span className="text-[11.5px] text-muted">{synced ? `Updated ${synced}` : ""}</span>
       </PageHeader>
       <RestockDashboard rows={rows} defaults={defaults} sortMode={sortMode} nowMs={Date.now()} />
     </>
