@@ -70,4 +70,4 @@ Efferd-inspired, one **violet** accent. Never hardcode a hex where a token exist
 ## Conventions
 
 - Match surrounding code; comment only real constraints, not narration. Money/qty formatting via `lib/format.ts` (2dp; `costFine` for sub-cent per-bag costs). Segment colors from `lib/segments.ts` (single source). Reference files as `path:line`.
-- The `Herbl Inc.` org in staging is real live data for that brand (now just tenant #1). The old `ops.herbl.co` app is being retired — this staging DB is the real production going forward.
+- Herbl's LIVE books are the `Herbl Inc.` org on PRODUCTION (consl.ai / hayabusa) — promoted to full feature parity 2026-08-14. The staging DB (roundhouse) is a sandbox the founder has historically kept in step by entering real data on both sides; treat production as the source of truth. The old `ops.herbl.co` app is deprecated and awaiting cancellation.
