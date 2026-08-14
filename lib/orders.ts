@@ -32,6 +32,9 @@ type Fetched = {
   fulfillmentLabel: string | null;
   total: number;
   currency: string;
+  /** Keep an existing non-zero total when this fetch carries $0 — the live Orders API hides a
+   *  Pending order's total, and re-zeroing what the report already filled would flap the number. */
+  preserveNonzeroTotal?: boolean;
   lines: FetchedLine[];
 };
 
@@ -68,8 +71,9 @@ async function persist(
     try {
       const existing = await prisma.salesOrder.findFirst({
         where: { channel, externalId: o.externalId },
-        select: { id: true },
+        select: { id: true, total: true },
       });
+      const keepTotal = o.preserveNonzeroTotal && o.total === 0 && (existing?.total ?? 0) > 0;
       const data = {
         orderNumber: o.orderNumber,
         orderedAt: o.orderedAt,
@@ -81,7 +85,7 @@ async function persist(
         replacement: o.replacement ?? false,
         fulfillment: o.fulfillment,
         fulfillmentLabel: o.fulfillmentLabel,
-        total: o.total,
+        ...(keepTotal ? {} : { total: o.total }),
         currency: o.currency,
       };
       const order = existing
@@ -495,10 +499,15 @@ export async function pollAmazonOrders(): Promise<OrderImportResult & { cursor?:
       sourceLabel: null,
       status: o.status,
       cancelled: o.status === "Canceled",
+      mcf: /^non.?amazon/i.test(o.salesChannel),
+      replacement: o.isReplacement,
       fulfillment: o.fulfillment === "AFN" ? "Amazon" : "Merchant",
       fulfillmentLabel: o.fulfillment === "AFN" ? "Amazon FBA" : "Merchant",
       total: o.total,
       currency: o.currency,
+      // The live API hides a Pending order's total until the charge settles — a $0 here must not
+      // wipe a real total the report already filled in.
+      preserveNonzeroTotal: true,
       lines,
     });
   }

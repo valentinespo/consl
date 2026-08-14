@@ -245,6 +245,8 @@ export type LiveAmazonOrder = {
   fulfillment: string; // AFN (FBA) | MFN (merchant)
   total: number; // OrderTotal — the buyer's grand total (items + tax + shipping, net of promos)
   currency: string;
+  salesChannel: string; // "Amazon.com" | "Non-Amazon" (an MCF order for another channel)
+  isReplacement: boolean;
 };
 
 export type LiveAmazonOrderItem = { sku: string; quantity: number; itemPrice: number; promotionDiscount: number };
@@ -272,6 +274,8 @@ export async function getOrdersUpdatedSince(client: SpApiClient, sinceISO: strin
       OrderStatus?: string;
       FulfillmentChannel?: string;
       OrderTotal?: { Amount?: string; CurrencyCode?: string };
+      SalesChannel?: string;
+      IsReplacementOrder?: boolean | string;
     };
     for (const o of (j.payload?.Orders ?? []) as ApiOrder[]) {
       out.push({
@@ -281,6 +285,8 @@ export async function getOrdersUpdatedSince(client: SpApiClient, sinceISO: strin
         fulfillment: o.FulfillmentChannel ?? "",
         total: Number(o.OrderTotal?.Amount) || 0,
         currency: o.OrderTotal?.CurrencyCode ?? "USD",
+        salesChannel: o.SalesChannel ?? "",
+        isReplacement: o.IsReplacementOrder === true || o.IsReplacementOrder === "true",
       });
     }
     next = j.payload?.NextToken ?? null;

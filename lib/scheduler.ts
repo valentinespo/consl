@@ -82,14 +82,6 @@ async function runOrgDaily(orgId: string): Promise<void> {
       }
 
       const r = await syncAmazonCore(); // no-op for orgs with no Amazon-mapped SKUs
-      // Amazon's recent ORDERS ride the daily run too: one extra 3-day report keeps the Orders tab
-      // current without burning quota (the data lags ~2 days at the source regardless).
-      try {
-        const { importAmazonOrders } = await import("@/lib/orders");
-        await importAmazonOrders(3);
-      } catch (e) {
-        console.error(`[scheduler] amazon orders failed for org ${orgId}:`, (e as Error).message);
-      }
       await getRestock(); // records today's inventory-value snapshot with fresh numbers
 
       if (r.ok) {
@@ -186,6 +178,22 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
             console.error(`[scheduler] amazon orders poll failed for org ${orgId}:`, (e as Error).message);
           }
         }
+
+        // The report-based correction pass, every 6 hours: one 3-day All-Orders report that fills
+        // in what the live poll can't — line-level revenue, MCF/replacement flags, and totals the
+        // API hid while Pending. Four report requests a day sits far inside the quota; running it
+        // more often would mostly re-read the same file (the report lags hours at the source).
+        const lastReport = lastAmazonOrderReport.get(orgId) ?? 0;
+        if (Date.now() - lastReport >= AMAZON_ORDER_REPORT_MS) {
+          lastAmazonOrderReport.set(orgId, Date.now());
+          try {
+            const { importAmazonOrders } = await import("@/lib/orders");
+            const r = await importAmazonOrders(3);
+            console.log(`[scheduler] amazon order report refresh for ${orgId}: ${r.orders} orders`);
+          } catch (e) {
+            console.error(`[scheduler] amazon order report failed for org ${orgId}:`, (e as Error).message);
+          }
+        }
       }
     });
   } catch (e) {
@@ -195,9 +203,11 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
 
 const ORDERS_REFRESH_MS = 15 * 60 * 1000;
 const AMAZON_POLL_MS = 5 * 60 * 1000;
+const AMAZON_ORDER_REPORT_MS = 6 * 60 * 60 * 1000;
 // In-process per-org timestamps; a restart just refreshes once immediately, which is harmless.
 const lastOrdersRefresh = new Map<string, number>();
 const lastAmazonPoll = new Map<string, number>();
+const lastAmazonOrderReport = new Map<string, number>();
 
 let backfilling = false;
 

@@ -55,7 +55,8 @@ Efferd-inspired, one **violet** accent. Never hardcode a hex where a token exist
 - **Two Railway environments** in project "Ecom Inventory Management" (service `web` in each):
   **production** = branch `v2` → **consl.ai** (live, Herbl's real data, hayabusa DB) and
   **staging** = branch `staging` → web-staging-7384.up.railway.app (roundhouse DB, a copy of live
-  taken 2026-08-03; its scheduled Amazon sync is disabled). `start` runs `prisma migrate deploy &&
+  taken 2026-08-03; its scheduler IS enabled — nightly sync, minute stock ticks, order polls all
+  run here, sharing the Amazon quota with the deprecated live app until that one is cancelled). `start` runs `prisma migrate deploy &&
   next start` in both. **Work lands on `staging` (push origin staging = auto-deploy staging);
   merge staging → v2 ONLY when verified — that deploys the LIVE app.** Local dev's `.env`
   DATABASE_URL points at the STAGING DB (live URL preserved commented in .env).
