@@ -758,6 +758,11 @@ model SalesOrder {
   sourceLabel  String? // human label for `source` ("Online Store", "TikTok")
   status       String? // platform status; a cancelled/refunded order is kept but flagged out of velocity
   cancelled    Boolean         @default(false)
+  // Amazon report flags: an MCF order is Amazon shipping ANOTHER channel's sale (sales-channel
+  // "Non-Amazon" — its $0 here is correct, the revenue lives on that channel's own order); a
+  // replacement is a free re-ship of an earlier order (is-replacement-order).
+  mcf          Boolean         @default(false)
+  replacement  Boolean         @default(false)
   // How it was fulfilled, when the platform tells us — drives which stock pool drains later.
   // Amazon: "Amazon" (FBA) | "Merchant". TikTok: "TIKTOK" | "SELLER". Shopify: null (seller-fulfilled).
   fulfillment  String?

@@ -3,13 +3,12 @@ import { requireView } from "@/lib/membership";
 import { getOrdersSummary, getOrdersPage, type OrdersFilter } from "@/lib/order-metrics";
 import { prisma } from "@/lib/prisma";
 import { OrdersClient } from "@/components/OrdersClient";
+import { rangeBounds, RANGES, type RangeKey } from "@/lib/chart";
 
 export const dynamic = "force-dynamic";
 
-const RANGES: Record<string, number> = { "30d": 30, "90d": 90, "12m": 365 };
-
 /**
- * Orders — the Analytics section's landing and the home for profit tracking to come. Shows every
+ * Orders — the Finances section's order feed and the home for profit tracking to come. Shows every
  * order pulled from the connected channels, paged and filterable, with the double-count guard for
  * channels that mirror into Shopify. Gated on "dashboard" (analytics-level visibility).
  */
@@ -20,10 +19,19 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const str = (v: string | string[] | undefined) => (typeof v === "string" && v ? v : undefined);
 
   const channel = ["AMAZON", "SHOPIFY", "TIKTOK"].includes(str(sp.channel) ?? "") ? str(sp.channel) : undefined;
-  const range = str(sp.range);
+
+  // The same range vocabulary as the dashboard chart: a preset key, or "custom" + from/to days.
+  const isKey = (v: string | undefined): v is RangeKey => !!v && RANGES.some((r) => r.key === v);
+  const rangeKey: RangeKey = isKey(str(sp.range)) ? (str(sp.range) as RangeKey) : "all";
+  const newest = new Date().toISOString().slice(0, 10);
+  const oldestRow = await prisma.salesOrder.findFirst({ orderBy: { orderedAt: "asc" }, select: { orderedAt: true } });
+  const oldest = (oldestRow?.orderedAt ?? new Date()).toISOString().slice(0, 10);
+  const b = rangeBounds(rangeKey, newest, str(sp.from), str(sp.to));
+
   const filter: OrdersFilter = {
     channel,
-    sinceDays: range ? RANGES[range] : undefined,
+    from: rangeKey === "all" ? undefined : (b.from ?? undefined),
+    to: rangeKey === "all" ? undefined : (b.to ?? undefined),
     q: str(sp.q),
   };
 
@@ -34,7 +42,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const connectedChannels = conns.map((c) => c.provider.toUpperCase());
 
   const [summary, orders] = await Promise.all([
-    getOrdersSummary(connectedChannels, { channel: filter.channel, sinceDays: filter.sinceDays }),
+    getOrdersSummary(connectedChannels, { channel: filter.channel, from: filter.from, to: filter.to }),
     getOrdersPage(page, 50, filter),
   ]);
   return (
@@ -44,7 +52,12 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         summary={summary}
         orders={orders}
         canImport={conns.length > 0}
-        filter={{ channel: channel ?? "", range: range ?? "", q: str(sp.q) ?? "" }}
+        filter={{
+          channel: channel ?? "",
+          range: { key: rangeKey, from: b.from ?? oldest, to: b.to ?? newest },
+          q: str(sp.q) ?? "",
+        }}
+        dataBounds={{ newest, oldest }}
       />
     </>
   );

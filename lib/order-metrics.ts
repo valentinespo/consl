@@ -35,12 +35,16 @@ function mirrorChannel(source: string | null): string | null {
 
 export type OrdersFilter = {
   channel?: string; // AMAZON | SHOPIFY | TIKTOK
-  sinceDays?: number; // 30 | 90 | 365; undefined = all time
-  q?: string; // search: order number substring, or an amount
+  from?: string; // ISO day (inclusive); undefined = beginning of time
+  to?: string; // ISO day (inclusive); undefined = today
+  q?: string; // free-text search — order #, amount, SKU, or words like "mcf" / "pending" / "free"
 };
 
-function sinceDate(f: OrdersFilter): Date | null {
-  return f.sinceDays ? new Date(Date.now() - f.sinceDays * 86_400_000) : null;
+function bounds(f: OrdersFilter): { since: Date | null; until: Date | null } {
+  return {
+    since: f.from ? new Date(`${f.from}T00:00:00Z`) : null,
+    until: f.to ? new Date(`${f.to}T23:59:59.999Z`) : null,
+  };
 }
 
 export type OrderRow = {
@@ -54,7 +58,12 @@ export type OrderRow = {
   units: number;
   total: number;
   currency: string;
+  status: string | null;
   cancelled: boolean;
+  mcf: boolean;
+  replacement: boolean;
+  /** A shipped Amazon order that charged $0 and isn't MCF or a replacement — Vine or another freebie. */
+  freeUnit: boolean;
   excluded: boolean;
 };
 
@@ -79,7 +88,7 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
   const settings = await getOrgSettings();
   const excluded = settings.excludedShopifySources ?? [];
   const connected = new Set(connectedChannels);
-  const since = sinceDate(filter);
+  const { since, until } = bounds(filter);
   const channelFilter = filter.channel ?? null;
 
   // Two aggregations: revenue/orders straight off SalesOrder (joining lines would multiply an
@@ -91,6 +100,7 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
       AND o.cancelled = false
       AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excluded}))
       AND (${since}::timestamp IS NULL OR o."orderedAt" >= ${since})
+      AND (${until}::timestamp IS NULL OR o."orderedAt" <= ${until})
       AND (${channelFilter}::text IS NULL OR o.channel = ${channelFilter})
     GROUP BY o.channel`;
   const unitRows = await prisma.$queryRaw<{ channel: string; units: bigint | null }[]>`
@@ -101,6 +111,7 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
       AND o.cancelled = false
       AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excluded}))
       AND (${since}::timestamp IS NULL OR o."orderedAt" >= ${since})
+      AND (${until}::timestamp IS NULL OR o."orderedAt" <= ${until})
       AND (${channelFilter}::text IS NULL OR o.channel = ${channelFilter})
     GROUP BY o.channel`;
   const unitsByChannel = new Map(unitRows.map((r) => [r.channel, Number(r.units ?? 0)]));
@@ -138,27 +149,63 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
   };
 }
 
+/** A shipped Amazon order that charged $0 without being MCF or a replacement — Vine or another freebie. */
+const FREE_UNIT_WHERE = {
+  channel: "AMAZON",
+  total: 0,
+  mcf: false,
+  replacement: false,
+  cancelled: false,
+  OR: [{ status: "Shipped" }, { status: "PartiallyShipped" }],
+};
+
+/**
+ * Free-text search → a where clause. Words people would actually type match what they mean:
+ * "mcf" finds MCF orders, "pending"/"shipped"/"cancelled" match status, "free"/"vine" find
+ * free units, a channel name filters that channel, a number matches the paid total, and anything
+ * else sweeps order #, SKU, sales channel, fulfilled-at and status.
+ */
+function searchWhere(raw: string): Record<string, unknown> {
+  const q = raw.trim();
+  const s = q.toLowerCase();
+  const contains = (v: string) => ({ contains: v, mode: "insensitive" as const });
+
+  if (["mcf", "multichannel", "multi-channel"].includes(s)) return { mcf: true };
+  if (["replacement", "replacements"].includes(s)) return { replacement: true };
+  if (["free", "free unit", "free units", "vine"].includes(s)) return FREE_UNIT_WHERE;
+  if (["cancelled", "canceled"].includes(s)) return { cancelled: true };
+  if (s === "pending") return { status: contains("pending") };
+  if (s === "unshipped") return { status: contains("unshipped") };
+  if (["shipped", "partially shipped"].includes(s)) return { OR: [{ status: "Shipped" }, { status: "PartiallyShipped" }] };
+  if (["amazon", "shopify", "tiktok"].includes(s)) return { channel: s.toUpperCase() };
+  if (["fba", "merchant"].includes(s)) return { fulfillmentLabel: contains(s) };
+
+  const amount = /^[0-9]+([.,][0-9]{1,2})?$/.test(s) ? Number(s.replace(",", ".")) : null;
+  return {
+    OR: [
+      { orderNumber: contains(q) },
+      { sourceLabel: contains(q) },
+      { fulfillmentLabel: contains(q) },
+      { status: contains(q) },
+      { lines: { some: { sku: contains(q) } } },
+      // An amount searches the paid total within a cent, so "23.4" finds $23.40.
+      ...(amount != null ? [{ total: { gte: amount - 0.005, lte: amount + 0.005 } }] : []),
+    ],
+  };
+}
+
 /** One page of orders, newest first, honouring the filters + search. Excluded/cancelled orders
  *  still show (dimmed) for transparency. */
 export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilter = {}): Promise<OrdersPage> {
   const settings = await getOrgSettings();
   const excluded = new Set(settings.excludedShopifySources ?? []);
-  const since = sinceDate(filter);
+  const { since, until } = bounds(filter);
 
   const q = filter.q?.trim();
-  const amount = q && /^[0-9]+([.,][0-9]{1,2})?$/.test(q) ? Number(q.replace(",", ".")) : null;
   const where = {
     ...(filter.channel ? { channel: filter.channel } : {}),
-    ...(since ? { orderedAt: { gte: since } } : {}),
-    ...(q
-      ? {
-          OR: [
-            { orderNumber: { contains: q, mode: "insensitive" as const } },
-            // An amount searches the paid total within a cent, so "23.4" finds $23.40.
-            ...(amount != null ? [{ total: { gte: amount - 0.005, lte: amount + 0.005 } }] : []),
-          ],
-        }
-      : {}),
+    ...(since || until ? { orderedAt: { ...(since ? { gte: since } : {}), ...(until ? { lte: until } : {}) } } : {}),
+    ...(q ? { AND: [searchWhere(q)] } : {}),
   };
 
   const total = await prisma.salesOrder.count({ where });
@@ -180,7 +227,10 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
       orderedAt: true,
       total: true,
       currency: true,
+      status: true,
       cancelled: true,
+      mcf: true,
+      replacement: true,
       lines: { select: { quantity: true } },
     },
   });
@@ -196,7 +246,17 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
     units: o.lines.reduce((s, l) => s + l.quantity, 0),
     total: o.total,
     currency: o.currency,
+    status: o.status,
     cancelled: o.cancelled,
+    mcf: o.mcf,
+    replacement: o.replacement,
+    freeUnit:
+      o.channel === "AMAZON" &&
+      o.total === 0 &&
+      !o.mcf &&
+      !o.replacement &&
+      !o.cancelled &&
+      (o.status === "Shipped" || o.status === "PartiallyShipped"),
     excluded: o.channel === "SHOPIFY" && !!o.source && excluded.has(o.source),
   }));
 

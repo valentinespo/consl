@@ -6,8 +6,9 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { RefreshCw, ChevronRight, Search } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { importOrders, setSourceExcluded } from "@/app/orders/actions";
-import type { OrdersSummary, OrdersPage } from "@/lib/order-metrics";
+import type { OrdersSummary, OrdersPage, OrderRow } from "@/lib/order-metrics";
 import { inputCls } from "@/components/FormKit";
+import { DateRangePicker, type Range } from "@/components/DateRangePicker";
 
 const CHANNEL_LOGO: Record<string, string> = {
   AMAZON: "/integrations/amazon-fba.png",
@@ -16,6 +17,24 @@ const CHANNEL_LOGO: Record<string, string> = {
 };
 
 const PILL = "inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium";
+
+/** The order's lifecycle as a pill. Cancelled wins; platform statuses map to a small shared
+ *  vocabulary; anything unrecognized still shows, prettified, as a neutral pill. */
+function statusPill(o: OrderRow): { label: string; cls: string } | null {
+  if (o.cancelled) return { label: "Cancelled", cls: "pill-red" };
+  const s = (o.status ?? "").toLowerCase().replace(/_/g, " ");
+  if (!s) return null;
+  if (s.includes("pending")) return { label: "Pending", cls: "pill-amber" };
+  if (s.includes("unshipped") || s.includes("unfulfilled") || s.includes("awaiting")) return { label: "Unshipped", cls: "pill-amber" };
+  if (s.includes("partially") && s.includes("ship")) return { label: "Partially shipped", cls: "pill-amber" };
+  if (s === "shipping") return { label: "Shipping", cls: "pill-amber" };
+  if (s.includes("shipped") || s.includes("fulfilled") || s.includes("completed") || s.includes("delivered"))
+    return { label: "Shipped", cls: "pill-green" };
+  if (s.includes("refund")) return { label: "Refunded", cls: "pill-red" };
+  if (s.includes("transit")) return { label: "In transit", cls: "pill-amber" };
+  if (s.includes("paid")) return { label: "Paid", cls: "pill-green" };
+  return { label: s.charAt(0).toUpperCase() + s.slice(1), cls: "pill-neutral" };
+}
 
 function Toggle({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
@@ -36,16 +55,18 @@ export function OrdersClient({
   orders,
   canImport,
   filter,
+  dataBounds,
 }: {
   summary: OrdersSummary;
   orders: OrdersPage;
   canImport: boolean;
-  filter: { channel: string; range: string; q: string };
+  filter: { channel: string; range: Range; q: string };
+  dataBounds: { newest: string; oldest: string };
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const { money } = useMoney();
+  const { money, locale } = useMoney();
   const [importing, startImport] = useTransition();
   const [savingSource, setSavingSource] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -73,6 +94,22 @@ export function OrdersClient({
     const q = new URLSearchParams(params.toString());
     if (value) q.set(key, value);
     else q.delete(key);
+    q.delete("page");
+    router.push(`${pathname}?${q.toString()}`);
+  }
+
+  /** The time window: a preset key, plus concrete from/to only when custom. */
+  function setRange(r: Range) {
+    const q = new URLSearchParams(params.toString());
+    if (r.key === "all") q.delete("range");
+    else q.set("range", r.key);
+    if (r.key === "custom") {
+      q.set("from", r.from);
+      q.set("to", r.to);
+    } else {
+      q.delete("from");
+      q.delete("to");
+    }
     q.delete("page");
     router.push(`${pathname}?${q.toString()}`);
   }
@@ -156,12 +193,13 @@ export function OrdersClient({
 
       {/* Filter bar */}
       <div className="flex flex-wrap items-center gap-2">
-        <select value={filter.range} onChange={(e) => setParam("range", e.target.value)} className={selectCls} aria-label="Time range">
-          <option value="">All time</option>
-          <option value="30d">Last 30 days</option>
-          <option value="90d">Last 90 days</option>
-          <option value="12m">Last 12 months</option>
-        </select>
+        <DateRangePicker
+          value={filter.range}
+          onChange={setRange}
+          newest={dataBounds.newest}
+          oldest={dataBounds.oldest}
+          locale={locale}
+        />
         <select value={filter.channel} onChange={(e) => setParam("channel", e.target.value)} className={selectCls} aria-label="Sales channel">
           <option value="">All channels</option>
           <option value="AMAZON">Amazon</option>
@@ -180,11 +218,11 @@ export function OrdersClient({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onBlur={() => search.trim() !== filter.q && setParam("q", search.trim())}
-            placeholder="Search order # or amount"
+            placeholder="Search anything — order #, SKU, amount, mcf, pending…"
             className={`${inputCls} pl-8`}
           />
         </form>
-        {(filter.channel || filter.range || filter.q) && (
+        {(filter.channel || filter.range.key !== "all" || filter.q) && (
           <button
             onClick={() => router.push(pathname)}
             className="text-[12.5px] font-medium text-muted underline-offset-2 hover:text-ink-soft hover:underline"
@@ -199,7 +237,7 @@ export function OrdersClient({
         <div className="rounded-[var(--radius-card)] border border-dashed border-border bg-surface-2/40 px-6 py-10 text-center">
           <div className="text-[14px] font-semibold text-ink">No orders found</div>
           <p className="mt-1 text-[12.5px] text-muted">
-            {filter.channel || filter.range || filter.q
+            {filter.channel || filter.range.key !== "all" || filter.q
               ? "Nothing matches these filters."
               : canImport
                 ? "Hit “Import orders” to pull your order history."
@@ -217,18 +255,41 @@ export function OrdersClient({
                   <th className="px-4 py-2.5 text-left font-medium">Source</th>
                   <th className="px-4 py-2.5 text-left font-medium">Sales channel</th>
                   <th className="px-4 py-2.5 text-left font-medium">Fulfilled at</th>
+                  <th className="px-4 py-2.5 text-left font-medium">Status</th>
                   <th className="px-4 py-2.5 text-right font-medium">Units</th>
                   <th className="px-4 py-2.5 text-right font-medium">Total</th>
                 </tr>
               </thead>
               <tbody>
-                {orders.rows.map((o) => (
+                {orders.rows.map((o) => {
+                  const st = statusPill(o);
+                  return (
                   <tr key={o.id} className={`border-b border-line last:border-0 ${o.excluded || o.cancelled ? "opacity-45" : ""}`}>
                     <td className="whitespace-nowrap px-4 py-2.5 text-[12px] text-muted">{fmtDate(o.orderedAt)}</td>
                     <td className="px-4 py-2.5">
                       <span className="font-medium text-ink">{o.orderNumber ?? "—"}</span>
                       {o.excluded && <span className={`${PILL} pill-neutral ml-2`}>not counted</span>}
-                      {o.cancelled && <span className={`${PILL} pill-red ml-2`}>cancelled</span>}
+                      {o.mcf && (
+                        <span
+                          className={`${PILL} pill-chart ml-2`}
+                          title="Amazon shipped this for another channel (e.g. a Shopify order) — the money lives on that channel's own order, so $0 here is correct."
+                        >
+                          MCF
+                        </span>
+                      )}
+                      {o.replacement && (
+                        <span className={`${PILL} pill-neutral ml-2`} title="A free re-ship of an earlier order — the original order carries the revenue.">
+                          Replacement
+                        </span>
+                      )}
+                      {o.freeUnit && (
+                        <span
+                          className={`${PILL} pill-neutral ml-2`}
+                          title="A shipped $0 order that isn't MCF or a replacement — could be Vine or another freebie."
+                        >
+                          Free unit
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5">
                       <span className="flex items-center gap-2">
@@ -238,10 +299,12 @@ export function OrdersClient({
                     </td>
                     <td className="px-4 py-2.5 text-ink-soft">{o.sourceLabel ?? "—"}</td>
                     <td className="px-4 py-2.5 text-ink-soft">{o.fulfillmentLabel ?? "—"}</td>
+                    <td className="px-4 py-2.5">{st ? <span className={`${PILL} ${st.cls}`}>{st.label}</span> : <span className="text-muted">—</span>}</td>
                     <td className="px-4 py-2.5 text-right tabular text-ink-soft">{o.units.toLocaleString()}</td>
                     <td className="px-4 py-2.5 text-right tabular text-ink-soft">{money(o.total)}</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

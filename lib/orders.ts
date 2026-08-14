@@ -25,6 +25,9 @@ type Fetched = {
   sourceLabel: string | null;
   status: string | null;
   cancelled: boolean;
+  // Amazon only: MCF (shipped for another channel — $0 here on purpose) / replacement re-ships.
+  mcf?: boolean;
+  replacement?: boolean;
   fulfillment: string | null;
   fulfillmentLabel: string | null;
   total: number;
@@ -74,6 +77,8 @@ async function persist(
         sourceLabel: o.sourceLabel,
         status: o.status,
         cancelled: o.cancelled,
+        mcf: o.mcf ?? false,
+        replacement: o.replacement ?? false,
         fulfillment: o.fulfillment,
         fulfillmentLabel: o.fulfillmentLabel,
         total: o.total,
@@ -360,6 +365,9 @@ export async function importAmazonOrders(window: { start: Date; end: Date } | nu
         sourceLabel: null,
         status: row.status,
         cancelled: row.status === "Cancelled",
+        // "Non-Amazon" sales channel = an MCF order (Amazon shipping another channel's sale).
+        mcf: /^non.?amazon/i.test(row.salesChannel),
+        replacement: row.isReplacement,
         fulfillment: row.fulfillment === "Amazon" ? "Amazon" : "Merchant",
         fulfillmentLabel: row.fulfillment === "Amazon" ? "Amazon FBA" : "Merchant",
         total: 0,

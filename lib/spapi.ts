@@ -325,6 +325,9 @@ export type AmazonOrderRow = {
   shippingTax: number;
   shipPromotionDiscount: number;
   currency: string;
+  // "Amazon.com" for marketplace sales; "Non-Amazon" = an MCF order Amazon ships for another channel.
+  salesChannel: string;
+  isReplacement: boolean; // is-replacement-order — a free re-ship of an earlier order
 };
 
 /** Per-order-item rows from the All Orders report — the order-level feed for the Orders tab
@@ -366,6 +369,8 @@ export async function getAllOrderRows(client: SpApiClient, startISO: string, end
     const iShipTax = h.indexOf("shipping-tax");
     const iShipPromo = h.indexOf("ship-promotion-discount");
     const iCur = h.indexOf("currency");
+    const iSalesCh = h.indexOf("sales-channel");
+    const iRepl = h.indexOf("is-replacement-order");
     const num = (idx: number, c: string[]) => (idx >= 0 ? Number(c[idx]) || 0 : 0);
     for (let i = 1; i < lines.length; i++) {
       const c = lines[i].split("\t");
@@ -388,6 +393,8 @@ export async function getAllOrderRows(client: SpApiClient, startISO: string, end
         shippingTax: num(iShipTax, c),
         shipPromotionDiscount: Math.abs(num(iShipPromo, c)),
         currency: iCur >= 0 ? c[iCur] || "USD" : "USD",
+        salesChannel: iSalesCh >= 0 ? c[iSalesCh] || "" : "",
+        isReplacement: iRepl >= 0 && (c[iRepl] || "").trim().toLowerCase() === "true",
       });
     }
   }
