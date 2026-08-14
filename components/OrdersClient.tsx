@@ -9,6 +9,7 @@ import { importOrders, setSourceExcluded } from "@/app/orders/actions";
 import type { OrdersSummary, OrdersPage, OrderRow } from "@/lib/order-metrics";
 import { inputCls } from "@/components/FormKit";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
+import { HoverHint } from "@/components/HoverHint";
 
 const CHANNEL_LOGO: Record<string, string> = {
   AMAZON: "/integrations/amazon-fba.png",
@@ -270,25 +271,31 @@ export function OrdersClient({
                       <span className="font-medium text-ink">{o.orderNumber ?? "—"}</span>
                       {o.excluded && <span className={`${PILL} pill-neutral ml-2`}>not counted</span>}
                       {o.mcf && (
-                        <span
-                          className={`${PILL} pill-chart ml-2`}
-                          title="Amazon shipped this for another channel (e.g. a Shopify order) — the money lives on that channel's own order, so $0 here is correct."
+                        <HoverHint
+                          title="MCF order"
+                          body="Amazon shipped this for another channel (e.g. a Shopify order). The money lives on that channel's own order, so $0 here is correct."
+                          className="ml-2 align-middle"
                         >
-                          MCF
-                        </span>
+                          <span className={`${PILL} pill-chart`}>MCF</span>
+                        </HoverHint>
                       )}
                       {o.replacement && (
-                        <span className={`${PILL} pill-neutral ml-2`} title="A free re-ship of an earlier order — the original order carries the revenue.">
-                          Replacement
-                        </span>
+                        <HoverHint
+                          title="Replacement"
+                          body="A free re-ship of an earlier order — the original order carries the revenue."
+                          className="ml-2 align-middle"
+                        >
+                          <span className={`${PILL} pill-neutral`}>Replacement</span>
+                        </HoverHint>
                       )}
                       {o.freeUnit && (
-                        <span
-                          className={`${PILL} pill-neutral ml-2`}
-                          title="A shipped $0 order that isn't MCF or a replacement — could be Vine or another freebie."
+                        <HoverHint
+                          title="Free unit"
+                          body="A shipped $0 order that isn't MCF or a replacement — could be Vine or another freebie."
+                          className="ml-2 align-middle"
                         >
-                          Free unit
-                        </span>
+                          <span className={`${PILL} pill-neutral`}>Free unit</span>
+                        </HoverHint>
                       )}
                     </td>
                     <td className="px-4 py-2.5">
