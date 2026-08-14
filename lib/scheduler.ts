@@ -150,13 +150,18 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
       if (Date.now() - last >= ORDERS_REFRESH_MS) {
         lastOrdersRefresh.set(orgId, Date.now());
         const { importShopifyOrders, importTikTokOrders } = await import("@/lib/orders");
-        for (const [provider, run] of [
-          ["shopify", () => importShopifyOrders(3)],
-          ["tiktok", () => importTikTokOrders(3)],
+        for (const [provider, channel, recent, full] of [
+          ["shopify", "SHOPIFY", () => importShopifyOrders(3), () => importShopifyOrders()],
+          ["tiktok", "TIKTOK", () => importTikTokOrders(3), () => importTikTokOrders()],
         ] as const) {
           if (!conns.some((c) => c.provider === provider)) continue;
           try {
-            await run();
+            // A connected channel with zero orders means its history was never pulled (connected
+            // outside onboarding, or a fresh database) — self-heal with one full import; every
+            // later pass is the cheap 3-day window.
+            const existing = await prisma.salesOrder.count({ where: { channel } });
+            await (existing === 0 ? full() : recent());
+            if (existing === 0) console.log(`[scheduler] ${provider} full order history imported for org ${orgId}`);
           } catch (e) {
             console.error(`[scheduler] ${provider} orders failed for org ${orgId}:`, (e as Error).message);
           }
