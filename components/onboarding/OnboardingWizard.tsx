@@ -7,10 +7,11 @@ import { AppLogo } from "@/components/AppLogo";
 import { OrgSwitcher } from "@/components/OrgSwitcher";
 import { CurrencyProvider, useMoney } from "@/components/CurrencyProvider";
 import { AccessProvider } from "@/components/AccessProvider";
-import { CompanyEditor, type CompanyForEdit, type EditorSaveRef } from "@/components/CompanyEditor";
+import { CompanyEditor, type CompanyForEdit } from "@/components/CompanyEditor";
 import { TimezoneSettings } from "@/components/TimezoneSettings";
 import { IntegrationControls } from "@/components/IntegrationControls";
 import { ChannelMappingClient } from "@/components/ChannelMappingClient";
+import { SelectMenu } from "@/components/SelectMenu";
 import { NewProductButton, NewMaterialButton } from "@/components/CreateButtons";
 import { SkuAvatar, Card } from "@/components/ui";
 import { Field, inputCls } from "@/components/FormKit";
@@ -42,7 +43,7 @@ export type WizardMapping = null | {
     mapped: { id: string; code: string; name: string; imageUrl: string | null } | null;
     suggestion: { productId: string; confidence: "exact" | "similar" } | null;
   }>;
-  pickerProducts: Array<{ id: string; code: string; name: string; takenExternalId: string | null }>;
+  pickerProducts: Array<{ id: string; code: string; name: string; imageUrl: string | null; takenExternalId: string | null }>;
   pendingByChannel: Record<string, number>;
 };
 
@@ -120,10 +121,6 @@ export function OnboardingWizard(props: {
 
   const anyConnected = props.providers.some((p) => p.connected);
   const ownFacilities = props.facilities.filter((f) => !f.channel);
-  // Step 0's editors save themselves when Continue is pressed — nobody should have to find the
-  // Save button to leave the first screen.
-  const companySaveRef: EditorSaveRef = useRef(null);
-  const tzSaveRef: EditorSaveRef = useRef(null);
 
   // ---- The one floating unsaved-changes bar. Sections register while dirty; Continue is gated. ----
   const [dirtySections, setDirtySections] = useState<Record<string, DirtySection>>({});
@@ -199,18 +196,6 @@ export function OnboardingWizard(props: {
     setWarning(null);
     setBusy(true);
     try {
-      if (step === 0) {
-        const savedCompany = companySaveRef.current ? await companySaveRef.current() : true;
-        if (!savedCompany) {
-          setError("Couldn't save your company details — check the form above.");
-          return;
-        }
-        const savedTz = tzSaveRef.current ? await tzSaveRef.current() : true;
-        if (!savedTz) {
-          setError("Couldn't save your time zone — check the form above.");
-          return;
-        }
-      }
       if (step === 6) {
         const r = await completeOnboarding();
         if (!r.ok) {
@@ -297,9 +282,7 @@ export function OnboardingWizard(props: {
           {/* Step body */}
           <main className="mx-auto max-w-[1040px] px-4 pb-28 pt-6 sm:px-6">
             <DirtyContext.Provider value={registerDirty}>
-              {step === 0 && (
-                <StepCompany company={props.company} isOwner={props.isOwner} syncTz={props.syncTz} companySaveRef={companySaveRef} tzSaveRef={tzSaveRef} />
-              )}
+              {step === 0 && <StepCompany company={props.company} isOwner={props.isOwner} syncTz={props.syncTz} />}
               {step === 1 && (
                 <StepChannels
                   providers={props.providers}
@@ -459,27 +442,29 @@ function DeleteX({ label, onDelete }: { label: string; onDelete: () => Promise<{
 
 /* ---------------------------------- Step 0: company ---------------------------------- */
 
-function StepCompany({
-  company,
-  isOwner,
-  syncTz,
-  companySaveRef,
-  tzSaveRef,
-}: {
-  company: CompanyForEdit;
-  isOwner: boolean;
-  syncTz: string;
-  companySaveRef: EditorSaveRef;
-  tzSaveRef: EditorSaveRef;
-}) {
+function StepCompany({ company, isOwner, syncTz }: { company: CompanyForEdit; isOwner: boolean; syncTz: string }) {
+  // Both editors save through the wizard's floating bar, like every other step.
+  type BarState = { save: () => Promise<string | null>; discard: () => void } | null;
+  const [companyState, setCompanyState] = useState<BarState>(null);
+  const [tzState, setTzState] = useState<BarState>(null);
+  useDirtySection("company", !!companyState, {
+    label: "company details",
+    save: () => companyState?.save() ?? Promise.resolve(null),
+    discard: () => companyState?.discard(),
+  });
+  useDirtySection("timezone", !!tzState, {
+    label: "time zone",
+    save: () => tzState?.save() ?? Promise.resolve(null),
+    discard: () => tzState?.discard(),
+  });
   return (
     <div className="space-y-4">
       <StepHeader
         title="Set up your company"
-        body="These details appear across the app and on the documents consl generates for you. Fill in at least your company name, address and email — Continue saves everything for you. The time zone decides when your business day starts and ends."
+        body="These details appear across the app and on the documents consl generates for you. Fill in at least your company name, address and email. The time zone decides when your business day starts and ends."
       />
-      <CompanyEditor company={company} isOwner={isOwner} saveRef={companySaveRef} />
-      <TimezoneSettings initialTz={syncTz} lastSyncAt={null} saveRef={tzSaveRef} />
+      <CompanyEditor company={company} isOwner={isOwner} hideSaveBar onDirtyState={setCompanyState} />
+      <TimezoneSettings initialTz={syncTz} lastSyncAt={null} hideSaveBar onDirtyState={setTzState} />
     </div>
   );
 }
@@ -599,9 +584,9 @@ function StepProducts({
               {Object.entries(mapping.pendingByChannel).map(([ch, n]) => (
                 <span
                   key={ch}
-                  className={`${n > 0 ? "pill-amber" : "pill-green"} inline-flex items-center rounded-full border px-2 py-[3px] text-[11px] font-medium`}
+                  className={`${n > 0 ? "pill-neutral" : "pill-green"} inline-flex items-center rounded-full border px-2 py-[3px] text-[11px] font-medium`}
                 >
-                  {ch === "AMAZON" ? "Amazon" : ch === "SHOPIFY" ? "Shopify" : "TikTok"}: {n > 0 ? `${n} to review` : "done"}
+                  {ch === "AMAZON" ? "Amazon" : ch === "SHOPIFY" ? "Shopify" : "TikTok"}: {n > 0 ? `${n} unmapped` : "all mapped"}
                 </span>
               ))}
             </div>
@@ -836,13 +821,12 @@ function NewFacilityInline() {
           <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. East Coast 3PL" />
         </Field>
         <Field label="Type">
-          <select value={type} onChange={(e) => setType(e.target.value)} className={inputCls}>
-            {FACILITY_TYPES.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label} — {t.hint}
-              </option>
-            ))}
-          </select>
+          <SelectMenu
+            value={type}
+            onChange={setType}
+            ariaLabel="Facility type"
+            options={FACILITY_TYPES.map((t) => ({ value: t.value, label: t.label, hint: t.hint }))}
+          />
         </Field>
       </div>
       {error && <div className="mt-2 text-[12px] text-negative">{error}</div>}
@@ -1079,30 +1063,26 @@ function RawBalanceCard({
           const mat = matById.get(l.materialTypeId);
           return (
             <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface-2 px-2.5 py-2">
-              <select
+              <SelectMenu
                 value={l.materialTypeId}
-                onChange={(e) => update(i, { materialTypeId: e.target.value, productId: "" })}
-                className={`${inputCls} min-w-[160px] flex-1 basis-40`}
-              >
-                {materials.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(v) => update(i, { materialTypeId: v, productId: "" })}
+                ariaLabel="Material"
+                className="min-w-[160px] flex-1 basis-40"
+                options={materials.map((m) => ({ value: m.id, label: m.name }))}
+              />
               {mat?.skuSpecific && (
-                <select
+                <SelectMenu
                   value={l.productId}
-                  onChange={(e) => update(i, { productId: e.target.value })}
-                  className={`${inputCls} max-w-[170px] shrink-0`}
-                >
-                  <option value="">For which product?</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.code}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => update(i, { productId: v })}
+                  ariaLabel="For which product"
+                  placeholder="For which product?"
+                  className="w-[170px] shrink-0"
+                  options={products.map((p) => ({
+                    value: p.id,
+                    label: p.code,
+                    icon: <SkuAvatar code={p.code} size={20} imageUrl={p.imageUrl} />,
+                  }))}
+                />
               )}
               <input
                 type="number"

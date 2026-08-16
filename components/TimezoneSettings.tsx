@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Clock } from "@/components/icons";
+import { SelectMenu } from "@/components/SelectMenu";
 import { Card } from "@/components/ui";
-import { Field, SaveBar, inputCls } from "@/components/FormKit";
+import { Field, SaveBar } from "@/components/FormKit";
 import { useMoney } from "@/components/CurrencyProvider";
 import { saveTimezone } from "@/app/settings/actions";
 import type { EditorSaveRef } from "@/components/CompanyEditor";
@@ -43,7 +44,21 @@ function useZones(current: string) {
   }, [current]);
 }
 
-export function TimezoneSettings({ initialTz, lastSyncAt, saveRef }: { initialTz: string; lastSyncAt: string | null; saveRef?: EditorSaveRef }) {
+export function TimezoneSettings({
+  initialTz,
+  lastSyncAt,
+  saveRef,
+  hideSaveBar = false,
+  onDirtyState,
+}: {
+  initialTz: string;
+  lastSyncAt: string | null;
+  saveRef?: EditorSaveRef;
+  /** The onboarding wizard saves through its floating bar — hide the page-style SaveBar. */
+  hideSaveBar?: boolean;
+  /** Reports dirty state upward (null = clean) with save/discard the wizard bar can drive. */
+  onDirtyState?: (s: { save: () => Promise<string | null>; discard: () => void } | null) => void;
+}) {
   const router = useRouter();
   const { locale } = useMoney();
   const [tz, setTz] = useState(initialTz);
@@ -51,6 +66,33 @@ export function TimezoneSettings({ initialTz, lastSyncAt, saveRef }: { initialTz
   const [error, setError] = useState<string | null>(null);
   const [saving, startSave] = useTransition();
   const zones = useZones(tz);
+  const dirty = tz !== initialTz;
+
+  // Wizard-bar integration: stable wrappers read the latest tz at call time.
+  const barRef = useRef({ tz });
+  barRef.current = { tz };
+  useEffect(() => {
+    if (!onDirtyState) return;
+    onDirtyState(
+      dirty
+        ? {
+            save: async () => {
+              const r = await saveTimezone(barRef.current.tz);
+              if (!r.ok) return r.error;
+              setSaved(true);
+              router.refresh();
+              return null;
+            },
+            discard: () => {
+              setTz(initialTz);
+              setError(null);
+            },
+          }
+        : null,
+    );
+    return () => onDirtyState(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-report on dirty flips only
+  }, [dirty]);
 
   function save() {
     setError(null);
@@ -99,13 +141,15 @@ export function TimezoneSettings({ initialTz, lastSyncAt, saveRef }: { initialTz
         </div>
 
         <Field label="Your timezone" hint={`Currently ${gmtLabel(tz)}.`}>
-          <select value={tz} onChange={(e) => { setTz(e.target.value); setSaved(false); }} className={inputCls}>
-            {zones.map((z) => (
-              <option key={z.tz} value={z.tz}>
-                {z.label}
-              </option>
-            ))}
-          </select>
+          <SelectMenu
+            value={tz}
+            onChange={(v) => {
+              setTz(v);
+              setSaved(false);
+            }}
+            ariaLabel="Your timezone"
+            options={zones.map((z) => ({ value: z.tz, label: z.label }))}
+          />
         </Field>
 
         <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-line pt-4">
@@ -116,17 +160,19 @@ export function TimezoneSettings({ initialTz, lastSyncAt, saveRef }: { initialTz
         </div>
       </Card>
 
-      <SaveBar
-        dirty={tz !== initialTz}
-        pending={saving}
-        error={error}
-        saved={saved}
-        onSave={save}
-        onReset={() => {
-          setTz(initialTz);
-          setError(null);
-        }}
-      />
+      {!hideSaveBar && (
+        <SaveBar
+          dirty={dirty}
+          pending={saving}
+          error={error}
+          saved={saved}
+          onSave={save}
+          onReset={() => {
+            setTz(initialTz);
+            setError(null);
+          }}
+        />
+      )}
     </>
   );
 }

@@ -69,7 +69,7 @@ export default async function MappingPage({ searchParams }: { searchParams: Prom
 
   const pickerProducts = products.map((p) => {
     const taken = mappedExternalId(p, channel);
-    return { id: p.id, code: p.code, name: p.name, takenExternalId: taken };
+    return { id: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl, takenExternalId: taken };
   });
 
   return (

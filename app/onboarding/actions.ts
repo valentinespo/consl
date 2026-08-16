@@ -84,10 +84,8 @@ export async function advanceOnboarding(opts?: { skipChannels?: boolean }) {
     if (productCount === 0) {
       return { ok: false as const, error: "Create at least one product (SKU) before continuing." };
     }
-    const pending = await pendingListingCount();
-    if (pending > 0) {
-      return { ok: false as const, error: `${pending} listing${pending === 1 ? "" : "s"} still need${pending === 1 ? "s" : ""} a decision — map, import or ignore each one, then save.` };
-    }
+    // Unmapped listings default to ignored — leaving a row alone IS the decision, never a dead end.
+    await ignorePendingListings();
     const missingCost = await prisma.product.count({ where: { openingUnitCost: null } });
     if (missingCost > 0) {
       return { ok: false as const, error: `Enter an average cost of goods for every product (${missingCost} missing) — it prices your starting inventory.` };
@@ -126,21 +124,22 @@ async function pullChannelData(providers: string[]): Promise<string | null> {
   return problems.length > 0 ? `Couldn't pull everything (${[...new Set(problems)].join(", ")}) — you can retry from the mapping step.` : null;
 }
 
-/** Listings still waiting on a decision (not ignored, not mapped), across every connected channel. */
-async function pendingListingCount(): Promise<number> {
+/** Mark every still-undecided listing ignored (not mapped, not already ignored) — ignoring is the
+ *  default treatment, so advancing never dead-ends on unreviewed rows. */
+async function ignorePendingListings(): Promise<void> {
   const integrations = await prisma.integration.findMany({ where: { status: "connected" } });
   const channels = integrations.map((i) => PROVIDER_CHANNEL[i.provider]).filter(Boolean);
-  if (channels.length === 0) return 0;
+  if (channels.length === 0) return;
   const [listings, products] = await Promise.all([
-    prisma.channelListing.findMany({ where: { channel: { in: channels }, ignored: false }, select: { channel: true, externalId: true } }),
+    prisma.channelListing.findMany({ where: { channel: { in: channels }, ignored: false }, select: { id: true, channel: true, externalId: true } }),
     prisma.product.findMany({ select: PRODUCT_MATCH_SELECT }),
   ]);
-  let pending = 0;
+  const pendingIds: string[] = [];
   for (const ch of channels) {
     const taken = new Set(products.map((p) => mappedExternalId(p, ch)).filter(Boolean));
-    pending += listings.filter((l) => l.channel === ch && !taken.has(l.externalId)).length;
+    pendingIds.push(...listings.filter((l) => l.channel === ch && !taken.has(l.externalId)).map((l) => l.id));
   }
-  return pending;
+  if (pendingIds.length) await prisma.channelListing.updateMany({ where: { id: { in: pendingIds } }, data: { ignored: true } });
 }
 
 /**

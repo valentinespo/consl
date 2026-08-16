@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui";
+import { SelectMenu } from "@/components/SelectMenu";
 import { BrandingCard, ImageSlot, type Branding } from "@/components/BrandingCard";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
 import { AddressInput } from "@/components/AddressField";
@@ -62,7 +63,21 @@ function sample(locale: string): string {
   }
 }
 
-export function CompanyEditor({ company, isOwner, saveRef }: { company: CompanyForEdit; isOwner: boolean; saveRef?: EditorSaveRef }) {
+export function CompanyEditor({
+  company,
+  isOwner,
+  saveRef,
+  hideSaveBar = false,
+  onDirtyState,
+}: {
+  company: CompanyForEdit;
+  isOwner: boolean;
+  saveRef?: EditorSaveRef;
+  /** The onboarding wizard saves through its floating bar — hide the page-style SaveBar. */
+  hideSaveBar?: boolean;
+  /** Reports dirty state upward (null = clean) with save/discard the wizard bar can drive. */
+  onDirtyState?: (s: { save: () => Promise<string | null>; discard: () => void } | null) => void;
+}) {
   const router = useRouter();
   const [name, setName] = useState(company.name);
   const [legalName, setLegalName] = useState(company.legalName ?? "");
@@ -127,6 +142,23 @@ export function CompanyEditor({ company, isOwner, saveRef }: { company: CompanyF
     };
   });
 
+  // Wizard-bar integration: report on dirty flips; the stable wrappers read the latest closures.
+  const barRef = useRef({ save, reset });
+  barRef.current = { save, reset };
+  useEffect(() => {
+    if (!onDirtyState) return;
+    onDirtyState(
+      dirty
+        ? {
+            save: async () => ((await barRef.current.save()) ? null : "Couldn't save the company details — check the form."),
+            discard: () => barRef.current.reset(),
+          }
+        : null,
+    );
+    return () => onDirtyState(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-report on dirty flips only
+  }, [dirty]);
+
   return (
     <>
       <Card>
@@ -174,14 +206,15 @@ export function CompanyEditor({ company, isOwner, saveRef }: { company: CompanyF
             <input value={currencyCode} onChange={(e) => setCurrencyCode(e.target.value.toUpperCase())} className={inputCls} />
           </Field>
           <Field label="Number & date format" hint={`Today looks like ${sample(locale)}.`}>
-            <select value={locale} onChange={(e) => setLocale(e.target.value)} className={inputCls}>
-              {LOCALES.some((l) => l.value === locale) ? null : <option value={locale}>{locale}</option>}
-              {LOCALES.map((l) => (
-                <option key={l.value} value={l.value}>
-                  {l.label}
-                </option>
-              ))}
-            </select>
+            <SelectMenu
+              value={locale}
+              onChange={setLocale}
+              ariaLabel="Number and date format"
+              options={[
+                ...(LOCALES.some((l) => l.value === locale) ? [] : [{ value: locale, label: locale }]),
+                ...LOCALES.map((l) => ({ value: l.value, label: l.label })),
+              ]}
+            />
           </Field>
         </div>
       </div>
@@ -203,7 +236,7 @@ export function CompanyEditor({ company, isOwner, saveRef }: { company: CompanyF
       />
 
       {isOwner ? (
-        <SaveBar dirty={dirty} pending={pending} error={error} saved={saved} onSave={save} onReset={reset} />
+        !hideSaveBar && <SaveBar dirty={dirty} pending={pending} error={error} saved={saved} onSave={save} onReset={reset} />
       ) : (
         dirty && (
           <p className="mt-4 text-[12.5px] text-muted">Only an owner can change the company profile.</p>

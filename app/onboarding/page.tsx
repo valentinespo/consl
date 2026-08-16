@@ -80,10 +80,11 @@ export default async function OnboardingPage({
     const channel: ChannelKey = requested && channels.includes(requested) ? requested : channels[0];
     const listings = await prisma.channelListing.findMany({ where: { channel: { in: channels } }, orderBy: { title: "asc" } });
 
+    // Unmapped = not linked to a product (ignored or not) — matches the merged worklist.
     const pendingByChannel: Record<string, number> = {};
     for (const ch of channels) {
       const taken = new Set(products.map((p) => mappedExternalId(p, ch)).filter(Boolean));
-      pendingByChannel[ch] = listings.filter((l) => l.channel === ch && !l.ignored && !taken.has(l.externalId)).length;
+      pendingByChannel[ch] = listings.filter((l) => l.channel === ch && !taken.has(l.externalId)).length;
     }
 
     const active = listings.filter((l) => l.channel === channel);
@@ -106,7 +107,7 @@ export default async function OnboardingPage({
           suggestion: suggestions.get(l.id) ?? null,
         };
       }),
-      pickerProducts: products.map((p) => ({ id: p.id, code: p.code, name: p.name, takenExternalId: mappedExternalId(p, channel) })),
+      pickerProducts: products.map((p) => ({ id: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl, takenExternalId: mappedExternalId(p, channel) })),
       pendingByChannel,
     };
   }

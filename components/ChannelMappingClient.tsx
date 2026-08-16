@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { RefreshCw, Undo2, CameraOff, CheckCircle2 } from "@/components/icons";
 import { refreshChannelListings, applyChannelMappings, type MappingActionItem } from "@/app/catalog/actions";
 import { useCan } from "@/components/AccessProvider";
+import { SelectMenu } from "@/components/SelectMenu";
+import { SkuAvatar } from "@/components/ui";
 
 type Row = {
   id: string;
@@ -18,9 +20,9 @@ type Row = {
   suggestion: { productId: string; confidence: "exact" | "similar" } | null;
 };
 
-type PickerProduct = { id: string; code: string; name: string; takenExternalId: string | null };
+type PickerProduct = { id: string; code: string; name: string; imageUrl: string | null; takenExternalId: string | null };
 
-type Stage = { action: "map"; productId: string } | { action: "import" } | { action: "ignore" } | { action: "unmap" } | { action: "restore" } | null;
+type Stage = { action: "map"; productId: string } | { action: "import" } | { action: "ignore" } | { action: "unmap" } | null;
 
 // The app-wide pill shape — the .pill-* classes only supply the frosted colors.
 const PILL = "inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-medium";
@@ -55,13 +57,14 @@ export function ChannelMappingClient({
   const [refreshing, setRefreshing] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
-  const pendingRows = rows.filter((r) => !r.mapped && !r.ignored);
+  // One merged worklist: everything not mapped, whether it's still pending or already ignored.
+  // "Ignore" is the default treatment — leaving a row alone and ignoring it are the same thing.
+  const unmappedRows = rows.filter((r) => !r.mapped);
   const mappedRows = rows.filter((r) => r.mapped);
-  const ignoredRows = rows.filter((r) => !r.mapped && r.ignored);
 
   const [stages, setStages] = useState<Record<string, Stage>>(() => {
     const init: Record<string, Stage> = {};
-    for (const r of pendingRows) if (r.suggestion) init[r.id] = { action: "map", productId: r.suggestion.productId };
+    for (const r of unmappedRows) if (!r.ignored && r.suggestion) init[r.id] = { action: "map", productId: r.suggestion.productId };
     return init;
   });
 
@@ -69,7 +72,7 @@ export function ChannelMappingClient({
 
   const setStage = (id: string, s: Stage) => setStages((prev) => ({ ...prev, [id]: s }));
 
-  // Batch selection over the needs-review list — one bulk decision for many rows at once.
+  // Batch selection over the unmapped list — one bulk decision for many rows at once.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const toggleSelected = (id: string) =>
     setSelected((prev) => {
@@ -78,12 +81,18 @@ export function ChannelMappingClient({
       else next.add(id);
       return next;
     });
-  const allSelected = pendingRows.length > 0 && pendingRows.every((r) => selected.has(r.id));
-  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(pendingRows.map((r) => r.id)));
-  const applyBulk = (s: Stage) => {
+  const allSelected = unmappedRows.length > 0 && unmappedRows.every((r) => selected.has(r.id));
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(unmappedRows.map((r) => r.id)));
+  /** Bulk "Ignore" stages the ignore only where it changes something; already-ignored rows reset. */
+  const applyBulk = (action: "import" | "ignore") => {
     setStages((prev) => {
       const next = { ...prev };
-      for (const id of selected) next[id] = s;
+      for (const id of selected) {
+        const row = unmappedRows.find((r) => r.id === id);
+        if (!row) continue;
+        if (action === "import") next[id] = { action: "import" };
+        else next[id] = row.ignored ? null : { action: "ignore" };
+      }
       return next;
     });
     setSelected(new Set());
@@ -191,11 +200,11 @@ export function ChannelMappingClient({
         </div>
       )}
 
-      {/* Needs review */}
+      {/* Unmapped — pending and ignored merged; leaving a row on "Ignore" IS the decision. */}
       <section>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <h2 className="flex items-center gap-2.5 text-[13px] font-medium text-ink">
-            {canEdit && pendingRows.length > 0 && (
+            {canEdit && unmappedRows.length > 0 && (
               <input
                 type="checkbox"
                 checked={allSelected}
@@ -204,41 +213,36 @@ export function ChannelMappingClient({
                 className="accent-[var(--color-accent)]"
               />
             )}
-            Needs review <span className="text-ink-soft">· {pendingRows.length}</span>
+            Unmapped <span className="text-ink-soft">· {unmappedRows.length}</span>
           </h2>
           {selected.size > 0 && (
             <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
               <span className="mr-1 text-ink-soft">{selected.size} selected —</span>
               <button
-                onClick={() => applyBulk({ action: "import" })}
+                onClick={() => applyBulk("import")}
                 className="rounded-lg border border-border bg-panel px-2.5 py-1 font-medium text-ink hover:bg-panel-2"
               >
                 Import as new
               </button>
               <button
-                onClick={() => applyBulk({ action: "ignore" })}
+                onClick={() => applyBulk("ignore")}
                 className="rounded-lg border border-border bg-panel px-2.5 py-1 font-medium text-ink hover:bg-panel-2"
               >
                 Ignore
               </button>
-              <button
-                onClick={() => applyBulk(null)}
-                className="rounded-lg border border-border bg-panel px-2.5 py-1 font-medium text-ink hover:bg-panel-2"
-              >
-                Decide later
-              </button>
             </div>
           )}
         </div>
-        {pendingRows.length === 0 ? (
+        {unmappedRows.length === 0 ? (
           <div className="rounded-xl border border-border bg-panel px-4 py-6 text-center text-[13px] text-ink-soft">
-            Nothing to review — every listing is mapped or ignored.
+            Nothing here — every listing is mapped.
           </div>
         ) : (
           <div className="overflow-hidden rounded-xl border border-border bg-panel">
-            {pendingRows.map((r, i) => {
+            {unmappedRows.map((r, i) => {
               const stage = stages[r.id] ?? null;
-              const mode = stage?.action ?? "skip";
+              const mode = stage?.action ?? "ignore";
+              const canMap = freeProducts(stage?.action === "map" ? stage.productId : undefined).length > 0;
               return (
                 <div key={r.id} className={`flex flex-wrap items-center gap-3 px-4 py-3 ${i > 0 ? "border-t border-border" : ""}`}>
                   {canEdit && (
@@ -268,42 +272,41 @@ export function ChannelMappingClient({
                       )}
                     </div>
                   </div>
-                  <div className="inline-flex items-center gap-2">
-                    <select
+                  <div className="flex items-center gap-2">
+                    <SelectMenu
                       value={mode}
-                      onChange={(e) => {
-                        const v = e.target.value;
+                      disabled={!canEdit}
+                      ariaLabel={`Decision for ${r.title}`}
+                      className="w-[190px]"
+                      options={[
+                        { value: "ignore", label: "Ignore" },
+                        // Nothing to map to until at least one consl product exists and is free.
+                        ...(canMap ? [{ value: "map", label: "Map to existing" }] : []),
+                        { value: "import", label: "Import as new product" },
+                      ]}
+                      onChange={(v) => {
                         if (v === "map") {
                           const first = r.suggestion?.productId ?? freeProducts()[0]?.id;
                           setStage(r.id, first ? { action: "map", productId: first } : null);
                         } else if (v === "import") setStage(r.id, { action: "import" });
-                        else if (v === "ignore") setStage(r.id, { action: "ignore" });
-                        else setStage(r.id, null);
+                        // "Ignore": for a pending row that's a real decision to save; an already-
+                        // ignored row just returns to its resting state.
+                        else setStage(r.id, r.ignored ? null : { action: "ignore" });
                       }}
-                      className="rounded-lg border border-border bg-panel px-2 py-1.5 text-[12.5px] text-ink"
-                      disabled={!canEdit}
-                    >
-                      <option value="skip">Decide later</option>
-                      {/* Nothing to map to until at least one consl product exists and is free. */}
-                      {freeProducts(stage?.action === "map" ? stage.productId : undefined).length > 0 && (
-                        <option value="map">Map to existing</option>
-                      )}
-                      <option value="import">Import as new product</option>
-                      <option value="ignore">Ignore</option>
-                    </select>
+                    />
                     {stage?.action === "map" && (
-                      <select
+                      <SelectMenu
                         value={stage.productId}
-                        onChange={(e) => setStage(r.id, { action: "map", productId: e.target.value })}
-                        className="max-w-[220px] rounded-lg border border-border bg-panel px-2 py-1.5 text-[12.5px] text-ink"
                         disabled={!canEdit}
-                      >
-                        {freeProducts(stage.productId).map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.code} — {p.name}
-                          </option>
-                        ))}
-                      </select>
+                        ariaLabel="Product to map to"
+                        className="w-[230px]"
+                        options={freeProducts(stage.productId).map((p) => ({
+                          value: p.id,
+                          label: `${p.code} — ${p.name}`,
+                          icon: <SkuAvatar code={p.code} size={20} imageUrl={p.imageUrl} />,
+                        }))}
+                        onChange={(v) => setStage(r.id, { action: "map", productId: v })}
+                      />
                     )}
                   </div>
                 </div>
@@ -366,39 +369,6 @@ export function ChannelMappingClient({
           </div>
         )}
       </section>
-
-      {/* Ignored */}
-      {ignoredRows.length > 0 && (
-        <section>
-          <h2 className="mb-2 text-[13px] font-medium text-ink">
-            Ignored <span className="text-ink-soft">· {ignoredRows.length}</span>
-          </h2>
-          <div className="overflow-hidden rounded-xl border border-border bg-panel">
-            {ignoredRows.map((r, i) => {
-              const staged = stages[r.id]?.action === "restore";
-              return (
-                <div key={r.id} className={`flex flex-wrap items-center gap-3 px-4 py-3 ${i > 0 ? "border-t border-border" : ""}`}>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] text-ink-soft">{r.title}</div>
-                    <div className="mt-0.5 flex items-center gap-2 text-[11.5px] text-ink-soft">
-                      {r.sku && <span className={`pill-neutral ${PILL}`}>{r.sku}</span>}
-                      {staged && <span className={`pill-chart ${PILL}`}>Will restore on save</span>}
-                    </div>
-                  </div>
-                  {canEdit && (
-                    <button
-                      onClick={() => setStage(r.id, staged ? null : { action: "restore" })}
-                      className="rounded-lg border border-border bg-panel px-2.5 py-1.5 text-[12px] font-medium text-ink hover:bg-panel-2"
-                    >
-                      {staged ? "Keep ignored" : "Restore"}
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
 
       {/* Commit bar — decisions stage above, the save lives at the container's foot. The wizard
           hides it and saves through its own floating bar instead. */}
