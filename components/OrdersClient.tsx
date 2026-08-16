@@ -55,6 +55,7 @@ export function OrdersClient({
   summary,
   orders,
   connected,
+  historyImporting = false,
   filter,
   dataBounds,
 }: {
@@ -62,6 +63,8 @@ export function OrdersClient({
   orders: OrdersPage;
   /** Whether any sales channel is connected — drives the empty-state copy only. */
   connected: boolean;
+  /** The background history walk hasn't finished its verification pass yet. */
+  historyImporting?: boolean;
   filter: { channel: string; range: Range; q: string };
   dataBounds: { newest: string; oldest: string };
 }) {
@@ -136,6 +139,12 @@ export function OrdersClient({
           <Stat label="Units sold" value={summary.totalUnits.toLocaleString()} />
           <Stat label="Revenue" value={money(summary.totalRevenue)} />
         </div>
+        {historyImporting && (
+          <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />
+            Importing your order history in the background — new sales stay live while it fills.
+          </span>
+        )}
       </div>
 
       {/* Per-channel split */}

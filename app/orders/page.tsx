@@ -41,10 +41,21 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   });
   const connectedChannels = conns.map((c) => c.provider.toUpperCase());
 
-  const [summary, orders] = await Promise.all([
+  const [summary, orders, orgSettings] = await Promise.all([
     getOrdersSummary(connectedChannels, { channel: filter.channel, from: filter.from, to: filter.to }),
     getOrdersPage(page, 50, filter),
+    prisma.settings.findFirst({ select: { ordersBackfillCursor: true, ordersBackfillPass: true } }),
   ]);
+
+  // The Amazon history walk is "done" once the verification pass has also reached the ~2-year
+  // retention floor; until then the tab shows a quiet importing hint. The floor comparison keeps
+  // working as time moves: an old done-cursor only gets further below the sliding floor.
+  const floorISO = new Date(Date.now() - 700 * 86_400_000).toISOString().slice(0, 10);
+  const walkDone =
+    (orgSettings?.ordersBackfillPass ?? 0) >= 1 &&
+    !!orgSettings?.ordersBackfillCursor &&
+    orgSettings.ordersBackfillCursor <= floorISO;
+  const historyImporting = connectedChannels.includes("AMAZON") && !walkDone;
   return (
     <>
       <PageHeader title="Orders" subtitle="Every sale across your connected channels." />
@@ -52,6 +63,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         summary={summary}
         orders={orders}
         connected={conns.length > 0}
+        historyImporting={historyImporting}
         filter={{
           channel: channel ?? "",
           range: { key: rangeKey, from: b.from ?? oldest, to: b.to ?? newest },

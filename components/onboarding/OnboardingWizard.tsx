@@ -386,7 +386,7 @@ function StepChannels({
     <div className="space-y-4">
       <StepHeader
         title="Connect your sales channels"
-        body="Connect EVERY channel where you sell or hold stock — consl reads what each one is holding right now and makes that your starting inventory. A channel you skip is stock consl can't see, so your numbers would start wrong."
+        body="Connect EVERY channel where you sell or hold stock — consl reads what each one is holding right now and makes that your starting inventory. A channel you skip is stock consl can't see, so your numbers would start wrong. Connecting also starts importing your full order history in the background — up to about two years for Amazon — so keep going; it finishes on its own."
       />
       {providers.map((p) => (
         <div key={p.key} className={`${panelCls} flex flex-wrap items-center gap-4`}>
