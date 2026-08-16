@@ -102,6 +102,19 @@ export async function getFbaInventory(client: SpApiClient): Promise<FbaRow[]> {
   return out;
 }
 
+type CatalogImageGroup = { marketplaceId?: string; images?: { variant?: string; link?: string; height?: number; width?: number }[] };
+
+/** Largest MAIN-variant image from a catalog item's image groups (any variant as fallback). */
+function pickCatalogImage(client: SpApiClient, groups: CatalogImageGroup[]): string | null {
+  const group = groups.find((g) => g.marketplaceId === client.marketplaceId) ?? groups[0];
+  const imgs = group?.images ?? [];
+  const mains = imgs.filter((i) => (i.variant ?? "").toUpperCase() === "MAIN" && i.link);
+  const pool = mains.length ? mains : imgs.filter((i) => i.link);
+  if (!pool.length) return null;
+  pool.sort((a, b) => (b.height ?? 0) * (b.width ?? 0) - (a.height ?? 0) * (a.width ?? 0));
+  return pool[0].link ?? null;
+}
+
 /** The main product image URL for an ASIN, from the Catalog Items API. Null when unavailable —
  *  the catalog is optional decoration, never a hard failure. Picks the largest MAIN-variant image. */
 export async function getCatalogImage(client: SpApiClient, asin: string): Promise<string | null> {
@@ -111,15 +124,37 @@ export async function getCatalogImage(client: SpApiClient, asin: string): Promis
   const j = await r.json().catch(() => null);
   if (!j) return null;
   // images: [{ marketplaceId, images: [{ variant, link, height, width }] }]
-  const groups: { marketplaceId?: string; images?: { variant?: string; link?: string; height?: number; width?: number }[] }[] =
-    j.images ?? [];
-  const group = groups.find((g) => g.marketplaceId === client.marketplaceId) ?? groups[0];
-  const imgs = group?.images ?? [];
-  const mains = imgs.filter((i) => (i.variant ?? "").toUpperCase() === "MAIN" && i.link);
-  const pool = mains.length ? mains : imgs.filter((i) => i.link);
-  if (!pool.length) return null;
-  pool.sort((a, b) => (b.height ?? 0) * (b.width ?? 0) - (a.height ?? 0) * (a.width ?? 0));
-  return pool[0].link ?? null;
+  return pickCatalogImage(client, j.images ?? []);
+}
+
+/** Main image per ASIN in batches of 20 (the Catalog Items search cap), throttled under the
+ *  ~2 req/s limit. Decoration-only like getCatalogImage: a failed batch just yields no entries,
+ *  so callers can keep whatever image they already had. */
+export async function getCatalogImages(client: SpApiClient, asins: string[]): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>();
+  const unique = [...new Set(asins.filter(Boolean))];
+  for (let i = 0; i < unique.length; i += 20) {
+    const batch = unique.slice(i, i + 20);
+    if (i > 0) await new Promise((res) => setTimeout(res, 600));
+    try {
+      const q = new URLSearchParams({
+        identifiers: batch.join(","),
+        identifiersType: "ASIN",
+        marketplaceIds: client.marketplaceId,
+        includedData: "images",
+        pageSize: "20",
+      });
+      const r = await sp(client, `/catalog/2022-04-01/items?${q.toString()}`);
+      if (!r.ok) continue;
+      const j = await r.json().catch(() => null);
+      for (const item of j?.items ?? []) {
+        if (item?.asin) out.set(item.asin, pickCatalogImage(client, item.images ?? []));
+      }
+    } catch {
+      // Missing pictures must never fail a listings refresh.
+    }
+  }
+  return out;
 }
 
 export type AwdRow = { sku: string; onhand: number; inbound: number; reserved: number };

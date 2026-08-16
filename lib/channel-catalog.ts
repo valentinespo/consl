@@ -93,7 +93,9 @@ async function upsertListings(channel: ChannelKey, fetched: FetchedListing[]): P
     if (row) {
       await prisma.channelListing.update({
         where: { id: row.id },
-        data: { sku: f.sku, title: f.title, imageUrl: f.imageUrl, price: f.price, externalProductId: f.externalProductId, lastSeenAt: now },
+        // Images are decoration: keep the last known one when a refresh couldn't fetch any
+        // (a throttled catalog call must not blank the screen).
+        data: { sku: f.sku, title: f.title, imageUrl: f.imageUrl ?? row.imageUrl, price: f.price, externalProductId: f.externalProductId, lastSeenAt: now },
       });
     } else {
       await prisma.channelListing.create({
@@ -173,13 +175,15 @@ export async function refreshShopifyListings(): Promise<{ seen: number }> {
 export async function refreshAmazonListings(): Promise<{ seen: number }> {
   const conn = await prisma.integration.findFirst({ where: { provider: "amazon", status: "connected" } });
   if (!conn?.refreshTokenEnc) throw new Error("Amazon is not connected");
-  const { makeClient, getFbaInventory } = await import("@/lib/spapi");
+  const { makeClient, getFbaInventory, getCatalogImages } = await import("@/lib/spapi");
   const client = makeClient({
     refreshToken: decryptSecret(conn.refreshTokenEnc),
     marketplaceId: conn.marketplaceId ?? "ATVPDKIKX0DER",
     region: conn.region ?? "na",
   });
   const rows = await getFbaInventory(client);
+  // FBA inventory carries no pictures — decorate from the Catalog Items API by ASIN (batched).
+  const images = await getCatalogImages(client, rows.map((r) => r.asin ?? "").filter(Boolean));
   const fetched: FetchedListing[] = rows
     .filter((r) => r.sellerSku)
     .map((r) => ({
@@ -187,7 +191,7 @@ export async function refreshAmazonListings(): Promise<{ seen: number }> {
       externalProductId: r.asin ?? null,
       sku: r.sellerSku as string,
       title: r.name?.trim() || (r.sellerSku as string),
-      imageUrl: null,
+      imageUrl: (r.asin && images.get(r.asin)) || null,
       price: null,
     }));
   return upsertListings("AMAZON", fetched);
