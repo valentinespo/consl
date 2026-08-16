@@ -401,6 +401,10 @@ model Settings {
   // How far back Amazon orders have been backfilled ("YYYY-MM-DD"). The scheduler walks this cursor
   // backward one window per tick until it hits the report's ~2-year retention floor. Null = not started.
   ordersBackfillCursor String?
+  // 0 = first lifetime walk; when it reaches the floor, the cursor resets for ONE verification
+  // re-walk (pass 1). Upserts make the second pass free; a thin report window on the first pass
+  // gets filled by the second, so history converges without any manual re-pull.
+  ordersBackfillPass Int @default(0)
   // Forward cursor for the near-real-time Amazon Orders API poll (ISO datetime of the last
   // LastUpdatedAfter sweep). Null = start from a few hours back on first poll.
   ordersPollCursor String?

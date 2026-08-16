@@ -393,6 +393,38 @@ export async function importAmazonOrders(window: { start: Date; end: Date } | nu
     lines: [...o._skus.values()].map((a) => ({ sku: a.sku, quantity: a.qty, unitPrice: a.qty > 0 ? a.amt / a.qty : 0 })),
   }));
 
+  // ---- Thin-report guard. Amazon's quota failure mode is a DONE report with silently missing
+  // rows, which would punch invisible holes in history. Two checks, only for windows old enough
+  // that the report can't be legitimately behind (its data lags ~2 days at the source):
+  //  1. Never fewer orders than the database already holds for the window — a re-pull can only add.
+  //  2. For a demonstrably active seller (>20 orders/day in this very report), a gap of 3+
+  //     consecutive missing days inside the window means rows were dropped, not that sales paused.
+  // Throwing (instead of persisting) leaves the backfill cursor untouched, so the window simply
+  // retries on the next pass.
+  const REPORT_LAG_MS = 2 * 86_400_000;
+  if (end.getTime() < Date.now() - REPORT_LAG_MS) {
+    const existing = await prisma.salesOrder.count({
+      where: { channel: "AMAZON", orderedAt: { gte: start, lte: end } },
+    });
+    if (fetched.length < existing) {
+      throw new Error(`orders report thin: ${fetched.length} rows for a window where ${existing} orders are already known`);
+    }
+    const days = new Set(fetched.map((o) => o.orderedAt.toISOString().slice(0, 10)));
+    const windowDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000));
+    if (fetched.length / windowDays > 20 && days.size > 0) {
+      const first = [...days].sort()[0];
+      let gap = 0;
+      let maxGap = 0;
+      for (let t = new Date(`${first}T00:00:00Z`).getTime(); t <= end.getTime() - REPORT_LAG_MS; t += 86_400_000) {
+        gap = days.has(new Date(t).toISOString().slice(0, 10)) ? 0 : gap + 1;
+        maxGap = Math.max(maxGap, gap);
+      }
+      if (maxGap >= 3) {
+        throw new Error(`orders report thin: ${maxGap} consecutive empty days in an active window (${fetched.length} orders/${windowDays}d)`);
+      }
+    }
+  }
+
   return persist("AMAZON", fetched, (l) => (l.sku ? map.bySku.get(l.sku) ?? null : null));
 }
 
@@ -417,7 +449,17 @@ export async function backfillAmazonOrdersStep(): Promise<{ done: boolean; impor
   const floor = new Date(Date.now() - AMAZON_BACKFILL_FLOOR_DAYS * 86_400_000);
   // Start the cursor at "now" the first time; thereafter it's the oldest date already covered.
   const cursorEnd = s.ordersBackfillCursor ? new Date(s.ordersBackfillCursor) : new Date();
-  if (cursorEnd <= floor) return { done: true, imported: 0, cursor: s.ordersBackfillCursor ?? "" };
+  if (cursorEnd <= floor) {
+    // First walk done → run ONE verification re-walk from the top. Upserts make it free, and the
+    // thin-report guard means a window that shrank can only be a bad report, never data loss —
+    // so two clean passes prove the history complete. Pass 1 done = stay done forever.
+    if ((s.ordersBackfillPass ?? 0) === 0) {
+      await saveOrgSettings({ ordersBackfillPass: 1, ordersBackfillCursor: null });
+      console.log("[orders] backfill first pass complete — starting verification re-walk");
+      return { done: false, imported: 0, cursor: "" };
+    }
+    return { done: true, imported: 0, cursor: s.ordersBackfillCursor ?? "" };
+  }
 
   const start = new Date(Math.max(floor.getTime(), cursorEnd.getTime() - BACKFILL_WINDOW_DAYS * 86_400_000));
   const r = await importAmazonOrders({ start, end: cursorEnd });
