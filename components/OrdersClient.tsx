@@ -350,7 +350,7 @@ export function OrdersClient({
                 {orders.rows.map((o) => {
                   const st = statusPill(o);
                   return (
-                  <tr key={o.id} className={`border-b border-line last:border-0 ${o.voided || o.excluded ? "opacity-45" : ""}`}>
+                  <tr key={o.id} className={`border-b border-line last:border-0 ${o.cancelled || o.voided || o.excluded ? "opacity-45" : ""}`}>
                     <td className="whitespace-nowrap px-4 py-2.5 text-[12px] text-muted">{fmtDate(o.orderedAt)}</td>
                     <td className="px-4 py-2.5">
                       <span className="font-medium text-ink">{o.orderNumber ?? "—"}</span>
@@ -394,7 +394,7 @@ export function OrdersClient({
                       {(o.voided || o.excluded) && (
                         <HoverHint
                           title="Voided"
-                          body="Out of every total — cancelled, a freebie, a double-count exclusion, or voided by hand from the row menu."
+                          body="Out of every total — a double-count removed by an exclusion toggle, or voided by hand from the row menu."
                           className="ml-2 align-middle"
                         >
                           <span className={`${PILL} pill-neutral`}>Voided</span>

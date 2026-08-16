@@ -39,8 +39,7 @@ export async function setSourceExcluded(source: string, excluded: boolean) {
   return { ok: true as const };
 }
 
-/** Manually void/unvoid one order from the row menu. The pin survives every re-import: the
- *  importers stop applying their automatic void rules to a manually decided order. */
+/** Void/unvoid one order from the row menu — the only writer of `voided`; imports never touch it. */
 export async function setOrderVoided(id: string, voided: boolean) {
   const gate = await requirePermission("inventory", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };

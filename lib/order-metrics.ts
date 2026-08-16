@@ -66,8 +66,9 @@ export type OrderRow = {
   freeUnit: boolean;
   /** A TikTok order the buyer paid $0 for — a free sample. */
   freeSample: boolean;
-  /** Out of every total (auto rules or manual pin) — washed out with the Voided pill. */
+  /** Manually voided from the row menu — out of every total, washed out with the Voided pill. */
   voided: boolean;
+  /** Dropped by a double-count toggle (mirrored Shopify source / MCF) — same wash + Voided pill. */
   excluded: boolean;
 };
 
@@ -116,6 +117,7 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
     SELECT o.channel, COUNT(*) AS orders, SUM(o.total) AS revenue
     FROM "SalesOrder" o
     WHERE o."orgId" = ${orgId}
+      AND o.cancelled = false
       AND o.voided = false
       AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excluded}))
       AND NOT (${excludeMcf}::boolean AND o.mcf)
@@ -128,6 +130,7 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
     FROM "SalesOrder" o
     JOIN "SalesOrderLine" l ON l."orderId" = o.id
     WHERE o."orgId" = ${orgId}
+      AND o.cancelled = false
       AND o.voided = false
       AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excluded}))
       AND NOT (${excludeMcf}::boolean AND o.mcf)
@@ -165,7 +168,7 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
   // connected — before that, the MCF rows are the only trace of those sales, so dropping them
   // would just lose orders. Cancelled MCF rows are left out of the count: they were never in the
   // totals, so the number shown matches exactly what the toggle removes.
-  const mcfCount = await prisma.salesOrder.count({ where: { channel: "AMAZON", mcf: true, voided: false } });
+  const mcfCount = await prisma.salesOrder.count({ where: { channel: "AMAZON", mcf: true, cancelled: false, voided: false } });
   const mcf: McfToggle = {
     offered: mcfCount > 0 && [...connected].some((c) => c !== "AMAZON"),
     count: mcfCount,
