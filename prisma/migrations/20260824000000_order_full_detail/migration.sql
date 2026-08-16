@@ -1,0 +1,22 @@
+-- Full per-order money split + dimensions + raw source rows, for the P&L and metrics to come.
+ALTER TABLE "SalesOrder"
+  ADD COLUMN "productGross" DOUBLE PRECISION NOT NULL DEFAULT 0,
+  ADD COLUMN "discounts" DOUBLE PRECISION NOT NULL DEFAULT 0,
+  ADD COLUMN "tax" DOUBLE PRECISION NOT NULL DEFAULT 0,
+  ADD COLUMN "shipping" DOUBLE PRECISION NOT NULL DEFAULT 0,
+  ADD COLUMN "giftWrap" DOUBLE PRECISION NOT NULL DEFAULT 0,
+  ADD COLUMN "isBusinessOrder" BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN "shipServiceLevel" TEXT,
+  ADD COLUMN "shipCity" TEXT,
+  ADD COLUMN "shipState" TEXT,
+  ADD COLUMN "shipPostalCode" TEXT,
+  ADD COLUMN "shipCountry" TEXT,
+  ADD COLUMN "platformUpdatedAt" TIMESTAMP(3),
+  ADD COLUMN "sourceData" JSONB;
+
+ALTER TABLE "SalesOrderLine"
+  ADD COLUMN "gross" DOUBLE PRECISION NOT NULL DEFAULT 0,
+  ADD COLUMN "tax" DOUBLE PRECISION NOT NULL DEFAULT 0,
+  ADD COLUMN "promoDiscount" DOUBLE PRECISION NOT NULL DEFAULT 0,
+  ADD COLUMN "asin" TEXT,
+  ADD COLUMN "itemStatus" TEXT;

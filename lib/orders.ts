@@ -16,7 +16,17 @@ import { shopifyGraphQL } from "@/lib/shopify";
 
 export type OrderImportResult = { channel: string; orders: number; lines: number; error?: string };
 
-type FetchedLine = { sku: string | null; quantity: number; unitPrice: number; variantId?: string };
+type FetchedLine = {
+  sku: string | null;
+  quantity: number;
+  unitPrice: number; // NET product price per unit
+  variantId?: string;
+  gross?: number; // whole-line product charge before promos
+  tax?: number; // whole-line item tax
+  promoDiscount?: number; // whole-line item promo (positive)
+  asin?: string | null;
+  itemStatus?: string | null;
+};
 type Fetched = {
   externalId: string;
   orderNumber: string | null;
@@ -35,6 +45,21 @@ type Fetched = {
   /** Keep an existing non-zero total when this fetch carries $0 — the live Orders API hides a
    *  Pending order's total, and re-zeroing what the report already filled would flap the number. */
   preserveNonzeroTotal?: boolean;
+  // ---- Full-detail fields. All optional: an importer writes only what its source actually
+  // carries, so the quick pollers can never blank out what the report already stored.
+  productGross?: number;
+  discounts?: number;
+  tax?: number;
+  shipping?: number;
+  giftWrap?: number;
+  isBusinessOrder?: boolean;
+  shipServiceLevel?: string | null;
+  shipCity?: string | null;
+  shipState?: string | null;
+  shipPostalCode?: string | null;
+  shipCountry?: string | null;
+  platformUpdatedAt?: Date | null;
+  sourceData?: unknown;
   lines: FetchedLine[];
 };
 
@@ -87,17 +112,43 @@ async function persist(
         fulfillmentLabel: o.fulfillmentLabel,
         ...(keepTotal ? {} : { total: o.total }),
         currency: o.currency,
+        // Detail fields land only when the source carried them — undefined leaves them untouched.
+        ...(o.productGross !== undefined ? { productGross: o.productGross } : {}),
+        ...(o.discounts !== undefined ? { discounts: o.discounts } : {}),
+        ...(o.tax !== undefined ? { tax: o.tax } : {}),
+        ...(o.shipping !== undefined ? { shipping: o.shipping } : {}),
+        ...(o.giftWrap !== undefined ? { giftWrap: o.giftWrap } : {}),
+        ...(o.isBusinessOrder !== undefined ? { isBusinessOrder: o.isBusinessOrder } : {}),
+        ...(o.shipServiceLevel !== undefined ? { shipServiceLevel: o.shipServiceLevel } : {}),
+        ...(o.shipCity !== undefined ? { shipCity: o.shipCity } : {}),
+        ...(o.shipState !== undefined ? { shipState: o.shipState } : {}),
+        ...(o.shipPostalCode !== undefined ? { shipPostalCode: o.shipPostalCode } : {}),
+        ...(o.shipCountry !== undefined ? { shipCountry: o.shipCountry } : {}),
+        ...(o.platformUpdatedAt !== undefined ? { platformUpdatedAt: o.platformUpdatedAt } : {}),
+        ...(o.sourceData !== undefined ? { sourceData: o.sourceData as object } : {}),
       };
       const order = existing
         ? await prisma.salesOrder.update({ where: { id: existing.id }, data })
         : await prisma.salesOrder.create({ data: { channel, externalId: o.externalId, ...data } });
-      // Replace the order's lines wholesale. Not wrapped in a transaction: a rare failure between
-      // the two leaves the order briefly line-less and the next import repairs it — cheap insurance
-      // versus a per-order transaction across a multi-hundred-order backfill.
-      if (existing) await prisma.salesOrderLine.deleteMany({ where: { orderId: order.id } });
+      // Replace the order's lines wholesale — but only when this fetch actually carries lines: a
+      // quick poll that couldn't read items (fresh Pending) must not wipe detail already stored.
+      // Not wrapped in a transaction: a rare failure between delete and create leaves the order
+      // briefly line-less and the next import repairs it.
+      if (existing && o.lines.length) await prisma.salesOrderLine.deleteMany({ where: { orderId: order.id } });
       if (o.lines.length) {
         await prisma.salesOrderLine.createMany({
-          data: o.lines.map((l) => ({ orderId: order.id, productId: resolve(l), sku: l.sku, quantity: l.quantity, unitPrice: l.unitPrice })),
+          data: o.lines.map((l) => ({
+            orderId: order.id,
+            productId: resolve(l),
+            sku: l.sku,
+            quantity: l.quantity,
+            unitPrice: l.unitPrice,
+            gross: l.gross ?? 0,
+            tax: l.tax ?? 0,
+            promoDiscount: l.promoDiscount ?? 0,
+            asin: l.asin ?? null,
+            itemStatus: l.itemStatus ?? null,
+          })),
         });
         lines += o.lines.length;
       }
@@ -115,12 +166,18 @@ type ShopifyOrderNode = {
   id: string;
   name: string | null;
   createdAt: string;
+  updatedAt: string | null;
   sourceName: string | null;
   cancelledAt: string | null;
   displayFinancialStatus: string | null;
+  displayFulfillmentStatus: string | null;
   app: { name: string | null } | null;
   channelInformation: { channelDefinition: { channelName: string | null } | null } | null;
   currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+  totalTaxSet: { shopMoney: { amount: string } } | null;
+  totalShippingPriceSet: { shopMoney: { amount: string } } | null;
+  totalDiscountsSet: { shopMoney: { amount: string } } | null;
+  shippingAddress: { city: string | null; provinceCode: string | null; zip: string | null; countryCodeV2: string | null } | null;
   fulfillments: Array<{ location: { name: string | null } | null }>;
   lineItems: {
     nodes: Array<{
@@ -136,10 +193,14 @@ type ShopifyOrderNode = {
 // One field list shared by the paged importer and the webhook's single-order refetch, so the two
 // can never drift apart on what an order means.
 const SHOPIFY_ORDER_FIELDS = `
-  id name createdAt sourceName cancelledAt displayFinancialStatus
+  id name createdAt updatedAt sourceName cancelledAt displayFinancialStatus displayFulfillmentStatus
   app { name }
   channelInformation { channelDefinition { channelName } }
   currentTotalPriceSet { shopMoney { amount currencyCode } }
+  totalTaxSet { shopMoney { amount } }
+  totalShippingPriceSet { shopMoney { amount } }
+  totalDiscountsSet { shopMoney { amount } }
+  shippingAddress { city provinceCode zip countryCodeV2 }
   fulfillments(first: 3) { location { name } }
   lineItems(first: 100) {
     nodes { sku quantity variant { id } discountedUnitPriceSet { shopMoney { amount } } originalUnitPriceSet { shopMoney { amount } } }
@@ -159,13 +220,29 @@ function mapShopifyOrder(o: ShopifyOrderNode): Fetched {
     fulfillmentLabel: location ?? "Unfulfilled",
     total: money(o.currentTotalPriceSet?.shopMoney.amount),
     currency: o.currentTotalPriceSet?.shopMoney.currencyCode ?? "USD",
-    lines: o.lineItems.nodes.map((l) => ({
-      sku: l.sku?.trim() || null,
-      quantity: l.quantity,
-      // Prefer the discounted unit price so promo/coupon discounts are reflected in revenue.
-      unitPrice: money(l.discountedUnitPriceSet?.shopMoney.amount ?? l.originalUnitPriceSet?.shopMoney.amount),
-      variantId: l.variant?.id ?? undefined,
-    })),
+    productGross: o.lineItems.nodes.reduce((s, l) => s + l.quantity * money(l.originalUnitPriceSet?.shopMoney.amount), 0),
+    discounts: money(o.totalDiscountsSet?.shopMoney.amount),
+    tax: money(o.totalTaxSet?.shopMoney.amount),
+    shipping: money(o.totalShippingPriceSet?.shopMoney.amount),
+    shipCity: o.shippingAddress?.city ?? null,
+    shipState: o.shippingAddress?.provinceCode ?? null,
+    shipPostalCode: o.shippingAddress?.zip ?? null,
+    shipCountry: o.shippingAddress?.countryCodeV2 ?? null,
+    platformUpdatedAt: o.updatedAt ? new Date(o.updatedAt) : null,
+    sourceData: o as unknown,
+    lines: o.lineItems.nodes.map((l) => {
+      const gross = l.quantity * money(l.originalUnitPriceSet?.shopMoney.amount);
+      const net = l.quantity * money(l.discountedUnitPriceSet?.shopMoney.amount ?? l.originalUnitPriceSet?.shopMoney.amount);
+      return {
+        sku: l.sku?.trim() || null,
+        quantity: l.quantity,
+        // Prefer the discounted unit price so promo/coupon discounts are reflected in revenue.
+        unitPrice: money(l.discountedUnitPriceSet?.shopMoney.amount ?? l.originalUnitPriceSet?.shopMoney.amount),
+        variantId: l.variant?.id ?? undefined,
+        gross,
+        promoDiscount: Math.max(0, gross - net),
+      };
+    }),
   };
 }
 
@@ -232,9 +309,19 @@ type TikTokOrder = {
   status?: string | null;
   order_status?: string | null;
   create_time?: number | null;
+  update_time?: number | null;
   fulfillment_type?: string | null; // FULFILLMENT_BY_TIKTOK | FULFILLMENT_BY_SELLER
   warehouse_id?: string | null;
-  payment?: { sub_total?: string | null; total_amount?: string | null; currency?: string | null } | null;
+  payment?: {
+    sub_total?: string | null;
+    total_amount?: string | null;
+    currency?: string | null;
+    tax?: string | null;
+    shipping_fee?: string | null;
+    seller_discount?: string | null;
+    platform_discount?: string | null;
+    original_total_product_price?: string | null;
+  } | null;
   line_items?: Array<{
     seller_sku?: string | null;
     sku_id?: string | null;
@@ -310,6 +397,12 @@ function mapTikTokOrder(o: TikTokOrder, warehouseName: Map<string, string>): Fet
     // applied (a 100%-discounted sample is $0). Product-only revenue lives on the lines.
     total: money(o.payment?.total_amount ?? o.payment?.sub_total),
     currency: o.payment?.currency ?? "USD",
+    productGross: money(o.payment?.original_total_product_price ?? o.payment?.sub_total),
+    discounts: money(o.payment?.seller_discount) + money(o.payment?.platform_discount),
+    tax: money(o.payment?.tax),
+    shipping: money(o.payment?.shipping_fee),
+    platformUpdatedAt: o.update_time ? new Date(o.update_time * 1000) : null,
+    sourceData: o as unknown,
     lines: [...bySku.values()],
   };
 }
@@ -356,8 +449,11 @@ export async function importAmazonOrders(window: { start: Date; end: Date } | nu
   const rows = await getAllOrderRows(client, iso(start), iso(end));
 
   // Group item rows → orders → per-SKU lines. The order's `total` is what the buyer PAID
-  // (items + taxes + shipping, net of all promotions); the lines carry net product revenue.
-  const byOrder = new Map<string, Fetched & { _skus: Map<string, { sku: string; qty: number; amt: number }> }>();
+  // (items + taxes + shipping + gift wrap, net of all promotions); the lines carry net product
+  // revenue, and every component is kept separately for the P&L — plus the raw rows themselves.
+  type SkuAgg = { sku: string; qty: number; amt: number; gross: number; tax: number; promo: number; asin: string; itemStatus: string };
+  const byOrder = new Map<string, Fetched & { _skus: Map<string, SkuAgg>; _rows: AmazonOrderRowLike[] }>();
+  type AmazonOrderRowLike = (typeof rows)[number];
   for (const row of rows) {
     let o = byOrder.get(row.orderId);
     if (!o) {
@@ -376,21 +472,58 @@ export async function importAmazonOrders(window: { start: Date; end: Date } | nu
         fulfillmentLabel: row.fulfillment === "Amazon" ? "Amazon FBA" : "Merchant",
         total: 0,
         currency: row.currency,
+        productGross: 0,
+        discounts: 0,
+        tax: 0,
+        shipping: 0,
+        giftWrap: 0,
+        isBusinessOrder: row.isBusinessOrder,
+        shipServiceLevel: row.shipServiceLevel || null,
+        shipCity: row.shipCity || null,
+        shipState: row.shipState || null,
+        shipPostalCode: row.shipPostalCode || null,
+        shipCountry: row.shipCountry || null,
+        platformUpdatedAt: row.lastUpdatedDate ? new Date(row.lastUpdatedDate) : null,
         lines: [],
         _skus: new Map(),
+        _rows: [],
       };
       byOrder.set(row.orderId, o);
     }
     const netProduct = row.itemPrice - row.promotionDiscount;
-    o.total += netProduct + row.itemTax + row.shippingPrice + row.shippingTax - row.shipPromotionDiscount;
-    const agg = o._skus.get(row.sku) ?? { sku: row.sku, qty: 0, amt: 0 };
+    o.total += netProduct + row.itemTax + row.shippingPrice + row.shippingTax + row.giftWrapPrice + row.giftWrapTax - row.shipPromotionDiscount;
+    o.productGross! += row.itemPrice;
+    o.discounts! += row.promotionDiscount + row.shipPromotionDiscount;
+    o.tax! += row.itemTax + row.shippingTax + row.giftWrapTax;
+    o.shipping! += row.shippingPrice - row.shipPromotionDiscount;
+    o.giftWrap! += row.giftWrapPrice;
+    o.isBusinessOrder = o.isBusinessOrder || row.isBusinessOrder;
+    if (row.lastUpdatedDate) {
+      const u = new Date(row.lastUpdatedDate);
+      if (!o.platformUpdatedAt || u > o.platformUpdatedAt) o.platformUpdatedAt = u;
+    }
+    o._rows.push(row);
+    const agg = o._skus.get(row.sku) ?? { sku: row.sku, qty: 0, amt: 0, gross: 0, tax: 0, promo: 0, asin: row.asin, itemStatus: row.itemStatus };
     agg.qty += row.quantity;
     agg.amt += netProduct;
+    agg.gross += row.itemPrice;
+    agg.tax += row.itemTax;
+    agg.promo += row.promotionDiscount;
     o._skus.set(row.sku, agg);
   }
   const fetched: Fetched[] = [...byOrder.values()].map((o) => ({
     ...o,
-    lines: [...o._skus.values()].map((a) => ({ sku: a.sku, quantity: a.qty, unitPrice: a.qty > 0 ? a.amt / a.qty : 0 })),
+    sourceData: { rows: o._rows.slice(0, 50) },
+    lines: [...o._skus.values()].map((a) => ({
+      sku: a.sku,
+      quantity: a.qty,
+      unitPrice: a.qty > 0 ? a.amt / a.qty : 0,
+      gross: a.gross,
+      tax: a.tax,
+      promoDiscount: a.promo,
+      asin: a.asin || null,
+      itemStatus: a.itemStatus || null,
+    })),
   }));
 
   // ---- Thin-report guard. Amazon's quota failure mode is a DONE report with silently missing
@@ -527,6 +660,9 @@ export async function pollAmazonOrders(): Promise<OrderImportResult & { cursor?:
         sku: i.sku,
         quantity: i.quantity,
         unitPrice: i.quantity > 0 ? Math.max(0, i.itemPrice - i.promotionDiscount) / i.quantity : 0,
+        gross: i.itemPrice,
+        tax: i.itemTax,
+        promoDiscount: i.promotionDiscount,
       }));
       // getOrderItems is hard-limited to ~0.5 req/s — pace bursts so a busy sweep can't 429.
       if (changed.length > 10) await new Promise((r) => setTimeout(r, 2100));
@@ -543,6 +679,7 @@ export async function pollAmazonOrders(): Promise<OrderImportResult & { cursor?:
       cancelled: o.status === "Canceled",
       mcf: /^non.?amazon/i.test(o.salesChannel),
       replacement: o.isReplacement,
+      platformUpdatedAt: o.lastUpdateDate ? new Date(o.lastUpdateDate) : undefined,
       fulfillment: o.fulfillment === "AFN" ? "Amazon" : "Merchant",
       fulfillmentLabel: o.fulfillment === "AFN" ? "Amazon FBA" : "Merchant",
       total: o.total,

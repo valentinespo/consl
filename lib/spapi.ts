@@ -247,9 +247,10 @@ export type LiveAmazonOrder = {
   currency: string;
   salesChannel: string; // "Amazon.com" | "Non-Amazon" (an MCF order for another channel)
   isReplacement: boolean;
+  lastUpdateDate: string;
 };
 
-export type LiveAmazonOrderItem = { sku: string; quantity: number; itemPrice: number; promotionDiscount: number };
+export type LiveAmazonOrderItem = { sku: string; quantity: number; itemPrice: number; promotionDiscount: number; itemTax: number };
 
 /**
  * Orders updated since `sinceISO`, from the live Orders API — the near-real-time feed. Amazon has
@@ -276,6 +277,7 @@ export async function getOrdersUpdatedSince(client: SpApiClient, sinceISO: strin
       OrderTotal?: { Amount?: string; CurrencyCode?: string };
       SalesChannel?: string;
       IsReplacementOrder?: boolean | string;
+      LastUpdateDate?: string;
     };
     for (const o of (j.payload?.Orders ?? []) as ApiOrder[]) {
       out.push({
@@ -287,6 +289,7 @@ export async function getOrdersUpdatedSince(client: SpApiClient, sinceISO: strin
         currency: o.OrderTotal?.CurrencyCode ?? "USD",
         salesChannel: o.SalesChannel ?? "",
         isReplacement: o.IsReplacementOrder === true || o.IsReplacementOrder === "true",
+        lastUpdateDate: o.LastUpdateDate ?? "",
       });
     }
     next = j.payload?.NextToken ?? null;
@@ -305,6 +308,7 @@ export async function getOrderItems(client: SpApiClient, orderId: string): Promi
     QuantityOrdered?: number;
     ItemPrice?: { Amount?: string };
     PromotionDiscount?: { Amount?: string };
+    ItemTax?: { Amount?: string };
   };
   return ((j.payload?.OrderItems ?? []) as ApiItem[])
     .filter((i) => i.SellerSKU)
@@ -313,6 +317,7 @@ export async function getOrderItems(client: SpApiClient, orderId: string): Promi
       quantity: i.QuantityOrdered ?? 0,
       itemPrice: Number(i.ItemPrice?.Amount) || 0,
       promotionDiscount: Math.abs(Number(i.PromotionDiscount?.Amount) || 0),
+      itemTax: Number(i.ItemTax?.Amount) || 0,
     }));
 }
 
@@ -334,6 +339,19 @@ export type AmazonOrderRow = {
   // "Amazon.com" for marketplace sales; "Non-Amazon" = an MCF order Amazon ships for another channel.
   salesChannel: string;
   isReplacement: boolean; // is-replacement-order — a free re-ship of an earlier order
+  // ---- Full-detail columns, stored so the P&L can split every dollar and dimension.
+  lastUpdatedDate: string;
+  itemStatus: string;
+  asin: string;
+  giftWrapPrice: number;
+  giftWrapTax: number;
+  shipServiceLevel: string;
+  shipCity: string;
+  shipState: string;
+  shipPostalCode: string;
+  shipCountry: string;
+  promotionIds: string;
+  isBusinessOrder: boolean;
 };
 
 /** Per-order-item rows from the All Orders report — the order-level feed for the Orders tab
@@ -377,7 +395,20 @@ export async function getAllOrderRows(client: SpApiClient, startISO: string, end
     const iCur = h.indexOf("currency");
     const iSalesCh = h.indexOf("sales-channel");
     const iRepl = h.indexOf("is-replacement-order");
+    const iUpdated = h.indexOf("last-updated-date");
+    const iItemStatus = h.indexOf("item-status");
+    const iAsin = h.indexOf("asin");
+    const iGift = h.indexOf("gift-wrap-price");
+    const iGiftTax = h.indexOf("gift-wrap-tax");
+    const iSvc = h.indexOf("ship-service-level");
+    const iCity = h.indexOf("ship-city");
+    const iState = h.indexOf("ship-state");
+    const iZip = h.indexOf("ship-postal-code");
+    const iCountry = h.indexOf("ship-country");
+    const iPromoIds = h.indexOf("promotion-ids");
+    const iBiz = h.indexOf("is-business-order");
     const num = (idx: number, c: string[]) => (idx >= 0 ? Number(c[idx]) || 0 : 0);
+    const str = (idx: number, c: string[]) => (idx >= 0 ? c[idx] || "" : "");
     for (let i = 1; i < lines.length; i++) {
       const c = lines[i].split("\t");
       if (c.length <= iQty || iId < 0) continue;
@@ -401,6 +432,18 @@ export async function getAllOrderRows(client: SpApiClient, startISO: string, end
         currency: iCur >= 0 ? c[iCur] || "USD" : "USD",
         salesChannel: iSalesCh >= 0 ? c[iSalesCh] || "" : "",
         isReplacement: iRepl >= 0 && (c[iRepl] || "").trim().toLowerCase() === "true",
+        lastUpdatedDate: str(iUpdated, c),
+        itemStatus: str(iItemStatus, c),
+        asin: str(iAsin, c),
+        giftWrapPrice: num(iGift, c),
+        giftWrapTax: num(iGiftTax, c),
+        shipServiceLevel: str(iSvc, c),
+        shipCity: str(iCity, c),
+        shipState: str(iState, c),
+        shipPostalCode: str(iZip, c),
+        shipCountry: str(iCountry, c),
+        promotionIds: str(iPromoIds, c),
+        isBusinessOrder: iBiz >= 0 && (c[iBiz] || "").trim().toLowerCase() === "true",
       });
     }
   }

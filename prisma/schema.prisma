@@ -778,6 +778,25 @@ model SalesOrder {
   fulfillmentLabel String?
   total        Float           @default(0) // order revenue in `currency`, for profit later
   currency     String          @default("USD")
+  // ---- Full money split + dimensions, for the P&L and metrics to come. Stored, not shown.
+  // Order-level rollups (Amazon sums its per-line report figures; Shopify/TikTok report these
+  // directly). `total` stays what the buyer PAID = productNet + tax + shipping + giftWrap.
+  productGross Float           @default(0) // product charges before promo discounts
+  discounts    Float           @default(0) // item + shipping promo discounts (positive number)
+  tax          Float           @default(0) // item tax + shipping tax + gift-wrap tax
+  shipping     Float           @default(0) // shipping charged to the buyer, net of ship promos
+  giftWrap     Float           @default(0)
+  isBusinessOrder Boolean      @default(false) // Amazon B2B flag
+  shipServiceLevel String? // e.g. Expedited / Standard
+  shipCity     String?
+  shipState    String?
+  shipPostalCode String?
+  shipCountry  String?
+  platformUpdatedAt DateTime? // the platform's own last-updated stamp for the order
+  // The raw source rows exactly as the platform sent them (report TSV rows / API payload) — so
+  // anything not columnized above is still kept forever. Written by the report/full importers;
+  // the quick pollers leave it untouched.
+  sourceData   Json?
   lines        SalesOrderLine[]
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
@@ -799,7 +818,13 @@ model SalesOrderLine {
   productId  String?
   sku        String? // the channel's SKU as sold, kept even when unmapped
   quantity   Int        @default(0)
-  unitPrice  Float      @default(0)
+  unitPrice  Float      @default(0) // NET product price per unit (gross − promos) — velocity/profit basis
+  // ---- Per-line money split + identifiers (Amazon reports these per line; others fill what they have).
+  gross      Float      @default(0) // product charge before promos, whole line
+  tax        Float      @default(0) // item tax, whole line
+  promoDiscount Float   @default(0) // item promo discount, whole line (positive)
+  asin       String?
+  itemStatus String? // Amazon per-line status (Shipped/Unshipped…)
   createdAt  DateTime   @default(now())
 
   @@index([orgId, productId])
