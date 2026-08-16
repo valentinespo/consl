@@ -161,9 +161,24 @@ export default async function OnboardingPage({
     ? Object.fromEntries(RESOURCE_KEYS.map((r) => [r, actionsOf(r).filter((a) => access.can(r, a))]))
     : null;
 
+  // Which steps actually hold saved content — a visited-ahead step only stays lit (and clickable)
+  // on the rail when something was really saved there; untouched defaults dim like unvisited.
+  const ownFacCount = facilities.filter((f) => !f.channel).length;
+  const stepHasContent = [
+    true, // 0 — company details always exist
+    integrations.length > 0,
+    products.length > 0,
+    ownFacCount > 0 || openingMovs.some((m) => m.itemType === "FINISHED"),
+    materials.length > 0,
+    openingMovs.some((m) => m.itemType === "RAW"),
+    false, // 6 — Finish saves nothing until it runs
+  ];
+
   return (
     <OnboardingWizard
       step={org.onboardingStep}
+      maxStep={org.onboardingMaxStep}
+      stepHasContent={stepHasContent}
       company={{
         name: org.name,
         legalName: org.legalName,

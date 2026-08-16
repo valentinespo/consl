@@ -25,6 +25,7 @@ import {
   completeOnboarding,
   deleteOnboardingFacility,
   deleteOnboardingMaterial,
+  jumpToOnboardingStep,
   saveOpeningCosts,
 } from "@/app/onboarding/actions";
 import { updateProduct } from "@/app/catalog/actions";
@@ -92,6 +93,10 @@ function useDirtySection(id: string, dirty: boolean, section: DirtySection) {
  */
 export function OnboardingWizard(props: {
   step: number;
+  /** Furthest step ever reached — the rail lets the user click back and forth within it. */
+  maxStep: number;
+  /** Per step: whether anything is actually saved there (drives the rail's lit/dim state). */
+  stepHasContent: boolean[];
   company: CompanyForEdit;
   isOwner: boolean;
   caps: Record<string, string[]> | null;
@@ -227,6 +232,22 @@ export function OnboardingWizard(props: {
     router.refresh();
   }
 
+  // The rail: completed steps (before the current one) and visited-ahead steps with real saved
+  // content are clickable jumps. A visited step with nothing saved dims like an unvisited one.
+  const railLit = (i: number) => i === step || i < step || (i <= props.maxStep && props.stepHasContent[i]);
+  const railClickable = (i: number) => i !== step && i <= props.maxStep && (i < step || props.stepHasContent[i]);
+  async function jump(i: number) {
+    if (!railClickable(i) || busy) return;
+    if (dirtyCount > 0) {
+      setNudge((n) => n + 1);
+      return;
+    }
+    setError(null);
+    setWarning(null);
+    await jumpToOnboardingStep(i);
+    router.refresh();
+  }
+
   // Step 1 only promises a pull when there is genuinely something new to pull — coming back with
   // nothing changed is a plain Continue (and the server skips the work to match).
   const willPull = step === 1 && anyConnected && props.channelsPullPending;
@@ -256,10 +277,13 @@ export function OnboardingWizard(props: {
               {STEPS.map((title, i) => (
                 <div key={title} className="flex shrink-0 items-center">
                   {i > 0 && <span className="mx-1.5 h-px w-3 shrink-0 bg-border sm:mx-2 sm:w-5" />}
-                  <span
+                  <button
+                    type="button"
+                    onClick={() => jump(i)}
+                    disabled={!railClickable(i)}
                     className={`flex items-center gap-1.5 whitespace-nowrap text-[12px] font-medium ${
-                      i === step ? "text-ink" : i < step ? "text-accent" : "text-muted"
-                    }`}
+                      i === step ? "text-ink" : i < step ? "text-accent" : railLit(i) ? "text-ink" : "text-muted"
+                    } ${railClickable(i) ? "cursor-pointer hover:opacity-75" : "cursor-default"}`}
                   >
                     <span
                       className={`grid h-5 w-5 place-items-center rounded-full text-[10.5px] ${
@@ -267,13 +291,15 @@ export function OnboardingWizard(props: {
                           ? "bg-accent-soft text-accent"
                           : i === step
                             ? "bg-ink text-bg"
-                            : "border border-border text-muted"
+                            : railLit(i)
+                              ? "border border-ink/40 text-ink"
+                              : "border border-border text-muted"
                       }`}
                     >
                       {i < step ? <Check size={11} /> : i}
                     </span>
                     <span className="hidden md:inline">{title}</span>
-                  </span>
+                  </button>
                 </div>
               ))}
             </div>

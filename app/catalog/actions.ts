@@ -431,9 +431,25 @@ export async function applyChannelMappings(channel: "SHOPIFY" | "AMAZON" | "TIKT
       if (item.action === "ignore" || item.action === "restore") {
         await prisma.channelListing.update({ where: { id: listing.id }, data: { ignored: item.action === "ignore" } });
       } else if (item.action === "unmap") {
-        const products = await prisma.product.findMany({ select: PRODUCT_MATCH_SELECT });
+        const products = await prisma.product.findMany({ select: { ...PRODUCT_MATCH_SELECT, importedFromListing: true } });
         const owner = products.find((p) => mappedExternalId(p, channel) === listing.externalId);
-        if (owner) await prisma.product.update({ where: { id: owner.id }, data: unmappingData(channel) });
+        if (owner) {
+          await prisma.product.update({ where: { id: owner.id }, data: unmappingData(channel) });
+          // A product minted by "Import as new product" and unmapped again is a phantom — remove
+          // it while nothing references it yet (same guards as deleteProduct); otherwise keep it.
+          if (owner.importedFromListing) {
+            const [lotLines, purchases, poLines, transactions, movements] = await Promise.all([
+              prisma.lotLine.count({ where: { productId: owner.id } }),
+              prisma.purchase.count({ where: { productId: owner.id } }),
+              prisma.purchaseOrderLine.count({ where: { productId: owner.id } }),
+              prisma.transaction.count({ where: { skus: owner.code } }),
+              prisma.stockMovement.count({ where: { productId: owner.id } }),
+            ]);
+            if (lotLines + purchases + poLines + transactions + movements === 0) {
+              await prisma.product.delete({ where: { id: owner.id } });
+            }
+          }
+        }
       } else if (item.action === "map") {
         const products = await prisma.product.findMany({ select: PRODUCT_MATCH_SELECT });
         const target = products.find((p) => p.id === item.productId);
@@ -469,7 +485,7 @@ export async function applyChannelMappings(channel: "SHOPIFY" | "AMAZON" | "TIKT
 
         const { mappingData: md } = await import("@/lib/channel-catalog");
         await prisma.product.create({
-          data: { code, name: listing.title, imageUrl, ...md(channel, listing) },
+          data: { code, name: listing.title, imageUrl, importedFromListing: true, ...md(channel, listing) },
         });
         if (listing.ignored) await prisma.channelListing.update({ where: { id: listing.id }, data: { ignored: false } });
       }

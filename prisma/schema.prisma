@@ -46,6 +46,8 @@ model Organization {
   // the wizard finishes (existing companies were backfilled as onboarded at migration time).
   onboardedAt    DateTime?
   onboardingStep Int       @default(0) // where the wizard resumes (0–6)
+  // Furthest step ever reached — steps up to here are revisitable by clicking the progress rail.
+  onboardingMaxStep Int @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -269,6 +271,9 @@ model Product {
   // Average cost of goods entered during onboarding for this SKU's starting balance. Only ever
   // read to stamp OPENING movements (the day-zero FIFO layers) — real production never uses it.
   openingUnitCost    Float?
+  // Created by "Import as new product" on the mapping screen. Unmapping such a product while it
+  // is still unused deletes it again — no phantom SKUs left behind.
+  importedFromListing Boolean @default(false)
   // --- Per-SKU restock policy (null = use the global default) ---
   minMonths          Float? // floor: months of stock to never fall below
   leadMonths         Float? // production only: placing a run → finished units in hand

@@ -100,8 +100,25 @@ export async function advanceOnboarding(opts?: { skipChannels?: boolean }) {
   }
 
   await setStep(step + 1);
+  // The rail remembers the furthest step ever reached — those stay revisitable by click.
+  if (step + 1 > org.onboardingMaxStep) {
+    await prismaBase.organization.update({ where: { id: org.id }, data: { onboardingMaxStep: step + 1 } });
+  }
   revalidatePath("/", "layout");
   return { ok: true as const, warning };
+}
+
+/** Jump to any step already reached (the progress rail's click) — forward or backward, never
+ *  beyond the furthest point, so no step's entry work is skipped the first time through. */
+export async function jumpToOnboardingStep(target: number) {
+  const org = await getCurrentOrg();
+  if (!org || org.onboardedAt) return { ok: false as const, error: "Onboarding is already finished." };
+  if (target < 0 || target > org.onboardingMaxStep) {
+    return { ok: false as const, error: "Use Continue to reach that step first." };
+  }
+  await setStep(target);
+  revalidatePath("/", "layout");
+  return { ok: true as const };
 }
 
 /** Stock + catalog pull for freshly connected channels, so the mapping step has rows to show.

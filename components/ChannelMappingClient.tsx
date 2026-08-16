@@ -83,16 +83,12 @@ export function ChannelMappingClient({
     });
   const allSelected = unmappedRows.length > 0 && unmappedRows.every((r) => selected.has(r.id));
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(unmappedRows.map((r) => r.id)));
-  /** Bulk "Ignore" stages the ignore only where it changes something; already-ignored rows reset. */
-  const applyBulk = (action: "import" | "ignore") => {
+  /** The one bulk action: stage "Import as new product" for everything selected (Ignore is the
+   *  default state of every row, so it needs no bulk button). */
+  const applyBulk = (action: "import") => {
     setStages((prev) => {
       const next = { ...prev };
-      for (const id of selected) {
-        const row = unmappedRows.find((r) => r.id === id);
-        if (!row) continue;
-        if (action === "import") next[id] = { action: "import" };
-        else next[id] = row.ignored ? null : { action: "ignore" };
-      }
+      for (const id of selected) next[id] = { action };
       return next;
     });
     setSelected(new Set());
@@ -223,12 +219,6 @@ export function ChannelMappingClient({
                 className="rounded-lg border border-border bg-panel px-2.5 py-1 font-medium text-ink hover:bg-panel-2"
               >
                 Import as new
-              </button>
-              <button
-                onClick={() => applyBulk("ignore")}
-                className="rounded-lg border border-border bg-panel px-2.5 py-1 font-medium text-ink hover:bg-panel-2"
-              >
-                Ignore
               </button>
             </div>
           )}
