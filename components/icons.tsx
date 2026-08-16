@@ -66,6 +66,8 @@ export const OrdersFilled = regular(P.ShoppingBag);
 export const SalesProfitFilled = regular(P.ChartLineUp);
 /** P&L — the two sides of the ledger weighed against each other. */
 export const PnlFilled = regular(P.Scales);
+/** Row overflow menu — three vertical dots. */
+export const DotsVertical = regular(P.DotsThreeVertical);
 /** Integrations — two plugs meeting. */
 export const Plug = regular(P.Plugs);
 export const Download = regular(P.DownloadSimple);

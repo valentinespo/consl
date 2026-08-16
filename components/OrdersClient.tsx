@@ -1,11 +1,12 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { ChevronRight, Search } from "@/components/icons";
+import { ChevronRight, DotsVertical, Search } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
-import { setSourceExcluded, setMcfExcluded } from "@/app/orders/actions";
+import { setSourceExcluded, setMcfExcluded, setOrderVoided } from "@/app/orders/actions";
 import type { OrdersSummary, OrdersPage, OrderRow } from "@/lib/order-metrics";
 import { inputCls } from "@/components/FormKit";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
@@ -35,6 +36,83 @@ function statusPill(o: OrderRow): { label: string; cls: string } | null {
   if (s.includes("transit")) return { label: "In transit", cls: "pill-amber" };
   if (s.includes("paid")) return { label: "Paid", cls: "pill-green" };
   return { label: s.charAt(0).toUpperCase() + s.slice(1), cls: "pill-neutral" };
+}
+
+/** The row's overflow menu (⋮): void/unvoid today, more settings later. Portalled — the table's
+ *  scroll container would clip an inline popover. */
+function RowMenu({ id, voided }: { id: string; voided: boolean }) {
+  const router = useRouter();
+  const btn = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState<{ top: number; left: number } | null>(null);
+  const [pending, start] = useTransition();
+  const open = box !== null;
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      const t = e.target as Node;
+      // The menu lives in a portal, so it is NOT inside btn — exempt both, or a press on a
+      // menu item unmounts the menu on mousedown and its click never fires.
+      if (!btn.current?.contains(t) && !menu.current?.contains(t)) setBox(null);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setBox(null);
+    const follow = () => setBox(null); // scrolling under a fixed menu — just close it
+    document.addEventListener("mousedown", close);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", follow, true);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", follow, true);
+    };
+  }, [open]);
+
+  function toggle() {
+    if (open) return setBox(null);
+    const r = btn.current!.getBoundingClientRect();
+    setBox({ top: r.bottom + 4, left: Math.max(8, r.right - 160) });
+  }
+
+  return (
+    <>
+      <button
+        ref={btn}
+        onClick={toggle}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Order options"
+        className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-ink"
+      >
+        <DotsVertical size={16} />
+      </button>
+      {box &&
+        createPortal(
+          <div
+            ref={menu}
+            role="menu"
+            style={{ position: "fixed", top: box.top, left: box.left, width: 160 }}
+            className="dropdown-in z-[300] rounded-xl border border-border bg-surface p-1 shadow-xl"
+          >
+            <button
+              role="menuitem"
+              disabled={pending}
+              onClick={() =>
+                start(async () => {
+                  await setOrderVoided(id, !voided);
+                  setBox(null);
+                  router.refresh();
+                })
+              }
+              className="w-full rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink-soft hover:bg-surface-2 hover:text-ink disabled:opacity-50"
+            >
+              {pending ? "Saving…" : voided ? "Unvoid order" : "Void order"}
+            </button>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
 }
 
 function Toggle({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
@@ -265,17 +343,18 @@ export function OrdersClient({
                   <th className="px-4 py-2.5 text-left font-medium">Status</th>
                   <th className="px-4 py-2.5 text-right font-medium">Units</th>
                   <th className="px-4 py-2.5 text-right font-medium">Total</th>
+                  <th className="w-10 px-2 py-2.5" />
                 </tr>
               </thead>
               <tbody>
                 {orders.rows.map((o) => {
                   const st = statusPill(o);
                   return (
-                  <tr key={o.id} className={`border-b border-line last:border-0 ${o.excluded || o.cancelled ? "opacity-45" : ""}`}>
+                  <tr key={o.id} className={`border-b border-line last:border-0 ${o.voided || o.excluded ? "opacity-45" : ""}`}>
                     <td className="whitespace-nowrap px-4 py-2.5 text-[12px] text-muted">{fmtDate(o.orderedAt)}</td>
                     <td className="px-4 py-2.5">
                       <span className="font-medium text-ink">{o.orderNumber ?? "—"}</span>
-                      {o.excluded && <span className={`${PILL} pill-neutral ml-2`}>not counted</span>}
+
                       {o.mcf && (
                         <HoverHint
                           title="MCF order"
@@ -303,6 +382,24 @@ export function OrdersClient({
                           <span className={`${PILL} pill-neutral`}>Free unit</span>
                         </HoverHint>
                       )}
+                      {o.freeSample && (
+                        <HoverHint
+                          title="Free sample"
+                          body="A TikTok order the buyer paid $0 for — a creator or promo sample."
+                          className="ml-2 align-middle"
+                        >
+                          <span className={`${PILL} pill-neutral`}>Free sample</span>
+                        </HoverHint>
+                      )}
+                      {(o.voided || o.excluded) && (
+                        <HoverHint
+                          title="Voided"
+                          body="Out of every total — cancelled, a freebie, a double-count exclusion, or voided by hand from the row menu."
+                          className="ml-2 align-middle"
+                        >
+                          <span className={`${PILL} pill-neutral`}>Voided</span>
+                        </HoverHint>
+                      )}
                     </td>
                     <td className="px-4 py-2.5">
                       <span className="flex items-center gap-2">
@@ -315,6 +412,9 @@ export function OrdersClient({
                     <td className="px-4 py-2.5">{st ? <span className={`${PILL} ${st.cls}`}>{st.label}</span> : <span className="text-muted">—</span>}</td>
                     <td className="px-4 py-2.5 text-right tabular text-ink-soft">{o.units.toLocaleString()}</td>
                     <td className="px-4 py-2.5 text-right tabular text-ink-soft">{money(o.total)}</td>
+                    <td className="px-2 py-2.5 text-right">
+                      <RowMenu id={o.id} voided={o.voided} />
+                    </td>
                   </tr>
                   );
                 })}

@@ -64,6 +64,10 @@ export type OrderRow = {
   replacement: boolean;
   /** A shipped Amazon order that charged $0 and isn't MCF or a replacement — Vine or another freebie. */
   freeUnit: boolean;
+  /** A TikTok order the buyer paid $0 for — a free sample. */
+  freeSample: boolean;
+  /** Out of every total (auto rules or manual pin) — washed out with the Voided pill. */
+  voided: boolean;
   excluded: boolean;
 };
 
@@ -112,7 +116,7 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
     SELECT o.channel, COUNT(*) AS orders, SUM(o.total) AS revenue
     FROM "SalesOrder" o
     WHERE o."orgId" = ${orgId}
-      AND o.cancelled = false
+      AND o.voided = false
       AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excluded}))
       AND NOT (${excludeMcf}::boolean AND o.mcf)
       AND (${since}::timestamp IS NULL OR o."orderedAt" >= ${since})
@@ -124,7 +128,7 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
     FROM "SalesOrder" o
     JOIN "SalesOrderLine" l ON l."orderId" = o.id
     WHERE o."orgId" = ${orgId}
-      AND o.cancelled = false
+      AND o.voided = false
       AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excluded}))
       AND NOT (${excludeMcf}::boolean AND o.mcf)
       AND (${since}::timestamp IS NULL OR o."orderedAt" >= ${since})
@@ -161,7 +165,7 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
   // connected — before that, the MCF rows are the only trace of those sales, so dropping them
   // would just lose orders. Cancelled MCF rows are left out of the count: they were never in the
   // totals, so the number shown matches exactly what the toggle removes.
-  const mcfCount = await prisma.salesOrder.count({ where: { channel: "AMAZON", mcf: true, cancelled: false } });
+  const mcfCount = await prisma.salesOrder.count({ where: { channel: "AMAZON", mcf: true, voided: false } });
   const mcf: McfToggle = {
     offered: mcfCount > 0 && [...connected].some((c) => c !== "AMAZON"),
     count: mcfCount,
@@ -189,6 +193,9 @@ const FREE_UNIT_WHERE = {
   OR: [{ status: "Shipped" }, { status: "PartiallyShipped" }],
 };
 
+/** A TikTok order the buyer paid $0 for — a creator or promo sample. */
+const FREE_SAMPLE_WHERE = { channel: "TIKTOK", total: 0, cancelled: false };
+
 /**
  * Free-text search → a where clause. Words people would actually type match what they mean:
  * "mcf" finds MCF orders, "pending"/"shipped"/"cancelled" match status, "free"/"vine" find
@@ -203,7 +210,9 @@ function searchWhere(raw: string): Record<string, unknown> {
   if (["mcf", "multichannel", "multi-channel"].includes(s)) return { mcf: true };
   if (["replacement", "replacements"].includes(s)) return { replacement: true };
   if (["free", "free unit", "free units", "vine"].includes(s)) return FREE_UNIT_WHERE;
+  if (["sample", "samples", "free sample", "free samples"].includes(s)) return FREE_SAMPLE_WHERE;
   if (["cancelled", "canceled"].includes(s)) return { cancelled: true };
+  if (["voided", "void"].includes(s)) return { voided: true };
   if (s === "pending") return { status: contains("pending") };
   if (s === "unshipped") return { status: contains("unshipped") };
   if (["shipped", "partially shipped"].includes(s)) return { OR: [{ status: "Shipped" }, { status: "PartiallyShipped" }] };
@@ -262,6 +271,7 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
       cancelled: true,
       mcf: true,
       replacement: true,
+      voided: true,
       lines: { select: { quantity: true } },
     },
   });
@@ -288,6 +298,8 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
       !o.replacement &&
       !o.cancelled &&
       (o.status === "Shipped" || o.status === "PartiallyShipped"),
+    freeSample: o.channel === "TIKTOK" && o.total === 0 && !o.cancelled,
+    voided: o.voided,
     excluded: (o.channel === "SHOPIFY" && !!o.source && excluded.has(o.source)) || (excludeMcf && o.mcf),
   }));
 

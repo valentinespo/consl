@@ -83,6 +83,23 @@ async function productMap(channel: "SHOPIFY" | "AMAZON" | "TIKTOK") {
   return { bySku, byVariant };
 }
 
+/** The automatic void rules — orders that shouldn't count toward any total: cancellations,
+ *  Amazon free units (shipped $0, not MCF/replacement — Vine and other freebies) and TikTok free
+ *  samples ($0 paid). A manual pin from the row menu always wins over these. */
+function autoVoid(channel: string, o: Fetched, effectiveTotal: number): boolean {
+  if (o.cancelled) return true;
+  if (channel === "AMAZON") {
+    return (
+      effectiveTotal === 0 &&
+      !(o.mcf ?? false) &&
+      !(o.replacement ?? false) &&
+      (o.status === "Shipped" || o.status === "PartiallyShipped")
+    );
+  }
+  if (channel === "TIKTOK") return effectiveTotal === 0;
+  return false;
+}
+
 /** Write one channel's fetched orders, replacing each order's lines. Runs each order in its own
  *  transaction so a single malformed order can't roll back the whole batch. */
 async function persist(
@@ -96,7 +113,7 @@ async function persist(
     try {
       const existing = await prisma.salesOrder.findFirst({
         where: { channel, externalId: o.externalId },
-        select: { id: true, total: true },
+        select: { id: true, total: true, voidedManual: true },
       });
       const keepTotal = o.preserveNonzeroTotal && o.total === 0 && (existing?.total ?? 0) > 0;
       const data = {
@@ -112,6 +129,8 @@ async function persist(
         fulfillmentLabel: o.fulfillmentLabel,
         ...(keepTotal ? {} : { total: o.total }),
         currency: o.currency,
+        // Auto-void by rule — unless the operator pinned this order from the row menu.
+        ...(existing?.voidedManual ? {} : { voided: autoVoid(channel, o, keepTotal ? existing!.total : o.total) }),
         // Detail fields land only when the source carried them — undefined leaves them untouched.
         ...(o.productGross !== undefined ? { productGross: o.productGross } : {}),
         ...(o.discounts !== undefined ? { discounts: o.discounts } : {}),

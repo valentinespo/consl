@@ -39,6 +39,17 @@ export async function setSourceExcluded(source: string, excluded: boolean) {
   return { ok: true as const };
 }
 
+/** Manually void/unvoid one order from the row menu. The pin survives every re-import: the
+ *  importers stop applying their automatic void rules to a manually decided order. */
+export async function setOrderVoided(id: string, voided: boolean) {
+  const gate = await requirePermission("inventory", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  const { prisma } = await import("@/lib/prisma");
+  await prisma.salesOrder.updateMany({ where: { id }, data: { voided, voidedManual: true } });
+  revalidatePath("/orders");
+  return { ok: true as const };
+}
+
 /** Drop Amazon MCF orders from totals — the same sale already counts on its own channel. */
 export async function setMcfExcluded(excluded: boolean) {
   const gate = await requirePermission("inventory", "edit");

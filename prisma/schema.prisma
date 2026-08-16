@@ -770,6 +770,11 @@ model SalesOrder {
   // replacement is a free re-ship of an earlier order (is-replacement-order).
   mcf          Boolean         @default(false)
   replacement  Boolean         @default(false)
+  // Voided = out of every total, washed out in the list. Set automatically at import (cancelled,
+  // Amazon free units, TikTok free samples) unless `voidedManual` pins an operator's override
+  // from the row menu — imports never touch a manually pinned row.
+  voided       Boolean         @default(false)
+  voidedManual Boolean         @default(false)
   // How it was fulfilled, when the platform tells us — drives which stock pool drains later.
   // Amazon: "Amazon" (FBA) | "Merchant". TikTok: "TIKTOK" | "SELLER". Shopify: null (seller-fulfilled).
   fulfillment  String?
