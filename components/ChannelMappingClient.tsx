@@ -63,6 +63,26 @@ export function ChannelMappingClient({
 
   const setStage = (id: string, s: Stage) => setStages((prev) => ({ ...prev, [id]: s }));
 
+  // Batch selection over the needs-review list — one bulk decision for many rows at once.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const toggleSelected = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const allSelected = pendingRows.length > 0 && pendingRows.every((r) => selected.has(r.id));
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(pendingRows.map((r) => r.id)));
+  const applyBulk = (s: Stage) => {
+    setStages((prev) => {
+      const next = { ...prev };
+      for (const id of selected) next[id] = s;
+      return next;
+    });
+    setSelected(new Set());
+  };
+
   async function save() {
     const items: MappingActionItem[] = [];
     for (const [listingId, s] of Object.entries(stages)) {
@@ -131,7 +151,6 @@ export function ChannelMappingClient({
           ))}
         </div>
         <div className="inline-flex items-center gap-2">
-          {note && <span className="text-[12px] text-ink-soft">{note}</span>}
           {canEdit && (
             <button
               onClick={refresh}
@@ -140,15 +159,6 @@ export function ChannelMappingClient({
             >
               <RefreshCw size={13} className={refreshing ? "animate-spin" : undefined} />
               {refreshing ? "Refreshing…" : "Refresh listings"}
-            </button>
-          )}
-          {canEdit && (
-            <button
-              onClick={save}
-              disabled={pendingSave || stagedCount === 0}
-              className="rounded-lg bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-bg hover:opacity-90 disabled:opacity-40"
-            >
-              {pendingSave ? "Saving…" : `Save changes${stagedCount ? ` (${stagedCount})` : ""}`}
             </button>
           )}
         </div>
@@ -164,9 +174,43 @@ export function ChannelMappingClient({
 
       {/* Needs review */}
       <section>
-        <h2 className="mb-2 text-[13px] font-medium text-ink">
-          Needs review <span className="text-ink-soft">· {pendingRows.length}</span>
-        </h2>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="flex items-center gap-2.5 text-[13px] font-medium text-ink">
+            {canEdit && pendingRows.length > 0 && (
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={toggleAll}
+                aria-label="Select every listing below"
+                className="accent-[var(--color-accent)]"
+              />
+            )}
+            Needs review <span className="text-ink-soft">· {pendingRows.length}</span>
+          </h2>
+          {selected.size > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
+              <span className="mr-1 text-ink-soft">{selected.size} selected —</span>
+              <button
+                onClick={() => applyBulk({ action: "import" })}
+                className="rounded-lg border border-border bg-panel px-2.5 py-1 font-medium text-ink hover:bg-panel-2"
+              >
+                Import as new
+              </button>
+              <button
+                onClick={() => applyBulk({ action: "ignore" })}
+                className="rounded-lg border border-border bg-panel px-2.5 py-1 font-medium text-ink hover:bg-panel-2"
+              >
+                Ignore
+              </button>
+              <button
+                onClick={() => applyBulk(null)}
+                className="rounded-lg border border-border bg-panel px-2.5 py-1 font-medium text-ink hover:bg-panel-2"
+              >
+                Decide later
+              </button>
+            </div>
+          )}
+        </div>
         {pendingRows.length === 0 ? (
           <div className="rounded-xl border border-border bg-panel px-4 py-6 text-center text-[13px] text-ink-soft">
             Nothing to review — every listing is mapped or ignored.
@@ -178,6 +222,15 @@ export function ChannelMappingClient({
               const mode = stage?.action ?? "skip";
               return (
                 <div key={r.id} className={`flex flex-wrap items-center gap-3 px-4 py-3 ${i > 0 ? "border-t border-border" : ""}`}>
+                  {canEdit && (
+                    <input
+                      type="checkbox"
+                      checked={selected.has(r.id)}
+                      onChange={() => toggleSelected(r.id)}
+                      aria-label={`Select ${r.title}`}
+                      className="accent-[var(--color-accent)]"
+                    />
+                  )}
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   {r.imageUrl ? (
                     <img src={r.imageUrl} alt="" className="h-9 w-9 rounded-lg border border-border object-cover" />
@@ -212,7 +265,10 @@ export function ChannelMappingClient({
                       disabled={!canEdit}
                     >
                       <option value="skip">Decide later</option>
-                      <option value="map">Map to existing</option>
+                      {/* Nothing to map to until at least one consl product exists and is free. */}
+                      {freeProducts(stage?.action === "map" ? stage.productId : undefined).length > 0 && (
+                        <option value="map">Map to existing</option>
+                      )}
                       <option value="import">Import as new product</option>
                       <option value="ignore">Ignore</option>
                     </select>
@@ -323,6 +379,20 @@ export function ChannelMappingClient({
             })}
           </div>
         </section>
+      )}
+
+      {/* Commit bar — decisions stage above, the save lives at the container's foot. */}
+      {canEdit && (
+        <div className="flex items-center justify-end gap-3">
+          {note && <span className="text-[12px] text-ink-soft">{note}</span>}
+          <button
+            onClick={save}
+            disabled={pendingSave || stagedCount === 0}
+            className="rounded-lg bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-bg hover:opacity-90 disabled:opacity-40"
+          >
+            {pendingSave ? "Saving…" : `Save changes${stagedCount ? ` (${stagedCount})` : ""}`}
+          </button>
+        </div>
       )}
     </div>
   );

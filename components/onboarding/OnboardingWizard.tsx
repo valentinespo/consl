@@ -15,7 +15,7 @@ import { NewProductButton, NewMaterialButton } from "@/components/CreateButtons"
 import { SkuAvatar, Card } from "@/components/ui";
 import { Field, inputCls } from "@/components/FormKit";
 import { FACILITY_TYPES } from "@/lib/facility-types";
-import { Plug, Check, AlertTriangle, ChevronLeft, Plus, X, Package, Lock } from "@/components/icons";
+import { Plug, Check, AlertTriangle, ChevronLeft, Plus, X, Package, Lock, Pencil } from "@/components/icons";
 import type { MyOrg } from "@/lib/orgs";
 import { createFacility, saveFinishedOpenings, saveRawOpenings } from "@/app/facilities/actions";
 import {
@@ -26,6 +26,7 @@ import {
   deleteOnboardingMaterial,
   saveOpeningCosts,
 } from "@/app/onboarding/actions";
+import { updateProduct } from "@/app/catalog/actions";
 
 /** The mapping payload for the active channel tab — null when no channel is connected. */
 export type WizardMapping = null | {
@@ -440,6 +441,30 @@ function StepProducts({
   setCog: (id: string, v: string) => void;
 }) {
   const { money } = useMoney();
+  const router = useRouter();
+  // One row at a time flips into rename mode (abbreviation + title) via the hover pencil.
+  const [edit, setEdit] = useState<{ id: string; code: string; name: string } | null>(null);
+  const [editPending, setEditPending] = useState(false);
+  const [editErr, setEditErr] = useState<string | null>(null);
+
+  async function saveEdit() {
+    if (!edit || editPending) return;
+    setEditPending(true);
+    setEditErr(null);
+    try {
+      const r = await updateProduct({ id: edit.id, code: edit.code, name: edit.name });
+      if (!r.ok) {
+        setEditErr(r.error ?? "Couldn't save.");
+        return;
+      }
+      setEdit(null);
+      router.refresh();
+    } catch {
+      setEditErr("Couldn't reach the server — try again.");
+    } finally {
+      setEditPending(false);
+    }
+  }
   return (
     <div className="space-y-6">
       <StepHeader
@@ -493,12 +518,60 @@ function StepProducts({
         ) : (
           <div className="divide-y divide-line overflow-hidden rounded-lg border border-border">
             {products.map((p) => (
-              <div key={p.id} className="flex items-center gap-3 bg-surface px-3 py-2">
+              <div key={p.id} className="group flex items-center gap-3 bg-surface px-3 py-2">
                 <SkuAvatar code={p.code} size={30} imageUrl={p.imageUrl} />
-                <div className="min-w-0 flex-1">
-                  <span className="text-[13px] font-medium text-ink">{p.code}</span>
-                  <span className="ml-2 truncate text-[12.5px] text-muted">{p.name}</span>
-                </div>
+                {edit?.id === p.id ? (
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                    <input
+                      value={edit.code}
+                      onChange={(e) => setEdit({ ...edit, code: e.target.value.toUpperCase() })}
+                      onKeyDown={(e) => (e.key === "Enter" ? saveEdit() : e.key === "Escape" ? setEdit(null) : undefined)}
+                      aria-label="Abbreviation"
+                      className={`${inputCls} max-w-24`}
+                      autoFocus
+                    />
+                    <input
+                      value={edit.name}
+                      onChange={(e) => setEdit({ ...edit, name: e.target.value })}
+                      onKeyDown={(e) => (e.key === "Enter" ? saveEdit() : e.key === "Escape" ? setEdit(null) : undefined)}
+                      aria-label="Product title"
+                      className={`${inputCls} min-w-0 flex-1`}
+                    />
+                    <button
+                      onClick={saveEdit}
+                      disabled={editPending}
+                      className="rounded-lg bg-ink px-2.5 py-1.5 text-[12px] font-medium text-bg hover:opacity-90 disabled:opacity-50"
+                    >
+                      {editPending ? "Saving…" : "Save"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEdit(null);
+                        setEditErr(null);
+                      }}
+                      className="rounded-lg border border-border px-2.5 py-1.5 text-[12px] font-medium text-ink-soft hover:text-ink"
+                    >
+                      Cancel
+                    </button>
+                    {editErr && <span className="w-full text-[11.5px] text-negative">{editErr}</span>}
+                  </div>
+                ) : (
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                    <span className="shrink-0 text-[13px] font-medium text-ink">{p.code}</span>
+                    <span className="min-w-0 truncate text-[12.5px] text-muted">{p.name}</span>
+                    <button
+                      onClick={() => {
+                        setEdit({ id: p.id, code: p.code, name: p.name });
+                        setEditErr(null);
+                      }}
+                      title="Rename — abbreviation or title"
+                      aria-label={`Rename ${p.code}`}
+                      className="shrink-0 rounded p-1 text-muted opacity-0 transition-opacity hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                  </div>
+                )}
                 <div className="flex shrink-0 items-center gap-1.5">
                   {/* inputCls carries w-full — cap with max-w or the field swallows the row */}
                   <input
