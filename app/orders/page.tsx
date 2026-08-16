@@ -62,7 +62,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
       <OrdersClient
         summary={summary}
         orders={orders}
-        connected={conns.length > 0}
+        connectedChannels={connectedChannels}
         historyImporting={historyImporting}
         filter={{
           channel: channel ?? "",

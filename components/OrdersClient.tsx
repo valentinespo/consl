@@ -4,13 +4,14 @@ import Image from "next/image";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { ChevronRight, DotsVertical, Search } from "@/components/icons";
+import { ChevronDown, ChevronRight, DotsVertical, Layers, Search } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { setSourceExcluded, setMcfExcluded, setOrderVoided } from "@/app/orders/actions";
 import type { OrdersSummary, OrdersPage, OrderRow } from "@/lib/order-metrics";
 import { inputCls } from "@/components/FormKit";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
 import { HoverHint } from "@/components/HoverHint";
+import { useExitAnimation } from "@/components/animate";
 
 const CHANNEL_LOGO: Record<string, string> = {
   AMAZON: "/integrations/amazon-fba.png",
@@ -129,23 +130,134 @@ function Toggle({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean
   );
 }
 
+const CHANNEL_ORDER = ["AMAZON", "SHOPIFY", "TIKTOK"];
+const CHANNEL_NAME: Record<string, string> = { AMAZON: "Amazon", SHOPIFY: "Shopify", TIKTOK: "TikTok" };
+
+/** The channel filter as a custom dropdown — each connected channel with its logo, "All channels"
+ *  on top. Portalled and exit-animated like the app's other popovers; only channels actually
+ *  connected are offered. */
+function ChannelSelect({ value, channels, onChange }: { value: string; channels: string[]; onChange: (v: string) => void }) {
+  const btn = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState<{ top: number; left: number } | null>(null);
+  const lastBox = useRef(box);
+  if (box) lastBox.current = box;
+  const open = box !== null;
+  const exit = useExitAnimation(open);
+
+  const options = CHANNEL_ORDER.filter((c) => channels.includes(c));
+
+  useEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const r = btn.current?.getBoundingClientRect();
+      if (r) setBox({ top: r.bottom + 6, left: r.left });
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setBox(null);
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      // The list is portalled — exempt it AND the trigger, or an item press unmounts the list
+      // on mousedown and its click never fires.
+      if (!btn.current?.contains(t) && !panel.current?.contains(t)) setBox(null);
+    };
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    window.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDown);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDown);
+    };
+  }, [open]);
+
+  function toggle() {
+    if (open) return setBox(null);
+    const r = btn.current!.getBoundingClientRect();
+    setBox({ top: r.bottom + 6, left: r.left });
+  }
+
+  function choose(v: string) {
+    setBox(null);
+    if (v !== value) onChange(v);
+  }
+
+  return (
+    <>
+      <button
+        ref={btn}
+        type="button"
+        onClick={toggle}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="inline-flex h-9 items-center gap-2 rounded-[10px] border border-border bg-surface px-3 text-[12.5px] font-medium text-ink outline-none transition-colors hover:border-ink/25 focus-visible:border-ink/40"
+      >
+        {value && CHANNEL_LOGO[value] ? (
+          <Image src={CHANNEL_LOGO[value]} alt="" width={16} height={16} className="rounded-[3px]" />
+        ) : (
+          <Layers size={15} className="text-ink-soft" />
+        )}
+        {value ? (CHANNEL_NAME[value] ?? value) : "All channels"}
+        <ChevronDown size={13} className="text-muted" />
+      </button>
+      {exit.mounted &&
+        lastBox.current &&
+        createPortal(
+          <div
+            ref={panel}
+            role="listbox"
+            aria-label="Sales channel"
+            style={{ position: "fixed", top: lastBox.current.top, left: lastBox.current.left, width: 190 }}
+            className={`${exit.closing ? "dropdown-out" : "dropdown-in"} z-[300] rounded-xl border border-border bg-surface p-1 shadow-xl`}
+          >
+            {[{ v: "", label: "All channels" }, ...options.map((c) => ({ v: c, label: CHANNEL_NAME[c] ?? c }))].map((o) => {
+              const active = value === o.v;
+              return (
+                <button
+                  key={o.v || "all"}
+                  type="button"
+                  role="option"
+                  aria-selected={active}
+                  onClick={() => choose(o.v)}
+                  className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] transition-colors ${
+                    active ? "bg-chart-soft font-medium text-chart" : "text-ink-soft hover:bg-surface-2 hover:text-ink"
+                  }`}
+                >
+                  {o.v && CHANNEL_LOGO[o.v] ? (
+                    <Image src={CHANNEL_LOGO[o.v]} alt="" width={16} height={16} className="rounded-[3px]" />
+                  ) : (
+                    <Layers size={15} className={active ? undefined : "text-muted"} />
+                  )}
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
 export function OrdersClient({
   summary,
   orders,
-  connected,
+  connectedChannels,
   historyImporting = false,
   filter,
   dataBounds,
 }: {
   summary: OrdersSummary;
   orders: OrdersPage;
-  /** Whether any sales channel is connected — drives the empty-state copy only. */
-  connected: boolean;
+  /** Connected channels (AMAZON/SHOPIFY/TIKTOK) — the filter offers exactly these; empty = none. */
+  connectedChannels: string[];
   /** The background history walk hasn't finished its verification pass yet. */
   historyImporting?: boolean;
   filter: { channel: string; range: Range; q: string };
   dataBounds: { newest: string; oldest: string };
 }) {
+  const connected = connectedChannels.length > 0;
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -204,8 +316,6 @@ export function OrdersClient({
   const { page, pageCount, total, pageSize } = orders;
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const to = Math.min(page * pageSize, total);
-  // inputCls carries w-full for form layouts; cap these so the filter bar reads as one row.
-  const selectCls = `${inputCls} sm:max-w-[170px]`;
 
   return (
     <div className="flex flex-col gap-5">
@@ -285,12 +395,7 @@ export function OrdersClient({
           oldest={dataBounds.oldest}
           locale={locale}
         />
-        <select value={filter.channel} onChange={(e) => setParam("channel", e.target.value)} className={selectCls} aria-label="Sales channel">
-          <option value="">All channels</option>
-          <option value="AMAZON">Amazon</option>
-          <option value="SHOPIFY">Shopify</option>
-          <option value="TIKTOK">TikTok</option>
-        </select>
+        <ChannelSelect value={filter.channel} channels={connectedChannels} onChange={(v) => setParam("channel", v)} />
         <form
           className="relative min-w-[220px] flex-1 sm:max-w-[280px]"
           onSubmit={(e) => {
