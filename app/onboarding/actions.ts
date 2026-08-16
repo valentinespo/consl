@@ -64,7 +64,19 @@ export async function advanceOnboarding(opts?: { skipChannels?: boolean }) {
     if (integrations.length === 0 && !opts?.skipChannels) {
       return { ok: false as const, error: "Connect at least one sales channel, or tick “I don't sell on any of these platforms” to continue." };
     }
-    if (integrations.length > 0) warning = await pullChannelData(integrations.map((i) => i.provider));
+    // Pull only when something connected since the last pull — coming back through step 1 with
+    // nothing new is a plain Continue, never a re-run of work already done.
+    const settings = await prisma.settings.findFirst({ select: { id: true, onboardingPulledAt: true } });
+    const pulledAt = settings?.onboardingPulledAt ?? null;
+    const needsPull = integrations.some((i) => !pulledAt || !i.connectedAt || i.connectedAt > pulledAt);
+    if (integrations.length > 0 && needsPull) {
+      warning = await pullChannelData(integrations.map((i) => i.provider));
+      // A clean pull is stamped; a partial failure leaves the stamp alone so returning offers the
+      // pull again instead of silently continuing on half-fetched data.
+      if (!warning && settings) {
+        await prisma.settings.update({ where: { id: settings.id }, data: { onboardingPulledAt: new Date() } });
+      }
+    }
   }
 
   if (step === 2) {

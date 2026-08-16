@@ -408,6 +408,9 @@ model Settings {
   // Forward cursor for the near-real-time Amazon Orders API poll (ISO datetime of the last
   // LastUpdatedAfter sweep). Null = start from a few hours back on first poll.
   ordersPollCursor String?
+  // When the onboarding wizard last pulled channel data (stock + catalogs). A connection newer
+  // than this makes step 1's button "Pull my data & continue" again; otherwise it's just Continue.
+  onboardingPulledAt DateTime?
   // Editable dashboard: [{ id, x, y, w, h }] of placed widgets (12-col grid). null = default layout.
   dashboardLayout   Json?
 

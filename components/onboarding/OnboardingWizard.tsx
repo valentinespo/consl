@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SignOutButton } from "@clerk/nextjs";
 import { AppLogo } from "@/components/AppLogo";
@@ -64,6 +64,26 @@ const STEPS = [
 
 const panelCls = "rounded-[var(--radius-card)] border border-border bg-surface p-5";
 
+/* ------------------------- Unsaved-changes bar (one per wizard) -------------------------
+ * Every section with local edits registers itself here while dirty: a label for the bar's text
+ * plus save/discard closures. The wizard renders ONE floating frosted bar for all of them, and
+ * Continue refuses to move while anything is registered (the bar shakes instead). */
+type DirtySection = { label: string; save: () => Promise<string | null>; discard: () => void };
+type RegisterDirty = (id: string, s: DirtySection | null) => void;
+const DirtyContext = createContext<RegisterDirty | null>(null);
+
+/** Register this section on the wizard's unsaved bar whenever `dirty` is true. */
+function useDirtySection(id: string, dirty: boolean, section: DirtySection) {
+  const register = useContext(DirtyContext);
+  const ref = useRef(section);
+  ref.current = section;
+  useEffect(() => {
+    if (!register) return;
+    register(id, dirty ? { label: ref.current.label, save: () => ref.current.save(), discard: () => ref.current.discard() } : null);
+    return () => register(id, null);
+  }, [register, id, dirty]);
+}
+
 /**
  * The onboarding wizard — a full-screen, locked setup flow. The current step lives on the
  * Organization row (the server validates every forward move), so closing the tab and coming back
@@ -78,6 +98,8 @@ export function OnboardingWizard(props: {
   currency: { symbol: string; locale: string; code: string };
   syncTz: string;
   providers: Array<{ key: string; label: string; blurb: string; connected: boolean; canConnect: boolean }>;
+  /** A channel connected since the wizard's last data pull — step 1 offers the pull again. */
+  channelsPullPending: boolean;
   mapping: WizardMapping;
   products: WizardProduct[];
   facilities: WizardFacility[];
@@ -103,7 +125,76 @@ export function OnboardingWizard(props: {
   const companySaveRef: EditorSaveRef = useRef(null);
   const tzSaveRef: EditorSaveRef = useRef(null);
 
+  // ---- The one floating unsaved-changes bar. Sections register while dirty; Continue is gated. ----
+  const [dirtySections, setDirtySections] = useState<Record<string, DirtySection>>({});
+  const registerDirty: RegisterDirty = useCallback((id, s) => {
+    setDirtySections((prev) => {
+      if (!s) {
+        if (!(id in prev)) return prev;
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      }
+      return { ...prev, [id]: s };
+    });
+  }, []);
+
+  async function saveCosts(): Promise<string | null> {
+    const entries = props.products.map((p) => {
+      const v = cogValue(p).trim();
+      return { productId: p.id, cost: v === "" ? null : Number(v) };
+    });
+    try {
+      const rs = await saveOpeningCosts(entries);
+      if (!rs.ok) return rs.error;
+      setCogDraft({});
+      return null;
+    } catch {
+      return "Couldn't reach the server — try again.";
+    }
+  }
+  const cogDirty = props.products.some(
+    (p) => cogDraft[p.id] !== undefined && cogDraft[p.id] !== (p.openingUnitCost != null ? String(p.openingUnitCost) : ""),
+  );
+  const allDirty: Record<string, DirtySection> = {
+    ...(cogDirty ? { costs: { label: "starting costs", save: saveCosts, discard: () => setCogDraft({}) } } : {}),
+    ...dirtySections,
+  };
+  const dirtyCount = Object.keys(allDirty).length;
+
+  const [barPending, setBarPending] = useState(false);
+  const [barError, setBarError] = useState<string | null>(null);
+  const [nudge, setNudge] = useState(0); // bump = replay the shake/attention animation
+
+  async function saveAll() {
+    setBarPending(true);
+    setBarError(null);
+    try {
+      for (const s of Object.values(allDirty)) {
+        const err = await s.save();
+        if (err) {
+          setBarError(err);
+          return;
+        }
+      }
+      router.refresh();
+    } catch {
+      setBarError("Couldn't reach the server — try again.");
+    } finally {
+      setBarPending(false);
+    }
+  }
+  function discardAll() {
+    for (const s of Object.values(allDirty)) s.discard();
+    setBarError(null);
+  }
+
   async function next() {
+    // Unsaved edits ride the bar, not the Continue button — shake it instead of moving on.
+    if (dirtyCount > 0) {
+      setNudge((n) => n + 1);
+      return;
+    }
     setError(null);
     setWarning(null);
     setBusy(true);
@@ -117,17 +208,6 @@ export function OnboardingWizard(props: {
         const savedTz = tzSaveRef.current ? await tzSaveRef.current() : true;
         if (!savedTz) {
           setError("Couldn't save your time zone — check the form above.");
-          return;
-        }
-      }
-      if (step === 2 && props.products.length > 0) {
-        const entries = props.products.map((p) => {
-          const v = cogValue(p).trim();
-          return { productId: p.id, cost: v === "" ? null : Number(v) };
-        });
-        const rs = await saveOpeningCosts(entries);
-        if (!rs.ok) {
-          setError(rs.error);
           return;
         }
       }
@@ -162,8 +242,10 @@ export function OnboardingWizard(props: {
     router.refresh();
   }
 
-  const continueLabel =
-    step === 1 && anyConnected ? "Pull my data & continue" : step === 2 ? "Save costs & continue" : step === 6 ? "Finish setup — open consl" : "Continue";
+  // Step 1 only promises a pull when there is genuinely something new to pull — coming back with
+  // nothing changed is a plain Continue (and the server skips the work to match).
+  const willPull = step === 1 && anyConnected && props.channelsPullPending;
+  const continueLabel = willPull ? "Pull my data & continue" : step === 6 ? "Finish setup — open consl" : "Continue";
 
   return (
     <CurrencyProvider symbol={props.currency.symbol} locale={props.currency.locale} code={props.currency.code}>
@@ -214,39 +296,71 @@ export function OnboardingWizard(props: {
 
           {/* Step body */}
           <main className="mx-auto max-w-[1040px] px-4 pb-28 pt-6 sm:px-6">
-            {step === 0 && (
-              <StepCompany company={props.company} isOwner={props.isOwner} syncTz={props.syncTz} companySaveRef={companySaveRef} tzSaveRef={tzSaveRef} />
-            )}
-            {step === 1 && (
-              <StepChannels
-                providers={props.providers}
-                anyConnected={anyConnected}
-                skipChannels={skipChannels}
-                setSkipChannels={setSkipChannels}
-              />
-            )}
-            {step === 2 && (
-              <StepProducts
-                mapping={props.mapping}
-                products={props.products}
-                cogValue={cogValue}
-                setCog={(id, v) => setCogDraft((d) => ({ ...d, [id]: v }))}
-              />
-            )}
-            {step === 3 && (
-              <StepFacilities
-                ownFacilities={ownFacilities}
-                channelCounts={props.channelCounts}
-                products={props.products}
-                finishedOpenings={props.finishedOpenings}
-              />
-            )}
-            {step === 4 && <StepMaterials materials={props.materials} />}
-            {step === 5 && (
-              <StepRawStock ownFacilities={ownFacilities} materials={props.materials} products={props.products} rawOpenings={props.rawOpenings} />
-            )}
-            {step === 6 && <StepFinish anyConnected={anyConnected} channelCounts={props.channelCounts} />}
+            <DirtyContext.Provider value={registerDirty}>
+              {step === 0 && (
+                <StepCompany company={props.company} isOwner={props.isOwner} syncTz={props.syncTz} companySaveRef={companySaveRef} tzSaveRef={tzSaveRef} />
+              )}
+              {step === 1 && (
+                <StepChannels
+                  providers={props.providers}
+                  anyConnected={anyConnected}
+                  skipChannels={skipChannels}
+                  setSkipChannels={setSkipChannels}
+                />
+              )}
+              {step === 2 && (
+                <StepProducts
+                  mapping={props.mapping}
+                  products={props.products}
+                  cogValue={cogValue}
+                  setCog={(id, v) => setCogDraft((d) => ({ ...d, [id]: v }))}
+                />
+              )}
+              {step === 3 && (
+                <StepFacilities
+                  ownFacilities={ownFacilities}
+                  channelCounts={props.channelCounts}
+                  products={props.products}
+                  finishedOpenings={props.finishedOpenings}
+                />
+              )}
+              {step === 4 && <StepMaterials materials={props.materials} />}
+              {step === 5 && (
+                <StepRawStock ownFacilities={ownFacilities} materials={props.materials} products={props.products} rawOpenings={props.rawOpenings} />
+              )}
+              {step === 6 && <StepFinish anyConnected={anyConnected} channelCounts={props.channelCounts} />}
+            </DirtyContext.Provider>
           </main>
+
+          {/* The one unsaved-changes bar — frosted like the app header, floating over the top.
+              Continue shakes it (nudge) instead of moving while anything is registered. */}
+          {dirtyCount > 0 && (
+            <div className="fixed inset-x-0 top-4 z-50 flex justify-center px-4">
+              <div
+                key={nudge}
+                className={`chrome-blur flex flex-wrap items-center gap-3 rounded-full border border-border px-4 py-2 shadow-lg ${nudge > 0 ? "bar-nudge" : ""}`}
+              >
+                <span className="text-[12.5px] font-medium text-ink-soft">
+                  Unsaved changes · {Object.values(allDirty).map((s) => s.label).join(", ")}
+                </span>
+                {barError && <span className="max-w-[300px] truncate text-[12px] text-negative">{barError}</span>}
+                <button
+                  onClick={discardAll}
+                  disabled={barPending}
+                  className="rounded-full border border-[#e7cfc8] px-3.5 py-1.5 text-[12.5px] font-medium text-negative hover:bg-[#fbf1ee] disabled:opacity-50"
+                >
+                  Discard
+                </button>
+                <button
+                  onClick={saveAll}
+                  disabled={barPending}
+                  className="rounded-full bg-ink px-4 py-1.5 text-[12.5px] font-medium text-bg hover:opacity-90 disabled:opacity-50"
+                >
+                  {barPending ? "Saving…" : "Save changes"}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Footer nav — sticky so Continue is always in reach on long steps. */}
           <div className="fixed inset-x-0 bottom-0 border-t border-border bg-surface/95 backdrop-blur">
@@ -273,7 +387,7 @@ export function OnboardingWizard(props: {
                 disabled={busy}
                 className="rounded-lg bg-ink px-4 py-2 text-[13px] font-medium text-bg hover:opacity-90 disabled:opacity-40"
               >
-                {busy ? (step === 1 && anyConnected ? "Pulling your data…" : "Working…") : continueLabel}
+                {busy ? (willPull ? "Pulling your data…" : "Working…") : continueLabel}
               </button>
             </div>
           </div>
@@ -442,6 +556,7 @@ function StepProducts({
 }) {
   const { money } = useMoney();
   const router = useRouter();
+  const registerDirty = useContext(DirtyContext);
   // One row at a time flips into rename mode (abbreviation + title) via the hover pencil.
   const [edit, setEdit] = useState<{ id: string; code: string; name: string } | null>(null);
   const [editPending, setEditPending] = useState(false);
@@ -498,6 +613,8 @@ function StepProducts({
             products={mapping.pickerProducts}
             justConnected={false}
             hrefBase="/onboarding"
+            hideSave
+            onStagesChange={(s) => registerDirty?.("mapping", s ? { label: "channel mapping", ...s } : null)}
           />
         </section>
       )}
@@ -754,24 +871,25 @@ function FinishedBalanceCard({
 }) {
   const { money } = useMoney();
   const [draft, setDraft] = useState<Record<string, string>>({});
-  const [pending, setPending] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
   const value = (p: WizardProduct) => draft[p.id] ?? (initial[p.id] != null ? String(initial[p.id]) : "");
   const dirty = products.some((p) => value(p) !== (initial[p.id] != null ? String(initial[p.id]) : ""));
 
-  async function save() {
-    setPending(true);
-    setNote(null);
-    try {
-      const rows = products.map((p) => ({ productId: p.id, units: Number(value(p)) || 0 }));
-      const r = await saveFinishedOpenings(facility.id, rows);
-      setNote(r.ok ? "Saved." : r.error);
-    } catch {
-      setNote("Couldn't reach the server — try again.");
-    } finally {
-      setPending(false);
-    }
-  }
+  // Saves ride the wizard's floating bar — this card only reports its dirty state.
+  useDirtySection(`fin-${facility.id}`, dirty, {
+    label: facility.code,
+    save: async () => {
+      try {
+        const rows = products.map((p) => ({ productId: p.id, units: Number(value(p)) || 0 }));
+        const r = await saveFinishedOpenings(facility.id, rows);
+        if (!r.ok) return r.error;
+        setDraft({});
+        return null;
+      } catch {
+        return "Couldn't reach the server — try again.";
+      }
+    },
+    discard: () => setDraft({}),
+  });
 
   return (
     <div className={panelCls}>
@@ -808,16 +926,6 @@ function FinishedBalanceCard({
           ))}
         </div>
       )}
-      <div className="mt-3 flex items-center gap-2">
-        <button
-          onClick={save}
-          disabled={pending || !dirty}
-          className="rounded-lg bg-ink px-3.5 py-2 text-[12.5px] font-medium text-bg hover:opacity-90 disabled:opacity-40"
-        >
-          {pending ? "Saving…" : "Save starting balance"}
-        </button>
-        {note && <span className={`text-[12px] ${note === "Saved." ? "text-positive" : "text-negative"}`}>{note}</span>}
-      </div>
     </div>
   );
 }
@@ -910,16 +1018,14 @@ function RawBalanceCard({
   initial: RawLine[];
 }) {
   type Line = { materialTypeId: string; productId: string; quantity: string; unitCost: string };
-  const [lines, setLines] = useState<Line[]>(() =>
+  const fromInitial = () =>
     initial.map((l) => ({
       materialTypeId: l.materialTypeId,
       productId: l.productId ?? "",
       quantity: String(l.quantity),
       unitCost: String(l.unitCost),
-    })),
-  );
-  const [pending, setPending] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
+    }));
+  const [lines, setLines] = useState<Line[]>(fromInitial);
   const matById = useMemo(() => new Map(materials.map((m) => [m.id, m])), [materials]);
 
   function addLine() {
@@ -932,24 +1038,35 @@ function RawBalanceCard({
     setLines((ls) => ls.filter((_, j) => j !== i));
   }
 
-  async function save() {
-    setPending(true);
-    setNote(null);
-    try {
-      const rows = lines.map((l) => ({
-        materialTypeId: l.materialTypeId,
-        productId: l.productId || null,
-        quantity: Number(l.quantity) || 0,
-        unitCost: Number(l.unitCost) || 0,
-      }));
-      const r = await saveRawOpenings(facility.id, rows);
-      setNote(r.ok ? "Saved." : r.error);
-    } catch {
-      setNote("Couldn't reach the server — try again.");
-    } finally {
-      setPending(false);
-    }
-  }
+  // Dirty compares what would actually be SAVED — empty/zero lines don't count, so an untouched
+  // blank line never blocks Continue.
+  const normalize = (rows: { materialTypeId: string; productId: string | null; quantity: number | string; unitCost: number | string }[]) =>
+    JSON.stringify(
+      rows
+        .map((r) => ({ m: r.materialTypeId, p: r.productId || "", q: Number(r.quantity) || 0, c: Number(r.unitCost) || 0 }))
+        .filter((r) => r.q > 0)
+        .sort((a, b) => `${a.m}|${a.p}`.localeCompare(`${b.m}|${b.p}`)),
+    );
+  const dirty = normalize(lines) !== normalize(initial);
+
+  useDirtySection(`raw-${facility.id}`, dirty, {
+    label: facility.code,
+    save: async () => {
+      try {
+        const rows = lines.map((l) => ({
+          materialTypeId: l.materialTypeId,
+          productId: l.productId || null,
+          quantity: Number(l.quantity) || 0,
+          unitCost: Number(l.unitCost) || 0,
+        }));
+        const r = await saveRawOpenings(facility.id, rows);
+        return r.ok ? null : r.error;
+      } catch {
+        return "Couldn't reach the server — try again.";
+      }
+    },
+    discard: () => setLines(fromInitial()),
+  });
 
   return (
     <div className={panelCls}>
@@ -1015,14 +1132,6 @@ function RawBalanceCard({
         <button onClick={addLine} className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-[12.5px] text-ink-soft hover:bg-surface-2">
           <Plus size={13} /> Add material
         </button>
-        <button
-          onClick={save}
-          disabled={pending}
-          className="rounded-lg bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-bg hover:opacity-90 disabled:opacity-40"
-        >
-          {pending ? "Saving…" : "Save starting balance"}
-        </button>
-        {note && <span className={`text-[12px] ${note === "Saved." ? "text-positive" : "text-negative"}`}>{note}</span>}
       </div>
     </div>
   );

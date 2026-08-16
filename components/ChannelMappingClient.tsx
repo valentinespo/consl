@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { RefreshCw, Undo2, CameraOff, CheckCircle2 } from "@/components/icons";
@@ -34,6 +34,8 @@ export function ChannelMappingClient({
   products,
   justConnected,
   hrefBase = "/catalog/mapping",
+  hideSave = false,
+  onStagesChange,
 }: {
   channel: "SHOPIFY" | "AMAZON" | "TIKTOK";
   tabs: Array<{ key: string; title: string; logo: string }>;
@@ -42,6 +44,10 @@ export function ChannelMappingClient({
   justConnected: boolean;
   /** Where the channel tabs link to — the onboarding wizard embeds this screen on its own page. */
   hrefBase?: string;
+  /** The wizard saves through its floating bar instead of the footer button. */
+  hideSave?: boolean;
+  /** Reports staged-decision state upward (null = clean) so the wizard bar can save/discard it. */
+  onStagesChange?: (s: { save: () => Promise<string | null>; discard: () => void } | null) => void;
 }) {
   const router = useRouter();
   const canEdit = useCan("catalog", "create");
@@ -83,22 +89,21 @@ export function ChannelMappingClient({
     setSelected(new Set());
   };
 
-  async function save() {
+  /** Commit the staged decisions. Returns an error string (null on success) so the wizard's
+   *  floating bar can surface failures; the standalone footer button shows them as a note. */
+  async function doSave(): Promise<string | null> {
     const items: MappingActionItem[] = [];
     for (const [listingId, s] of Object.entries(stages)) {
       if (!s) continue;
       if (s.action === "map") items.push({ listingId, action: "map", productId: s.productId });
       else items.push({ listingId, action: s.action });
     }
-    if (!items.length) return;
+    if (!items.length) return null;
     setPendingSave(true);
     setNote(null);
     try {
       const r = await applyChannelMappings(channel, items);
-      if (!r.ok) {
-        setNote("Save failed — try again.");
-        return;
-      }
+      if (!r.ok) return "Save failed — try again.";
       setNote(
         r.failed.length
           ? `${r.applied} saved, ${r.failed.length} failed: ${r.failed[0]?.error ?? ""}`
@@ -106,12 +111,26 @@ export function ChannelMappingClient({
       );
       setStages({});
       router.refresh();
+      return r.failed.length ? `${r.failed.length} of the changes failed: ${r.failed[0]?.error ?? ""}` : null;
     } catch {
-      setNote("Couldn't reach the server — reload and retry.");
+      return "Couldn't reach the server — reload and retry.";
     } finally {
       setPendingSave(false);
     }
   }
+
+  async function save() {
+    const err = await doSave();
+    if (err) setNote(err);
+  }
+
+  // Tell the wizard whether decisions are staged here, with fresh save/discard closures.
+  useEffect(() => {
+    if (!onStagesChange) return;
+    onStagesChange(stagedCount > 0 ? { save: doSave, discard: () => setStages({}) } : null);
+    return () => onStagesChange(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-register per stages change only
+  }, [stages]);
 
   async function refresh() {
     setRefreshing(true);
@@ -381,8 +400,9 @@ export function ChannelMappingClient({
         </section>
       )}
 
-      {/* Commit bar — decisions stage above, the save lives at the container's foot. */}
-      {canEdit && (
+      {/* Commit bar — decisions stage above, the save lives at the container's foot. The wizard
+          hides it and saves through its own floating bar instead. */}
+      {canEdit && !hideSave && (
         <div className="flex items-center justify-end gap-3">
           {note && <span className="text-[12px] text-ink-soft">{note}</span>}
           <button

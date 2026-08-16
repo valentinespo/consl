@@ -55,6 +55,10 @@ export default async function OnboardingPage({
     ]);
 
   const connected = new Set(integrations.map((i) => i.provider));
+  // Step 1's button: a connection newer than the last wizard pull means data is waiting to be
+  // pulled; otherwise coming back through the step is a plain Continue (nothing is redone).
+  const pulledAt = settings.onboardingPulledAt ?? null;
+  const channelsPullPending = integrations.some((i) => !pulledAt || !i.connectedAt || i.connectedAt > pulledAt);
   const canConnect: Record<Provider, boolean> = {
     amazon: amazonOAuthConfigured(),
     shopify: shopifyOAuthConfigured(),
@@ -179,6 +183,7 @@ export default async function OnboardingPage({
       currency={{ symbol: org.currencySymbol, locale: org.locale, code: org.currencyCode }}
       syncTz={settings.syncTz}
       providers={providers}
+      channelsPullPending={channelsPullPending}
       mapping={mapping}
       products={products.map((p) => ({ id: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl, openingUnitCost: p.openingUnitCost }))}
       facilities={facilities.map((f) => ({ id: f.id, code: f.code, name: f.name, type: f.type, channel: f.channel, locked: f.locked }))}
