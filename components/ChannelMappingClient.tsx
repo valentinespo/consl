@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { RefreshCw, Undo2, ArrowLeftRight, CheckCircle2 } from "@/components/icons";
+import { RefreshCw, Undo2, CameraOff, CheckCircle2 } from "@/components/icons";
 import { refreshChannelListings, applyChannelMappings, type MappingActionItem } from "@/app/catalog/actions";
 import { useCan } from "@/components/AccessProvider";
 
@@ -182,8 +182,8 @@ export function ChannelMappingClient({
                   {r.imageUrl ? (
                     <img src={r.imageUrl} alt="" className="h-9 w-9 rounded-lg border border-border object-cover" />
                   ) : (
-                    <span className="grid h-9 w-9 place-items-center rounded-lg border border-border text-ink-soft">
-                      <ArrowLeftRight size={14} />
+                    <span title="No picture on the channel" className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-border bg-surface-2/60 text-muted">
+                      <CameraOff size={15} />
                     </span>
                   )}
                   <div className="min-w-0 flex-1">
@@ -255,8 +255,8 @@ export function ChannelMappingClient({
                   {(r.mapped?.imageUrl ?? r.imageUrl) ? (
                     <img src={r.mapped?.imageUrl ?? r.imageUrl ?? ""} alt="" className="h-9 w-9 rounded-lg border border-border object-cover" />
                   ) : (
-                    <span className="grid h-9 w-9 place-items-center rounded-lg border border-border text-ink-soft">
-                      <ArrowLeftRight size={14} />
+                    <span title="No picture on the channel" className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-border bg-surface-2/60 text-muted">
+                      <CameraOff size={15} />
                     </span>
                   )}
                   <div className="min-w-0 flex-1">

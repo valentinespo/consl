@@ -92,6 +92,8 @@ export const Copy = regular(P.Copy);
 export const Upload = regular(P.UploadSimple);
 export const Paperclip = regular(P.Paperclip);
 export const Camera = regular(P.Camera);
+/** "No picture" placeholder — the crossed-out camera. */
+export const CameraOff = regular(P.CameraSlash);
 export const Lock = regular(P.Lock);
 export const ExternalLink = regular(P.ArrowSquareOut);
 export const Undo2 = regular(P.ArrowUUpLeft);
