@@ -26,7 +26,7 @@ export function SelectMenu({
   onChange,
   placeholder = "Select…",
   disabled = false,
-  className = "",
+  className = "w-full",
   ariaLabel,
 }: {
   value: string;
@@ -34,7 +34,8 @@ export function SelectMenu({
   onChange: (v: string) => void;
   placeholder?: string;
   disabled?: boolean;
-  /** Extra classes for the trigger (width/max-width live here; it is w-full by default). */
+  /** Trigger sizing classes — defaults to w-full; pass an explicit width to bound it instead
+   *  (the base carries no width, so yours is the only one that applies). */
   className?: string;
   ariaLabel?: string;
 }) {
@@ -104,7 +105,7 @@ export function SelectMenu({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={ariaLabel}
-        className={`flex h-9 w-full items-center gap-2 rounded-[10px] border border-border bg-surface px-3 text-left text-[13px] text-ink outline-none transition-colors hover:border-ink/25 focus-visible:border-ink/40 disabled:cursor-default disabled:opacity-50 ${className}`}
+        className={`flex h-9 items-center gap-2 rounded-[10px] border border-border bg-surface px-3 text-left text-[13px] text-ink outline-none transition-colors hover:border-ink/25 focus-visible:border-ink/40 disabled:cursor-default disabled:opacity-50 ${className}`}
       >
         {selected?.icon && <span className="shrink-0">{selected.icon}</span>}
         <span className={`min-w-0 flex-1 truncate ${selected ? "" : "text-muted"}`}>{selected?.label ?? placeholder}</span>

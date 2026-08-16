@@ -299,10 +299,13 @@ export function ChannelMappingClient({
                         value={stage.productId}
                         disabled={!canEdit}
                         ariaLabel="Product to map to"
-                        className="w-[230px]"
+                        className="w-[160px]"
                         options={freeProducts(stage.productId).map((p) => ({
+                          // Code up front, full name as the muted second line — long titles
+                          // truncate in the panel instead of stretching the trigger.
                           value: p.id,
-                          label: `${p.code} — ${p.name}`,
+                          label: p.code,
+                          hint: p.name,
                           icon: <SkuAvatar code={p.code} size={20} imageUrl={p.imageUrl} />,
                         }))}
                         onChange={(v) => setStage(r.id, { action: "map", productId: v })}
