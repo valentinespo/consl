@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { Plug, Lock, Check, AlertTriangle } from "@/components/icons";
+import { Lock, Check, AlertTriangle } from "@/components/icons";
 import { Card } from "@/components/ui";
 import { PROVIDERS, type Provider } from "@/lib/integrations";
+import { PROVIDER_LOGO } from "@/lib/channel-logos";
 import { IntegrationControls } from "@/components/IntegrationControls";
 import { amazonOAuthConfigured } from "@/lib/amazon-oauth";
 import { shopifyOAuthConfigured } from "@/lib/shopify-oauth";
@@ -78,8 +79,10 @@ export default async function IntegrationsSettingsPage({
 
         return (
           <Card key={p} className="flex flex-wrap items-center gap-4">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
-              <Plug size={19} />
+            {/* The platform's own mark on a white tile — same treatment as everywhere else. */}
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white p-1.5">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={PROVIDER_LOGO[p]} alt="" className="max-h-full max-w-full object-contain" />
             </span>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">

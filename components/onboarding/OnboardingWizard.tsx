@@ -16,7 +16,7 @@ import { NewProductButton, NewMaterialButton } from "@/components/CreateButtons"
 import { SkuAvatar, Card } from "@/components/ui";
 import { Field, inputCls } from "@/components/FormKit";
 import { FACILITY_TYPES } from "@/lib/facility-types";
-import { Plug, Check, AlertTriangle, ChevronLeft, Plus, X, Package, Lock, Pencil } from "@/components/icons";
+import { Check, AlertTriangle, ChevronLeft, Plus, X, Package, Lock, Pencil } from "@/components/icons";
 import type { MyOrg } from "@/lib/orgs";
 import { createFacility, saveFinishedOpenings, saveRawOpenings } from "@/app/facilities/actions";
 import {
@@ -103,7 +103,7 @@ export function OnboardingWizard(props: {
   orgs: MyOrg[];
   currency: { symbol: string; locale: string; code: string };
   syncTz: string;
-  providers: Array<{ key: string; label: string; blurb: string; connected: boolean; canConnect: boolean }>;
+  providers: Array<{ key: string; label: string; blurb: string; logo: string; connected: boolean; canConnect: boolean }>;
   /** A channel connected since the wizard's last data pull — step 1 offers the pull again. */
   channelsPullPending: boolean;
   mapping: WizardMapping;
@@ -503,7 +503,7 @@ function StepChannels({
   skipChannels,
   setSkipChannels,
 }: {
-  providers: Array<{ key: string; label: string; blurb: string; connected: boolean; canConnect: boolean }>;
+  providers: Array<{ key: string; label: string; blurb: string; logo: string; connected: boolean; canConnect: boolean }>;
   anyConnected: boolean;
   skipChannels: boolean;
   setSkipChannels: (v: boolean) => void;
@@ -516,8 +516,10 @@ function StepChannels({
       />
       {providers.map((p) => (
         <div key={p.key} className={`${panelCls} flex flex-wrap items-center gap-4`}>
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
-            <Plug size={19} />
+          {/* The platform's own mark on a white tile — same treatment as everywhere else. */}
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white p-1.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={p.logo} alt="" className="max-h-full max-w-full object-contain" />
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">

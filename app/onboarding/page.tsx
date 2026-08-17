@@ -11,16 +11,14 @@ import { amazonOAuthConfigured } from "@/lib/amazon-oauth";
 import { shopifyOAuthConfigured } from "@/lib/shopify-oauth";
 import { tiktokConfigured } from "@/lib/tiktok";
 import { CHANNEL_TITLES, PRODUCT_MATCH_SELECT, mappedExternalId, suggestMappings, type ChannelKey } from "@/lib/channel-catalog";
+import { ROOT_LOGO, PROVIDER_LOGO } from "@/lib/channel-logos";
 import { OnboardingWizard, type WizardMapping } from "@/components/onboarding/OnboardingWizard";
 
 export const dynamic = "force-dynamic";
 
 const PROVIDER_CHANNEL: Record<string, ChannelKey> = { shopify: "SHOPIFY", amazon: "AMAZON", tiktok: "TIKTOK" };
-const CHANNEL_TAB_LOGO: Record<ChannelKey, string> = {
-  SHOPIFY: "/integrations/shopify.png",
-  AMAZON: "/integrations/amazon-fba.png",
-  TIKTOK: "/integrations/tiktok.png",
-};
+// Tabs name a whole channel — the shared root marks (Amazon's smile, not the FBA badge).
+const CHANNEL_TAB_LOGO = ROOT_LOGO;
 
 /** The setup wizard — the only page a not-yet-onboarded company can reach (the root layout
  *  redirects every other path here until `completeOnboarding()` unlocks the app). */
@@ -68,6 +66,7 @@ export default async function OnboardingPage({
     key: p,
     label: PROVIDERS[p].label,
     blurb: PROVIDERS[p].blurb,
+    logo: PROVIDER_LOGO[p],
     connected: connected.has(p),
     canConnect: canConnect[p],
   }));

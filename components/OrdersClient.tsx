@@ -12,12 +12,10 @@ import { inputCls } from "@/components/FormKit";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
 import { HoverHint } from "@/components/HoverHint";
 import { useExitAnimation } from "@/components/animate";
+import { ROOT_LOGO } from "@/lib/channel-logos";
 
-const CHANNEL_LOGO: Record<string, string> = {
-  AMAZON: "/integrations/amazon-fba.png",
-  SHOPIFY: "/integrations/shopify.png",
-  TIKTOK: "/integrations/tiktok.png",
-};
+// Channel marks come from the shared map — Orders always talks about a whole channel.
+const CHANNEL_LOGO = ROOT_LOGO;
 
 const PILL = "inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium";
 

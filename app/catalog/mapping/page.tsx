@@ -5,16 +5,14 @@ import { PageHeader } from "@/components/ui";
 import { EmptyState } from "@/components/EmptyState";
 import { requireView } from "@/lib/membership";
 import { CHANNEL_TITLES, PRODUCT_MATCH_SELECT, mappedExternalId, suggestMappings, type ChannelKey } from "@/lib/channel-catalog";
+import { ROOT_LOGO } from "@/lib/channel-logos";
 import { ChannelMappingClient } from "@/components/ChannelMappingClient";
 
 export const dynamic = "force-dynamic";
 
 const PROVIDER_CHANNEL: Record<string, ChannelKey> = { shopify: "SHOPIFY", amazon: "AMAZON", tiktok: "TIKTOK" };
-const CHANNEL_TAB_LOGO: Record<ChannelKey, string> = {
-  SHOPIFY: "/integrations/shopify.png",
-  AMAZON: "/integrations/amazon-fba.png",
-  TIKTOK: "/integrations/tiktok.png",
-};
+// Tabs name a whole channel — the shared root marks (Amazon's smile, not the FBA badge).
+const CHANNEL_TAB_LOGO = ROOT_LOGO;
 
 export default async function MappingPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   await requireView("catalog");
