@@ -218,7 +218,7 @@ export function ChannelMappingClient({
                 onClick={() => applyBulk("import")}
                 className="rounded-lg border border-border bg-panel px-2.5 py-1 font-medium text-ink hover:bg-panel-2"
               >
-                Import as new
+                Import as new product
               </button>
             </div>
           )}
