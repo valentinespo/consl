@@ -199,6 +199,21 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
             console.error(`[scheduler] amazon order report failed for org ${orgId}:`, (e as Error).message);
           }
         }
+      
+        // The money ledger's live leg: sweep newly posted financial events (fees, refunds,
+        // reimbursements) every half hour. Events post with their own delay at Amazon's side, so
+        // this cadence keeps the P&L as fresh as the source allows without burning the rate limit.
+        const lastFin = lastAmazonFinanceSweep.get(orgId) ?? 0;
+        if (Date.now() - lastFin >= AMAZON_FINANCE_SWEEP_MS) {
+          lastAmazonFinanceSweep.set(orgId, Date.now());
+          try {
+            const { sweepAmazonFinances } = await import("@/lib/finances");
+            const r = await sweepAmazonFinances();
+            if (r && r.rows > 0) console.log(`[scheduler] amazon finance sweep for ${orgId}: ${r.rows} ledger rows`);
+          } catch (e) {
+            console.error(`[scheduler] amazon finance sweep failed for org ${orgId}:`, (e as Error).message);
+          }
+        }
       }
     });
   } catch (e) {
@@ -209,10 +224,12 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
 const ORDERS_REFRESH_MS = 15 * 60 * 1000;
 const AMAZON_POLL_MS = 5 * 60 * 1000;
 const AMAZON_ORDER_REPORT_MS = 6 * 60 * 60 * 1000;
+const AMAZON_FINANCE_SWEEP_MS = 30 * 60 * 1000;
 // In-process per-org timestamps; a restart just refreshes once immediately, which is harmless.
 const lastOrdersRefresh = new Map<string, number>();
 const lastAmazonPoll = new Map<string, number>();
 const lastAmazonOrderReport = new Map<string, number>();
+const lastAmazonFinanceSweep = new Map<string, number>();
 
 let backfilling = false;
 
@@ -238,6 +255,11 @@ async function backfillTick(): Promise<void> {
           const { backfillAmazonOrdersStep } = await import("@/lib/orders");
           const r = await backfillAmazonOrdersStep();
           if (r.imported > 0) console.log(`[scheduler] amazon order backfill for ${orgId}: +${r.imported} (cursor ${r.cursor}${r.done ? ", done" : ""})`);
+          // The finance ledger walks back alongside the orders — different rate pool, so the two
+          // steps in one tick never contend.
+          const { backfillAmazonFinancesStep } = await import("@/lib/finances");
+          const f = await backfillAmazonFinancesStep();
+          if (f.rows > 0) console.log(`[scheduler] amazon finance backfill for ${orgId}: +${f.rows} rows (cursor ${f.cursor}${f.done ? ", done" : ""})`);
         });
       } catch (e) {
         console.error(`[scheduler] backfill failed for org ${orgId}:`, (e as Error).message);

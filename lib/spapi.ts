@@ -535,3 +535,45 @@ export function chooseMarketplace(list: SellerMarketplace[], fallback = "ATVPDKI
   const active = list.filter((m) => m.participating);
   return active.find((m) => m.id === "ATVPDKIKX0DER")?.id ?? active[0]?.id ?? list[0]?.id ?? fallback;
 }
+
+/* ------------------------------ Finances (the money ledger) ------------------------------ */
+
+/** One page of the Finances API's event groups, kept raw — lib/finances.ts flattens them. */
+export type FinancialEventsPage = Record<string, unknown[]>;
+
+/**
+ * Every financial event posted in [postedAfter, postedBefore) — the exact ledger Amazon settles
+ * money by (fees, refunds, reimbursements, ad invoices, storage…). Pages at 100 event groups per
+ * call; the endpoint allows ~0.5 req/s, so pages are spaced out and 429s retried with backoff.
+ */
+export async function listFinancialEvents(
+  client: SpApiClient,
+  postedAfter: Date,
+  postedBefore: Date,
+): Promise<FinancialEventsPage[]> {
+  const pages: FinancialEventsPage[] = [];
+  let next: string | null = null;
+  for (let page = 0; page < 400; page++) {
+    if (page > 0) await new Promise((res) => setTimeout(res, 2100));
+    const q = new URLSearchParams({ MaxResultsPerPage: "100" });
+    // NextToken carries the whole query state — Amazon rejects re-sending the dates with it.
+    if (next) q.set("NextToken", next);
+    else {
+      q.set("PostedAfter", postedAfter.toISOString());
+      q.set("PostedBefore", postedBefore.toISOString());
+    }
+    let r: Response | null = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      r = await sp(client, `/finances/v0/financialEvents?${q.toString()}`);
+      if (r.status !== 429) break;
+      await new Promise((res) => setTimeout(res, 5000 * (attempt + 1)));
+    }
+    const j = await r!.json();
+    if (!r!.ok) throw new Error(`financialEvents: ${JSON.stringify(j).slice(0, 200)}`);
+    const payload = j.payload ?? j;
+    if (payload.FinancialEvents) pages.push(payload.FinancialEvents as FinancialEventsPage);
+    next = payload.NextToken ?? null;
+    if (!next) break;
+  }
+  return pages;
+}

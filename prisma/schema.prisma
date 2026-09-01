@@ -61,6 +61,7 @@ model Organization {
   channelListings         ChannelListing[]
   channelStock            ChannelStock[]
   salesOrders             SalesOrder[]
+  financeEvents           FinanceEvent[]
   salesOrderLines         SalesOrderLine[]
   materialTypes           MaterialType[]
   purchaseInvoices        PurchaseInvoice[]
@@ -413,6 +414,10 @@ model Settings {
   // Forward cursor for the near-real-time Amazon Orders API poll (ISO datetime of the last
   // LastUpdatedAfter sweep). Null = start from a few hours back on first poll.
   ordersPollCursor String?
+  // Amazon financial-events ledger cursors (P&L). Forward: ISO datetime the live sweep has fully
+  // covered up to. Backward: ISO date the history walk has reached (walks to the ~2-year floor).
+  financeEventsCursor  String?
+  financeBackfillCursor String?
   // When the onboarding wizard last pulled channel data (stock + catalogs). A connection newer
   // than this makes step 1's button "Pull my data & continue" again; otherwise it's just Continue.
   onboardingPulledAt DateTime?
@@ -843,4 +848,32 @@ model SalesOrderLine {
 
   @@index([orgId, productId])
   @@index([orderId])
+}
+
+/// One money movement from a sales channel's financial ledger (Amazon Finances API today),
+/// flattened to a single signed amount with its P&L bucket. The P&L is a sum over these rows plus
+/// engine-computed COGS. Rows carry no per-event platform id (Amazon shipment events have none),
+/// so imports REPLACE whole posted-date windows — idempotent by construction.
+model FinanceEvent {
+  id           String        @id @default(cuid())
+  orgId        String?
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  channel      String // "AMAZON" (later SHOPIFY / TIKTOK)
+  postedAt     DateTime // when the platform posted the money event — import windows key on this
+  // The P&L attribution date: the order's purchase instant for shipment-scoped money (matching how
+  // sellers read a daily P&L), the posted date for everything else (refunds, ads, adjustments).
+  eventAt      DateTime
+  group        String // P&L bucket: sales|refunds|fba_fees|referral_fees|storage_fees|advertising|taxes|other
+  type         String // the platform's fine-grained label, e.g. "Principal", "Commission", "FBAPerUnitFulfillmentFee"
+  amount       Float // signed as the platform reports it: revenue +, fees/withholdings −
+  currency     String        @default("USD")
+  orderId      String? // platform order id when the event is order-scoped
+  sku          String? // seller SKU when item-scoped
+  quantity     Int? // units on shipment Principal rows — drives COGS attribution
+  createdAt    DateTime      @default(now())
+
+  @@index([orgId, channel, postedAt])
+  @@index([orgId, group, postedAt])
+  @@index([orgId, channel, eventAt])
+  @@index([orgId, group, eventAt])
 }
