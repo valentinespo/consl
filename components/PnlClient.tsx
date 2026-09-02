@@ -103,6 +103,14 @@ export function PnlClient({
           <Image src={ROOT_LOGO.AMAZON} alt="" width={14} height={14} className="rounded-[3px]" />
           Amazon
         </span>
+        {pnl.pendingSales > 0 && (
+          <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
+            <span className="pill-amber inline-flex items-center rounded-full border px-2 py-[3px] text-[11px] font-medium">
+              {money(pnl.pendingSales)} pending
+            </span>
+            recent sales Amazon hasn&apos;t settled yet — exact fees replace the estimates as money posts.
+          </span>
+        )}
         {pnl.backfillInProgress && (
           <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />

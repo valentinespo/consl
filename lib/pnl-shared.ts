@@ -14,6 +14,8 @@ export type Pnl = {
   netProfit: number;
   margin: number | null; // netProfit / sales
   roi: number | null; // netProfit / |cogs|
+  /** Revenue included from orders Amazon hasn't settled yet (exact split; fees estimated). */
+  pendingSales: number;
   unmatchedSkus: string[]; // shipped SKUs with no product/cost — their units are NOT in cogs
   backfillInProgress: boolean;
   hasData: boolean;

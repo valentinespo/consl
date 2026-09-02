@@ -876,4 +876,5 @@ model FinanceEvent {
   @@index([orgId, group, postedAt])
   @@index([orgId, channel, eventAt])
   @@index([orgId, group, eventAt])
+  @@index([orgId, orderId])
 }
