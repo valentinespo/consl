@@ -222,9 +222,9 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
 }
 
 const ORDERS_REFRESH_MS = 15 * 60 * 1000;
-const AMAZON_POLL_MS = 5 * 60 * 1000;
+const AMAZON_POLL_MS = 3 * 60 * 1000; // getOrders allows ~1/min per seller; 3 min leaves room for two orgs
 const AMAZON_ORDER_REPORT_MS = 6 * 60 * 60 * 1000;
-const AMAZON_FINANCE_SWEEP_MS = 30 * 60 * 1000;
+const AMAZON_FINANCE_SWEEP_MS = 15 * 60 * 1000;
 // In-process per-org timestamps; a restart just refreshes once immediately, which is harmless.
 const lastOrdersRefresh = new Map<string, number>();
 const lastAmazonPoll = new Map<string, number>();
