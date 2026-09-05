@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Settings, Check, ChevronDown, GripVertical } from "@/components/icons";
 import { HoverHint } from "@/components/HoverHint";
 import { BATCH_HELP, BUFFER_HELP, FLOOR_HELP, LEAD_HELP, REORDER_TO_HELP, SHIP_HELP } from "@/lib/restock-help";
@@ -113,6 +113,19 @@ export function RestockDashboard({
   const [order, setOrder] = useState<string[]>([]); // ids during manual arranging
   const dragId = useRef<string | null>(null);
   const router = useRouter();
+
+  // Arriving from a product page ("Edit on Reorder"): open that product's policy editor and bring
+  // it into view, then drop the parameter so a reload doesn't reopen it.
+  const params = useSearchParams();
+  const policyFor = params.get("policy");
+  useEffect(() => {
+    if (!policyFor || !rows.some((r) => r.id === policyFor)) return;
+    setEditSku(policyFor);
+    window.history.replaceState(null, "", window.location.pathname);
+    requestAnimationFrame(() => {
+      document.getElementById(`restock-${policyFor}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, [policyFor, rows]);
 
   const byId = useMemo(() => new Map(rows.map((r) => [r.id, compute(r, win, nowMs)])), [rows, win, nowMs]);
   const computed = useMemo(() => {
@@ -273,6 +286,7 @@ export function RestockDashboard({
           return (
             <div
               key={r.id}
+              id={`restock-${r.id}`}
               draggable={arranging}
               onDragStart={() => { dragId.current = r.id; }}
               onDragOver={(e) => { if (arranging) { e.preventDefault(); onDragOver(r.id); } }}

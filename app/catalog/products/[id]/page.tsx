@@ -51,8 +51,8 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         <Card>
           <div className="mb-3 flex items-center justify-between">
             <div className="text-[12px] font-medium uppercase tracking-wide text-muted">Restock policy</div>
-            <Link href="/inventory" className="text-[12.5px] font-medium text-accent hover:underline">
-              Edit on Inventory →
+            <Link href={`/reorder?policy=${product.id}`} className="text-[12.5px] font-medium text-accent hover:underline">
+              Edit on Reorder →
             </Link>
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
