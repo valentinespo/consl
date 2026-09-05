@@ -2,6 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { GROUP_ORDER, type Pnl, type PnlGroupBlock } from "@/lib/pnl-shared";
+import { amazonMarketplaceCurrency } from "@/lib/channel-tz";
 
 export { GROUP_ORDER, GROUP_LABEL, type Pnl, type PnlGroupBlock, type PnlTypeRow } from "@/lib/pnl-shared";
 
@@ -81,12 +82,18 @@ async function pendingBridge(from: Date, to: Date, costs: Map<string, number>): 
   const orgId = await getCurrentOrgId();
   if (!orgId) return none;
 
+  // The ledger is one marketplace's (the connection's), so only orders sold there can be waiting
+  // on it. A unified account also ships the odd order to a sister marketplace (Amazon.ca, in
+  // CAD): that money settles in the other marketplace's ledger and would never arrive here.
+  const conn = await prisma.integration.findFirst({ where: { provider: "amazon" }, select: { marketplaceId: true } });
+  const currency = amazonMarketplaceCurrency(conn?.marketplaceId);
+
   const orders = await prisma.$queryRaw<
     { id: string; total: number; productGross: number | null; discounts: number | null; tax: number | null; shipping: number | null; giftWrap: number | null }[]
   >`
     SELECT so.id, so.total, so."productGross", so.discounts, so.tax, so.shipping, so."giftWrap"
     FROM "SalesOrder" so
-    WHERE so."orgId" = ${orgId} AND so.channel = 'AMAZON'
+    WHERE so."orgId" = ${orgId} AND so.channel = 'AMAZON' AND so.currency = ${currency}
       AND so.cancelled = false AND so.voided = false AND so.total <> 0
       AND so."orderedAt" >= ${from} AND so."orderedAt" <= ${to}
       AND NOT EXISTS (

@@ -86,3 +86,17 @@ export function todayIn(tz: string): string {
   const m = Object.fromEntries(parts.map((p) => [p.type, p.value]));
   return `${m.year}-${m.month}-${m.day}`;
 }
+
+/** Amazon marketplace → the currency its ledger settles in. */
+const AMAZON_MARKETPLACE_CURRENCY: Record<string, string> = {
+  ATVPDKIKX0DER: "USD", A2EUQ1WTGCTBG2: "CAD", A1AM78C64UM0Y8: "MXN", A2Q3Y263D00KWC: "BRL",
+  A1F83G8C2ARO7P: "GBP", A1PA6795UKMFR9: "EUR", A13V1IB3VIYZZH: "EUR", APJ6JRA9NG5V4: "EUR",
+  A1RKKUPIHCS9HS: "EUR", A1805IZSGTT6HH: "EUR", A2NODRKZP88ZB9: "SEK", A1C3SOZRARQ6R3: "PLN",
+  AMEN7PMS3EDWL: "EUR", A33AVAJ2PDY3EV: "TRY", ARBP9OOSHTCHU: "EGP", A2VIGQ35RCS4UG: "AED",
+  A17E79C6D8DWNP: "SAR", A21TJRUUN4KGV: "INR", A19VAU5U5O7RUS: "SGD", A1VC38T7YXB528: "JPY",
+  A39IBJ37TRP1C6: "AUD",
+};
+
+export function amazonMarketplaceCurrency(marketplaceId: string | null | undefined): string {
+  return AMAZON_MARKETPLACE_CURRENCY[marketplaceId ?? ""] ?? "USD";
+}
