@@ -101,6 +101,9 @@ model Integration {
   marketplaceId   String? // Amazon: e.g. ATVPDKIKX0DER (US); TikTok: the shop_cipher for shop-scoped calls
   region          String? // Amazon: na | eu | fe (endpoint group); TikTok: shop region (e.g. US)
   scope           String? // granted OAuth scopes, if the platform returns them
+  // The platform's own calendar for this channel (IANA name): the day its reports are cut on.
+  // Amazon/TikTok derive it from the marketplace/region; Shopify reports the shop's setting.
+  timezone        String?
   connectedAt     DateTime?
   lastSyncAt      DateTime?
   lastError       String?
@@ -870,6 +873,12 @@ model FinanceEvent {
   orderId      String? // platform order id when the event is order-scoped
   sku          String? // seller SKU when item-scoped
   quantity     Int? // units on shipment Principal rows — drives COGS attribution
+  // The platform's transaction identity — imports upsert by it, so any window can be re-read
+  // freely. Amazon books a payout-deferred sale twice (held original, then a release copy a week
+  // later); the copy keys to the ORIGINAL's id so the two land as one transaction.
+  txId         String?
+  status       String? // "held" (charged, payout deferred) | "released"
+  releasedAt   DateTime? // when the money reached (or is due to reach) the payout balance
   createdAt    DateTime      @default(now())
 
   @@index([orgId, channel, postedAt])
@@ -877,4 +886,5 @@ model FinanceEvent {
   @@index([orgId, channel, eventAt])
   @@index([orgId, group, eventAt])
   @@index([orgId, orderId])
+  @@index([orgId, channel, txId])
 }

@@ -9,11 +9,11 @@ export { GROUP_ORDER, GROUP_LABEL, type Pnl, type PnlGroupBlock, type PnlTypeRow
  * The P&L read side: sum the imported financial ledger by bucket for a date window, price the
  * shipped units with the engine's landed cost — and bridge the settlement lag.
  *
- * Amazon posts an order's money only around delivery (+ up to a week of payout hold), so the most
- * recent ~10 days of order-dated revenue haven't reached the ledger yet. Orders in range with no
- * posted Principal are added as "(pending)" rows: their revenue split comes from the order record
- * itself (exact), their fees from this seller's own per-SKU history (estimate). Every pending row
- * is replaced by the real posted money as Amazon settles — the statement converges to the ledger.
+ * Amazon books an order's money when it ships (held for payout, but exact), so only orders placed
+ * and not yet shipped are missing from the ledger. Those are added as "(pending)" rows: their
+ * revenue split comes from the order record itself (exact), their fees from this seller's own
+ * per-SKU history (estimate). Every pending row is replaced by the real posted money the moment
+ * the order ships — the statement converges to the ledger within a day or two.
  */
 
 /** UTC instant of local midnight starting `day` (YYYY-MM-DD) in `tz`, DST-safe. */

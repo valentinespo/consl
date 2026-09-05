@@ -77,12 +77,23 @@ async function runOrgDaily(orgId: string): Promise<void> {
       try {
         const { ensureShopifyWebhooks } = await import("@/lib/shopify-webhooks");
         await ensureShopifyWebhooks();
+        const { ensureShopifyTimezone } = await import("@/lib/shopify-oauth");
+        await ensureShopifyTimezone(orgId);
       } catch (e) {
         console.error(`[scheduler] shopify webhook ensure failed for org ${orgId}:`, (e as Error).message);
       }
 
       const r = await syncAmazonCore(); // no-op for orgs with no Amazon-mapped SKUs
       await getRestock(); // records today's inventory-value snapshot with fresh numbers
+
+      // Money ledger self-check: re-read the last two weeks so anything Amazon revised in place
+      // (a held sale it cancelled, a reissued fee) is caught. Upserts make the re-read free.
+      try {
+        const { reconcileAmazonFinances } = await import("@/lib/finances");
+        await reconcileAmazonFinances();
+      } catch (e) {
+        console.error(`[scheduler] amazon finance reconcile failed for org ${orgId}:`, (e as Error).message);
+      }
 
       if (r.ok) {
         await saveOrgSettings({ lastSyncAt: new Date() });
@@ -200,9 +211,9 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
           }
         }
       
-        // The money ledger's live leg: sweep newly posted financial events (fees, refunds,
-        // reimbursements) every half hour. Events post with their own delay at Amazon's side, so
-        // this cadence keeps the P&L as fresh as the source allows without burning the rate limit.
+        // The money ledger's live leg: sweep newly posted transactions every quarter hour. A sale
+        // shows up here the moment it ships (held for payout, exact fees), so this is what keeps
+        // the P&L within minutes of Amazon without burning the rate limit.
         const lastFin = lastAmazonFinanceSweep.get(orgId) ?? 0;
         if (Date.now() - lastFin >= AMAZON_FINANCE_SWEEP_MS) {
           lastAmazonFinanceSweep.set(orgId, Date.now());

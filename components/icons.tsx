@@ -115,6 +115,7 @@ export const AlertTriangle = regular(P.Warning);
 export const Info = regular(P.Info);
 export const CalendarDays = regular(P.Calendar);
 export const Clock = regular(P.Clock);
+export const Buildings = regular(P.Buildings);
 export const Truck = regular(P.Truck);
 export const Zap = regular(P.Lightning); // a real bolt again
 export const Gauge = regular(P.Gauge);

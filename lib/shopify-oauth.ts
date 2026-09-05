@@ -1,7 +1,7 @@
 import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { prismaBase } from "@/lib/prisma-base";
-import { encryptSecret } from "@/lib/secret-box";
+import { decryptSecret, encryptSecret } from "@/lib/secret-box";
 import { ensureChannelFacilities } from "@/lib/integrations";
 import { makeState } from "@/lib/oauth-state";
 import { shopifyGraphQL } from "@/lib/shopify";
@@ -101,12 +101,13 @@ export async function exchangeShopifyCode(shop: string, code: string): Promise<{
  * facility. Unscoped client with an explicit, already-authorized orgId — same as Amazon.
  */
 export async function completeShopifyConnection(orgId: string, shop: string, accessToken: string, scope: string | null): Promise<void> {
-  const data = await shopifyGraphQL<{ shop: { name: string; myshopifyDomain: string } }>(
+  const data = await shopifyGraphQL<{ shop: { name: string; myshopifyDomain: string; ianaTimezone: string | null } }>(
     shop,
     accessToken,
-    `{ shop { name myshopifyDomain } }`,
+    `{ shop { name myshopifyDomain ianaTimezone } }`,
   );
   const canonical = data.shop.myshopifyDomain?.toLowerCase() || shop;
+  const timezone = data.shop.ianaTimezone || null;
 
   await prismaBase.integration.upsert({
     where: { orgId_provider: { orgId, provider: "shopify" } },
@@ -117,6 +118,7 @@ export async function completeShopifyConnection(orgId: string, shop: string, acc
       refreshTokenEnc: encryptSecret(accessToken),
       sellerId: canonical,
       scope,
+      timezone,
       connectedAt: new Date(),
       lastError: null,
     },
@@ -125,6 +127,7 @@ export async function completeShopifyConnection(orgId: string, shop: string, acc
       refreshTokenEnc: encryptSecret(accessToken),
       sellerId: canonical,
       scope,
+      timezone,
       connectedAt: new Date(),
       lastError: null,
     },
@@ -166,4 +169,12 @@ export async function completeShopifyConnection(orgId: string, shop: string, acc
   } catch {
     // the Refresh button on the mapping screen retries
   }
+}
+
+/** Record the shop's reporting timezone on a connection made before we kept it (idempotent). */
+export async function ensureShopifyTimezone(orgId: string): Promise<void> {
+  const conn = await prismaBase.integration.findFirst({ where: { orgId, provider: "shopify", status: "connected" } });
+  if (!conn?.refreshTokenEnc || !conn.sellerId || conn.timezone) return;
+  const data = await shopifyGraphQL<{ shop: { ianaTimezone: string | null } }>(conn.sellerId, decryptSecret(conn.refreshTokenEnc), `{ shop { ianaTimezone } }`);
+  if (data.shop.ianaTimezone) await prismaBase.integration.update({ where: { id: conn.id }, data: { timezone: data.shop.ianaTimezone } });
 }

@@ -538,42 +538,46 @@ export function chooseMarketplace(list: SellerMarketplace[], fallback = "ATVPDKI
 
 /* ------------------------------ Finances (the money ledger) ------------------------------ */
 
-/** One page of the Finances API's event groups, kept raw — lib/finances.ts flattens them. */
-export type FinancialEventsPage = Record<string, unknown[]>;
+/** One raw transaction from the Finances API v2024-06-19 — kept untyped; lib/finances maps it. */
+export type FinanceTransaction = Record<string, unknown>;
 
 /**
- * Every financial event posted in [postedAfter, postedBefore) — the exact ledger Amazon settles
- * money by (fees, refunds, reimbursements, ad invoices, storage…). Pages at 100 event groups per
- * call; the endpoint allows ~0.5 req/s, so pages are spaced out and 429s retried with backoff.
+ * Every transaction posted in [postedAfter, postedBefore): a FLAT list, each with its own id,
+ * posted date, status (DEFERRED = charged but payout held, RELEASED, DEFERRED_RELEASED) and a
+ * breakdown tree down to the component. The endpoint allows ~0.5 req/s, so pages are spaced out
+ * and 429s retried with backoff. `status` narrows to one side of the payout line.
  */
-export async function listFinancialEvents(
+export async function listTransactions(
   client: SpApiClient,
   postedAfter: Date,
-  postedBefore: Date,
-): Promise<FinancialEventsPage[]> {
-  const pages: FinancialEventsPage[] = [];
+  postedBefore: Date | null,
+  status?: "DEFERRED" | "RELEASED",
+): Promise<FinanceTransaction[]> {
+  const out: FinanceTransaction[] = [];
   let next: string | null = null;
   for (let page = 0; page < 400; page++) {
     if (page > 0) await new Promise((res) => setTimeout(res, 2100));
-    const q = new URLSearchParams({ MaxResultsPerPage: "100" });
-    // NextToken carries the whole query state — Amazon rejects re-sending the dates with it.
-    if (next) q.set("NextToken", next);
+    const q = new URLSearchParams();
+    // nextToken carries the whole query state — Amazon rejects re-sending the dates with it.
+    if (next) q.set("nextToken", next);
     else {
-      q.set("PostedAfter", postedAfter.toISOString());
-      q.set("PostedBefore", postedBefore.toISOString());
+      q.set("postedAfter", postedAfter.toISOString());
+      if (postedBefore) q.set("postedBefore", postedBefore.toISOString());
+      if (status) q.set("transactionStatus", status);
+      q.set("marketplaceId", client.marketplaceId);
     }
     let r: Response | null = null;
     for (let attempt = 0; attempt < 4; attempt++) {
-      r = await sp(client, `/finances/v0/financialEvents?${q.toString()}`);
+      r = await sp(client, `/finances/2024-06-19/transactions?${q.toString()}`);
       if (r.status !== 429) break;
       await new Promise((res) => setTimeout(res, 5000 * (attempt + 1)));
     }
     const j = await r!.json();
-    if (!r!.ok) throw new Error(`financialEvents: ${JSON.stringify(j).slice(0, 200)}`);
+    if (!r!.ok) throw new Error(`transactions: ${JSON.stringify(j).slice(0, 300)}`);
     const payload = j.payload ?? j;
-    if (payload.FinancialEvents) pages.push(payload.FinancialEvents as FinancialEventsPage);
-    next = payload.NextToken ?? null;
+    for (const t of payload.transactions ?? []) out.push(t as FinanceTransaction);
+    next = payload.nextToken ?? null;
     if (!next) break;
   }
-  return pages;
+  return out;
 }

@@ -3,7 +3,8 @@
 import Image from "next/image";
 import { useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { ChevronDown, PnlFilled } from "@/components/icons";
+import { Buildings, ChevronDown, PnlFilled } from "@/components/icons";
+import { SelectMenu } from "@/components/SelectMenu";
 import { useMoney } from "@/components/CurrencyProvider";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
 import { GROUP_LABEL, type Pnl, type PnlGroupBlock } from "@/lib/pnl-shared";
@@ -68,10 +69,13 @@ export function PnlClient({
   pnl,
   filter,
   dataBounds,
+  day,
 }: {
   pnl: Pnl;
   filter: { range: Range };
   dataBounds: { newest: string; oldest: string };
+  /** Which clock cuts a day: the channel's own reporting timezone or the company's business day. */
+  day: { basis: "channel" | "company"; channel: string | null; company: string };
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -91,6 +95,13 @@ export function PnlClient({
     router.push(`${pathname}?${q.toString()}`);
   }
 
+  function setDayBasis(v: string) {
+    const q = new URLSearchParams(params.toString());
+    if (v === "company") q.set("day", "company");
+    else q.delete("day");
+    router.push(`${pathname}?${q.toString()}`);
+  }
+
   const pct = (v: number | null) => (v == null ? "—" : `${(v * 100).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`);
   const salesBlock = pnl.groups.find((g) => g.group === "sales");
   const rest = pnl.groups.filter((g) => g.group !== "sales");
@@ -103,12 +114,34 @@ export function PnlClient({
           <Image src={ROOT_LOGO.AMAZON} alt="" width={14} height={14} className="rounded-[3px]" />
           Amazon
         </span>
+        {day.channel && (
+          <SelectMenu
+            ariaLabel="Day basis"
+            className="w-[250px]"
+            value={day.basis}
+            onChange={setDayBasis}
+            options={[
+              {
+                value: "channel",
+                label: "Amazon's day",
+                hint: `${day.channel} — matches Seller Central`,
+                icon: <Image src={ROOT_LOGO.AMAZON} alt="" width={16} height={16} className="rounded-[3px]" />,
+              },
+              {
+                value: "company",
+                label: "Company day",
+                hint: `${day.company} — the rest of the app`,
+                icon: <Buildings size={16} className="text-muted" />,
+              },
+            ]}
+          />
+        )}
         {pnl.pendingSales > 0 && (
           <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
             <span className="pill-amber inline-flex items-center rounded-full border px-2 py-[3px] text-[11px] font-medium">
               {money(pnl.pendingSales)} pending
             </span>
-            recent sales Amazon hasn&apos;t settled yet — exact fees replace the estimates as money posts.
+            orders placed but not shipped yet — Amazon posts the exact money the moment they ship.
           </span>
         )}
         {pnl.backfillInProgress && (

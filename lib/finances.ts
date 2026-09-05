@@ -1,19 +1,23 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { decryptSecret } from "@/lib/secret-box";
-import { makeClient, listFinancialEvents, type FinancialEventsPage, type SpApiClient } from "@/lib/spapi";
+import { makeClient, listTransactions, type FinanceTransaction, type SpApiClient } from "@/lib/spapi";
 import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
 
 /**
  * Amazon's financial ledger → FinanceEvent rows, the raw material of the P&L.
  *
- * The Finances API returns the exact money movements Amazon settles by: item charges, fees,
- * promotions, refunds, ad invoices, storage, reimbursements. We flatten every component to one
- * signed row tagged with a P&L bucket. Amazon gives these events no ids, so imports REPLACE the
- * whole [postedAfter, postedBefore) window in one transaction — re-running any window is a no-op.
+ * Source: the Finances API v2024-06-19 `transactions` feed — one flat transaction per money
+ * movement (a shipment, a refund, a fee invoice, an ad charge…), each with its own id, posted
+ * date and a tree of breakdowns down to the component (principal, tax, commission, FBA fee…).
+ * We flatten every leaf to one signed row tagged with a P&L bucket and upsert by transaction id,
+ * so any window can be re-read at any time and the ledger never doubles.
  *
- * Date basis is Amazon's PostedDate (when the money moved), the same basis Sellerise and the
- * settlement reports use — so totals reconcile with bank deposits, not with order dates.
+ * Payout deferral: Amazon charges a sale when it ships but holds the payout until about a week
+ * after delivery. The feed shows that sale immediately as a DEFERRED transaction (exact money,
+ * exact fees), and later adds a RELEASED copy that points back to it. Both key to the original's
+ * id here, so a sale is one transaction whose status moves held → released — revenue lands in the
+ * P&L the day it ships, not the day Amazon lets go of the cash.
  */
 
 export type PnlGroup = "sales" | "refunds" | "fba_fees" | "referral_fees" | "storage_fees" | "advertising" | "taxes" | "other";
@@ -28,13 +32,24 @@ type FlatRow = {
   orderId: string | null;
   sku: string | null;
   quantity: number | null;
+  txId: string;
+  status: "held" | "released";
+  releasedAt: Date | null;
   /** Internal: this row should be re-dated to its order's purchase date (stripped before insert). */
   orderDated?: boolean;
 };
 
+type AnyObj = Record<string, any>;
+
 const money = (m: unknown): number => {
-  const v = (m as { CurrencyAmount?: number } | null)?.CurrencyAmount;
+  const v = (m as { currencyAmount?: number } | null)?.currencyAmount;
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
+};
+
+const parseDate = (v: unknown): Date | null => {
+  if (typeof v !== "string" || !v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
 };
 
 /** Fee type → bucket, mirroring how the settlement P&L reads: FBA fees = per-order fulfillment
@@ -51,191 +66,158 @@ function feeGroup(type: string): PnlGroup {
   return "other";
 }
 
+type Leaf = { path: string[]; amount: number };
+
+/** Every terminal node of a breakdown tree with the names leading to it. */
+function leaves(node: AnyObj, path: string[], out: Leaf[]): void {
+  const name = String(node.breakdownType ?? "");
+  const kids: AnyObj[] = Array.isArray(node.breakdowns) ? node.breakdowns : [];
+  if (kids.length === 0) out.push({ path: [...path, name], amount: money(node.breakdownAmount) });
+  else for (const k of kids) leaves(k, [...path, name], out);
+}
+
+/** The component this leaf stands for. Amazon ends most branches in a bare "Base" node, and
+ *  writes a fee discount as a "Promo" child of the fee — both read as the branch above them. */
+function leafName(path: string[]): string {
+  const names = path.filter((n) => n && n !== "Base");
+  let name = names[names.length - 1] ?? "Other";
+  if (name === "Promo" && names.length > 1) name = names[names.length - 2];
+  return name;
+}
+
+/** Order-money component → (bucket, label). Labels follow the settlement vocabulary the P&L was
+ *  built on (Principal, Tax, ShippingCharge, Promotion, Commission…); `TaxWithheld:` marks what the
+ *  marketplace facilitator collected and kept. */
+function orderComponent(path: string[]): { group: PnlGroup; type: string } {
+  const category = path[0] ?? "";
+  const name = leafName(path);
+  if (name.startsWith("MarketplaceFacilitatorTax")) return { group: "taxes", type: `TaxWithheld:${name}` };
+  switch (category) {
+    case "ProductCharges":
+      return { group: "sales", type: name === "OurPricePrincipal" ? "Principal" : name };
+    case "Shipping":
+      return { group: "sales", type: name === "ShippingPrincipal" ? "ShippingCharge" : name };
+    case "Tax":
+      return { group: "sales", type: name === "OurPriceTax" ? "Tax" : name };
+    case "PromoRebates":
+    case "Promo":
+      return { group: "sales", type: "Promotion" };
+    case "Other":
+      return name === "GiftwrapPrincipal" ? { group: "sales", type: "GiftWrap" } : { group: "other", type: name };
+    case "AmazonFees":
+    case "FBAFees":
+      return { group: feeGroup(name), type: name };
+    default:
+      return { group: "other", type: name };
+  }
+}
+
+function identifiers(tx: AnyObj): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const r of tx.relatedIdentifiers ?? []) {
+    if (r?.relatedIdentifierName && r?.relatedIdentifierValue) out.set(String(r.relatedIdentifierName), String(r.relatedIdentifierValue));
+  }
+  return out;
+}
+
+function productContext(item: AnyObj): { sku: string | null; quantity: number | null } {
+  const ctx = (item.contexts ?? []).find((c: AnyObj) => c?.contextType === "ProductContext");
+  const qty = ctx?.quantityShipped;
+  return { sku: ctx?.sku ? String(ctx.sku) : null, quantity: typeof qty === "number" ? qty : null };
+}
+
 /** Push one row, dropping zero-amount noise. */
 function push(rows: FlatRow[], row: FlatRow) {
   if (row.amount !== 0) rows.push(row);
 }
 
-type AnyObj = Record<string, any>;
-
-/** Order-scoped shipment/refund/chargeback events share one nested shape; `mode` decides buckets:
- *  a shipment's components split across sales/fees/taxes, a refund's all land in "refunds". */
-function flattenOrderEvent(rows: FlatRow[], ev: AnyObj, mode: "shipment" | "refund", refundType = "Refund") {
-  const postedAt = ev.PostedDate ? new Date(ev.PostedDate) : null;
-  if (!postedAt || Number.isNaN(postedAt.getTime())) return;
-  const orderId: string | null = ev.AmazonOrderId ?? null;
-  const items: AnyObj[] = [...(ev.ShipmentItemList ?? []), ...(ev.ShipmentItemAdjustmentList ?? [])];
-  const base = { postedAt, eventAt: postedAt, orderId, orderDated: mode === "shipment" } as const;
-  for (const item of items) {
-    const sku: string | null = item.SellerSKU ?? null;
-    const qty: number | null = item.QuantityShipped ?? null;
-    const charges: AnyObj[] = [...(item.ItemChargeList ?? []), ...(item.ItemChargeAdjustmentList ?? [])];
-    for (const c of charges) {
-      const type = String(c.ChargeType ?? "Charge");
-      push(rows, {
-        ...base,
-        sku,
-        // Units ride ONLY the shipped Principal rows — one attribution per item, and it is what
-        // the COGS calculation multiplies by the FIFO unit cost.
-        quantity: mode === "shipment" && type === "Principal" ? qty : null,
-        group: mode === "refund" ? "refunds" : "sales",
-        type: mode === "refund" ? `${refundType}:${type}` : type,
-        amount: money(c.ChargeAmount),
-      });
-    }
-    const fees: AnyObj[] = [...(item.ItemFeeList ?? []), ...(item.ItemFeeAdjustmentList ?? [])];
-    for (const f of fees) {
-      const type = String(f.FeeType ?? "Fee");
-      push(rows, {
-        ...base, sku, quantity: null,
-        group: mode === "refund" ? "refunds" : feeGroup(type),
-        type: mode === "refund" ? `${refundType}:${type}` : type,
-        amount: money(f.FeeAmount),
-      });
-    }
-    const promos: AnyObj[] = [...(item.PromotionList ?? []), ...(item.PromotionAdjustmentList ?? [])];
-    for (const p of promos) {
-      push(rows, {
-        ...base, sku, quantity: null,
-        group: mode === "refund" ? "refunds" : "sales",
-        type: mode === "refund" ? `${refundType}:Promotion` : "Promotion",
-        amount: money(p.PromotionAmount),
-      });
-    }
-    const withheld: AnyObj[] = item.ItemTaxWithheldList ?? [];
-    for (const w of withheld) {
-      for (const c of w.TaxesWithheld ?? []) {
-        push(rows, {
-          ...base, sku, quantity: null,
-          group: mode === "refund" ? "refunds" : "taxes",
-          type: mode === "refund" ? `${refundType}:TaxWithheld` : `TaxWithheld:${c.ChargeType ?? ""}`,
-          amount: money(c.ChargeAmount),
-        });
-      }
-    }
-  }
-}
-
-/** One raw Finances page → flat P&L rows. Unhandled event lists are counted, not dropped silently.
- *  `fallbackAt` dates the few event kinds Amazon ships WITHOUT a posted date (service fees like
- *  inbound transportation): it must be inside the imported window, so replace-by-window stays
- *  idempotent — never "now", which would let those rows escape the window and duplicate. */
-export function flattenFinancialEvents(page: FinancialEventsPage, unhandled?: Map<string, number>, fallbackAt?: Date): FlatRow[] {
+/** One transaction → flat P&L rows (empty for kinds that aren't P&L, like bank disbursements).
+ *  Kinds we don't model explicitly still land — in "other", under the platform's own label — so
+ *  the ledger always sums to what Amazon moved; `unhandled` counts them for a verification pass. */
+export function flattenTransaction(tx: FinanceTransaction, unhandled?: Map<string, number>): FlatRow[] {
   const rows: FlatRow[] = [];
-  const p = page as AnyObj;
+  const t = tx as AnyObj;
+  const kind = String(t.transactionType ?? "");
+  if (kind === "Transfer") return rows; // money moving to the bank account, not a P&L event
+  const postedAt = parseDate(t.postedDate);
+  if (!postedAt) return rows;
 
-  for (const ev of p.ShipmentEventList ?? []) flattenOrderEvent(rows, ev, "shipment");
-  for (const ev of p.RefundEventList ?? []) flattenOrderEvent(rows, ev, "refund", "Refund");
-  for (const ev of p.GuaranteeClaimEventList ?? []) flattenOrderEvent(rows, ev, "refund", "GuaranteeClaim");
-  for (const ev of p.ChargebackEventList ?? []) flattenOrderEvent(rows, ev, "refund", "Chargeback");
+  const ids = identifiers(t);
+  const status: FlatRow["status"] = t.transactionStatus === "DEFERRED" ? "held" : "released";
+  const deferred = (t.contexts ?? []).find((c: AnyObj) => c?.contextType === "DeferredContext");
+  // A released row's own date is the release; a held one only knows when the hold is due to end.
+  const releasedAt = t.transactionStatus === "RELEASED" ? postedAt : parseDate(deferred?.maturityDate);
+  const base = {
+    postedAt,
+    eventAt: postedAt,
+    orderId: ids.get("ORDER_ID") ?? null,
+    txId: ids.get("DEFERRED_TRANSACTION_ID") ?? String(t.transactionId),
+    status,
+    releasedAt,
+  };
+  const description = String(t.description ?? kind);
 
-  for (const ev of p.ServiceFeeEventList ?? []) {
-    // Service fees carry no PostedDate of their own reliably; FeeList components hold the money.
-    const postedAt = ev.PostedDate ? new Date(ev.PostedDate) : null;
-    for (const f of ev.FeeList ?? []) {
-      const reason = String(ev.FeeReason ?? f.FeeType ?? "ServiceFee");
-      const t = reason.toLowerCase();
-      // Non-order service fees (inbound placement, disposal, subscriptions…) belong in "other" —
-      // the FBA-fees bucket is reserved for per-order fulfillment, matching the settlement P&L.
-      const sg = feeGroup(reason);
-      const group: PnlGroup = sg === "storage_fees" ? "storage_fees" : "other";
-      const at = postedAt && !Number.isNaN(postedAt.getTime()) ? postedAt : (fallbackAt ?? new Date());
-      push(rows, {
-        postedAt: at,
-        eventAt: at,
-        group,
-        type: reason,
-        amount: money(f.FeeAmount),
-        orderId: ev.AmazonOrderId ?? null,
-        sku: ev.SellerSKU ?? null,
-        quantity: null,
-      });
-    }
-  }
+  const items: AnyObj[] = Array.isArray(t.items) ? t.items : [];
+  const units: { leaves: Leaf[]; sku: string | null; quantity: number | null; fallback: number }[] = items.length
+    ? items.map((item) => {
+        const ls: Leaf[] = [];
+        for (const b of item.breakdowns ?? []) leaves(b, [], ls);
+        return { leaves: ls, ...productContext(item), fallback: money(item.totalAmount) };
+      })
+    : [(() => {
+        const ls: Leaf[] = [];
+        for (const b of t.breakdowns ?? []) leaves(b, [], ls);
+        return { leaves: ls, sku: null, quantity: null, fallback: money(t.totalAmount) };
+      })()];
 
-  for (const ev of p.AdjustmentEventList ?? []) {
-    const postedAt = ev.PostedDate ? new Date(ev.PostedDate) : null;
-    if (!postedAt || Number.isNaN(postedAt.getTime())) continue;
-    const type = String(ev.AdjustmentType ?? "Adjustment");
-    const group: PnlGroup = type.toLowerCase().includes("storage") ? "storage_fees" : "other";
-    // Item list carries per-SKU splits when present; otherwise the event-level total.
-    const items: AnyObj[] = ev.AdjustmentItemList ?? [];
-    if (items.length) {
-      for (const it of items) {
-        push(rows, { postedAt, eventAt: postedAt, group, type, amount: money(it.TotalAmount), orderId: null, sku: it.SellerSKU ?? null, quantity: null });
-      }
-    } else {
-      push(rows, { postedAt, eventAt: postedAt, group, type, amount: money(ev.AdjustmentAmount), orderId: null, sku: null, quantity: null });
-    }
-  }
-
-  for (const ev of p.ProductAdsPaymentEventList ?? []) {
-    const postedAt = ev.postedDate ? new Date(ev.postedDate) : null;
-    if (!postedAt || Number.isNaN(postedAt.getTime())) continue;
-    push(rows, {
-      postedAt,
-      eventAt: postedAt,
-      group: "advertising",
-      type: String(ev.transactionType ?? "ProductAds"),
-      amount: money(ev.transactionValue) || money(ev.baseValue) + money(ev.taxValue),
-      orderId: null, sku: null, quantity: null,
-    });
-  }
-
-  for (const ev of p.SellerReviewEnrollmentPaymentEventList ?? []) {
-    const postedAt = ev.PostedDate ? new Date(ev.PostedDate) : null;
-    if (!postedAt || Number.isNaN(postedAt.getTime())) continue;
-    const amount = money(ev.ChargeComponent?.ChargeAmount) + money(ev.FeeComponent?.FeeAmount);
-    push(rows, { postedAt, eventAt: postedAt, group: "other", type: "VineEnrollmentFee", amount, orderId: null, sku: null, quantity: null });
-  }
-
-  for (const ev of p.DebtRecoveryEventList ?? []) {
-    // Recovery reduces the payout; some payloads carry no PostedDate — fall back to the charge's.
-    const postedAt = ev.PostedDate || ev.DebtRecoveryItemList?.[0]?.GroupBeginDate
-      ? new Date(ev.PostedDate ?? ev.DebtRecoveryItemList?.[0]?.GroupBeginDate)
-      : (fallbackAt ?? new Date());
-    const amount = -Math.abs(money(ev.RecoveryAmount));
-    push(rows, { postedAt, eventAt: postedAt, group: "other", type: String(ev.DebtRecoveryType ?? "DebtRecovery"), amount, orderId: null, sku: null, quantity: null });
-  }
-
-  for (const ev of p.RemovalShipmentEventList ?? []) {
-    const postedAt = ev.PostedDate ? new Date(ev.PostedDate) : null;
-    if (!postedAt || Number.isNaN(postedAt.getTime())) continue;
-    for (const it of ev.RemovalShipmentItemList ?? []) {
-      const amount = money(it.Revenue) + money(it.FeeAmount) + money(it.TaxAmount) + money(it.TaxWithheld);
-      push(rows, { postedAt, eventAt: postedAt, group: "other", type: "RemovalShipment", amount, orderId: ev.OrderId ?? null, sku: it.FulfillmentNetworkSKU ?? null, quantity: null });
-    }
-  }
-
-  for (const ev of p.RetrochargeEventList ?? []) {
-    const postedAt = ev.PostedDate ? new Date(ev.PostedDate) : null;
-    if (!postedAt || Number.isNaN(postedAt.getTime())) continue;
-    const amount = money(ev.BaseTax) + money(ev.ShippingTax);
-    push(rows, { postedAt, eventAt: postedAt, group: "taxes", type: String(ev.RetrochargeEventType ?? "Retrocharge"), amount, orderId: ev.AmazonOrderId ?? null, sku: null, quantity: null });
-  }
-
-  for (const ev of p.CouponPaymentEventList ?? []) {
-    const postedAt = ev.PostedDate ? new Date(ev.PostedDate) : null;
-    if (!postedAt || Number.isNaN(postedAt.getTime())) continue;
-    const amount = money(ev.TotalAmount) || money(ev.ChargeComponent?.ChargeAmount) + money(ev.FeeComponent?.FeeAmount);
-    push(rows, { postedAt, eventAt: postedAt, group: "sales", type: "CouponPayment", amount, orderId: null, sku: null, quantity: null });
-  }
-
-  // Anything not modelled above gets counted so a verification pass can see what was skipped.
-  if (unhandled) {
-    const handled = new Set([
-      "ShipmentEventList", "RefundEventList", "GuaranteeClaimEventList", "ChargebackEventList",
-      "ServiceFeeEventList", "AdjustmentEventList", "ProductAdsPaymentEventList",
-      "SellerReviewEnrollmentPaymentEventList", "DebtRecoveryEventList", "RemovalShipmentEventList",
-      "RetrochargeEventList", "CouponPaymentEventList",
-    ]);
-    for (const [key, list] of Object.entries(p)) {
-      if (!handled.has(key) && Array.isArray(list) && list.length > 0) {
-        unhandled.set(key, (unhandled.get(key) ?? 0) + list.length);
+  for (const u of units) {
+    // An item with no breakdown tree still carries its total — never drop money on the floor.
+    const ls = u.leaves.length ? u.leaves : [{ path: [description], amount: u.fallback }];
+    for (const leaf of ls) {
+      switch (kind) {
+        case "Shipment": {
+          const c = orderComponent(leaf.path);
+          push(rows, {
+            ...base, ...c, sku: u.sku, amount: leaf.amount, orderDated: true,
+            // Units ride ONLY the shipped Principal rows — one attribution per item, and it is
+            // what the COGS calculation multiplies by the FIFO unit cost.
+            quantity: c.type === "Principal" ? u.quantity : null,
+          });
+          break;
+        }
+        case "Refund":
+        case "GuaranteeClaim":
+        case "Chargeback": {
+          const c = orderComponent(leaf.path);
+          const type = c.group === "taxes" ? "TaxWithheld" : c.type;
+          push(rows, { ...base, group: "refunds", type: `${kind}:${type}`, sku: u.sku, quantity: null, amount: leaf.amount });
+          break;
+        }
+        case "ServiceFee":
+        case "ServiceCharge": {
+          // Non-order fees (inbound transportation, storage, subscriptions, credits…) belong in
+          // "other" — the FBA-fees bucket is reserved for per-order fulfillment.
+          const name = leafName(leaf.path);
+          const group: PnlGroup = feeGroup(name) === "storage_fees" ? "storage_fees" : "other";
+          push(rows, { ...base, group, type: name, sku: u.sku, quantity: null, amount: leaf.amount });
+          break;
+        }
+        case "FBAInventoryReimbursement":
+        case "Adjustment":
+        case "MiscellaneousLedgerAdjustment": {
+          const group: PnlGroup = description.toLowerCase().includes("storage") ? "storage_fees" : "other";
+          push(rows, { ...base, group, type: description, sku: u.sku, quantity: null, amount: leaf.amount });
+          break;
+        }
+        case "ProductAdsPayment":
+          push(rows, { ...base, group: "advertising", type: "ProductAdsPayment", sku: null, quantity: null, amount: leaf.amount });
+          break;
+        default:
+          if (unhandled) unhandled.set(kind, (unhandled.get(kind) ?? 0) + 1);
+          push(rows, { ...base, group: "other", type: description || kind, sku: u.sku, quantity: null, amount: leaf.amount });
       }
     }
   }
-
   return rows;
 }
 
@@ -249,13 +231,67 @@ async function amazonClient(): Promise<SpApiClient | null> {
   });
 }
 
-/** Import one posted-date window, replacing whatever that window already held. */
+type TxBundle = { rows: FlatRow[]; postedAt: Date; status: FlatRow["status"]; releasedAt: Date | null; actualRelease: boolean };
+
+/** Fold a window's transactions into one bundle per transaction id: a held original and its
+ *  release copy carry identical money, so the copy only contributes the release date. */
+function bundle(txs: FinanceTransaction[], unhandled: Map<string, number>): Map<string, TxBundle> {
+  const out = new Map<string, TxBundle>();
+  for (const tx of txs) {
+    const rows = flattenTransaction(tx, unhandled);
+    if (!rows.length) continue;
+    const t = tx as AnyObj;
+    const isCopy = identifiers(t).has("DEFERRED_TRANSACTION_ID");
+    const key = rows[0].txId;
+    const cur = out.get(key);
+    const actualRelease = t.transactionStatus === "RELEASED";
+    if (!cur) {
+      out.set(key, { rows, postedAt: rows[0].postedAt, status: rows[0].status, releasedAt: rows[0].releasedAt, actualRelease });
+      continue;
+    }
+    // Merge: the original's charge date is the posting date; a copy or later status wins on release.
+    if (rows[0].postedAt < cur.postedAt) cur.postedAt = rows[0].postedAt;
+    if (!isCopy) cur.rows = rows; // the original carries the item detail at first hand
+    if (rows[0].status === "released") cur.status = "released";
+    if (actualRelease || (!cur.actualRelease && rows[0].releasedAt)) {
+      cur.releasedAt = rows[0].releasedAt;
+      cur.actualRelease = cur.actualRelease || actualRelease;
+    }
+  }
+  return out;
+}
+
+/** Import one posted-date window: upsert every transaction in it by id. Legacy rows imported
+ *  before transactions carried ids are replaced window-wise, so re-walking history migrates them. */
 export async function importAmazonFinances(postedAfter: Date, postedBefore: Date): Promise<{ rows: number; unhandled: Record<string, number> }> {
   const client = await amazonClient();
   if (!client) return { rows: 0, unhandled: {} };
   const unhandled = new Map<string, number>();
-  const pages = await listFinancialEvents(client, postedAfter, postedBefore);
-  const rows = pages.flatMap((page) => flattenFinancialEvents(page, unhandled, postedAfter));
+  const txs = await listTransactions(client, postedAfter, postedBefore);
+  const bundles = bundle(txs, unhandled);
+  const keys = [...bundles.keys()];
+
+  // What we already hold for these transactions: a held original imported earlier keeps its charge
+  // date when only its release copy is in this window, and a known release date is never replaced
+  // by a maturity estimate.
+  const existing = new Map<string, { postedAt: Date; status: string | null; releasedAt: Date | null }>();
+  for (let i = 0; i < keys.length; i += 1000) {
+    const chunk = await prisma.financeEvent.findMany({
+      where: { channel: "AMAZON", txId: { in: keys.slice(i, i + 1000) } },
+      select: { txId: true, postedAt: true, status: true, releasedAt: true },
+      distinct: ["txId"],
+    });
+    for (const e of chunk) if (e.txId) existing.set(e.txId, e);
+  }
+  const rows: FlatRow[] = [];
+  for (const [key, b] of bundles) {
+    const prev = existing.get(key);
+    const postedAt = prev && prev.postedAt < b.postedAt ? prev.postedAt : b.postedAt;
+    const status = b.status === "released" || prev?.status === "released" ? "released" : "held";
+    const releasedAt = b.actualRelease ? b.releasedAt : prev?.status === "released" && prev.releasedAt ? prev.releasedAt : b.releasedAt;
+    for (const r of b.rows) rows.push({ ...r, postedAt, status, releasedAt });
+  }
+
   // Re-date shipment money onto its order's purchase instant — the day a seller reads it under.
   const orderIds = [...new Set(rows.filter((r) => r.orderDated && r.orderId).map((r) => r.orderId as string))];
   const orderedAt = new Map<string, Date>();
@@ -266,24 +302,22 @@ export async function importAmazonFinances(postedAfter: Date, postedBefore: Date
     });
     for (const o of chunk) orderedAt.set(o.externalId, o.orderedAt);
   }
-  for (const r of rows) {
-    if (r.orderDated && r.orderId) r.eventAt = orderedAt.get(r.orderId) ?? r.postedAt;
-  }
-  // Replace-by-window: delete + insert atomically so a crash can never leave a half-window.
+  for (const r of rows) r.eventAt = r.orderDated && r.orderId ? (orderedAt.get(r.orderId) ?? r.postedAt) : r.postedAt;
+
+  // Delete + insert atomically so a crash can never leave a half-imported transaction.
   await prisma.$transaction([
-    prisma.financeEvent.deleteMany({ where: { channel: "AMAZON", postedAt: { gte: postedAfter, lt: postedBefore } } }),
+    ...(keys.length ? [prisma.financeEvent.deleteMany({ where: { channel: "AMAZON", txId: { in: keys } } })] : []),
+    prisma.financeEvent.deleteMany({ where: { channel: "AMAZON", txId: null, postedAt: { gte: postedAfter, lt: postedBefore } } }),
     ...(rows.length
       ? [prisma.financeEvent.createMany({
           data: rows.map(({ orderDated: _drop, ...r }) => ({ channel: "AMAZON", ...r })),
         })]
       : []),
   ], { timeout: 120_000, maxWait: 15_000 }); // a 7-day window can carry thousands of rows
-  if (unhandled.size > 0) console.log("[finances] unhandled event lists:", Object.fromEntries(unhandled));
+  if (unhandled.size > 0) console.log("[finances] unmodelled transaction kinds:", Object.fromEntries(unhandled));
   return { rows: rows.length, unhandled: Object.fromEntries(unhandled) };
 }
 
-// Small windows on purpose: the handful of event kinds Amazon ships undated (service fees) get
-// dated at the window start, so a tighter window keeps them within days of the truth.
 const BACKFILL_WINDOW_DAYS = 7;
 const BACKFILL_FLOOR_DAYS = 730; // matches the orders walk — about two years back
 
@@ -293,7 +327,7 @@ export async function backfillAmazonFinancesStep(): Promise<{ done: boolean; row
   if (!client) return { done: true, rows: 0, cursor: "" };
   const s = await getOrgSettings();
   const floor = new Date(Date.now() - BACKFILL_FLOOR_DAYS * 86_400_000);
-  // First step starts at now − 3 min: the API refuses a PostedBefore within 2 minutes of now.
+  // First step starts at now − 3 min: the API refuses a postedBefore within 2 minutes of now.
   const cursorEnd = s.financeBackfillCursor ? new Date(s.financeBackfillCursor) : new Date(Date.now() - 3 * 60_000);
   if (cursorEnd <= floor) return { done: true, rows: 0, cursor: s.financeBackfillCursor ?? "" };
   const start = new Date(Math.max(floor.getTime(), cursorEnd.getTime() - BACKFILL_WINDOW_DAYS * 86_400_000));
@@ -302,8 +336,8 @@ export async function backfillAmazonFinancesStep(): Promise<{ done: boolean; row
   return { done: start.getTime() <= floor.getTime(), rows: r.rows, cursor: start.toISOString() };
 }
 
-/** The live leg: sweep [cursor − overlap, now − 2 min) forward. Replace-by-window makes the
- *  overlap free, and the 2-minute stand-off is the Finances API's own PostedBefore requirement. */
+/** The live leg: sweep [cursor − overlap, now − 2 min) forward. Upserts make the overlap free,
+ *  and the 2-minute stand-off is the Finances API's own postedBefore requirement. */
 export async function sweepAmazonFinances(): Promise<{ rows: number } | null> {
   const client = await amazonClient();
   if (!client) return null;
@@ -314,4 +348,21 @@ export async function sweepAmazonFinances(): Promise<{ rows: number } | null> {
   const r = await importAmazonFinances(from, end);
   await saveOrgSettings({ financeEventsCursor: end.toISOString() });
   return { rows: r.rows };
+}
+
+const RECONCILE_DAYS = 14;
+
+/** Nightly: re-read the last two weeks so anything Amazon revised in place (a held sale it
+ *  cancelled, a reissued fee) is caught — the sweep only sees what posts fresh. */
+export async function reconcileAmazonFinances(): Promise<{ rows: number } | null> {
+  const client = await amazonClient();
+  if (!client) return null;
+  const end = new Date(Date.now() - 3 * 60_000);
+  let rows = 0;
+  for (let d = RECONCILE_DAYS; d > 0; d -= BACKFILL_WINDOW_DAYS) {
+    const from = new Date(end.getTime() - d * 86_400_000);
+    const to = new Date(Math.min(end.getTime(), from.getTime() + BACKFILL_WINDOW_DAYS * 86_400_000));
+    rows += (await importAmazonFinances(from, to)).rows;
+  }
+  return { rows };
 }
