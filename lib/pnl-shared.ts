@@ -16,7 +16,9 @@ export type Pnl = {
   roi: number | null; // netProfit / |cogs|
   /** Revenue included from orders Amazon hasn't settled yet (exact split; fees estimated). */
   pendingSales: number;
-  unmatchedSkus: string[]; // shipped SKUs with no product/cost — their units are NOT in cogs
+  unmatchedSkus: string[]; // managed SKUs with no cost yet — their units are NOT in cogs
+  /** Listings sold on the channel that the company doesn't manage in consl — left out entirely. */
+  ignored: { skus: string[]; units: number; sales: number };
   backfillInProgress: boolean;
   hasData: boolean;
 };

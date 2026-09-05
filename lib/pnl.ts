@@ -2,13 +2,20 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { GROUP_ORDER, type Pnl, type PnlGroupBlock } from "@/lib/pnl-shared";
-import { amazonMarketplaceCurrency } from "@/lib/channel-tz";
+import { getCurrentOrg } from "@/lib/org";
+import { fxRate } from "@/lib/fx";
 
 export { GROUP_ORDER, GROUP_LABEL, type Pnl, type PnlGroupBlock, type PnlTypeRow } from "@/lib/pnl-shared";
 
 /**
  * The P&L read side: sum the imported financial ledger by bucket for a date window, price the
  * shipped units with the engine's landed cost — and bridge the settlement lag.
+ *
+ * Scope: the products the company keeps in consl. Listings it never mapped (ignored at
+ * onboarding, or a sister listing it doesn't manage here) are left out entirely — their sales,
+ * fees, refunds and units alike — so the statement never shows revenue it can't cost. Money with
+ * no SKU on it (ad invoices, storage bills, subscriptions) is the account's and always counts.
+ * Amounts are the company's currency (`baseAmount`), so a Canadian sale adds up with a US one.
  *
  * Amazon books an order's money when it ships (held for payout, but exact), so only orders placed
  * and not yet shipped are missing from the ledger. Those are added as "(pending)" rows: their
@@ -65,6 +72,17 @@ async function avgCostBySellerSku(): Promise<Map<string, number>> {
   return out;
 }
 
+/** Amazon seller SKUs the company manages in consl — the statement's scope. */
+async function mappedSellerSkus(): Promise<Set<string>> {
+  const products = await prisma.product.findMany({ where: { sellerSku: { not: null } }, select: { sellerSku: true } });
+  return new Set(products.map((p) => p.sellerSku as string));
+}
+
+/** Prisma filter: rows about one of `skus`, or about no SKU at all (account-level money). */
+function inScope(skus: Set<string>) {
+  return { OR: [{ sku: null }, { sku: { in: [...skus] } }] };
+}
+
 type Bridge = {
   sales: { type: string; amount: number }[];
   taxes: number;
@@ -77,23 +95,17 @@ type Bridge = {
 };
 
 /** Orders in range whose shipment money hasn't posted yet → exact revenue + estimated fees. */
-async function pendingBridge(from: Date, to: Date, costs: Map<string, number>): Promise<Bridge> {
+async function pendingBridge(from: Date, to: Date, costs: Map<string, number>, scope: Set<string>, baseCurrency: string): Promise<Bridge> {
   const none: Bridge = { sales: [], taxes: 0, fba: 0, referral: 0, cogs: 0, units: 0, pendingSales: 0, unmatchedSkus: new Set() };
   const orgId = await getCurrentOrgId();
   if (!orgId) return none;
 
-  // The ledger is one marketplace's (the connection's), so only orders sold there can be waiting
-  // on it. A unified account also ships the odd order to a sister marketplace (Amazon.ca, in
-  // CAD): that money settles in the other marketplace's ledger and would never arrive here.
-  const conn = await prisma.integration.findFirst({ where: { provider: "amazon" }, select: { marketplaceId: true } });
-  const currency = amazonMarketplaceCurrency(conn?.marketplaceId);
-
-  const orders = await prisma.$queryRaw<
-    { id: string; total: number; productGross: number | null; discounts: number | null; tax: number | null; shipping: number | null; giftWrap: number | null }[]
+  const candidates = await prisma.$queryRaw<
+    { id: string; total: number; currency: string; orderedAt: Date; productGross: number | null; discounts: number | null; tax: number | null; shipping: number | null; giftWrap: number | null }[]
   >`
-    SELECT so.id, so.total, so."productGross", so.discounts, so.tax, so.shipping, so."giftWrap"
+    SELECT so.id, so.total, so.currency, so."orderedAt", so."productGross", so.discounts, so.tax, so.shipping, so."giftWrap"
     FROM "SalesOrder" so
-    WHERE so."orgId" = ${orgId} AND so.channel = 'AMAZON' AND so.currency = ${currency}
+    WHERE so."orgId" = ${orgId} AND so.channel = 'AMAZON'
       AND so.cancelled = false AND so.voided = false AND so.total <> 0
       AND so."orderedAt" >= ${from} AND so."orderedAt" <= ${to}
       AND NOT EXISTS (
@@ -101,31 +113,44 @@ async function pendingBridge(from: Date, to: Date, costs: Map<string, number>): 
         WHERE fe."orgId" = so."orgId" AND fe.channel = 'AMAZON'
           AND fe."orderId" = so."externalId" AND fe.type = 'Principal'
       )`;
+  if (candidates.length === 0) return none;
+
+  // An order is in scope when at least one of its lines is a product the company manages here.
+  const allLines = await prisma.salesOrderLine.findMany({
+    where: { orderId: { in: candidates.map((o) => o.id) } },
+    select: { orderId: true, sku: true, quantity: true, gross: true, unitPrice: true },
+  });
+  const inScopeOrders = new Set(allLines.filter((l) => l.sku && scope.has(l.sku)).map((l) => l.orderId));
+  const orders = candidates.filter((o) => inScopeOrders.has(o.id));
   if (orders.length === 0) return none;
 
-  // Revenue split straight off the order records — exact, not an estimate.
+  // Revenue split straight off the order records — exact, not an estimate — in the company's
+  // currency (a sister-marketplace order converts at its day's reference rate).
   let principal = 0, promo = 0, tax = 0, shipping = 0, wrap = 0;
+  const rateOf = new Map<string, number>();
   for (const o of orders) {
+    const fx = o.currency === baseCurrency ? 1 : await fxRate(o.currency, baseCurrency, o.orderedAt);
+    rateOf.set(o.id, fx);
     if (o.productGross != null) {
-      principal += o.productGross;
-      promo -= o.discounts ?? 0;
-      tax += o.tax ?? 0;
-      shipping += o.shipping ?? 0;
-      wrap += o.giftWrap ?? 0;
+      principal += o.productGross * fx;
+      promo -= (o.discounts ?? 0) * fx;
+      tax += (o.tax ?? 0) * fx;
+      shipping += (o.shipping ?? 0) * fx;
+      wrap += (o.giftWrap ?? 0) * fx;
     } else {
-      principal += o.total; // fresh order the report hasn't detailed yet — total is what we know
+      principal += o.total * fx; // fresh order the report hasn't detailed yet — total is what we know
     }
   }
 
   // Fee estimates from this seller's own posted history, per SKU with an org-wide fallback.
   const [principalHist, fbaHist, commissionHist] = await Promise.all([
-    prisma.financeEvent.groupBy({ by: ["sku"], where: { channel: "AMAZON", type: "Principal" }, _sum: { amount: true, quantity: true } }),
-    prisma.financeEvent.groupBy({ by: ["sku"], where: { channel: "AMAZON", type: "FBAPerUnitFulfillmentFee" }, _sum: { amount: true } }),
-    prisma.financeEvent.groupBy({ by: ["sku"], where: { channel: "AMAZON", type: "Commission" }, _sum: { amount: true } }),
+    prisma.financeEvent.groupBy({ by: ["sku"], where: { channel: "AMAZON", type: "Principal" }, _sum: { baseAmount: true, quantity: true } }),
+    prisma.financeEvent.groupBy({ by: ["sku"], where: { channel: "AMAZON", type: "FBAPerUnitFulfillmentFee" }, _sum: { baseAmount: true } }),
+    prisma.financeEvent.groupBy({ by: ["sku"], where: { channel: "AMAZON", type: "Commission" }, _sum: { baseAmount: true } }),
   ]);
-  const principalBySku = new Map(principalHist.map((r) => [r.sku ?? "", { amount: r._sum.amount ?? 0, units: r._sum.quantity ?? 0 }]));
-  const fbaBySku = new Map(fbaHist.map((r) => [r.sku ?? "", r._sum.amount ?? 0]));
-  const commissionBySku = new Map(commissionHist.map((r) => [r.sku ?? "", r._sum.amount ?? 0]));
+  const principalBySku = new Map(principalHist.map((r) => [r.sku ?? "", { amount: r._sum.baseAmount ?? 0, units: r._sum.quantity ?? 0 }]));
+  const fbaBySku = new Map(fbaHist.map((r) => [r.sku ?? "", r._sum.baseAmount ?? 0]));
+  const commissionBySku = new Map(commissionHist.map((r) => [r.sku ?? "", r._sum.baseAmount ?? 0]));
   const totals = {
     principal: [...principalBySku.values()].reduce((t, v) => t + v.amount, 0),
     units: [...principalBySku.values()].reduce((t, v) => t + v.units, 0),
@@ -135,18 +160,18 @@ async function pendingBridge(from: Date, to: Date, costs: Map<string, number>): 
   const orgFbaPerUnit = totals.units > 0 ? totals.fba / totals.units : 0;
   const orgCommissionRate = totals.principal > 0 ? totals.commission / totals.principal : 0;
 
-  const lines = await prisma.salesOrderLine.findMany({
-    where: { orderId: { in: orders.map((o) => o.id) } },
-    select: { sku: true, quantity: true, gross: true, unitPrice: true },
-  });
+  // Lines of in-scope orders, in-scope SKUs only (a mixed order's unmanaged line carries no fee
+  // or cost here; its order-level revenue split above is the one approximation this makes).
+  const lines = allLines.filter((l) => inScopeOrders.has(l.orderId) && l.sku && scope.has(l.sku));
   let fba = 0, referral = 0, cogs = 0, units = 0;
   const unmatched = new Set<string>();
   for (const l of lines) {
     const sku = l.sku ?? "";
+    const fx = rateOf.get(l.orderId) ?? 1;
     const hist = principalBySku.get(sku);
     const fbaPerUnit = hist && hist.units > 0 ? (fbaBySku.get(sku) ?? 0) / hist.units : orgFbaPerUnit;
     const commissionRate = hist && hist.amount > 0 ? (commissionBySku.get(sku) ?? 0) / hist.amount : orgCommissionRate;
-    const gross = l.gross || l.quantity * l.unitPrice;
+    const gross = (l.gross || l.quantity * l.unitPrice) * fx;
     fba += l.quantity * fbaPerUnit;
     referral += gross * commissionRate;
     units += l.quantity;
@@ -176,18 +201,21 @@ async function pendingBridge(from: Date, to: Date, costs: Map<string, number>): 
 }
 
 export async function getPnl(from: Date, to: Date): Promise<Pnl> {
-  const where = { channel: "AMAZON", eventAt: { gte: from, lte: to } };
+  const scope = await mappedSellerSkus();
+  const baseCurrency = (await getCurrentOrg())?.currencyCode ?? "USD";
+  const window = { channel: "AMAZON", eventAt: { gte: from, lte: to } };
+  const where = { ...window, ...inScope(scope) };
 
   const sums = await prisma.financeEvent.groupBy({
     by: ["group", "type"],
     where,
-    _sum: { amount: true },
+    _sum: { baseAmount: true },
   });
 
   const blocks = new Map<string, { type: string; amount: number }[]>();
   for (const s of sums) {
     const list = blocks.get(s.group) ?? [];
-    list.push({ type: s.type, amount: s._sum.amount ?? 0 });
+    list.push({ type: s.type, amount: s._sum.baseAmount ?? 0 });
     blocks.set(s.group, list);
   }
 
@@ -209,8 +237,20 @@ export async function getPnl(from: Date, to: Date): Promise<Pnl> {
     else if (q.sku && units > 0) unmatched.add(q.sku);
   }
 
+  // What the scope left out: listings sold on Amazon that the company doesn't manage here.
+  const left = await prisma.financeEvent.groupBy({
+    by: ["sku"],
+    where: { ...window, group: "sales", type: "Principal", sku: { notIn: [...scope], not: null } },
+    _sum: { quantity: true, baseAmount: true },
+  });
+  const ignored = {
+    skus: left.map((r) => r.sku as string).sort(),
+    units: left.reduce((t, r) => t + (r._sum.quantity ?? 0), 0),
+    sales: left.reduce((t, r) => t + (r._sum.baseAmount ?? 0), 0),
+  };
+
   // Bridge the settlement lag: recent orders whose money hasn't posted yet.
-  const bridge = await pendingBridge(from, to, costs);
+  const bridge = await pendingBridge(from, to, costs, scope, baseCurrency);
   if (bridge.sales.length) {
     blocks.set("sales", [...(blocks.get("sales") ?? []), ...bridge.sales]);
     if (bridge.taxes !== 0) blocks.set("taxes", [...(blocks.get("taxes") ?? []), { type: "TaxWithheld (pending)", amount: bridge.taxes }]);
@@ -244,6 +284,7 @@ export async function getPnl(from: Date, to: Date): Promise<Pnl> {
     roi: cogs !== 0 ? netProfit / Math.abs(cogs) : null,
     pendingSales: bridge.pendingSales,
     unmatchedSkus: [...unmatched],
+    ignored,
     backfillInProgress,
     hasData: groups.length > 0,
   };

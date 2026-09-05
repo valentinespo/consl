@@ -545,13 +545,15 @@ export type FinanceTransaction = Record<string, unknown>;
  * Every transaction posted in [postedAfter, postedBefore): a FLAT list, each with its own id,
  * posted date, status (DEFERRED = charged but payout held, RELEASED, DEFERRED_RELEASED) and a
  * breakdown tree down to the component. The endpoint allows ~0.5 req/s, so pages are spaced out
- * and 429s retried with backoff. `status` narrows to one side of the payout line.
+ * and 429s retried with backoff. `status` narrows to one side of the payout line. Without a
+ * marketplace the feed covers the whole region the account trades in (a North America account:
+ * Amazon.com, .ca and .com.mx, each in its own currency).
  */
 export async function listTransactions(
   client: SpApiClient,
   postedAfter: Date,
   postedBefore: Date | null,
-  status?: "DEFERRED" | "RELEASED",
+  opts: { status?: "DEFERRED" | "RELEASED"; marketplaceId?: string } = {},
 ): Promise<FinanceTransaction[]> {
   const out: FinanceTransaction[] = [];
   let next: string | null = null;
@@ -563,8 +565,8 @@ export async function listTransactions(
     else {
       q.set("postedAfter", postedAfter.toISOString());
       if (postedBefore) q.set("postedBefore", postedBefore.toISOString());
-      if (status) q.set("transactionStatus", status);
-      q.set("marketplaceId", client.marketplaceId);
+      if (opts.status) q.set("transactionStatus", opts.status);
+      if (opts.marketplaceId) q.set("marketplaceId", opts.marketplaceId);
     }
     let r: Response | null = null;
     for (let attempt = 0; attempt < 4; attempt++) {

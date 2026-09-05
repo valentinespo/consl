@@ -879,6 +879,10 @@ model FinanceEvent {
   txId         String?
   status       String? // "held" (charged, payout deferred) | "released"
   releasedAt   DateTime? // when the money reached (or is due to reach) the payout balance
+  // A unified account settles sister marketplaces in their own money (Amazon.ca in CAD): `amount`
+  // is as posted, `baseAmount` the same in the company's currency at that day's reference rate.
+  baseAmount    Float?
+  marketplaceId String?
   createdAt    DateTime      @default(now())
 
   @@index([orgId, channel, postedAt])
@@ -887,4 +891,17 @@ model FinanceEvent {
   @@index([orgId, group, eventAt])
   @@index([orgId, orderId])
   @@index([orgId, channel, txId])
+}
+
+/// Daily reference exchange rates (ECB, via frankfurter.app), cached once fetched. Global, not
+/// tenant data — one CAD→USD rate for a day is the same for every company.
+model FxRate {
+  id        String   @id @default(cuid())
+  day       String // YYYY-MM-DD
+  base      String // currency the amount is in
+  quote     String // currency it is converted to
+  rate      Float
+  createdAt DateTime @default(now())
+
+  @@unique([day, base, quote])
 }

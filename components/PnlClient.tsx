@@ -192,9 +192,17 @@ export function PnlClient({
 
       {pnl.unmatchedSkus.length > 0 && (
         <p className="max-w-3xl text-[12px] text-muted">
-          {pnl.unmatchedSkus.length} shipped SKU{pnl.unmatchedSkus.length === 1 ? " isn't" : "s aren't"} mapped to a product, so their
-          units carry no cost here: {pnl.unmatchedSkus.slice(0, 4).join(", ")}
+          {pnl.unmatchedSkus.length} product{pnl.unmatchedSkus.length === 1 ? " has" : "s have"} no landed cost yet, so
+          {pnl.unmatchedSkus.length === 1 ? " its" : " their"} units carry no cost here: {pnl.unmatchedSkus.slice(0, 4).join(", ")}
           {pnl.unmatchedSkus.length > 4 ? "…" : ""}
+        </p>
+      )}
+      {pnl.ignored.skus.length > 0 && (
+        <p className="max-w-3xl text-[12px] text-muted">
+          Left out: {pnl.ignored.units.toLocaleString()} unit{pnl.ignored.units === 1 ? "" : "s"} ({money(pnl.ignored.sales)} in sales) from{" "}
+          {pnl.ignored.skus.length} listing{pnl.ignored.skus.length === 1 ? "" : "s"} not managed in consl — {pnl.ignored.skus.slice(0, 4).join(", ")}
+          {pnl.ignored.skus.length > 4 ? "…" : ""}. Map {pnl.ignored.skus.length === 1 ? "it" : "them"} to a product to include{" "}
+          {pnl.ignored.skus.length === 1 ? "it" : "them"}.
         </p>
       )}
     </div>

@@ -4,6 +4,8 @@ import { decryptSecret } from "@/lib/secret-box";
 import { makeClient, listTransactions, type FinanceTransaction, type SpApiClient } from "@/lib/spapi";
 import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
 import { getCurrentOrgId } from "@/lib/tenant";
+import { getCurrentOrg } from "@/lib/org";
+import { fxRate } from "@/lib/fx";
 
 /**
  * Amazon's financial ledger → FinanceEvent rows, the raw material of the P&L.
@@ -13,6 +15,10 @@ import { getCurrentOrgId } from "@/lib/tenant";
  * date and a tree of breakdowns down to the component (principal, tax, commission, FBA fee…).
  * We flatten every leaf to one signed row tagged with a P&L bucket and upsert by transaction id,
  * so any window can be re-read at any time and the ledger never doubles.
+ *
+ * The whole region is imported (a North America account sells the odd unit on Amazon.ca or
+ * .com.mx): each row keeps its posted currency and carries the same money in the company's
+ * currency, so one statement can add them up.
  *
  * Payout deferral: Amazon charges a sale when it ships but holds the payout until about a week
  * after delivery. The feed shows that sale immediately as a DEFERRED transaction (exact money,
@@ -36,6 +42,10 @@ type FlatRow = {
   txId: string;
   status: "held" | "released";
   releasedAt: Date | null;
+  currency: string;
+  marketplaceId: string | null;
+  /** `amount` in the company's currency — filled at import from the day's reference rate. */
+  baseAmount: number;
   /** Internal: this row should be re-dated to its order's purchase date (stripped before insert). */
   orderDated?: boolean;
 };
@@ -139,7 +149,9 @@ export function flattenTransaction(tx: FinanceTransaction, unhandled?: Map<strin
   const rows: FlatRow[] = [];
   const t = tx as AnyObj;
   const kind = String(t.transactionType ?? "");
-  if (kind === "Transfer") return rows; // money moving to the bank account, not a P&L event
+  // Not P&L events: money moving to the bank account, and Amazon's rolling reserve being held
+  // and released (always a ± pair at the same instant).
+  if (kind === "Transfer" || /reserve/i.test(kind)) return rows;
   const postedAt = parseDate(t.postedDate);
   if (!postedAt) return rows;
 
@@ -148,6 +160,7 @@ export function flattenTransaction(tx: FinanceTransaction, unhandled?: Map<strin
   const deferred = (t.contexts ?? []).find((c: AnyObj) => c?.contextType === "DeferredContext");
   // A released row's own date is the release; a held one only knows when the hold is due to end.
   const releasedAt = t.transactionStatus === "RELEASED" ? postedAt : parseDate(deferred?.maturityDate);
+  const currency = String(t.totalAmount?.currencyCode ?? "USD");
   const base = {
     postedAt,
     eventAt: postedAt,
@@ -155,8 +168,14 @@ export function flattenTransaction(tx: FinanceTransaction, unhandled?: Map<strin
     txId: ids.get("DEFERRED_TRANSACTION_ID") ?? String(t.transactionId),
     status,
     releasedAt,
+    currency,
+    marketplaceId: t.marketplaceDetails?.marketplaceId ? String(t.marketplaceDetails.marketplaceId) : null,
+    baseAmount: 0, // set at import once the day's rate is known
   };
   const description = String(t.description ?? kind);
+  // A "Non-Amazon" marketplace is Multi-Channel Fulfillment: Amazon shipping another channel's
+  // order. Its fees are real money, kept visibly apart from Amazon-order fees.
+  const mcf = /^non-amazon/i.test(String(t.marketplaceDetails?.marketplaceName ?? ""));
 
   const items: AnyObj[] = Array.isArray(t.items) ? t.items : [];
   const units: { leaves: Leaf[]; sku: string | null; quantity: number | null; fallback: number }[] = items.length
@@ -179,7 +198,7 @@ export function flattenTransaction(tx: FinanceTransaction, unhandled?: Map<strin
         case "Shipment": {
           const c = orderComponent(leaf.path);
           push(rows, {
-            ...base, ...c, sku: u.sku, amount: leaf.amount, orderDated: true,
+            ...base, ...c, type: mcf ? `MCF:${c.type}` : c.type, sku: u.sku, amount: leaf.amount, orderDated: true,
             // Units ride ONLY the shipped Principal rows — one attribution per item, and it is
             // what the COGS calculation multiplies by the FIFO unit cost.
             quantity: c.type === "Principal" ? u.quantity : null,
@@ -234,6 +253,11 @@ async function amazonClient(): Promise<SpApiClient | null> {
 
 type TxBundle = { rows: FlatRow[]; postedAt: Date; status: FlatRow["status"]; releasedAt: Date | null; actualRelease: boolean };
 
+/** The ledger identity of a transaction: a release copy keys to its held original. */
+function txKey(t: AnyObj): string {
+  return identifiers(t).get("DEFERRED_TRANSACTION_ID") ?? String(t.transactionId);
+}
+
 /** Fold a window's transactions into one bundle per transaction id: a held original and its
  *  release copy carry identical money, so the copy only contributes the release date. */
 function bundle(txs: FinanceTransaction[], unhandled: Map<string, number>): Map<string, TxBundle> {
@@ -243,7 +267,7 @@ function bundle(txs: FinanceTransaction[], unhandled: Map<string, number>): Map<
     if (!rows.length) continue;
     const t = tx as AnyObj;
     const isCopy = identifiers(t).has("DEFERRED_TRANSACTION_ID");
-    const key = rows[0].txId;
+    const key = txKey(t);
     const cur = out.get(key);
     const actualRelease = t.transactionStatus === "RELEASED";
     if (!cur) {
@@ -270,7 +294,8 @@ export async function importAmazonFinances(postedAfter: Date, postedBefore: Date
   const unhandled = new Map<string, number>();
   const txs = await listTransactions(client, postedAfter, postedBefore);
   const bundles = bundle(txs, unhandled);
-  const keys = [...bundles.keys()];
+  // Every transaction in the window, kept or not: rows of a kind we stopped keeping go away too.
+  const keys = [...new Set(txs.map((t) => txKey(t as AnyObj)))];
 
   // What we already hold for these transactions: a held original imported earlier keeps its charge
   // date when only its release copy is in this window, and a known release date is never replaced
@@ -304,6 +329,10 @@ export async function importAmazonFinances(postedAfter: Date, postedBefore: Date
     for (const o of chunk) orderedAt.set(o.externalId, o.orderedAt);
   }
   for (const r of rows) r.eventAt = r.orderDated && r.orderId ? (orderedAt.get(r.orderId) ?? r.postedAt) : r.postedAt;
+
+  // Sister-marketplace money in the company's currency, at the reference rate of the posting day.
+  const baseCurrency = (await getCurrentOrg())?.currencyCode ?? "USD";
+  for (const r of rows) r.baseAmount = r.currency === baseCurrency ? r.amount : r.amount * (await fxRate(r.currency, baseCurrency, r.postedAt));
 
   // Delete + insert atomically so a crash can never leave a half-imported transaction. The
   // advisory lock (released at commit) serializes importers per company: the backfill walker, the
