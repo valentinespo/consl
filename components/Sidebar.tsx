@@ -157,13 +157,16 @@ export function Sidebar({
   };
 
   return (
-    <aside className="flex h-full w-[230px] shrink-0 flex-col overflow-y-auto bg-sidebar">
+    <aside className="flex h-full w-[230px] shrink-0 flex-col overflow-hidden bg-sidebar">
       {/* Theme switch sits where a sidebar search would — a full-width control, not a pill. */}
-      <div className="px-3 pb-2.5 pt-3">
+      <div className="shrink-0 px-3 pb-2.5 pt-3">
         <ThemeToggle />
       </div>
 
-      <nav className="flex-1 px-3 py-2">
+      {/* Only the tab list scrolls when there are more tabs than height. The Integrations sleeve
+          and the footer stay put below it — flex would otherwise squeeze them (the hairline is a
+          1px item and simply vanished once the tabs outgrew the sidebar). */}
+      <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
         {/* Finances — Sales & Profit, P&L and Orders. Collapsible, above Production. */}
         {finances.length > 0 && (
           <>
@@ -196,8 +199,8 @@ export function Sidebar({
       {/* Integrations sleeve: its own little landing above the footer, split off by a hairline. */}
       {canView("settings") && (
         <>
-          <div aria-hidden className="mx-3 h-px bg-border" />
-          <div className="px-3 py-2">
+          <div aria-hidden className="mx-3 h-px shrink-0 bg-border" />
+          <div className="shrink-0 px-3 py-2">
             <Link
               href="/settings/integrations"
               onClick={onNavigate}
@@ -214,7 +217,7 @@ export function Sidebar({
         </>
       )}
 
-      <div className="flex items-center justify-between px-4 pb-4 pt-2">
+      <div className="flex shrink-0 items-center justify-between px-4 pb-4 pt-2">
         <div className="min-w-0">
           <div className="truncate text-[12px] font-medium text-ink-soft">{orgName ?? "Your company"}</div>
           <div className="text-[11px] text-muted">Production &amp; Inventory</div>

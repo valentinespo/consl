@@ -103,7 +103,7 @@ export function RestockDashboard({
   nowMs: number;
 }) {
   const { qty: n } = useMoney(); // unit counts in the org's locale
-  const [win, setWin] = useState<Win>(90);
+  const [win, setWin] = useState<Win>(30);
   const [pending, start] = useTransition();
   const [editSku, setEditSku] = useState<string | null>(null);
   const [winSku, setWinSku] = useState<string | null>(null); // per-SKU window-override panel open
