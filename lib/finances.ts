@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { decryptSecret } from "@/lib/secret-box";
 import { makeClient, listTransactions, type FinanceTransaction, type SpApiClient } from "@/lib/spapi";
 import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
+import { getCurrentOrgId } from "@/lib/tenant";
 
 /**
  * Amazon's financial ledger → FinanceEvent rows, the raw material of the P&L.
@@ -304,8 +305,13 @@ export async function importAmazonFinances(postedAfter: Date, postedBefore: Date
   }
   for (const r of rows) r.eventAt = r.orderDated && r.orderId ? (orderedAt.get(r.orderId) ?? r.postedAt) : r.postedAt;
 
-  // Delete + insert atomically so a crash can never leave a half-imported transaction.
+  // Delete + insert atomically so a crash can never leave a half-imported transaction. The
+  // advisory lock (released at commit) serializes importers per company: the backfill walker, the
+  // live sweep and the nightly reconcile — in this process or another replica — can overlap on a
+  // window, and two delete-then-insert transactions running side by side would BOTH insert.
+  const orgId = await getCurrentOrgId();
   await prisma.$transaction([
+    prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`finance:${orgId ?? ""}`}))`,
     ...(keys.length ? [prisma.financeEvent.deleteMany({ where: { channel: "AMAZON", txId: { in: keys } } })] : []),
     prisma.financeEvent.deleteMany({ where: { channel: "AMAZON", txId: null, postedAt: { gte: postedAfter, lt: postedBefore } } }),
     ...(rows.length
@@ -319,7 +325,8 @@ export async function importAmazonFinances(postedAfter: Date, postedBefore: Date
 }
 
 const BACKFILL_WINDOW_DAYS = 7;
-const BACKFILL_FLOOR_DAYS = 730; // matches the orders walk — about two years back
+// The API refuses a start "before 2 years from now" to the second, so stop a day short of it.
+const BACKFILL_FLOOR_DAYS = 729;
 
 /** One backward step of the history walk (scheduler-driven, like the orders backfill). */
 export async function backfillAmazonFinancesStep(): Promise<{ done: boolean; rows: number; cursor: string }> {
@@ -331,9 +338,15 @@ export async function backfillAmazonFinancesStep(): Promise<{ done: boolean; row
   const cursorEnd = s.financeBackfillCursor ? new Date(s.financeBackfillCursor) : new Date(Date.now() - 3 * 60_000);
   if (cursorEnd <= floor) return { done: true, rows: 0, cursor: s.financeBackfillCursor ?? "" };
   const start = new Date(Math.max(floor.getTime(), cursorEnd.getTime() - BACKFILL_WINDOW_DAYS * 86_400_000));
-  const r = await importAmazonFinances(start, cursorEnd);
+  let rows = 0;
+  try {
+    rows = (await importAmazonFinances(start, cursorEnd)).rows;
+  } catch (e) {
+    // Amazon's retention edge moves with the clock; hitting it means the history is fully walked.
+    if (!/2 years/i.test((e as Error).message)) throw e;
+  }
   await saveOrgSettings({ financeBackfillCursor: start.toISOString() });
-  return { done: start.getTime() <= floor.getTime(), rows: r.rows, cursor: start.toISOString() };
+  return { done: start.getTime() <= floor.getTime(), rows, cursor: start.toISOString() };
 }
 
 /** The live leg: sweep [cursor − overlap, now − 2 min) forward. Upserts make the overlap free,
