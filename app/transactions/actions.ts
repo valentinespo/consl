@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { Prisma } from "@/app/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { recomputeAll } from "@/lib/recompute";
 import { isExcludedCategory } from "@/lib/categories";
@@ -21,12 +22,15 @@ export type InvoicePayload = {
   dateISO: string | null;
   invoiceTotal: number;
   lines: InvoiceLineInput[];
+  /** Save what's there as a draft: kept off the books (no allocation rows, no recompute). */
+  draft?: boolean;
 };
 
 /** Create/update a transaction invoice + its allocation lines. Lines must sum to the total. */
 export async function upsertTransactionInvoice(payload: InvoicePayload) {
   const gate = await requirePermission("transactions", payload.id ? "edit" : "create");
   if (!gate.ok) return { ok: false as const, error: gate.error };
+  if (payload.draft) return saveDraft(payload);
   const lines = payload.lines.filter((l) => l.category || l.amount);
   if (lines.length === 0) return { ok: false as const, error: "Add at least one line." };
 
@@ -74,7 +78,11 @@ export async function upsertTransactionInvoice(payload: InvoicePayload) {
     const old = await prisma.transaction.findMany({ where: { invoiceId: payload.id }, select: { supplierId: true } });
     staleSuppliers = old.map((o) => o.supplierId);
     await prisma.transaction.deleteMany({ where: { invoiceId: payload.id } });
-    await prisma.transactionInvoice.update({ where: { id: payload.id }, data: { supplierId, date, invoiceTotal: payload.invoiceTotal } });
+    // Completing a draft is this same path: the flag clears and its lines become real rows.
+    await prisma.transactionInvoice.update({
+      where: { id: payload.id },
+      data: { supplierId, date, invoiceTotal: payload.invoiceTotal, draft: false, draftLines: Prisma.DbNull },
+    });
     await prisma.transaction.createMany({ data: toRow(payload.id) });
   } else {
     const inv = await prisma.transactionInvoice.create({ data: { supplierId, date, invoiceTotal: payload.invoiceTotal } });
@@ -87,6 +95,44 @@ export async function upsertTransactionInvoice(payload: InvoicePayload) {
   revalidatePath("/", "layout");
   // The id lets the form attach staged documents right after a create.
   return { ok: true as const, id: invoiceId! };
+}
+
+/** A draft keeps whatever is filled in so far — nothing is checked beyond the money being
+ *  numbers, no allocation rows are written and nothing is recomputed. An invoice already on the
+ *  books can't be turned back into one: its lines are live in the costing. */
+async function saveDraft(payload: InvoicePayload) {
+  if (!Number.isFinite(Number(payload.invoiceTotal))) return { ok: false as const, error: "Enter a valid invoice total." };
+  if (!payload.lines.every((l) => Number.isFinite(Number(l.amount)))) return { ok: false as const, error: "Every line needs a valid amount." };
+  if (payload.id) {
+    const existing = await prisma.transactionInvoice.findUnique({ where: { id: payload.id }, select: { draft: true } });
+    if (!existing) return { ok: false as const, error: "This transaction no longer exists." };
+    if (!existing.draft) return { ok: false as const, error: "This transaction is already on the books — finish the changes instead of saving a draft." };
+  }
+  const owned = await checkOwned(payload.lines.map((l) => ["lot", l.lotId] as [OwnedModel, string | null]));
+  if (owned) return owned;
+
+  const supplierId = await resolveSupplierId(payload.supplierName);
+  const date = payload.dateISO ? new Date(payload.dateISO) : null;
+  const draftLines = payload.lines.map((l) => ({
+    category: l.category,
+    amount: Number(l.amount) || 0,
+    lotId: l.lotId || null,
+    sku: l.sku && l.sku.toUpperCase() !== "ALL" ? l.sku.toUpperCase() : null,
+    concept: l.concept?.trim() || null,
+  }));
+  const data = { supplierId, date, invoiceTotal: Number(payload.invoiceTotal) || 0, draft: true, draftLines };
+  let staleSupplier: string | null = null;
+  let id = payload.id;
+  if (payload.id) {
+    const old = await prisma.transactionInvoice.findUnique({ where: { id: payload.id }, select: { supplierId: true } });
+    staleSupplier = old?.supplierId ?? null;
+    await prisma.transactionInvoice.update({ where: { id: payload.id }, data });
+  } else {
+    id = (await prisma.transactionInvoice.create({ data })).id;
+  }
+  if (staleSupplier && staleSupplier !== supplierId) await cleanupSupplierIfOrphan(staleSupplier);
+  revalidatePath("/transactions");
+  return { ok: true as const, id: id! };
 }
 
 export async function deleteTransactionInvoice(id: string) {

@@ -26,6 +26,8 @@ export type InvLine = {
 };
 export type InvoiceRow = {
   id: string;
+  /** Still being written up: shown in the list, on nobody's books. */
+  draft: boolean;
   dateISO: string | null;
   supplier: string | null;
   supplierPhotoUrl?: string | null;
@@ -53,12 +55,13 @@ const inputCls =
 let keySeq = 0;
 const newKey = () => `l${keySeq++}`;
 
-function toEditLines(lines: InvLine[] | undefined, defaultLotId?: string): EditLine[] {
+function toEditLines(lines: InvLine[] | undefined, defaultLotId?: string, draft = false): EditLine[] {
   if (lines && lines.length) {
     return lines.map((l) => ({
       key: newKey(),
       category: l.category,
-      amount: String(l.amount ?? ""),
+      // A draft keeps what was typed; a blank amount was blank, not zero.
+      amount: draft && !l.amount ? "" : String(l.amount ?? ""),
       lotId: l.lotId ?? "",
       sku: l.sku ?? "ALL",
       concept: l.concept ?? "",
@@ -93,8 +96,8 @@ export function TransactionInvoiceForm({
   const editing = !!invoice;
   const [supplier, setSupplier] = useState(invoice?.supplier ?? "");
   const [dateISO, setDateISO] = useState(invoice?.dateISO ?? "");
-  const [total, setTotal] = useState(invoice ? String(invoice.invoiceTotal) : "");
-  const [lines, setLines] = useState<EditLine[]>(() => toEditLines(invoice?.lines, defaultLotId));
+  const [total, setTotal] = useState(invoice && !(invoice.draft && !invoice.invoiceTotal) ? String(invoice.invoiceTotal) : "");
+  const [lines, setLines] = useState<EditLine[]>(() => toEditLines(invoice?.lines, defaultLotId, invoice?.draft));
   const [pending, setPending] = useState(false);
   const [delStep, setDelStep] = useState(0); // 0 = idle, 1 = first confirm, 2 = final confirm
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
@@ -140,6 +143,16 @@ export function TransactionInvoiceForm({
   const fileRef = useRef<HTMLInputElement>(null);
   const dirty = !invoice || currentSnapshot !== originalSnapshot || pendingFiles.length > 0 || removeIds.length > 0;
 
+  // Complete = fit to go on the books: a total, and lines that add up to it. Anything short of
+  // that can still be kept as a DRAFT (new invoices and existing drafts only — an invoice already
+  // on the books can't slip back off them, so its button just waits for the numbers to balance).
+  const complete = balanced && totalNum !== 0;
+  const isDraft = !!invoice?.draft;
+  const draftable = (!editing || isDraft) && !complete;
+  const hasAnything =
+    supplier.trim() !== "" || dateISO !== "" || total.trim() !== "" || pendingFiles.length > 0 ||
+    lines.some((l) => l.amount.trim() !== "" || l.concept.trim() !== "" || l.lotId !== "" || l.category !== DEFAULT_CATEGORY);
+
   function patch(key: string, p: Partial<EditLine>) {
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...p } : l)));
   }
@@ -155,9 +168,9 @@ export function TransactionInvoiceForm({
     patch(key, { amount: String(Math.round((totalNum - others) * 100) / 100) });
   }
 
-  async function submit() {
+  async function submit(asDraft = false) {
     setError(null);
-    if (!balanced) {
+    if (!asDraft && !balanced) {
       setError(`Lines add up to ${money(linesSum, 2)} but the invoice total is ${money(totalNum, 2)}.`);
       return;
     }
@@ -176,6 +189,7 @@ export function TransactionInvoiceForm({
         dateISO: dateISO || null,
         invoiceTotal: totalNum,
         lines: payloadLines,
+        draft: asDraft,
       });
       if (!res.ok) {
         setError(res.error);
@@ -224,6 +238,12 @@ export function TransactionInvoiceForm({
 
   return (
     <div className="space-y-4">
+      {isDraft && (
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-[12.5px] text-ink-soft">
+          <span className="pill-neutral inline-flex items-center rounded-full border px-2 py-[2px] text-[11px] font-medium uppercase tracking-wide">Draft</span>
+          Not on the books yet — nothing here reaches a lot or the costing. Enter the total, balance the lines and Save &amp; recompute to post it.
+        </div>
+      )}
       {/* Invoice documents — where the old card sat. Everything here is STAGED: new files upload
           and marked removals delete only when Save is clicked, like any other edit. */}
       <div className="rounded-lg border border-border bg-surface px-3 py-2.5">
@@ -481,15 +501,27 @@ export function TransactionInvoiceForm({
               {cancelLabel}
             </button>
           )}
-          <button
-            type="button"
-            onClick={submit}
-            disabled={pending || !balanced || totalNum === 0 || (editing && !dirty)}
-            className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-bg hover:opacity-90 disabled:opacity-50"
-            title={editing && !dirty ? "No changes to save" : !balanced ? "Lines must sum to the invoice total" : undefined}
-          >
-            {pending ? "Saving…" : editing ? "Save changes" : "Save & recompute"}
-          </button>
+          {draftable ? (
+            <button
+              type="button"
+              onClick={() => submit(true)}
+              disabled={pending || !hasAnything || (editing && !dirty)}
+              className="rounded-lg border border-border bg-surface px-3.5 py-2 text-[13px] font-medium text-ink-soft hover:bg-surface-2 disabled:opacity-50"
+              title={editing && !dirty ? "No changes to save" : !hasAnything ? "Nothing to keep yet" : "Kept off the books until the lines add up to the total"}
+            >
+              {pending ? "Saving…" : "Save as draft"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => submit(false)}
+              disabled={pending || !complete || (editing && !dirty)}
+              className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-bg hover:opacity-90 disabled:opacity-50"
+              title={editing && !dirty ? "No changes to save" : !balanced ? "Lines must sum to the invoice total" : undefined}
+            >
+              {pending ? "Saving…" : editing && !isDraft ? "Save changes" : "Save & recompute"}
+            </button>
+          )}
         </div>
       </div>
     </div>

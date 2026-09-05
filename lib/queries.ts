@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "./prisma";
+import { isExcludedCategory } from "./categories";
 import { isLayerKind } from "./constants";
 import { computeEngineResult } from "./recompute";
 import { buildCostChips } from "./lot-costs";
@@ -233,19 +234,35 @@ export async function getTransactionInvoices(lotId?: string) {
   const prodImage = new Map(products.map((p) => [p.code, p.imageUrl]));
   // Which SKUs each lot currently produces — used to detect a tag pointing at a removed SKU.
   const lotSkus = new Map(lots.map((l) => [l.id, new Set(l.lines.map((x) => x.product.code))]));
+  const lotNrOf = new Map(lots.map((l) => [l.id, l.lotNr]));
+  type DraftLine = { category: string; amount: number; lotId: string | null; sku: string | null; concept: string | null };
   const mapped = invoices.map((inv) => {
-    const lines = inv.lines.map((l) => ({
-      id: l.id,
-      lotId: l.lotId,
-      lotNr: l.lot?.lotNr ?? null,
-      category: l.category,
-      amount: l.applicableAmount,
-      sku: l.skus,
-      concept: l.concept,
-      appliesToCog: l.appliesToCog,
-      // SKU tag points to a SKU no longer in its (still-existing) lot → unassigned, out of COG.
-      skuMissing: !!(l.appliesToCog && l.lotId && l.skus && !lotSkus.get(l.lotId)?.has(l.skus)),
-    }));
+    // A draft's lines exist only as JSON on the invoice — shown here, counted nowhere.
+    const draftLines: DraftLine[] = inv.draft && Array.isArray(inv.draftLines) ? (inv.draftLines as DraftLine[]) : [];
+    const lines = inv.draft
+      ? draftLines.map((l, i) => ({
+          id: `${inv.id}-draft-${i}`,
+          lotId: l.lotId,
+          lotNr: l.lotId ? (lotNrOf.get(l.lotId) ?? null) : null,
+          category: l.category,
+          amount: l.amount,
+          sku: l.sku,
+          concept: l.concept,
+          appliesToCog: !isExcludedCategory(l.category),
+          skuMissing: false,
+        }))
+      : inv.lines.map((l) => ({
+          id: l.id,
+          lotId: l.lotId,
+          lotNr: l.lot?.lotNr ?? null,
+          category: l.category,
+          amount: l.applicableAmount,
+          sku: l.skus,
+          concept: l.concept,
+          appliesToCog: l.appliesToCog,
+          // SKU tag points to a SKU no longer in its (still-existing) lot → unassigned, out of COG.
+          skuMissing: !!(l.appliesToCog && l.lotId && l.skus && !lotSkus.get(l.lotId)?.has(l.skus)),
+        }));
     const applicable = lines.filter((l) => l.appliesToCog).reduce((s, l) => s + l.amount, 0);
     const notApplicable = lines.filter((l) => !l.appliesToCog).reduce((s, l) => s + l.amount, 0);
     const unassignedAmount = lines
@@ -263,6 +280,7 @@ export async function getTransactionInvoices(lotId?: string) {
     const presentCats = [...new Set(lines.map((l) => l.category))];
     return {
       id: inv.id,
+      draft: inv.draft,
       dateISO: inv.date ? inv.date.toISOString().slice(0, 10) : null,
       supplier: inv.supplier?.name ?? null,
       supplierPhotoUrl: inv.supplier?.photoUrl ?? null,
@@ -274,12 +292,14 @@ export async function getTransactionInvoices(lotId?: string) {
       presentSkus,
       presentLots,
       presentCats,
-      hasUnassigned: lines.some((l) => l.appliesToCog && !l.lotId),
+      // A draft is on nobody's books, so nothing about it is "unassigned" yet.
+      hasUnassigned: !inv.draft && lines.some((l) => l.appliesToCog && !l.lotId),
       hasSkuUnassigned: lines.some((l) => l.skuMissing),
       lines,
     };
   });
-  return lotId ? mapped.filter((inv) => inv.lines.some((l) => l.lotId === lotId)) : mapped;
+  // A lot's own list shows what is on its books — a draft pointing at it isn't, yet.
+  return lotId ? mapped.filter((inv) => !inv.draft && inv.lines.some((l) => l.lotId === lotId)) : mapped;
 }
 
 /** Run the finished-goods engine: where finished units physically are and what they're worth.

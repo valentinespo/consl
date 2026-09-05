@@ -671,6 +671,11 @@ model TransactionInvoice {
   documentUrl  String? // legacy single-doc field (superseded by documents[])
   documents    Document[]
   lines        Transaction[]
+  // A draft is an invoice still being written up. Its lines live here as JSON and NOT as
+  // Transaction rows, so nothing about it can reach the books — the costing engine, lot totals
+  // and supplier spend all read Transaction rows — until it is completed and recomputed.
+  draft        Boolean       @default(false)
+  draftLines   Json?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 }

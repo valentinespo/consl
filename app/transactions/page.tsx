@@ -15,11 +15,12 @@ export default async function TransactionsPage() {
     getCategoriesInUse(),
   ]);
 
+  const drafts = invoices.filter((inv) => inv.draft).length;
   return (
     <>
       <PageHeader
         title="Transactions"
-        subtitle={`${invoices.length} invoices. Each fans out into allocation lines — costs flow into each lot's COG by category.`}
+        subtitle={`${invoices.length - drafts} invoices${drafts ? ` and ${drafts} draft${drafts === 1 ? "" : "s"}` : ""}. Each fans out into allocation lines — costs flow into each lot's COG by category.`}
       />
       <TransactionInvoicesTable invoices={invoices} lots={lots} suppliers={suppliers} categories={categories} skuImages={skuImages} showLotColumn />
     </>

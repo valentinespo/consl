@@ -80,15 +80,20 @@ export function TransactionInvoicesTable({
       return true;
     });
     out.sort((a, b) => {
+      // Drafts are unfinished work: they sit at the top whatever the sort, so they can't be missed.
+      if (a.draft !== b.draft) return a.draft ? -1 : 1;
       const cmp = sortKey === "date" ? (a.dateISO ?? "").localeCompare(b.dateISO ?? "") : a.applicable - b.applicable;
       return sortDir === "asc" ? cmp : -cmp;
     });
     return out;
   }, [invoices, q, category, lot, supplier, from, to, sortKey, sortDir]);
 
-  const applicableTotal = filtered.reduce((s, inv) => s + inv.applicable, 0);
-  const naTotal = filtered.reduce((s, inv) => s + inv.notApplicable, 0);
-  const unassignedTotal = filtered.reduce((s, inv) => s + inv.unassignedAmount, 0);
+  // Drafts are listed but never counted — they aren't on the books.
+  const live = filtered.filter((inv) => !inv.draft);
+  const draftCount = filtered.length - live.length;
+  const applicableTotal = live.reduce((s, inv) => s + inv.applicable, 0);
+  const naTotal = live.reduce((s, inv) => s + inv.notApplicable, 0);
+  const unassignedTotal = live.reduce((s, inv) => s + inv.unassignedAmount, 0);
   const anyFilter = q || category !== "ALL" || lot !== "ALL" || supplier !== "ALL" || from || to;
 
   function toggleSort(k: SortKey) {
@@ -146,6 +151,7 @@ export function TransactionInvoicesTable({
         {naTotal > 0 && <span className="text-muted">Not applicable: {money(naTotal, 2)}</span>}
         <span className="text-muted">
           {filtered.length} of {invoices.length} invoices
+          {draftCount > 0 && ` · ${draftCount} draft${draftCount === 1 ? "" : "s"} not counted`}
         </span>
         {canCreate && (
           <button
@@ -182,11 +188,21 @@ export function TransactionInvoicesTable({
               const open = expanded.has(inv.id);
               return (
                 <Fragment key={inv.id}>
-                  <tr onClick={() => toggle(inv.id)} className={`cursor-pointer border-b border-line last:border-0 ${open ? "bg-surface-2" : "hover:bg-surface-2"}`}>
+                  <tr
+                    onClick={() => toggle(inv.id)}
+                    className={`cursor-pointer border-b border-line last:border-0 ${
+                      inv.draft ? "bg-surface-2/70 hover:bg-surface-2" : open ? "bg-surface-2" : "hover:bg-surface-2"
+                    }`}
+                  >
                     <td className="px-4 py-3 whitespace-nowrap text-muted align-middle">
                       <div className="flex items-center gap-1.5">
                         <ChevronRight size={14} className={`text-muted transition-transform ${open ? "rotate-90" : ""}`} />
-                        {date(inv.dateISO)}
+                        {inv.draft && (
+                          <span className="pill-neutral inline-flex items-center rounded-full border px-2.5 py-[3px] text-[12px] font-medium uppercase tracking-wider">
+                            Draft
+                          </span>
+                        )}
+                        {inv.dateISO ? date(inv.dateISO) : inv.draft ? <span className="text-muted/70">No date</span> : date(inv.dateISO)}
                       </div>
                       {inv.lines.length > 1 && <div className="ml-[22px] mt-0.5 text-[10.5px] text-muted/70">{inv.lines.length} lines</div>}
                     </td>
@@ -240,10 +256,14 @@ export function TransactionInvoicesTable({
                       </div>
                     </td>
                     <td className="px-4 py-3 text-right align-middle">
-                      <div className="text-[15px] font-semibold tabular text-ink">{money(inv.applicable, 2)}</div>
+                      {inv.draft ? (
+                        <div className="text-[12px] text-muted" title="A draft counts nowhere until it is completed">Not counted</div>
+                      ) : (
+                        <div className="text-[15px] font-semibold tabular text-ink">{money(inv.applicable, 2)}</div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right align-middle">
-                      <div className="text-[12px] tabular text-muted">{money(inv.invoiceTotal, 2)}</div>
+                      <div className="text-[12px] tabular text-muted">{inv.invoiceTotal ? money(inv.invoiceTotal, 2) : "—"}</div>
                       {inv.notApplicable > 0 && (
                         <div className="text-[11px] tabular text-negative/70">N/A {money(inv.notApplicable, 2)}</div>
                       )}
