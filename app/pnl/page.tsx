@@ -2,8 +2,7 @@ import { PageHeader } from "@/components/ui";
 import { requireView } from "@/lib/membership";
 import { getPnl, oldestFinanceDate, zonedDayBounds } from "@/lib/pnl";
 import { getOrgSettings } from "@/lib/settings";
-import { prisma } from "@/lib/prisma";
-import { channelTimezone, describeTimezone, todayIn } from "@/lib/channel-tz";
+import { todayIn } from "@/lib/channel-tz";
 import { PnlClient } from "@/components/PnlClient";
 import { rangeBounds, RANGES, type RangeKey } from "@/lib/chart";
 
@@ -22,17 +21,12 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
   const isKey = (v: string | undefined): v is RangeKey => !!v && RANGES.some((r) => r.key === v);
   const rangeKey: RangeKey = isKey(str(sp.range)) ? (str(sp.range) as RangeKey) : "30";
 
-  // Which clock cuts a "day": the channel's own (Amazon.com reports on Pacific time, so the
-  // statement matches Seller Central line for line) or the company's business day, the calendar
-  // the rest of the app reads. The channel's is the default for a single-channel statement.
+  // Days are the company's business day (syncTz) — the one calendar every channel and every
+  // screen in the app shares, so a day here is the same 24 hours as on the dashboard and the
+  // Orders tab. (A channel's own clock — Amazon cuts its day on Pacific time — is recorded on the
+  // connection for reconciliation, never for display.)
   const settings = await getOrgSettings();
-  const amazon = await prisma.integration.findFirst({
-    where: { provider: "amazon", status: "connected" },
-    select: { provider: true, timezone: true, marketplaceId: true, region: true },
-  });
-  const channelTz = amazon ? channelTimezone(amazon) : null;
-  const dayBasis: "channel" | "company" = str(sp.day) === "company" || !channelTz ? "company" : "channel";
-  const tz = dayBasis === "channel" && channelTz ? channelTz : settings.syncTz;
+  const tz = settings.syncTz;
 
   const newest = todayIn(tz);
   const oldest = (await oldestFinanceDate()) ?? newest;
@@ -47,11 +41,6 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
         pnl={pnl}
         filter={{ range: { key: rangeKey, from: b.from ?? oldest, to: b.to ?? newest } }}
         dataBounds={{ newest, oldest }}
-        day={{
-          basis: dayBasis,
-          channel: channelTz ? describeTimezone(channelTz) : null,
-          company: describeTimezone(settings.syncTz),
-        }}
       />
     </>
   );
