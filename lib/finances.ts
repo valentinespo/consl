@@ -149,9 +149,10 @@ export function flattenTransaction(tx: FinanceTransaction, unhandled?: Map<strin
   const rows: FlatRow[] = [];
   const t = tx as AnyObj;
   const kind = String(t.transactionType ?? "");
+  const description = String(t.description ?? kind);
   // Not P&L events: money moving to the bank account, and Amazon's rolling reserve being held
-  // and released (always a ± pair at the same instant).
-  if (kind === "Transfer" || /reserve/i.test(kind)) return rows;
+  // and released (an "Adjustment" described as "Reserve" — always a ± pair at the same instant).
+  if (kind === "Transfer" || /reserve/i.test(kind) || (kind === "Adjustment" && /^reserve/i.test(description))) return rows;
   const postedAt = parseDate(t.postedDate);
   if (!postedAt) return rows;
 
@@ -172,7 +173,6 @@ export function flattenTransaction(tx: FinanceTransaction, unhandled?: Map<strin
     marketplaceId: t.marketplaceDetails?.marketplaceId ? String(t.marketplaceDetails.marketplaceId) : null,
     baseAmount: 0, // set at import once the day's rate is known
   };
-  const description = String(t.description ?? kind);
   // A "Non-Amazon" marketplace is Multi-Channel Fulfillment: Amazon shipping another channel's
   // order. Its fees are real money, kept visibly apart from Amazon-order fees.
   const mcf = /^non-amazon/i.test(String(t.marketplaceDetails?.marketplaceName ?? ""));
