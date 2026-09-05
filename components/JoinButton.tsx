@@ -22,7 +22,7 @@ export function JoinButton({ token, orgName }: { token: string; orgName: string 
 
   return (
     <>
-      {error && <div className="mt-4 rounded-lg bg-[#fdf2ef] px-3 py-2 text-[12.5px] text-negative">{error}</div>}
+      {error && <div className="mt-4 rounded-lg tint-red px-3 py-2 text-[12.5px] text-negative">{error}</div>}
       <button
         onClick={join}
         disabled={pending}

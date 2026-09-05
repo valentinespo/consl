@@ -108,6 +108,35 @@ html[data-theme="dark"] .iso-invert {
   color: var(--color-chart);
 }
 
+/* The pill recipe applied to BOXES — banners, danger zones, marked rows, inline chips: a
+ * translucent wash of the signal colour and a faint same-hue border (pair with `border` for the
+ * hairline). Token-driven like the pills, so both themes follow; these replaced the light-only
+ * hex tints that turned cream and pink on dark. */
+.tint-red {
+  background: color-mix(in srgb, var(--color-negative) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-negative) 28%, transparent);
+}
+.tint-amber {
+  background: color-mix(in srgb, var(--color-warn) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-warn) 28%, transparent);
+}
+.tint-green {
+  background: color-mix(in srgb, var(--color-positive) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-positive) 28%, transparent);
+}
+/* Border only — a card that stays on its own surface but signals danger at the edge. */
+.edge-red {
+  border-color: color-mix(in srgb, var(--color-negative) 28%, transparent);
+}
+/* Outlined destructive action: red text, faint red border, a red wash on hover. */
+.btn-danger {
+  border-color: color-mix(in srgb, var(--color-negative) 35%, transparent);
+  color: var(--color-negative);
+}
+.btn-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-negative) 8%, transparent);
+}
+
 /* Frosted readout card for chart hovers — explicit prefixes so the blur is guaranteed. */
 .tip-frost {
   background: color-mix(in srgb, var(--color-surface) 44%, transparent);

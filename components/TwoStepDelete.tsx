@@ -27,7 +27,7 @@ export function TwoStepDelete({
         type="button"
         onClick={() => setStep(1)}
         disabled={pending}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-[#e7cfc8] px-3 py-2 text-[13px] font-medium text-negative hover:bg-[#fbf1ee] disabled:opacity-50"
+        className="inline-flex items-center gap-1.5 rounded-lg border btn-danger px-3 py-2 text-[13px] font-medium disabled:opacity-50"
       >
         <Trash2 size={14} /> Delete
       </button>
@@ -37,7 +37,7 @@ export function TwoStepDelete({
     return (
       <div className="flex items-center gap-2">
         <span className="text-[12px] text-negative">Delete this {noun}?</span>
-        <button type="button" onClick={() => setStep(2)} className="rounded-lg border border-[#e7cfc8] px-2.5 py-1.5 text-[12.5px] font-medium text-negative hover:bg-[#fbf1ee]">
+        <button type="button" onClick={() => setStep(2)} className="rounded-lg border btn-danger px-2.5 py-1.5 text-[12.5px] font-medium">
           Continue
         </button>
         <button type="button" onClick={() => setStep(0)} className="text-[12.5px] text-muted hover:text-ink-soft">

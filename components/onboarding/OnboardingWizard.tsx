@@ -356,7 +356,7 @@ export function OnboardingWizard(props: {
                 <button
                   onClick={discardAll}
                   disabled={barPending}
-                  className="rounded-full border border-[#e7cfc8] px-3.5 py-1.5 text-[12.5px] font-medium text-negative hover:bg-[#fbf1ee] disabled:opacity-50"
+                  className="rounded-full border btn-danger px-3.5 py-1.5 text-[12.5px] font-medium disabled:opacity-50"
                 >
                   Discard
                 </button>
@@ -541,7 +541,7 @@ function StepChannels({
       ))}
       {!anyConnected && (
         <label className="flex items-center gap-2 text-[13px] text-ink-soft">
-          <input type="checkbox" checked={skipChannels} onChange={(e) => setSkipChannels(e.target.checked)} className="accent-[#7c3aed]" />
+          <input type="checkbox" checked={skipChannels} onChange={(e) => setSkipChannels(e.target.checked)} className="accent-accent" />
           I don&apos;t sell on any of these platforms yet
         </label>
       )}

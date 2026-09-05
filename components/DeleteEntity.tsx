@@ -90,14 +90,14 @@ export function DeleteEntity({
   }
 
   return (
-    <div className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border border-[#e7cfc8] bg-[#fcf4f1] px-5 py-4">
+    <div className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border tint-red px-5 py-4">
       <div>
         <div className="text-[13.5px] font-semibold text-negative">Delete this {kind}</div>
         <div className="text-[12px] text-muted">{description ?? `Nothing depends on it, so it can be removed permanently.`}</div>
       </div>
       <button
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-[#e0b3a8] bg-surface px-3.5 py-2 text-[13px] font-medium text-negative hover:bg-[#fbeae6]"
+        className="inline-flex items-center gap-1.5 rounded-lg border btn-danger bg-surface px-3.5 py-2 text-[13px] font-medium"
       >
         <Trash2 size={14} /> Delete {kind}
       </button>
@@ -115,7 +115,7 @@ export function DeleteEntity({
               This permanently deletes the {kind}. <span className="font-medium text-negative">This cannot be undone.</span>
             </p>
             <p className="mt-3 text-[13px] text-ink-soft">
-              Type <span className="rounded bg-[#fbeae6] px-1.5 py-0.5 font-mono text-[12px] font-semibold text-negative">{name}</span> to confirm.
+              Type <span className="tint-red rounded px-1.5 py-0.5 font-mono text-[12px] font-medium text-negative">{name}</span> to confirm.
             </p>
             <input
               value={text}

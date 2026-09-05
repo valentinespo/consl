@@ -123,7 +123,7 @@ export function MaterialEditor({ material, locked }: { material: MaterialForEdit
                 checked={skuSpecific}
                 disabled={locked}
                 onChange={(e) => setSkuSpecific(e.target.checked)}
-                className="mt-0.5 accent-[#1a2f18]"
+                className="mt-0.5 accent-accent"
               />
               <span>
                 <span className="text-[13px] font-medium text-ink">Stocked separately for each product (SKU-specific)</span>

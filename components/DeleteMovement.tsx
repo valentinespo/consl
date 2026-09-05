@@ -96,7 +96,7 @@ export function DeleteMovement({ id }: { id: string }) {
           createPortal(
             <div
               style={{ position: "fixed", top: box.top, left: box.left, width: 320 }}
-              className="dropdown-in z-[300] rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-left shadow-xl"
+              className="dropdown-in z-[300] rounded-lg border tint-red px-3 py-2 text-left shadow-xl"
             >
               {warnings.map((w, i) => (
                 <div key={i} className={`flex items-start gap-1.5 text-[12px] font-medium leading-snug text-negative ${i > 0 ? "mt-1.5" : ""}`}>

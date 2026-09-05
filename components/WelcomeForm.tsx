@@ -120,7 +120,7 @@ export function WelcomeForm({ additional = false }: { additional?: boolean }) {
             </div>
           )}
 
-          {error && <div className="rounded-lg bg-[#fdf2ef] px-3 py-2 text-[12.5px] text-negative">{error}</div>}
+          {error && <div className="rounded-lg tint-red px-3 py-2 text-[12.5px] text-negative">{error}</div>}
 
           <button
             onClick={submit}

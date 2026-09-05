@@ -220,7 +220,7 @@ export function TransactionInvoicesTable({
                             </Link>
                           ))}
                           {inv.hasUnassigned && (
-                            <span className="rounded-md bg-[#fbeae6] px-1.5 py-0.5 text-[11px] font-semibold text-negative">⚠ Unassigned</span>
+                            <span className="pill-red rounded-md border px-1.5 py-0.5 text-[11px] font-medium">⚠ Unassigned</span>
                           )}
                           {inv.presentLots.length === 0 && !inv.hasUnassigned && <span className="text-muted">—</span>}
                         </div>
@@ -236,7 +236,7 @@ export function TransactionInvoicesTable({
                             s.missing ? (
                               <span
                                 key={s.code}
-                                className="inline-flex items-center gap-1 rounded-md bg-[#fbeae6] px-1.5 py-0.5 text-[11px] font-semibold text-negative"
+                                className="inline-flex items-center gap-1 pill-red rounded-md border px-1.5 py-0.5 text-[11px] font-medium"
                                 title={`SKU ${s.code} was removed from its lot — reassign this allocation`}
                               >
                                 ⚠ {s.code}

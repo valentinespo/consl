@@ -49,7 +49,7 @@ export default async function IntegrationsSettingsPage({
         </div>
       )}
       {error && (
-        <div className="flex items-start gap-2 rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-[12.5px] text-negative">
+        <div className="flex items-start gap-2 rounded-lg border tint-red px-3 py-2 text-[12.5px] text-negative">
           <AlertTriangle size={14} className="mt-0.5 shrink-0" /> {error}
         </div>
       )}

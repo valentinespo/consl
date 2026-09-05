@@ -53,19 +53,19 @@ export function SectionTitle({ children, action }: { children: React.ReactNode; 
 }
 
 const PILL: Record<string, string> = {
-  IN_PRODUCTION: "bg-accent-soft text-accent border-accent/25",
-  FINISHED: "bg-positive/12 text-positive border-positive/25",
-  PAID: "bg-positive/12 text-positive border-positive/25",
-  DUE: "bg-[#fdf6ec] text-[#b45309] border-[#f3dcb8]",
-  TEA: "bg-[#f5f5f5] text-[#404040] border-[#e5e5e5]",
-  OTHER: "bg-[#f5f5f5] text-[#737373] border-[#e5e5e5]",
-  NOT_APPLICABLE: "bg-[#fef2f2] text-[#dc2626] border-[#fecaca]",
-  DRAFT: "bg-[#f5f5f5] text-[#737373] border-[#e5e5e5]",
-  SENT: "bg-[#dcfce7] text-[#166534] border-[#bbf7d0]",
+  IN_PRODUCTION: "pill-chart",
+  FINISHED: "pill-green",
+  PAID: "pill-green",
+  DUE: "pill-amber",
+  TEA: "pill-neutral",
+  OTHER: "pill-neutral",
+  NOT_APPLICABLE: "pill-red",
+  DRAFT: "pill-neutral",
+  SENT: "pill-green",
 };
 
 export function Pill({ kind, children }: { kind?: keyof typeof PILL | string; children: React.ReactNode }) {
-  const cls = (kind && PILL[kind]) || "bg-[#f0eee6] text-muted border-border";
+  const cls = (kind && PILL[kind]) || "pill-neutral";
   return (
     <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${cls}`}>
       {children}

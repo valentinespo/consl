@@ -148,7 +148,7 @@ export function NewMaterialButton() {
               />
             </Field>
             <label className="flex items-center gap-2 text-[12.5px] text-ink-soft">
-              <input type="checkbox" checked={skuSpecific} onChange={(e) => setSkuSpecific(e.target.checked)} className="accent-[#1a2f18]" />
+              <input type="checkbox" checked={skuSpecific} onChange={(e) => setSkuSpecific(e.target.checked)} className="accent-accent" />
               SKU-specific (separate stock per product, like pouches)
             </label>
             {error && <div className="text-[12px] text-negative">{error}</div>}

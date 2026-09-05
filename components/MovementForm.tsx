@@ -503,7 +503,7 @@ export function MovementForm({
           </Field>
 
           {overCap && q > 0 && (
-            <div className="flex items-start gap-1.5 rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-[12.5px] text-negative">
+            <div className="flex items-start gap-1.5 rounded-lg border tint-red px-3 py-2 text-[12.5px] text-negative">
               <AlertTriangle size={14} className="mt-0.5 shrink-0" />
               <span>
                 Only {Math.floor(dateCap).toLocaleString()} units were here on this date — the rest either arrived later or already
@@ -511,7 +511,7 @@ export function MovementForm({
               </span>
             </div>
           )}
-          {error && <div className="rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-[12.5px] text-negative">{error}</div>}
+          {error && <div className="rounded-lg border tint-red px-3 py-2 text-[12.5px] text-negative">{error}</div>}
 
           <div className="flex justify-end gap-2 pt-1">
             <button onClick={onDone} className="rounded-lg border border-border px-3.5 py-2 text-[13px] text-ink-soft hover:bg-surface-2">

@@ -494,7 +494,7 @@ export function LotEditor({
               Unsaved changes · {lines.length} SKU{lines.length === 1 ? "" : "s"} · {qty(totalUnits)} {inflectUnit("unit", totalUnits)}
             </span>
             {error && <span className="text-[12px] text-negative">{error}</span>}
-            <button onClick={reset} disabled={pending} className="rounded-full border border-[#e7cfc8] px-3.5 py-1.5 text-[12.5px] font-medium text-negative hover:bg-[#fbf1ee] disabled:opacity-50">Discard</button>
+            <button onClick={reset} disabled={pending} className="rounded-full border btn-danger px-3.5 py-1.5 text-[12.5px] font-medium disabled:opacity-50">Discard</button>
             <button onClick={save} disabled={pending} className="rounded-full bg-ink px-4 py-1.5 text-[12.5px] font-medium text-bg hover:opacity-90 disabled:opacity-50">{pending ? "Saving…" : "Save changes"}</button>
           </div>
         </div>

@@ -257,7 +257,7 @@ export function PurchaseInvoiceForm({
         </button>
       </div>
 
-      {error && <div className="rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-[12.5px] text-negative">{error}</div>}
+      {error && <div className="rounded-lg border tint-red px-3 py-2 text-[12.5px] text-negative">{error}</div>}
 
       <div className="flex items-center justify-between pt-1">
         <div>
@@ -267,7 +267,7 @@ export function PurchaseInvoiceForm({
         </div>
         <div className="flex gap-2">
           {editing && dirty ? (
-            <button type="button" onClick={onDone} className="rounded-lg border border-[#e7cfc8] px-3.5 py-2 text-[13px] font-medium text-negative hover:bg-[#fbf1ee]">
+            <button type="button" onClick={onDone} className="rounded-lg border btn-danger px-3.5 py-2 text-[13px] font-medium">
               Cancel changes
             </button>
           ) : (

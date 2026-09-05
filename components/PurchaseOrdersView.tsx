@@ -245,7 +245,7 @@ function StatusSelect({ id, status }: { id: string; status: string }) {
       onChange={change}
       disabled={pending}
       className={`h-7 rounded-full border px-2 text-[11.5px] font-medium outline-none disabled:opacity-50 ${
-        status === "SENT" ? "border-[#bbf7d0] bg-[#dcfce7] text-[#166534]" : "border-border bg-[#f5f5f5] text-muted"
+        status === "SENT" ? "pill-green" : "pill-neutral"
       }`}
     >
       <option value="DRAFT">Draft</option>

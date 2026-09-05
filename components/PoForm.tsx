@@ -442,7 +442,7 @@ export function PoForm({
           : `Generating creates production Lot #${nextLotNr} at ${facility?.code ?? "…"} with the SKU lines' lot units, plus the PO PDF. Leave unit cost empty for "TBD".`}
       </p>
 
-      {error && <div className="rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-[12.5px] text-negative">{error}</div>}
+      {error && <div className="rounded-lg border tint-red px-3 py-2 text-[12.5px] text-negative">{error}</div>}
 
       <div className="flex items-center justify-between pt-1">
         <div>

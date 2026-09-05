@@ -610,7 +610,7 @@ function WindowOverrideEditor({
         <Check size={13} /> Save override
       </button>
       {hasOverride && (
-        <button onClick={onClear} disabled={pending} className="text-[12px] font-medium text-[#dc2626] hover:underline disabled:opacity-60">
+        <button onClick={onClear} disabled={pending} className="text-[12px] font-medium text-negative hover:underline disabled:opacity-60">
           Clear
         </button>
       )}

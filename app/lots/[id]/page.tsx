@@ -93,7 +93,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
       </PageHeader>
 
       {hasShortfall && (
-        <div className="mb-5 flex items-start gap-2.5 rounded-[var(--radius-card)] border border-[#e7cfc8] bg-[#fbeae6] px-4 py-3">
+        <div className="mb-5 flex items-start gap-2.5 rounded-[var(--radius-card)] border tint-red px-4 py-3">
           <span className="text-[16px] leading-none">⚠️</span>
           <div className="text-[12.5px] text-negative">
             <span className="font-semibold">Not enough material purchased for this lot.</span>

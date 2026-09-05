@@ -298,7 +298,7 @@ export default async function FacilitiesPage() {
         </p>
 
         {stock.shortfalls.length > 0 && (
-          <div className="mb-3 flex items-start gap-1.5 rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-[12px] text-negative">
+          <div className="mb-3 flex items-start gap-1.5 rounded-lg border tint-red px-3 py-2 text-[12px] text-negative">
             <AlertTriangle size={13} className="mt-0.5 shrink-0" />
             <span>
               {stock.shortfalls.length} movement{stock.shortfalls.length === 1 ? "" : "s"} shipped more units than that

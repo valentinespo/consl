@@ -35,7 +35,7 @@ export function DeleteOrganization({ orgName, isOwner }: { orgName: string; isOw
   if (!isOwner) return null;
 
   return (
-    <Card className="mt-4 border-[#f0d3cb]">
+    <Card className="mt-4 edge-red">
       <div className="mb-1 flex items-center gap-1.5 text-[12px] font-medium uppercase tracking-wide text-negative">
         <AlertTriangle size={13} />
         Danger zone
@@ -51,12 +51,12 @@ export function DeleteOrganization({ orgName, isOwner }: { orgName: string; isOw
       {!armed ? (
         <button
           onClick={() => setArmed(true)}
-          className="rounded-lg border border-[#e8bab5] bg-[#fdf2ef] px-3.5 py-2 text-[13px] font-medium text-negative hover:bg-[#fbe6e0]"
+          className="rounded-lg border btn-danger px-3.5 py-2 text-[13px] font-medium"
         >
           Delete this company
         </button>
       ) : (
-        <div className="rounded-xl border border-[#e8bab5] bg-[#fdf2ef] p-3.5">
+        <div className="rounded-xl border tint-red p-3.5">
           <div className="text-[13px] font-medium text-ink">
             Type <span className="font-mono">{orgName}</span> to confirm
           </div>
@@ -74,7 +74,7 @@ export function DeleteOrganization({ orgName, isOwner }: { orgName: string; isOw
             }}
             placeholder={orgName}
             spellCheck={false}
-            className="mt-2.5 h-9 w-full rounded-lg border border-[#e8bab5] bg-surface px-2.5 text-[13px] text-ink outline-none focus:border-negative"
+            className="mt-2.5 h-9 w-full rounded-lg border edge-red bg-surface px-2.5 text-[13px] text-ink outline-none focus:border-negative"
           />
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
             <button

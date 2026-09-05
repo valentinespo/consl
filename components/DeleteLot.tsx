@@ -26,14 +26,14 @@ export function DeleteLot({ lotId, lotNr }: { lotId: string; lotNr: number }) {
   if (!canDelete) return null;
 
   return (
-    <div className="mt-8 flex items-center justify-between rounded-[var(--radius-card)] border border-[#e7cfc8] bg-[#fcf4f1] px-5 py-4">
+    <div className="mt-8 flex items-center justify-between rounded-[var(--radius-card)] border tint-red px-5 py-4">
       <div>
         <div className="text-[13.5px] font-semibold text-negative">Delete this lot</div>
         <div className="text-[12px] text-muted">Permanently removes the lot, its SKUs, bill of materials and all assigned transactions.</div>
       </div>
       <button
         onClick={() => setStep(1)}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-[#e0b3a8] bg-surface px-3.5 py-2 text-[13px] font-medium text-negative hover:bg-[#fbeae6]"
+        className="inline-flex items-center gap-1.5 rounded-lg border btn-danger bg-surface px-3.5 py-2 text-[13px] font-medium"
       >
         <Trash2 size={14} /> Delete lot
       </button>
@@ -67,7 +67,7 @@ export function DeleteLot({ lotId, lotNr }: { lotId: string; lotNr: number }) {
             ) : (
               <>
                 <p className="text-[13px] text-ink-soft">
-                  Type <span className="rounded bg-[#fbeae6] px-1.5 py-0.5 font-mono text-[12px] font-semibold text-negative">DELETE</span> to confirm.
+                  Type <span className="tint-red rounded px-1.5 py-0.5 font-mono text-[12px] font-medium text-negative">DELETE</span> to confirm.
                 </p>
                 <input
                   value={text}

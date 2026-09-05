@@ -264,7 +264,7 @@ export function TransactionInvoiceForm({
           {documents.map((d) => {
             const marked = removeIds.includes(d.id);
             return (
-              <div key={d.id} className={`flex items-center gap-2 rounded-lg border px-2.5 py-1.5 ${marked ? "border-[#f0d3cb] bg-[#fdf2ef]" : "border-border bg-surface"}`}>
+              <div key={d.id} className={`flex items-center gap-2 rounded-lg border px-2.5 py-1.5 ${marked ? "tint-red" : "border-border bg-surface"}`}>
                 <Paperclip size={13} className="shrink-0 text-muted" />
                 <span className={`min-w-0 truncate text-[12.5px] ${marked ? "text-negative line-through" : "text-ink-soft"}`} title={d.fileName ?? ""}>
                   {d.fileName ?? "document"}
@@ -362,7 +362,7 @@ export function TransactionInvoiceForm({
           return (
             <div
               key={l.key}
-              className={`rounded-lg border p-2.5 ${na || orphaned ? "border-[#f0d3cb] bg-[#fdf2ef]" : "border-border bg-surface"}`}
+              className={`rounded-lg border p-2.5 ${na || orphaned ? "tint-red" : "border-border bg-surface"}`}
             >
               <div className="flex flex-wrap items-end gap-2">
                 <MiniField label="Category" className="w-[150px]">
@@ -483,7 +483,7 @@ export function TransactionInvoiceForm({
         </button>
       </div>
 
-      {error && <div className="rounded-lg border border-[#f0d3cb] bg-[#fdf2ef] px-3 py-2 text-[12.5px] text-negative">{error}</div>}
+      {error && <div className="rounded-lg border tint-red px-3 py-2 text-[12.5px] text-negative">{error}</div>}
 
       <div className="flex items-center justify-between pt-1">
         <div>
@@ -493,7 +493,7 @@ export function TransactionInvoiceForm({
         </div>
         <div className="flex gap-2">
           {editing && dirty ? (
-            <button type="button" onClick={onDone} className="rounded-lg border border-[#e7cfc8] px-3.5 py-2 text-[13px] font-medium text-negative hover:bg-[#fbf1ee]">
+            <button type="button" onClick={onDone} className="rounded-lg border btn-danger px-3.5 py-2 text-[13px] font-medium">
               Cancel changes
             </button>
           ) : (
