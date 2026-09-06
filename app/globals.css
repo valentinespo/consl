@@ -78,32 +78,34 @@ html[data-theme="dark"] .iso-invert {
 }
 
 /* Unified status-pill palette. EVERY chip/pill in the app draws from these five — no ad-hoc
- * tints. The recipe is the Finished-lot pill's frosted look: a translucent wash of the signal
+ * tints. Colour only (`background-color`, never the shorthand): a native <select> wearing a pill
+ * keeps its arrow, which is a background-image the shorthand would reset into a tiled pattern.
+ * The recipe is the Finished-lot pill's frosted look: a translucent wash of the signal
  * colour, a faint border of the same hue, and the hue itself as text — all token-driven, so
  * both themes follow. green = good, amber = needs attention, red = critical, neutral =
  * informational, chart = violet accents tied to chart-owned controls. */
 .pill-green {
-  background: color-mix(in srgb, var(--color-positive) 12%, transparent);
+  background-color: color-mix(in srgb, var(--color-positive) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-positive) 25%, transparent);
   color: var(--color-positive);
 }
 .pill-amber {
-  background: color-mix(in srgb, var(--color-warn) 12%, transparent);
+  background-color: color-mix(in srgb, var(--color-warn) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-warn) 25%, transparent);
   color: var(--color-warn);
 }
 .pill-red {
-  background: color-mix(in srgb, var(--color-negative) 12%, transparent);
+  background-color: color-mix(in srgb, var(--color-negative) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-negative) 25%, transparent);
   color: var(--color-negative);
 }
 .pill-neutral {
-  background: var(--color-surface-2);
+  background-color: var(--color-surface-2);
   border: 1px solid color-mix(in srgb, var(--color-muted) 22%, transparent);
   color: var(--color-muted);
 }
 .pill-chart {
-  background: color-mix(in srgb, var(--color-chart) 10%, transparent);
+  background-color: color-mix(in srgb, var(--color-chart) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-chart) 25%, transparent);
   color: var(--color-chart);
 }
@@ -113,15 +115,15 @@ html[data-theme="dark"] .iso-invert {
  * hairline). Token-driven like the pills, so both themes follow; these replaced the light-only
  * hex tints that turned cream and pink on dark. */
 .tint-red {
-  background: color-mix(in srgb, var(--color-negative) 10%, transparent);
+  background-color: color-mix(in srgb, var(--color-negative) 10%, transparent);
   border-color: color-mix(in srgb, var(--color-negative) 28%, transparent);
 }
 .tint-amber {
-  background: color-mix(in srgb, var(--color-warn) 10%, transparent);
+  background-color: color-mix(in srgb, var(--color-warn) 10%, transparent);
   border-color: color-mix(in srgb, var(--color-warn) 28%, transparent);
 }
 .tint-green {
-  background: color-mix(in srgb, var(--color-positive) 10%, transparent);
+  background-color: color-mix(in srgb, var(--color-positive) 10%, transparent);
   border-color: color-mix(in srgb, var(--color-positive) 28%, transparent);
 }
 /* Border only — a card that stays on its own surface but signals danger at the edge. */
@@ -134,7 +136,7 @@ html[data-theme="dark"] .iso-invert {
   color: var(--color-negative);
 }
 .btn-danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-negative) 8%, transparent);
+  background-color: color-mix(in srgb, var(--color-negative) 8%, transparent);
 }
 
 /* Frosted readout card for chart hovers — explicit prefixes so the blur is guaranteed. */
