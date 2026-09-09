@@ -111,16 +111,11 @@ export function DashboardGrid({
   initialLayout,
   title,
   subtitle,
-  banner,
 }: {
   data: DashboardData;
   initialLayout: unknown;
   title: string;
   subtitle?: string;
-  // Rendered between the header and the grid (the Getting Started checklist). Passed from the
-  // server page so the grid owns the whole header→banner→grid stack and the Edit button can sit
-  // inline with the title instead of in a half-empty row of its own.
-  banner?: React.ReactNode;
 }) {
   const [items, setItems] = useState<Item[]>(() => sanitize(initialLayout));
   const [editing, setEditing] = useState(false);
@@ -282,7 +277,6 @@ export function DashboardGrid({
         </div>
       </PageHeader>
 
-      {banner}
 
       {/* Grid */}
       {isMobile ? (

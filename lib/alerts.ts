@@ -89,8 +89,8 @@ export async function getAlerts(rows: RestockRow[]): Promise<Alert[]> {
   // Auto-clear resolved dismissals, then hide the ones still dismissed.
   const dismissed = await prisma.dismissedNotification.findMany();
   const activeKeys = new Set(alerts.map((a) => a.key));
-  // Only prune dismissals that belong to the alert namespace — other features (the Getting
-  // Started banner) store their own dismissal in this same table and must not be swept away.
+  // Only prune dismissals that belong to the alert namespace — other features may store their
+  // own dismissals in this same table and must not be swept away.
   const isAlertKey = (k: string) => /^(ship|expedite|reorder|material):/.test(k);
   const stale = dismissed.filter((d) => isAlertKey(d.key) && !activeKeys.has(d.key)).map((d) => d.key);
   if (stale.length) await prisma.dismissedNotification.deleteMany({ where: { key: { in: stale } } });
