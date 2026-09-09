@@ -87,13 +87,20 @@ export function SkuAvatar({ code, size = 36, imageUrl }: { code: string; size?: 
     );
   }
   const { bg, fg } = skuColor(code);
+  // One line, always: an abbreviation like "LKD-CP" must never break across lines inside the
+  // tile. Longer codes get a smaller face; below a readable size, the tile shows the leading
+  // letters instead (the full code stays in the tooltip, and the colour is the full code's).
+  const scale = code.length <= 3 ? 0.32 : code.length <= 4 ? 0.28 : code.length <= 6 ? 0.22 : 0.17;
+  const fontSize = Math.max(8, size * scale);
+  const room = Math.floor((size - 4) / (fontSize * 0.62));
+  const shown = code.length <= room ? code : code.replace(/[^A-Za-z0-9]/g, "").slice(0, Math.max(1, room));
   return (
     <span
-      className="inline-flex shrink-0 items-center justify-center rounded-[10px] font-semibold"
-      style={{ width: size, height: size, background: bg, color: fg, fontSize: size * 0.3 }}
+      className="inline-flex shrink-0 items-center justify-center overflow-hidden whitespace-nowrap rounded-[10px] font-semibold leading-none tracking-tight"
+      style={{ width: size, height: size, background: bg, color: fg, fontSize }}
       title={code}
     >
-      {code}
+      {shown}
     </span>
   );
 }

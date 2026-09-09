@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X } from "@/components/icons";
-import { createProduct, createMaterial } from "@/app/catalog/actions";
+import { SkuAvatar } from "@/components/ui";
+import { createProduct, createMaterial, uploadEntityImage } from "@/app/catalog/actions";
 import { SearchSelect } from "@/components/SearchSelect";
 import { COMMON_UNIT_LABELS } from "@/lib/format";
 import { useCan } from "@/components/AccessProvider";
@@ -48,24 +49,56 @@ export function NewProductButton() {
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
+  const [photo, setPhoto] = useState<File | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
   const canCreate = useCan("catalog", "create");
 
+  // A local preview of the chosen photo; the object URL is released when it changes or closes.
+  const preview = useMemo(() => (photo ? URL.createObjectURL(photo) : null), [photo]);
+  useEffect(() => () => {
+    if (preview) URL.revokeObjectURL(preview);
+  }, [preview]);
+
+  function reset() {
+    setCode("");
+    setName("");
+    setPhoto(null);
+    setError(null);
+  }
+
   async function save() {
     setPending(true);
     setError(null);
-    const r = await createProduct({ code, name });
-    setPending(false);
-    if (!r.ok) {
-      setError(r.error ?? "Failed");
-      return;
+    try {
+      const r = await createProduct({ code, name });
+      if (!r.ok) {
+        setError(r.error ?? "Failed");
+        return;
+      }
+      // The photo rides the same upload the product page uses, once there is a product to hang it on.
+      if (photo && !r.existed) {
+        const fd = new FormData();
+        fd.set("kind", "product");
+        fd.set("id", r.id);
+        fd.set("file", photo);
+        const up = await uploadEntityImage(fd);
+        if (!up.ok) {
+          setError(`${r.code} was created, but the photo didn't upload: ${up.error}. Add it from the product page.`);
+          router.refresh();
+          return;
+        }
+      }
+      setOpen(false);
+      reset();
+      router.refresh();
+    } catch {
+      setError("Couldn't reach the server — try again.");
+    } finally {
+      setPending(false);
     }
-    setOpen(false);
-    setCode("");
-    setName("");
-    router.refresh();
   }
 
   if (!canCreate) return null;
@@ -76,12 +109,56 @@ export function NewProductButton() {
       {open && (
         <Modal title="New SKU" onClose={() => setOpen(false)}>
           <div className="space-y-3">
-            <Field label="Product name">
-              <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Lavender Hand Cream" />
-            </Field>
-            <Field label="Abbreviation">
-              <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} className={inputCls} placeholder="Your internal code, e.g. LAV" />
-            </Field>
+            <div className="flex items-start gap-4">
+              <div className="shrink-0">
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  className="group relative block overflow-hidden rounded-[10px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  title={photo ? "Change photo" : "Add a photo"}
+                >
+                  {preview ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={preview} alt="" className="block h-24 w-24 rounded-[10px] border border-border object-cover" />
+                  ) : (
+                    <SkuAvatar code={code.trim() || "SKU"} size={96} />
+                  )}
+                  <span className="absolute inset-x-0 bottom-0 bg-black/55 py-1 text-center text-[10.5px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
+                    {photo ? "Change" : "Add photo"}
+                  </span>
+                </button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  className="hidden"
+                  onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
+                />
+                <div className="mt-1.5 text-center text-[11px] text-muted">
+                  {photo ? (
+                    <button type="button" onClick={() => setPhoto(null)} className="hover:text-ink">
+                      Remove photo
+                    </button>
+                  ) : (
+                    "Photo (optional)"
+                  )}
+                </div>
+              </div>
+              <div className="min-w-0 flex-1 space-y-3">
+                <Field label="Product name">
+                  <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Lavender Hand Cream" />
+                </Field>
+                <Field label="Abbreviation">
+                  <input
+                    value={code}
+                    onChange={(e) => setCode(e.target.value.toUpperCase().slice(0, 8))}
+                    maxLength={8}
+                    className={inputCls}
+                    placeholder="Your internal code, e.g. LAV"
+                  />
+                </Field>
+              </div>
+            </div>
             {error && <div className="text-[12px] text-negative">{error}</div>}
             <div className="flex justify-end gap-2 pt-1">
               <button onClick={() => setOpen(false)} className="rounded-lg border border-border px-3.5 py-2 text-[13px] text-ink-soft hover:bg-surface-2">
