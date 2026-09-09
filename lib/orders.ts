@@ -305,12 +305,13 @@ export async function importShopifyOrderById(orderGid: string): Promise<OrderImp
   return persist("SHOPIFY", [mapShopifyOrder(data.node)], shopifyResolver(map));
 }
 
-type TikTokOrder = {
+export type TikTokOrder = {
   id: string;
   status?: string | null;
   order_status?: string | null;
   create_time?: number | null;
   update_time?: number | null;
+  paid_time?: number | null;
   fulfillment_type?: string | null; // FULFILLMENT_BY_TIKTOK | FULFILLMENT_BY_SELLER
   warehouse_id?: string | null;
   payment?: {
@@ -322,6 +323,11 @@ type TikTokOrder = {
     seller_discount?: string | null;
     platform_discount?: string | null;
     original_total_product_price?: string | null;
+  } | null;
+  recipient_address?: {
+    region_code?: string | null;
+    postal_code?: string | null;
+    district_info?: Array<{ address_level_name?: string | null; address_name?: string | null }> | null;
   } | null;
   line_items?: Array<{
     seller_sku?: string | null;
@@ -342,12 +348,8 @@ export async function importTikTokOrders(sinceDays?: number): Promise<OrderImpor
   const { getTikTokAccessToken } = await import("@/lib/tiktok-oauth");
   const { tiktokApi, TIKTOK_API_VERSION } = await import("@/lib/tiktok");
   const token = await getTikTokAccessToken(conn);
-  const map = await productMap("TIKTOK");
-  // warehouse_id → facility name, so the "Fulfilled at" column reads the real warehouse.
-  const warehouses = await prisma.facility.findMany({ where: { channel: "TIKTOK", externalId: { not: null } }, select: { externalId: true, name: true } });
-  const warehouseName = new Map(warehouses.map((f) => [f.externalId!, f.name]));
 
-  const fetched: Fetched[] = [];
+  const fetched: TikTokOrder[] = [];
   let pageToken: string | null = null;
   for (let page = 0; page < 200; page++) {
     const query: Record<string, string> = {
@@ -362,11 +364,22 @@ export async function importTikTokOrders(sinceDays?: number): Promise<OrderImpor
       query,
       body: sinceDays ? { create_time_ge: Math.floor(Date.now() / 1000) - sinceDays * 86_400 } : {},
     });
-    fetched.push(...(data.orders ?? []).map((o) => mapTikTokOrder(o, warehouseName)));
+    fetched.push(...(data.orders ?? []));
     pageToken = data.next_page_token || null;
     if (!pageToken) break;
   }
 
+  return persistTikTokOrders(fetched);
+}
+
+/** Upsert TikTok orders already in hand — the API's own order objects. The shared tail of every
+ *  TikTok import (full pull, webhook refetch) and the entry point for a history load. */
+export async function persistTikTokOrders(orders: TikTokOrder[]): Promise<OrderImportResult> {
+  const map = await productMap("TIKTOK");
+  // warehouse_id → facility name, so the "Fulfilled at" column reads the real warehouse.
+  const warehouses = await prisma.facility.findMany({ where: { channel: "TIKTOK", externalId: { not: null } }, select: { externalId: true, name: true } });
+  const warehouseName = new Map(warehouses.map((f) => [f.externalId!, f.name]));
+  const fetched = orders.map((o) => mapTikTokOrder(o, warehouseName));
   return persist("TIKTOK", fetched, (l) => (l.sku ? map.bySku.get(l.sku) ?? null : null));
 }
 
@@ -377,12 +390,25 @@ function mapTikTokOrder(o: TikTokOrder, warehouseName: Map<string, string>): Fet
   const bySku = new Map<string, FetchedLine>();
   for (const l of o.line_items ?? []) {
     const sku = l.seller_sku?.trim() || null;
-    // Net of seller + platform discounts, so the total counts discounts (per the merchant's ask).
-    const unitPrice = Math.max(0, money(l.sale_price ?? l.original_price) - money(l.seller_discount) - money(l.platform_discount));
+    // The seller's revenue on a unit is its list price less the seller-funded discount. A
+    // platform-funded discount is TikTok's money (the seller is paid it anyway), so it never
+    // reduces revenue; `sale_price` already has the discounts taken out, so it is only the
+    // fallback when no list price is given.
+    const listPrice = money(l.original_price);
+    const unitPrice = Math.max(0, listPrice > 0 ? listPrice - money(l.seller_discount) : money(l.sale_price));
+    const promo = Math.max(0, listPrice - unitPrice);
     const cur = bySku.get(sku ?? "");
-    if (cur) cur.quantity += 1;
-    else bySku.set(sku ?? "", { sku, quantity: 1, unitPrice });
+    if (cur) {
+      cur.quantity += 1;
+      cur.gross = (cur.gross ?? 0) + listPrice;
+      cur.promoDiscount = (cur.promoDiscount ?? 0) + promo;
+    } else bySku.set(sku ?? "", { sku, quantity: 1, unitPrice, gross: listPrice, promoDiscount: promo });
   }
+  // Where it shipped to, at the level Amazon's report gives (state/city/zip/country) — never the
+  // street or the person.
+  const addr = o.recipient_address;
+  const district = (re: RegExp, fallback: number) =>
+    addr?.district_info?.find((d) => re.test(d.address_level_name ?? ""))?.address_name ?? addr?.district_info?.[fallback]?.address_name ?? null;
   return {
     externalId: o.id,
     orderNumber: o.id,
@@ -402,6 +428,14 @@ function mapTikTokOrder(o: TikTokOrder, warehouseName: Map<string, string>): Fet
     discounts: money(o.payment?.seller_discount) + money(o.payment?.platform_discount),
     tax: money(o.payment?.tax),
     shipping: money(o.payment?.shipping_fee),
+    ...(addr
+      ? {
+          shipState: district(/state|province|L1/i, 0),
+          shipCity: district(/city|L2/i, 1),
+          shipPostalCode: addr.postal_code ?? null,
+          shipCountry: addr.region_code ?? null,
+        }
+      : {}),
     platformUpdatedAt: o.update_time ? new Date(o.update_time * 1000) : null,
     sourceData: o as unknown,
     lines: [...bySku.values()],
@@ -416,9 +450,6 @@ export async function importTikTokOrderIds(ids: string[]): Promise<OrderImportRe
   const { getTikTokAccessToken } = await import("@/lib/tiktok-oauth");
   const { tiktokApi, TIKTOK_API_VERSION } = await import("@/lib/tiktok");
   const token = await getTikTokAccessToken(conn);
-  const map = await productMap("TIKTOK");
-  const warehouses = await prisma.facility.findMany({ where: { channel: "TIKTOK", externalId: { not: null } }, select: { externalId: true, name: true } });
-  const warehouseName = new Map(warehouses.map((f) => [f.externalId!, f.name]));
 
   const data = await tiktokApi<{ orders?: TikTokOrder[] | null }>({
     method: "GET",
@@ -426,8 +457,7 @@ export async function importTikTokOrderIds(ids: string[]): Promise<OrderImportRe
     accessToken: token,
     query: { shop_cipher: conn.marketplaceId, ids: ids.slice(0, 50).join(",") },
   });
-  const fetched = (data.orders ?? []).map((o) => mapTikTokOrder(o, warehouseName));
-  return persist("TIKTOK", fetched, (l) => (l.sku ? map.bySku.get(l.sku) ?? null : null));
+  return persistTikTokOrders(data.orders ?? []);
 }
 
 /** Amazon marketplace orders from the All Orders report, order-level. `fulfillment` keeps FBA vs

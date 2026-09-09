@@ -165,12 +165,13 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
 
   // The mirror in the other direction: Amazon MCF rows are Amazon shipping another channel's
   // sale. Offered (global count, like the source toggles) once any non-Amazon channel is
-  // connected — before that, the MCF rows are the only trace of those sales, so dropping them
-  // would just lose orders. Cancelled MCF rows are left out of the count: they were never in the
-  // totals, so the number shown matches exactly what the toggle removes.
+  // connected or has orders in the feed — before that, the MCF rows are the only trace of those
+  // sales, so dropping them would just lose orders. Cancelled MCF rows are left out of the count:
+  // they were never in the totals, so the number shown matches exactly what the toggle removes.
   const mcfCount = await prisma.salesOrder.count({ where: { channel: "AMAZON", mcf: true, cancelled: false, voided: false } });
+  const otherChannelOrders = mcfCount > 0 ? await prisma.salesOrder.count({ where: { channel: { not: "AMAZON" } } }) : 0;
   const mcf: McfToggle = {
-    offered: mcfCount > 0 && [...connected].some((c) => c !== "AMAZON"),
+    offered: mcfCount > 0 && ([...connected].some((c) => c !== "AMAZON") || otherChannelOrders > 0),
     count: mcfCount,
     excluded: excludeMcf,
   };
