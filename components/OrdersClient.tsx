@@ -499,14 +499,19 @@ export function OrdersClient({
                     </td>
                     <td className="px-4 py-2.5 text-ink-soft">{o.sourceLabel ?? "—"}</td>
                     <td className="px-4 py-2.5 text-ink-soft">
-                      {o.fulfillmentOverride ? (
+                      <HoverHint
+                        title="Fulfilled at"
+                        body={`${o.channelLabel} says "${o.fulfillmentLabel ?? "unknown"}"${o.fulfilledAt ? ` — consl places it at ${o.fulfilledAt.name}${o.viaMcf ? " (shipped by Amazon MCF)" : ""}` : " — not placed at a facility yet"}.`}
+                        className="block"
+                      >
                         <span className="flex flex-col leading-tight">
-                          <span className="text-[11.5px] text-muted line-through">{o.fulfillmentLabel ?? "—"}</span>
-                          <span>{o.fulfillmentOverride}</span>
+                          {o.fulfilledAtDetected && <span className="text-[11.5px] text-muted line-through">{o.fulfilledAtDetected.name}</span>}
+                          <span>
+                            {o.fulfilledAt?.name ?? o.fulfillmentLabel ?? "—"}
+                            {o.viaMcf && <span className="ml-1 text-[11px] text-muted">via MCF</span>}
+                          </span>
                         </span>
-                      ) : (
-                        (o.fulfillmentLabel ?? "—")
-                      )}
+                      </HoverHint>
                     </td>
                     <td className="px-4 py-2.5">{st ? <span className={`${PILL} ${st.cls}`}>{st.label}</span> : <span className="text-muted">—</span>}</td>
                     <td className="px-4 py-2.5 text-right tabular text-ink-soft">{o.units.toLocaleString()}</td>
@@ -560,7 +565,7 @@ export function OrdersClient({
         </div>
       )}
 
-      {dialogOrder && <OrderDialog order={dialogOrder} fulfilledAt={fees.fulfilledAt} onClose={() => setDialogId(null)} />}
+      {dialogOrder && <OrderDialog order={dialogOrder} facilities={fees.facilities} onClose={() => setDialogId(null)} />}
     </div>
   );
 }

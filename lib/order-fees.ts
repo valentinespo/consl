@@ -16,11 +16,11 @@ import { prisma } from "@/lib/prisma";
 export const FEE_TAGS: Record<string, string> = { mcf: "MCF", free_sample: "Free sample", replacement: "Replacement", free_unit: "Free unit" };
 export type FeeKind = "fixed" | "percent";
 
-type Rule = { id: string; name: string; kind: string; value: number; channel: string | null; source: string | null; fulfilledAt: string | null; tag: string | null; appliesToPast: boolean; active: boolean; createdAt: Date };
-type Order = { id: string; channel: string; source: string | null; fulfillmentLabel: string | null; fulfillmentOverride: string | null; mcf: boolean; replacement: boolean; total: number; cancelled: boolean; status: string | null; orderedAt: Date };
+type Rule = { id: string; name: string; kind: string; value: number; channel: string | null; source: string | null; facilityId: string | null; tag: string | null; appliesToPast: boolean; active: boolean; createdAt: Date };
+type Order = { id: string; channel: string; source: string | null; fulfillmentFacilityId: string | null; fulfillmentOverrideFacilityId: string | null; mcf: boolean; replacement: boolean; total: number; cancelled: boolean; status: string | null; orderedAt: Date };
 
 const ORDER_SELECT = {
-  id: true, channel: true, source: true, fulfillmentLabel: true, fulfillmentOverride: true, mcf: true, replacement: true, total: true, cancelled: true, status: true, orderedAt: true,
+  id: true, channel: true, source: true, fulfillmentFacilityId: true, fulfillmentOverrideFacilityId: true, mcf: true, replacement: true, total: true, cancelled: true, status: true, orderedAt: true,
 } as const;
 
 export const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -35,15 +35,16 @@ export function orderTags(o: Order): Set<string> {
   return tags;
 }
 
-/** Where the order counts as fulfilled: the operator's correction, else the imported label. */
-export const effectiveFulfilledAt = (o: { fulfillmentLabel: string | null; fulfillmentOverride: string | null }) => o.fulfillmentOverride ?? o.fulfillmentLabel;
+/** The facility the order counts as fulfilled from: the operator's correction, else the detected one. */
+export const effectiveFacilityId = (o: { fulfillmentFacilityId: string | null; fulfillmentOverrideFacilityId: string | null }) =>
+  o.fulfillmentOverrideFacilityId ?? o.fulfillmentFacilityId;
 
 export function ruleMatches(rule: Rule, o: Order): boolean {
   if (!rule.active) return false;
   if (!rule.appliesToPast && o.orderedAt < rule.createdAt) return false;
   if (rule.channel && o.channel !== rule.channel) return false;
   if (rule.source && (o.source ?? "").toLowerCase() !== rule.source.toLowerCase()) return false;
-  if (rule.fulfilledAt && (effectiveFulfilledAt(o) ?? "") !== rule.fulfilledAt) return false;
+  if (rule.facilityId && effectiveFacilityId(o) !== rule.facilityId) return false;
   if (rule.tag && !orderTags(o).has(rule.tag)) return false;
   return true;
 }
@@ -89,7 +90,9 @@ export async function applyFeeRule(ruleId: string): Promise<number> {
   const where = {
     ...(rule.channel ? { channel: rule.channel } : {}),
     ...(rule.source ? { source: { equals: rule.source, mode: "insensitive" as const } } : {}),
-    ...(rule.fulfilledAt ? { OR: [{ fulfillmentOverride: rule.fulfilledAt }, { fulfillmentOverride: null, fulfillmentLabel: rule.fulfilledAt }] } : {}),
+    ...(rule.facilityId
+      ? { OR: [{ fulfillmentOverrideFacilityId: rule.facilityId }, { fulfillmentOverrideFacilityId: null, fulfillmentFacilityId: rule.facilityId }] }
+      : {}),
     ...(rule.tag === "mcf" ? { mcf: true } : {}),
     ...(rule.tag === "replacement" ? { replacement: true } : {}),
     ...(rule.tag === "free_sample" ? { channel: "TIKTOK", total: 0 } : {}),

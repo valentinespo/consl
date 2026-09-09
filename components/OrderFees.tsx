@@ -15,7 +15,7 @@ import type { OrderRow, FeeRuleRow } from "@/lib/order-metrics";
  * server actions and refresh the page; nothing is kept locally beyond the form drafts.
  */
 
-export type FeeOptions = { rules: FeeRuleRow[]; sources: { value: string; label: string }[]; fulfilledAt: string[] };
+export type FeeOptions = { rules: FeeRuleRow[]; sources: { value: string; label: string }[]; facilities: { id: string; name: string }[] };
 
 // Client-side copy of the rule vocabulary (the server module can't be imported here).
 const FEE_TAGS: Record<string, string> = { mcf: "MCF", free_sample: "Free sample", replacement: "Replacement", free_unit: "Free unit" };
@@ -118,14 +118,14 @@ export function BulkBar({ ids, onClear }: { ids: string[]; onClear: () => void }
 }
 
 /** One order's custom fees and its fulfilled-at correction. */
-export function OrderDialog({ order, fulfilledAt, onClose }: { order: OrderRow; fulfilledAt: string[]; onClose: () => void }) {
+export function OrderDialog({ order, facilities, onClose }: { order: OrderRow; facilities: { id: string; name: string }[]; onClose: () => void }) {
   const router = useRouter();
   const { money } = useMoney();
   const [pending, start] = useTransition();
   const [draft, setDraft] = useState<FeeDraft>(emptyFee);
   const [error, setError] = useState<string | null>(null);
-  const [loc, setLoc] = useState(order.fulfillmentOverride ?? "");
-  const [custom, setCustom] = useState("");
+  const detected = order.fulfilledAtDetected ?? (order.fulfilledAt && !order.fulfilledAtDetected ? order.fulfilledAt : null);
+  const [loc, setLoc] = useState(order.fulfilledAtDetected ? (order.fulfilledAt?.id ?? "") : "");
   const act = (fn: () => Promise<Result>) =>
     start(async () => {
       const r = await fn();
@@ -134,11 +134,9 @@ export function OrderDialog({ order, fulfilledAt, onClose }: { order: OrderRow; 
       router.refresh();
     });
   const locations = [
-    { value: "", label: `Keep imported (${order.fulfillmentLabel ?? "—"})` },
-    ...fulfilledAt.filter((l) => l !== order.fulfillmentLabel).map((l) => ({ value: l, label: l })),
-    { value: "__custom", label: "Somewhere else…" },
+    { value: "", label: detected ? `Keep detected (${detected.name})` : "Keep as detected (nowhere yet)" },
+    ...facilities.filter((f) => f.id !== detected?.id).map((f) => ({ value: f.id, label: f.name })),
   ];
-  if (loc && loc !== "__custom" && !locations.some((l) => l.value === loc)) locations.splice(1, 0, { value: loc, label: loc });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
@@ -205,17 +203,16 @@ export function OrderDialog({ order, fulfilledAt, onClose }: { order: OrderRow; 
         <section className="mt-5">
           <div className="text-[11px] font-medium uppercase tracking-wide text-muted">Fulfilled at</div>
           <p className="mt-1 text-[12.5px] text-muted">
-            Imported as {order.fulfillmentLabel ?? "unknown"}. Correct it here — the imported label stays on the record, struck through.
+            {CHANNEL_NAME[order.channel] ?? order.channel} says &ldquo;{order.fulfillmentLabel ?? "unknown"}&rdquo;
+            {detected ? `, which consl reads as ${detected.name}` : ", which consl can't place yet"}. Pick the facility it really shipped from — the
+            detected one stays on the record, struck through.
           </p>
           <div className="mt-2 flex flex-col gap-2">
             <SelectMenu value={loc} options={locations} onChange={setLoc} />
-            {loc === "__custom" && (
-              <input value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="Location name" className={inputCls} maxLength={80} />
-            )}
             <button
               className={`${btnPrimary} self-start`}
-              disabled={pending || (loc === "__custom" && !custom.trim())}
-              onClick={() => act(() => setFulfillmentOverride(order.id, loc === "__custom" ? custom : loc || null))}
+              disabled={pending}
+              onClick={() => act(() => setFulfillmentOverride(order.id, loc || null))}
             >
               <Check size={13} /> Save location
             </button>
@@ -251,7 +248,7 @@ export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClo
     [
       r.channel && CHANNEL_NAME[r.channel],
       r.source && (options.sources.find((s) => s.value === r.source)?.label ?? r.source),
-      r.fulfilledAt && `fulfilled at ${r.fulfilledAt}`,
+      r.facility && `fulfilled at ${r.facility.name}`,
       r.tag && FEE_TAGS[r.tag],
     ]
       .filter(Boolean)
@@ -306,7 +303,7 @@ export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClo
             options={[{ value: "", label: "Any channel" }, ...Object.entries(CHANNEL_NAME).map(([v, l]) => ({ value: v, label: l }))]}
           />
           <SelectMenu value={source} onChange={setSource} options={[{ value: "", label: "Any sales channel" }, ...options.sources]} />
-          <SelectMenu value={where} onChange={setWhere} options={[{ value: "", label: "Fulfilled anywhere" }, ...options.fulfilledAt.map((l) => ({ value: l, label: l }))]} />
+          <SelectMenu value={where} onChange={setWhere} options={[{ value: "", label: "Fulfilled anywhere" }, ...options.facilities.map((f) => ({ value: f.id, label: f.name }))]} />
           <SelectMenu value={tag} onChange={setTag} options={[{ value: "", label: "Any tag" }, ...Object.entries(FEE_TAGS).map(([v, l]) => ({ value: v, label: l }))]} />
         </div>
         <label className="flex items-center gap-2 text-[12.5px] text-ink-soft">
@@ -319,7 +316,7 @@ export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClo
             disabled={pending}
             onClick={() =>
               act(async () => {
-                const r = await createFeeRule({ ...parseFee(draft), channel: channel || null, source: source || null, fulfilledAt: where || null, tag: tag || null, appliesToPast: past });
+                const r = await createFeeRule({ ...parseFee(draft), channel: channel || null, source: source || null, facilityId: where || null, tag: tag || null, appliesToPast: past });
                 if (r.ok) {
                   setDraft(emptyFee);
                   setChannel("");

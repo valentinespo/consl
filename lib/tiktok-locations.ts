@@ -63,7 +63,10 @@ export async function syncTikTokWarehouses(accessToken: string, shopCipher: stri
     query: { shop_cipher: shopCipher },
   });
   const all = data.warehouses ?? [];
-  const wanted = all.filter((w) => w.type === "SALES_WAREHOUSE" && w.effect_status === "ENABLED");
+  // A warehouse that IS Amazon's MCF mirrors stock consl already holds as Amazon FBA — same rule
+  // as Shopify's MCF location: never a second facility; orders from it resolve to FBA instead.
+  const amazonConnected = (await prisma.facility.count({ where: { channel: "AMAZON_FBA" } })) > 0;
+  const wanted = all.filter((w) => w.type === "SALES_WAREHOUSE" && w.effect_status === "ENABLED" && !(amazonConnected && /amazon/i.test(w.name)));
 
   const existing = await prisma.facility.findMany({ where: { channel: "TIKTOK" } });
   const byExternal = new Map(existing.filter((f) => f.externalId).map((f) => [f.externalId!, f]));

@@ -178,6 +178,9 @@ model Facility {
   purchaseOrders  PurchaseOrder[]
   supplierProfile Supplier?
   channelStock    ChannelStock[]
+  fulfilledOrders SalesOrder[]    @relation("OrderFulfilledAt")
+  overriddenOrders SalesOrder[]   @relation("OrderFulfilledAtOverride")
+  feeRules        OrderFeeRule[]
   movementsOut    StockMovement[] @relation("MovementFrom")
   movementsIn     StockMovement[] @relation("MovementTo")
   createdAt       DateTime        @default(now())
@@ -832,9 +835,17 @@ model SalesOrder {
   // anything not columnized above is still kept forever. Written by the report/full importers;
   // the quick pollers leave it untouched.
   sourceData   Json?
-  // Where it REALLY shipped from, when the operator says so — the imported label stays, shown
-  // struck through under the correction. Fee rules that key on the location use this.
+  // Retired 2026-09-09 (column kept): the correction is a facility now, below.
   fulfillmentOverride String?
+  // Where it shipped from as a consl FACILITY: detected from the platform at import (an MCF
+  // location or warehouse resolves to Amazon FBA, a Shopify location or TikTok warehouse to its
+  // own facility), plus the operator's correction — the detected one stays, shown struck
+  // through. The platform's raw label lives on fulfillmentLabel. This is the hook for pricing a
+  // unit from the queue of the place it actually left.
+  fulfillmentFacility         Facility? @relation("OrderFulfilledAt", fields: [fulfillmentFacilityId], references: [id], onDelete: SetNull)
+  fulfillmentFacilityId       String?
+  fulfillmentOverrideFacility Facility? @relation("OrderFulfilledAtOverride", fields: [fulfillmentOverrideFacilityId], references: [id], onDelete: SetNull)
+  fulfillmentOverrideFacilityId String?
   lines        SalesOrderLine[]
   fees         OrderFee[]
   createdAt    DateTime        @default(now())
@@ -843,6 +854,7 @@ model SalesOrder {
   @@unique([orgId, channel, externalId])
   @@index([orgId, channel, orderedAt])
   @@index([orgId, source])
+  @@index([orgId, fulfillmentFacilityId])
 }
 
 /// A cost the operator attaches to every order a rule matches — a marketplace commission consl
@@ -858,7 +870,9 @@ model OrderFeeRule {
   value        Float
   channel      String? // AMAZON | SHOPIFY | TIKTOK
   source       String? // Shopify order source key, e.g. "faire"
-  fulfilledAt  String? // fulfilled-at label (after any manual override)
+  fulfilledAt  String? // retired 2026-09-09 (column kept) — see facilityId
+  facility     Facility?     @relation(fields: [facilityId], references: [id], onDelete: SetNull)
+  facilityId   String? // the consl facility the order was fulfilled from (after any correction)
   tag          String? // mcf | free_sample | replacement | free_unit
   // Whether the rule was also written onto orders that predate it; otherwise it starts today.
   appliesToPast Boolean      @default(false)

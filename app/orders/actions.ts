@@ -81,20 +81,19 @@ export async function removeOrderFee(feeId: string) {
   return { ok: true as const };
 }
 
-/** Correct where an order shipped from. Null clears the correction. Fee rules keyed on the
- *  location follow the correction. */
-export async function setFulfillmentOverride(orderId: string, label: string | null) {
+/** Correct which facility an order shipped from. Null clears the correction. Fee rules keyed on
+ *  the facility follow the correction. */
+export async function setFulfillmentOverride(orderId: string, facilityId: string | null) {
   const gate = await requirePermission("inventory", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };
-  const clean = label?.trim() || null;
-  if (clean && clean.length > 80) return { ok: false as const, error: "Keep the location under 80 characters." };
-  await prisma.salesOrder.updateMany({ where: { id: orderId }, data: { fulfillmentOverride: clean } });
+  if (facilityId && !(await prisma.facility.findFirst({ where: { id: facilityId }, select: { id: true } }))) return { ok: false as const, error: "Pick a facility." };
+  await prisma.salesOrder.updateMany({ where: { id: orderId }, data: { fulfillmentOverrideFacilityId: facilityId } });
   await applyFeeRulesToOrders([orderId]);
   touched();
   return { ok: true as const };
 }
 
-type RuleInput = FeeInput & { channel: string | null; source: string | null; fulfilledAt: string | null; tag: string | null; appliesToPast: boolean };
+type RuleInput = FeeInput & { channel: string | null; source: string | null; facilityId: string | null; tag: string | null; appliesToPast: boolean };
 
 /** Create a rule and write it onto every order it covers (the past too when asked). */
 export async function createFeeRule(input: RuleInput) {
@@ -104,6 +103,7 @@ export async function createFeeRule(input: RuleInput) {
   if (bad) return { ok: false as const, error: bad };
   if (input.channel && !["AMAZON", "SHOPIFY", "TIKTOK"].includes(input.channel)) return { ok: false as const, error: "Unknown channel." };
   if (input.tag && !FEE_TAGS[input.tag]) return { ok: false as const, error: "Unknown tag." };
+  if (input.facilityId && !(await prisma.facility.findFirst({ where: { id: input.facilityId }, select: { id: true } }))) return { ok: false as const, error: "Pick a facility." };
   const rule = await prisma.orderFeeRule.create({
     data: {
       name: input.name.trim(),
@@ -111,7 +111,7 @@ export async function createFeeRule(input: RuleInput) {
       value: input.value,
       channel: input.channel || null,
       source: input.source?.trim() || null,
-      fulfilledAt: input.fulfilledAt?.trim() || null,
+      facilityId: input.facilityId || null,
       tag: input.tag || null,
       appliesToPast: input.appliesToPast,
     },

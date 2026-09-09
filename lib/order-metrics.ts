@@ -54,9 +54,14 @@ export type OrderRow = {
   channel: string;
   channelLabel: string;
   sourceLabel: string | null;
+  /** The platform's own words for where it shipped from (kept for the record). */
   fulfillmentLabel: string | null;
-  /** The operator's correction of where it shipped from; the imported label stays for the record. */
-  fulfillmentOverride: string | null;
+  /** The consl facility it counts as fulfilled from — the correction if there is one, else the detected one. */
+  fulfilledAt: { id: string; name: string } | null;
+  /** The facility detected from the platform, when a correction replaced it. */
+  fulfilledAtDetected: { id: string; name: string } | null;
+  /** A non-Amazon order that shipped from Amazon FBA — through MCF. */
+  viaMcf: boolean;
   orderedAt: string;
   units: number;
   total: number;
@@ -85,31 +90,29 @@ export type FeeRuleRow = {
   value: number;
   channel: string | null;
   source: string | null;
-  fulfilledAt: string | null;
+  facility: { id: string; name: string } | null;
   tag: string | null;
   appliesToPast: boolean;
   active: boolean;
   orders: number;
 };
 
-/** The fee rules plus the vocab the rule form offers: known Shopify sources and fulfilled-at labels. */
-export async function feeRuleOptions(): Promise<{ rules: FeeRuleRow[]; sources: { value: string; label: string }[]; fulfilledAt: string[] }> {
-  const [rules, sources, labels, overrides] = await Promise.all([
-    prisma.orderFeeRule.findMany({ orderBy: { createdAt: "asc" }, include: { _count: { select: { fees: true } } } }),
+/** The fee rules plus the vocab the rule form offers: known Shopify sources and the facilities. */
+export async function feeRuleOptions(): Promise<{ rules: FeeRuleRow[]; sources: { value: string; label: string }[]; facilities: { id: string; name: string }[] }> {
+  const [rules, sources, facilities] = await Promise.all([
+    prisma.orderFeeRule.findMany({ orderBy: { createdAt: "asc" }, include: { _count: { select: { fees: true } }, facility: { select: { id: true, name: true } } } }),
     prisma.salesOrder.groupBy({ by: ["source", "sourceLabel"], where: { channel: "SHOPIFY", source: { not: null } } }),
-    prisma.salesOrder.groupBy({ by: ["fulfillmentLabel"], where: { fulfillmentLabel: { not: null } } }),
-    prisma.salesOrder.groupBy({ by: ["fulfillmentOverride"], where: { fulfillmentOverride: { not: null } } }),
+    prisma.facility.findMany({ where: { inactive: false }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
   ]);
   const seen = new Set<string>();
   const src = sources
     .map((s) => ({ value: s.source as string, label: s.sourceLabel ?? (s.source as string) }))
     .filter((s) => !seen.has(s.value) && seen.add(s.value))
     .sort((a, b) => a.label.localeCompare(b.label));
-  const fulfilledAt = [...new Set([...labels.map((l) => l.fulfillmentLabel as string), ...overrides.map((l) => l.fulfillmentOverride as string)])].sort();
   return {
-    rules: rules.map((r) => ({ id: r.id, name: r.name, kind: r.kind, value: r.value, channel: r.channel, source: r.source, fulfilledAt: r.fulfilledAt, tag: r.tag, appliesToPast: r.appliesToPast, active: r.active, orders: r._count.fees })),
+    rules: rules.map((r) => ({ id: r.id, name: r.name, kind: r.kind, value: r.value, channel: r.channel, source: r.source, facility: r.facility, tag: r.tag, appliesToPast: r.appliesToPast, active: r.active, orders: r._count.fees })),
     sources: src,
-    fulfilledAt,
+    facilities,
   };
 }
 
@@ -257,7 +260,7 @@ function searchWhere(raw: string, ex: Exclusions): Record<string, unknown> {
   if (s === "unshipped") return { status: contains("unshipped") };
   if (["shipped", "partially shipped"].includes(s)) return { OR: [{ status: "Shipped" }, { status: "PartiallyShipped" }] };
   if (["amazon", "shopify", "tiktok"].includes(s)) return { channel: s.toUpperCase() };
-  if (["fba", "merchant"].includes(s)) return { fulfillmentLabel: contains(s) };
+  if (["fba", "merchant"].includes(s)) return { OR: [{ fulfillmentLabel: contains(s) }, { fulfillmentFacility: { name: contains(s) } }] };
 
   const amount = /^[0-9]+([.,][0-9]{1,2})?$/.test(s) ? Number(s.replace(",", ".")) : null;
   return {
@@ -265,6 +268,8 @@ function searchWhere(raw: string, ex: Exclusions): Record<string, unknown> {
       { orderNumber: contains(q) },
       { sourceLabel: contains(q) },
       { fulfillmentLabel: contains(q) },
+      { fulfillmentFacility: { name: contains(q) } },
+      { fulfillmentOverrideFacility: { name: contains(q) } },
       { status: contains(q) },
       { lines: { some: { sku: contains(q) } } },
       // An amount searches the paid total within a cent, so "23.4" finds $23.40.
@@ -302,7 +307,8 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
       source: true,
       sourceLabel: true,
       fulfillmentLabel: true,
-      fulfillmentOverride: true,
+      fulfillmentFacility: { select: { id: true, name: true, channel: true } },
+      fulfillmentOverrideFacility: { select: { id: true, name: true, channel: true } },
       orderedAt: true,
       total: true,
       currency: true,
@@ -323,7 +329,9 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
     channelLabel: CHANNEL_LABEL[o.channel] ?? o.channel,
     sourceLabel: o.sourceLabel,
     fulfillmentLabel: o.fulfillmentLabel,
-    fulfillmentOverride: o.fulfillmentOverride,
+    fulfilledAt: (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility) ? { id: (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility)!.id, name: (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility)!.name } : null,
+    fulfilledAtDetected: o.fulfillmentOverrideFacility && o.fulfillmentFacility ? { id: o.fulfillmentFacility.id, name: o.fulfillmentFacility.name } : null,
+    viaMcf: o.channel !== "AMAZON" && (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility)?.channel === "AMAZON_FBA",
     orderedAt: o.orderedAt.toISOString(),
     units: o.lines.reduce((s, l) => s + l.quantity, 0),
     total: o.total,

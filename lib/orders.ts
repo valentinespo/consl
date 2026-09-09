@@ -5,6 +5,7 @@ import { shopifyGraphQL } from "@/lib/shopify";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { upsertShopifyFinanceEvents, importShopifyPaymentsLedger, hasShopifyPaymentsScope } from "@/lib/shopify-finances";
 import { applyFeeRulesToOrders } from "@/lib/order-fees";
+import { resolveFulfillmentFacilities } from "@/lib/fulfillment";
 
 /**
  * Pull orders from the connected channels into SalesOrder/SalesOrderLine — the raw feed for
@@ -163,8 +164,11 @@ async function persist(
       // skip the one bad order; the rest of the batch still lands
     }
   }
-  // Fee rules follow the orders: a new order picks up its fees, an edited total re-prices them.
-  for (let i = 0; i < touched.length; i += 500) await applyFeeRulesToOrders(touched.slice(i, i + 500));
+  // Where each order shipped from, as a facility; then the fee rules (some key on that place).
+  for (let i = 0; i < touched.length; i += 500) {
+    await resolveFulfillmentFacilities(touched.slice(i, i + 500));
+    await applyFeeRulesToOrders(touched.slice(i, i + 500));
+  }
   return { channel, orders, lines };
 }
 
@@ -186,7 +190,7 @@ type ShopifyOrderNode = {
   totalShippingPriceSet: { shopMoney: { amount: string } } | null;
   totalDiscountsSet: { shopMoney: { amount: string } } | null;
   shippingAddress: { city: string | null; provinceCode: string | null; zip: string | null; countryCodeV2: string | null } | null;
-  fulfillments: Array<{ location: { name: string | null } | null }>;
+  fulfillments: Array<{ location: { id: string | null; name: string | null } | null }>;
   lineItems: {
     nodes: Array<{
       sku: string | null;
@@ -223,7 +227,7 @@ const SHOPIFY_ORDER_FIELDS = `
   totalShippingPriceSet { shopMoney { amount } }
   totalDiscountsSet { shopMoney { amount } }
   shippingAddress { city provinceCode zip countryCodeV2 }
-  fulfillments(first: 3) { location { name } }
+  fulfillments(first: 3) { location { id name } }
   lineItems(first: 100) {
     nodes {
       sku quantity variant { id }
