@@ -155,29 +155,32 @@ export function PnlClient({
             Amazon
             <span>{money(pnl.pendingSales)} pending</span>
           </span>
-          orders placed but not shipped yet — Amazon posts the exact money the moment they ship.
+          <span>
+            Orders placed but not shipped yet. They already count in this P&amp;L — the sale at the order&apos;s price, the fees estimated
+            from your past orders. When Amazon ships them and posts the real money, that replaces the estimate.
+          </span>
         </div>
       )}
       {pnl.preHistoryUnits > 0 && (
-        <p className="max-w-3xl text-[12px] text-muted">
+        <p className="text-[12px] text-muted">
           {pnl.preHistoryUnits.toLocaleString()} of the units sold predate the first shipment on record for their product, so they carry the
           pre-consl average cost (set it with the button top right; until then the starting cost stands in).
         </p>
       )}
       {pnl.overflowUnits > 0 && (
-        <p className="max-w-3xl text-[12px] text-muted">
+        <p className="text-[12px] text-muted">
           {pnl.overflowUnits.toLocaleString()} units were sold beyond what was recorded as shipped, so they carry the newest cost on record.
         </p>
       )}
       {pnl.unmatchedSkus.length > 0 && (
-        <p className="max-w-3xl text-[12px] text-muted">
+        <p className="text-[12px] text-muted">
           {pnl.unmatchedSkus.length} product{pnl.unmatchedSkus.length === 1 ? " has" : "s have"} no landed cost yet, so
           {pnl.unmatchedSkus.length === 1 ? " its" : " their"} units carry no cost here: {pnl.unmatchedSkus.slice(0, 4).join(", ")}
           {pnl.unmatchedSkus.length > 4 ? "…" : ""}
         </p>
       )}
       {pnl.ignored.skus.length > 0 && (
-        <p className="max-w-3xl text-[12px] text-muted">
+        <p className="text-[12px] text-muted">
           Left out: {pnl.ignored.units.toLocaleString()} unit{pnl.ignored.units === 1 ? "" : "s"} ({money(pnl.ignored.sales)} in sales) from{" "}
           {pnl.ignored.skus.length} listing{pnl.ignored.skus.length === 1 ? "" : "s"} not managed in consl — {pnl.ignored.skus.slice(0, 4).join(", ")}
           {pnl.ignored.skus.length > 4 ? "…" : ""}. Map {pnl.ignored.skus.length === 1 ? "it" : "them"} to a product to include{" "}
