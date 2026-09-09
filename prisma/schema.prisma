@@ -78,6 +78,8 @@ model Organization {
   purchaseOrderLines      PurchaseOrderLine[]
   stockMovements          StockMovement[]
   integrations            Integration[]
+  orderFeeRules           OrderFeeRule[]
+  orderFees               OrderFee[]
 }
 
 /// A tenant's connection to an external sales platform (Amazon, Shopify, TikTok Shop). Holds the
@@ -830,13 +832,61 @@ model SalesOrder {
   // anything not columnized above is still kept forever. Written by the report/full importers;
   // the quick pollers leave it untouched.
   sourceData   Json?
+  // Where it REALLY shipped from, when the operator says so — the imported label stays, shown
+  // struck through under the correction. Fee rules that key on the location use this.
+  fulfillmentOverride String?
   lines        SalesOrderLine[]
+  fees         OrderFee[]
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
 
   @@unique([orgId, channel, externalId])
   @@index([orgId, channel, orderedAt])
   @@index([orgId, source])
+}
+
+/// A cost the operator attaches to every order a rule matches — a marketplace commission consl
+/// can't see on its own (Faire's cut on orders that live in Shopify), a handling charge per MCF
+/// shipment, anything paid per order. Criteria are ANDed; an empty one matches everything. A flat
+/// amount per order, or a share of what the customer paid. Lands in the P&L's "Custom fees".
+model OrderFeeRule {
+  id           String        @id @default(cuid())
+  orgId        String?
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name         String
+  kind         String // "fixed" (per order) | "percent" (of what the customer paid)
+  value        Float
+  channel      String? // AMAZON | SHOPIFY | TIKTOK
+  source       String? // Shopify order source key, e.g. "faire"
+  fulfilledAt  String? // fulfilled-at label (after any manual override)
+  tag          String? // mcf | free_sample | replacement | free_unit
+  // Whether the rule was also written onto orders that predate it; otherwise it starts today.
+  appliesToPast Boolean      @default(false)
+  active       Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  fees         OrderFee[]
+
+  @@index([orgId])
+}
+
+/// One fee sitting on one order — written by a rule (ruleId set; recomputed whenever the rule or
+/// the order changes) or by hand (ruleId null; only the operator removes it). `amount` is a
+/// positive cost in the order's currency; the P&L carries it as a negative line.
+model OrderFee {
+  id           String        @id @default(cuid())
+  orgId        String?
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  order        SalesOrder    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId      String
+  rule         OrderFeeRule? @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  ruleId       String?
+  name         String
+  amount       Float
+  createdAt    DateTime      @default(now())
+
+  @@index([orgId, orderId])
+  @@index([ruleId])
 }
 
 /// One SKU line of a `SalesOrder`. `productId` is the mapped consl product (null when the channel

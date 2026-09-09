@@ -4,6 +4,7 @@ import { decryptSecret } from "@/lib/secret-box";
 import { shopifyGraphQL } from "@/lib/shopify";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { upsertShopifyFinanceEvents, importShopifyPaymentsLedger, hasShopifyPaymentsScope } from "@/lib/shopify-finances";
+import { applyFeeRulesToOrders } from "@/lib/order-fees";
 
 /**
  * Pull orders from the connected channels into SalesOrder/SalesOrderLine — the raw feed for
@@ -94,6 +95,7 @@ async function persist(
 ): Promise<OrderImportResult> {
   let orders = 0;
   let lines = 0;
+  const touched: string[] = [];
   for (const o of fetched) {
     try {
       const existing = await prisma.salesOrder.findFirst({
@@ -133,6 +135,7 @@ async function persist(
       const order = existing
         ? await prisma.salesOrder.update({ where: { id: existing.id }, data })
         : await prisma.salesOrder.create({ data: { channel, externalId: o.externalId, ...data } });
+      touched.push(order.id);
       // Replace the order's lines wholesale — but only when this fetch actually carries lines: a
       // quick poll that couldn't read items (fresh Pending) must not wipe detail already stored.
       // Not wrapped in a transaction: a rare failure between delete and create leaves the order
@@ -160,6 +163,8 @@ async function persist(
       // skip the one bad order; the rest of the batch still lands
     }
   }
+  // Fee rules follow the orders: a new order picks up its fees, an edited total re-prices them.
+  for (let i = 0; i < touched.length; i += 500) await applyFeeRulesToOrders(touched.slice(i, i + 500));
   return { channel, orders, lines };
 }
 

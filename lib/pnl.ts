@@ -346,6 +346,24 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
   const add = (group: string, type: string, amount: number) => blocks.set(group, [...(blocks.get(group) ?? []), { type, amount }]);
   for (const s of sums) add(s.group, s.type, s.amount);
 
+  // Custom fees the operator attached (by rule or by hand): a cost on the order's own channel. A
+  // fee counts whenever its order counts; on an MCF order it always counts (the fee is a real
+  // cost even though that order's revenue lives on another channel); on a Shopify order the
+  // double-count rule drops, only a hand-written fee counts.
+  const feeRows = await prisma.$queryRaw<{ name: string; currency: string; amount: number; orderedAt: Date }[]>`
+    SELECT f.name, o.currency, f.amount::float8 AS amount, o."orderedAt"
+    FROM "OrderFee" f JOIN "SalesOrder" o ON o.id = f."orderId"
+    WHERE o."orgId" = ${orgId} AND o.channel = ANY(${selected}::text[])
+      AND o."orderedAt" >= ${from} AND o."orderedAt" <= ${to}
+      AND o.cancelled = false AND o.voided = false
+      AND (f."ruleId" IS NULL OR o.mcf OR NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excludedSources}::text[])))`;
+  const feeByName = new Map<string, number>();
+  for (const f of feeRows) {
+    const fx = f.currency === baseCurrency ? 1 : await fxRate(f.currency, baseCurrency, f.orderedAt);
+    feeByName.set(f.name, (feeByName.get(f.name) ?? 0) - f.amount * fx);
+  }
+  for (const [name, amount] of feeByName) add("custom_fees", name, amount);
+
   // What the scope left out: listings sold that the company doesn't manage here.
   const ignored = { skus: [] as string[], units: 0, sales: 0 };
   if (selectedSet.has("AMAZON")) {

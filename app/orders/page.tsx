@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/ui";
 import { requireView } from "@/lib/membership";
-import { getOrdersSummary, getOrdersPage, type OrdersFilter } from "@/lib/order-metrics";
+import { getOrdersSummary, getOrdersPage, feeRuleOptions, type OrdersFilter } from "@/lib/order-metrics";
 import { prisma } from "@/lib/prisma";
 import { OrdersClient } from "@/components/OrdersClient";
 import { rangeBounds, RANGES, type RangeKey } from "@/lib/chart";
@@ -41,10 +41,11 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   });
   const connectedChannels = conns.map((c) => c.provider.toUpperCase());
 
-  const [summary, orders, orgSettings] = await Promise.all([
+  const [summary, orders, orgSettings, fees] = await Promise.all([
     getOrdersSummary(connectedChannels, { channel: filter.channel, from: filter.from, to: filter.to }),
     getOrdersPage(page, 50, filter),
     prisma.settings.findFirst({ select: { ordersBackfillCursor: true, ordersBackfillPass: true } }),
+    feeRuleOptions(),
   ]);
 
   // The Amazon history walk is "done" once the verification pass has also reached the ~2-year
@@ -64,6 +65,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         orders={orders}
         connectedChannels={connectedChannels}
         historyImporting={historyImporting}
+        fees={fees}
         filter={{
           channel: channel ?? "",
           range: { key: rangeKey, from: b.from ?? oldest, to: b.to ?? newest },

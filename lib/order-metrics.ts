@@ -55,6 +55,8 @@ export type OrderRow = {
   channelLabel: string;
   sourceLabel: string | null;
   fulfillmentLabel: string | null;
+  /** The operator's correction of where it shipped from; the imported label stays for the record. */
+  fulfillmentOverride: string | null;
   orderedAt: string;
   units: number;
   total: number;
@@ -71,7 +73,45 @@ export type OrderRow = {
   voided: boolean;
   /** Dropped by a double-count toggle (mirrored Shopify source / MCF) — same wash + Voided pill. */
   excluded: boolean;
+  /** Custom fees on the order — from a rule (fromRule) or written by hand. */
+  fees: { id: string; name: string; amount: number; fromRule: boolean }[];
+  feeTotal: number;
 };
+
+export type FeeRuleRow = {
+  id: string;
+  name: string;
+  kind: string;
+  value: number;
+  channel: string | null;
+  source: string | null;
+  fulfilledAt: string | null;
+  tag: string | null;
+  appliesToPast: boolean;
+  active: boolean;
+  orders: number;
+};
+
+/** The fee rules plus the vocab the rule form offers: known Shopify sources and fulfilled-at labels. */
+export async function feeRuleOptions(): Promise<{ rules: FeeRuleRow[]; sources: { value: string; label: string }[]; fulfilledAt: string[] }> {
+  const [rules, sources, labels, overrides] = await Promise.all([
+    prisma.orderFeeRule.findMany({ orderBy: { createdAt: "asc" }, include: { _count: { select: { fees: true } } } }),
+    prisma.salesOrder.groupBy({ by: ["source", "sourceLabel"], where: { channel: "SHOPIFY", source: { not: null } } }),
+    prisma.salesOrder.groupBy({ by: ["fulfillmentLabel"], where: { fulfillmentLabel: { not: null } } }),
+    prisma.salesOrder.groupBy({ by: ["fulfillmentOverride"], where: { fulfillmentOverride: { not: null } } }),
+  ]);
+  const seen = new Set<string>();
+  const src = sources
+    .map((s) => ({ value: s.source as string, label: s.sourceLabel ?? (s.source as string) }))
+    .filter((s) => !seen.has(s.value) && seen.add(s.value))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  const fulfilledAt = [...new Set([...labels.map((l) => l.fulfillmentLabel as string), ...overrides.map((l) => l.fulfillmentOverride as string)])].sort();
+  return {
+    rules: rules.map((r) => ({ id: r.id, name: r.name, kind: r.kind, value: r.value, channel: r.channel, source: r.source, fulfilledAt: r.fulfilledAt, tag: r.tag, appliesToPast: r.appliesToPast, active: r.active, orders: r._count.fees })),
+    sources: src,
+    fulfilledAt,
+  };
+}
 
 export type ChannelSummary = { channel: string; label: string; orders: number; units: number; revenue: number };
 
@@ -262,6 +302,7 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
       source: true,
       sourceLabel: true,
       fulfillmentLabel: true,
+      fulfillmentOverride: true,
       orderedAt: true,
       total: true,
       currency: true,
@@ -271,6 +312,7 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
       replacement: true,
       voided: true,
       lines: { select: { quantity: true } },
+      fees: { select: { id: true, name: true, amount: true, ruleId: true }, orderBy: { createdAt: "asc" } },
     },
   });
 
@@ -281,6 +323,7 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
     channelLabel: CHANNEL_LABEL[o.channel] ?? o.channel,
     sourceLabel: o.sourceLabel,
     fulfillmentLabel: o.fulfillmentLabel,
+    fulfillmentOverride: o.fulfillmentOverride,
     orderedAt: o.orderedAt.toISOString(),
     units: o.lines.reduce((s, l) => s + l.quantity, 0),
     total: o.total,
@@ -299,6 +342,8 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
     freeSample: o.channel === "TIKTOK" && o.total === 0 && !o.cancelled,
     voided: o.voided,
     excluded: (o.channel === "SHOPIFY" && !!o.source && excluded.includes(o.source)) || (excludeMcf && o.mcf),
+    fees: o.fees.map((f) => ({ id: f.id, name: f.name, amount: f.amount, fromRule: f.ruleId !== null })),
+    feeTotal: o.fees.reduce((s, f) => s + f.amount, 0),
   }));
 
   return { rows, total, page: current, pageSize, pageCount };

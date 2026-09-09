@@ -27,7 +27,7 @@ import { fxRate } from "@/lib/fx";
  * P&L the day it ships, not the day Amazon lets go of the cash.
  */
 
-export type PnlGroup = "sales" | "refunds" | "fba_fees" | "referral_fees" | "payment_fees" | "storage_fees" | "advertising" | "taxes" | "other";
+export type PnlGroup = "sales" | "refunds" | "fba_fees" | "referral_fees" | "payment_fees" | "custom_fees" | "storage_fees" | "advertising" | "taxes" | "other";
 
 type FlatRow = {
   postedAt: Date;

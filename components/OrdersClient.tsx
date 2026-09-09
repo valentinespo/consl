@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronRight, DotsVertical, Layers, Search } from "@/components/icons";
+import { ChevronDown, ChevronRight, DotsVertical, Layers, Search, Settings } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { setOrderVoided } from "@/app/orders/actions";
 import type { OrdersSummary, OrdersPage, OrderRow } from "@/lib/order-metrics";
@@ -13,6 +13,7 @@ import { DateRangePicker, type Range } from "@/components/DateRangePicker";
 import { HoverHint } from "@/components/HoverHint";
 import { useExitAnimation } from "@/components/animate";
 import { ROOT_LOGO } from "@/lib/channel-logos";
+import { BulkBar, OrderDialog, FeeRulesPanel, type FeeOptions } from "@/components/OrderFees";
 
 // Channel marks come from the shared map — Orders always talks about a whole channel.
 const CHANNEL_LOGO = ROOT_LOGO;
@@ -39,7 +40,7 @@ function statusPill(o: OrderRow): { label: string; cls: string } | null {
 
 /** The row's overflow menu (⋮): void/unvoid today, more settings later. Portalled — the table's
  *  scroll container would clip an inline popover. */
-function RowMenu({ id, voided }: { id: string; voided: boolean }) {
+function RowMenu({ id, voided, onManage }: { id: string; voided: boolean; onManage: () => void }) {
   const router = useRouter();
   const btn = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -93,6 +94,16 @@ function RowMenu({ id, voided }: { id: string; voided: boolean }) {
             style={{ position: "fixed", top: box.top, left: box.left, width: 160 }}
             className="dropdown-in z-[300] rounded-xl border border-border bg-surface p-1 shadow-xl"
           >
+            <button
+              role="menuitem"
+              onClick={() => {
+                setBox(null);
+                onManage();
+              }}
+              className="w-full rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink-soft hover:bg-surface-2 hover:text-ink"
+            >
+              Fees &amp; fulfillment…
+            </button>
             <button
               role="menuitem"
               disabled={pending}
@@ -229,6 +240,7 @@ export function OrdersClient({
   orders,
   connectedChannels,
   historyImporting = false,
+  fees,
   filter,
   dataBounds,
 }: {
@@ -238,6 +250,8 @@ export function OrdersClient({
   connectedChannels: string[];
   /** The background history walk hasn't finished its verification pass yet. */
   historyImporting?: boolean;
+  /** Fee rules and the vocab the rule form offers. */
+  fees: FeeOptions;
   filter: { channel: string; range: Range; q: string };
   dataBounds: { newest: string; oldest: string };
 }) {
@@ -247,6 +261,21 @@ export function OrdersClient({
   const params = useSearchParams();
   const { money, locale } = useMoney();
   const [search, setSearch] = useState(filter.q);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [dialogId, setDialogId] = useState<string | null>(null);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  // Only rows on this page count as selected — a page change or filter silently drops the rest.
+  const selectedIds = orders.rows.filter((r) => selected.has(r.id)).map((r) => r.id);
+  const allSelected = orders.rows.length > 0 && selectedIds.length === orders.rows.length;
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(orders.rows.map((r) => r.id)));
+  const toggleOne = (id: string) =>
+    setSelected((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const dialogOrder = dialogId ? orders.rows.find((r) => r.id === dialogId) ?? null : null;
 
   /** Update one query param and reset to page 1 (a new filter restarts the walk). */
   function setParam(key: string, value: string) {
@@ -354,7 +383,23 @@ export function OrdersClient({
             Clear
           </button>
         )}
+        <button
+          type="button"
+          onClick={() => setRulesOpen((o) => !o)}
+          aria-pressed={rulesOpen}
+          title="Fee rules"
+          className={`ml-auto inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[12.5px] font-medium transition-colors ${
+            rulesOpen ? "bg-surface-2 text-ink" : "bg-surface text-ink-soft hover:text-ink"
+          }`}
+        >
+          <Settings size={15} />
+          Fee rules
+          {fees.rules.length > 0 && <span className="pill-neutral inline-flex items-center rounded-full border px-1.5 py-px text-[10.5px] font-medium">{fees.rules.length}</span>}
+        </button>
       </div>
+
+      {rulesOpen && <FeeRulesPanel options={fees} onClose={() => setRulesOpen(false)} />}
+      {selectedIds.length > 0 && <BulkBar ids={selectedIds} onClear={() => setSelected(new Set())} />}
 
       {/* Orders table */}
       {orders.rows.length === 0 ? (
@@ -371,9 +416,12 @@ export function OrdersClient({
       ) : (
         <div>
           <div className="overflow-x-auto rounded-[var(--radius-card)] border border-border">
-            <table className="w-full min-w-[860px] border-collapse text-[13px]">
+            <table className="w-full min-w-[900px] border-collapse text-[13px]">
               <thead>
                 <tr className="border-b border-border bg-surface-2/50 text-[11px] font-medium uppercase tracking-wide text-muted">
+                  <th className="w-9 px-3 py-2.5">
+                    <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Select all on this page" className="h-4 w-4 accent-accent-strong" />
+                  </th>
                   <th className="px-4 py-2.5 text-left font-medium">Date</th>
                   <th className="px-4 py-2.5 text-left font-medium">Order #</th>
                   <th className="px-4 py-2.5 text-left font-medium">Source</th>
@@ -389,7 +437,10 @@ export function OrdersClient({
                 {orders.rows.map((o) => {
                   const st = statusPill(o);
                   return (
-                  <tr key={o.id} className={`border-b border-line last:border-0 ${o.cancelled || o.voided || o.excluded ? "opacity-45" : ""}`}>
+                  <tr key={o.id} className={`border-b border-line last:border-0 ${o.cancelled || o.voided || o.excluded ? "opacity-45" : ""} ${selected.has(o.id) ? "bg-accent-soft/40" : ""}`}>
+                    <td className="px-3 py-2.5">
+                      <input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleOne(o.id)} aria-label="Select order" className="h-4 w-4 accent-accent-strong" />
+                    </td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-[12px] text-muted">{fmtDate(o.orderedAt)}</td>
                     <td className="px-4 py-2.5">
                       <span className="font-medium text-ink">{o.orderNumber ?? "—"}</span>
@@ -447,12 +498,32 @@ export function OrdersClient({
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-ink-soft">{o.sourceLabel ?? "—"}</td>
-                    <td className="px-4 py-2.5 text-ink-soft">{o.fulfillmentLabel ?? "—"}</td>
+                    <td className="px-4 py-2.5 text-ink-soft">
+                      {o.fulfillmentOverride ? (
+                        <span className="flex flex-col leading-tight">
+                          <span className="text-[11.5px] text-muted line-through">{o.fulfillmentLabel ?? "—"}</span>
+                          <span>{o.fulfillmentOverride}</span>
+                        </span>
+                      ) : (
+                        (o.fulfillmentLabel ?? "—")
+                      )}
+                    </td>
                     <td className="px-4 py-2.5">{st ? <span className={`${PILL} ${st.cls}`}>{st.label}</span> : <span className="text-muted">—</span>}</td>
                     <td className="px-4 py-2.5 text-right tabular text-ink-soft">{o.units.toLocaleString()}</td>
-                    <td className="px-4 py-2.5 text-right tabular text-ink-soft">{money(o.total)}</td>
+                    <td className="px-4 py-2.5 text-right tabular text-ink-soft">
+                      {money(o.total)}
+                      {o.fees.length > 0 && (
+                        <HoverHint
+                          title="Custom fees"
+                          body={o.fees.map((f) => `${f.name}: ${money(f.amount)}`).join(" · ")}
+                          className="block"
+                        >
+                          <span className="block text-[11px] text-muted">−{money(o.feeTotal)} fees</span>
+                        </HoverHint>
+                      )}
+                    </td>
                     <td className="px-2 py-2.5 text-right">
-                      <RowMenu id={o.id} voided={o.voided} />
+                      <RowMenu id={o.id} voided={o.voided} onManage={() => setDialogId(o.id)} />
                     </td>
                   </tr>
                   );
@@ -488,6 +559,8 @@ export function OrdersClient({
           </div>
         </div>
       )}
+
+      {dialogOrder && <OrderDialog order={dialogOrder} fulfilledAt={fees.fulfilledAt} onClose={() => setDialogId(null)} />}
     </div>
   );
 }
