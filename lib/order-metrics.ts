@@ -208,7 +208,9 @@ const FREE_SAMPLE_WHERE = { channel: "TIKTOK", total: 0, cancelled: false };
  * free units, a channel name filters that channel, a number matches the paid total, and anything
  * else sweeps order #, SKU, sales channel, fulfilled-at and status.
  */
-function searchWhere(raw: string): Record<string, unknown> {
+type Exclusions = { sources: string[]; mcf: boolean };
+
+function searchWhere(raw: string, ex: Exclusions): Record<string, unknown> {
   const q = raw.trim();
   const s = q.toLowerCase();
   const contains = (v: string) => ({ contains: v, mode: "insensitive" as const });
@@ -218,7 +220,17 @@ function searchWhere(raw: string): Record<string, unknown> {
   if (["free", "free unit", "free units", "vine"].includes(s)) return FREE_UNIT_WHERE;
   if (["sample", "samples", "free sample", "free samples"].includes(s)) return FREE_SAMPLE_WHERE;
   if (["cancelled", "canceled"].includes(s)) return { cancelled: true };
-  if (["voided", "void"].includes(s)) return { voided: true };
+  // "Voided" is what the row shows for a manual void AND for an order a double-count toggle drops,
+  // so the word finds both — everything wearing the pill.
+  if (["voided", "void", "excluded"].includes(s)) {
+    return {
+      OR: [
+        { voided: true },
+        ...(ex.sources.length ? [{ channel: "SHOPIFY", source: { in: ex.sources } }] : []),
+        ...(ex.mcf ? [{ channel: "AMAZON", mcf: true }] : []),
+      ],
+    };
+  }
   if (s === "pending") return { status: contains("pending") };
   if (s === "unshipped") return { status: contains("unshipped") };
   if (["shipped", "partially shipped"].includes(s)) return { OR: [{ status: "Shipped" }, { status: "PartiallyShipped" }] };
@@ -251,7 +263,7 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
   const where = {
     ...(filter.channel ? { channel: filter.channel } : {}),
     ...(since || until ? { orderedAt: { ...(since ? { gte: since } : {}), ...(until ? { lte: until } : {}) } } : {}),
-    ...(q ? { AND: [searchWhere(q)] } : {}),
+    ...(q ? { AND: [searchWhere(q, { sources: [...excluded], mcf: excludeMcf })] } : {}),
   };
 
   const total = await prisma.salesOrder.count({ where });
