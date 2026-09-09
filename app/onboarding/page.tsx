@@ -113,12 +113,18 @@ export default async function OnboardingPage({
     };
   }
 
-  // ---- Step 3: what each connected channel reports holding (recorded as day-zero layers on finish) ----
+  // ---- Step 3: what each connected channel reports holding (recorded as day-zero layers on finish),
+  // priced at the starting cost entered in step 2 — the same cost those layers will carry. ----
   const codeById = new Map(products.map((p) => [p.id, p.code]));
-  const channelCounts: { channel: string; label: string; skus: { code: string; units: number }[] }[] = [];
+  const costById = new Map(products.map((p) => [p.id, p.openingUnitCost]));
+  const priced = (productId: string, units: number) => {
+    const cost = costById.get(productId) ?? null;
+    return { units, value: cost != null ? units * cost : null };
+  };
+  const channelCounts: { channel: string; label: string; skus: { code: string; units: number; value: number | null }[] }[] = [];
   if (connected.has("amazon")) {
     const skus = snaps
-      .map((s) => ({ code: codeById.get(s.productId) ?? "?", units: s.fbaTotal + Math.max(0, s.awdOnhand - s.awdReserved) + s.awdInbound }))
+      .map((s) => ({ code: codeById.get(s.productId) ?? "?", ...priced(s.productId, s.fbaTotal + Math.max(0, s.awdOnhand - s.awdReserved) + s.awdInbound) }))
       .filter((s) => s.units > 0 && s.code !== "?")
       .sort((a, b) => b.units - a.units);
     channelCounts.push({ channel: "AMAZON", label: "Amazon (FBA + AWD)", skus });
@@ -128,16 +134,16 @@ export default async function OnboardingPage({
     ["TIKTOK", "TikTok Shop"],
   ] as const) {
     if (!channels.includes(ch)) continue;
-    const perSku = new Map<string, number>();
+    const perSku = new Map<string, { productId: string; units: number }>();
     for (const c of channelHeld) {
       if (c.facility.channel !== ch) continue;
       const code = codeById.get(c.productId);
-      if (code) perSku.set(code, (perSku.get(code) ?? 0) + c.units);
+      if (code) perSku.set(code, { productId: c.productId, units: (perSku.get(code)?.units ?? 0) + c.units });
     }
     channelCounts.push({
       channel: ch,
       label,
-      skus: [...perSku.entries()].map(([code, units]) => ({ code, units })).sort((a, b) => b.units - a.units),
+      skus: [...perSku.entries()].map(([code, x]) => ({ code, ...priced(x.productId, x.units) })).sort((a, b) => b.units - a.units),
     });
   }
 

@@ -32,6 +32,8 @@ import {
 } from "@/app/onboarding/actions";
 import { updateProduct } from "@/app/catalog/actions";
 import type { OnboardingJob } from "@/lib/onboarding-jobs";
+import Image from "next/image";
+import { ROOT_LOGO } from "@/lib/channel-logos";
 
 /** Mirror of lib/onboarding-jobs' rule (that module is server-only): a job that never reported
  *  back — the server restarted mid-way — stops counting as running after a generous window. */
@@ -71,7 +73,8 @@ export type WizardMapping = null | {
 type WizardProduct = { id: string; code: string; name: string; imageUrl: string | null; openingUnitCost: number | null };
 type WizardFacility = { id: string; code: string; name: string; type: string; channel: string | null; locked: boolean };
 type WizardMaterial = { id: string; code: string; name: string; unitLabel: string; skuSpecific: boolean };
-type ChannelCount = { channel: string; label: string; skus: { code: string; units: number }[] };
+/** `value` = units × the product's starting cost; null while that cost is still missing. */
+type ChannelCount = { channel: string; label: string; skus: { code: string; units: number; value: number | null }[] };
 type RawLine = { materialTypeId: string; productId: string | null; quantity: number; unitCost: number };
 
 const STEPS = [
@@ -881,6 +884,7 @@ function StepFacilities({
   products: WizardProduct[];
   finishedOpenings: Record<string, Record<string, number>>;
 }) {
+  const { money } = useMoney();
   return (
     <div className="space-y-6">
       <StepHeader
@@ -908,23 +912,55 @@ function StepFacilities({
             starting balance at your starting cost — nothing to type here.
           </p>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {channelCounts.map((c) => (
-              <div key={c.channel} className="rounded-lg border border-border bg-surface-2 p-3">
-                <div className="mb-1.5 text-[12.5px] font-semibold text-ink">{c.label}</div>
-                {c.skus.length === 0 ? (
-                  <div className="text-[12px] text-muted">Nothing in stock</div>
-                ) : (
-                  <div className="space-y-0.5">
-                    {c.skus.map((s) => (
-                      <div key={s.code} className="flex items-center justify-between text-[12px]">
-                        <span className="text-ink-soft">{s.code}</span>
-                        <span className="tabular font-medium text-ink">{s.units.toLocaleString()}</span>
-                      </div>
-                    ))}
+            {channelCounts.map((c) => {
+              const units = c.skus.reduce((t, s) => t + s.units, 0);
+              const value = c.skus.reduce((t, s) => t + (s.value ?? 0), 0);
+              const unpriced = c.skus.some((s) => s.value == null);
+              return (
+                <div key={c.channel} className="rounded-lg border border-border bg-surface-2 p-3">
+                  <div className="mb-2 flex items-center gap-2 text-[12.5px] font-semibold text-ink">
+                    {ROOT_LOGO[c.channel] && <Image src={ROOT_LOGO[c.channel]} alt="" width={18} height={18} className="rounded-[4px]" />}
+                    {c.label}
                   </div>
-                )}
-              </div>
-            ))}
+                  {c.skus.length === 0 ? (
+                    <div className="text-[12px] text-muted">Nothing in stock</div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 text-[10.5px] font-medium uppercase tracking-wide text-muted">
+                        <span>SKU</span>
+                        <span className="text-right">Units</span>
+                        <span className="text-right">Value</span>
+                      </div>
+                      <div className="mt-1 space-y-0.5">
+                        {c.skus.map((s) => (
+                          <div key={s.code} className="grid grid-cols-[1fr_auto_auto] gap-x-4 text-[12px]">
+                            <span className="text-ink-soft">{s.code}</span>
+                            <span className="tabular text-right font-medium text-ink">{s.units.toLocaleString()}</span>
+                            <span
+                              className="tabular text-right text-ink-soft"
+                              title={s.value == null ? "Enter this product's starting cost on the previous step" : undefined}
+                            >
+                              {s.value == null ? "—" : money(s.value, 0)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-2 grid grid-cols-[1fr_auto_auto] gap-x-4 border-t border-border pt-2 text-[12px]">
+                        <span className="font-medium text-ink">Total</span>
+                        <span className="tabular text-right font-medium text-ink">{units.toLocaleString()}</span>
+                        <span className="tabular text-right font-semibold text-ink">
+                          {money(value, 0)}
+                          {unpriced ? "*" : ""}
+                        </span>
+                      </div>
+                      {unpriced && (
+                        <div className="mt-1 text-[11px] text-muted">* products without a starting cost yet aren&apos;t in the value.</div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </section>
       )}
