@@ -56,6 +56,35 @@ export async function syncAllChannelsCore(): Promise<{ synced: string[]; failed:
 }
 
 /**
+ * Every connected channel's STOCK in one quick pass — plain API reads, never Amazon's report job.
+ * For work that must answer within a request (the onboarding wizard): the full sync polls a
+ * report for minutes, long enough for the browser's request to be cut off mid-way.
+ */
+export async function syncAllChannelsStockCore(): Promise<{ synced: string[]; failed: string[] }> {
+  const { syncShopifyStock, syncTikTokStock } = await import("@/lib/channel-stock");
+  const synced: string[] = [];
+  const failed: string[] = [];
+  const amazon = await syncAmazonStockCore().catch((e) => ({
+    ok: false as const,
+    error: e instanceof Error ? e.message : "Amazon stock refresh failed.",
+  }));
+  if (amazon.ok) synced.push("Amazon");
+  else if (!("nothingToSync" in amazon && amazon.nothingToSync)) failed.push("Amazon");
+  for (const [label, run] of [
+    ["Shopify", syncShopifyStock],
+    ["TikTok", syncTikTokStock],
+  ] as const) {
+    try {
+      const r = await run();
+      if (r.facilities > 0) synced.push(label);
+    } catch {
+      failed.push(label);
+    }
+  }
+  return { synced, failed };
+}
+
+/**
  * Refresh ONLY Amazon's stock numbers, leaving the sales figures untouched.
  *
  * Amazon's two halves have wildly different costs. Inventory is a plain API read that answers in

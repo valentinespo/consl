@@ -7,7 +7,7 @@ import { getCurrentOrgId } from "@/lib/tenant";
 import { getCurrentOrg } from "@/lib/org";
 import { requirePermission } from "@/lib/membership";
 import { recomputeAll } from "@/lib/recompute";
-import { syncAllChannelsCore } from "@/lib/sync";
+import { syncAllChannelsStockCore } from "@/lib/sync";
 import { refreshChannelListingsCore, autoMapExact, mappedExternalId, PRODUCT_MATCH_SELECT, type ChannelKey } from "@/lib/channel-catalog";
 
 /**
@@ -90,11 +90,12 @@ export async function advanceOnboarding(opts?: { skipChannels?: boolean }) {
     if (missingCost > 0) {
       return { ok: false as const, error: `Enter an average cost of goods for every product (${missingCost} missing) — it prices your starting inventory.` };
     }
-    // Mapping just landed, so Shopify/TikTok quantities can finally resolve to products — pull
-    // stock again so the next step (and the final starting balances) see real channel counts.
+    // Mapping just landed, so channel quantities can finally resolve to products — pull stock
+    // again so the next step (and the final starting balances) see real channel counts. Stock
+    // only: the sales report is the scheduler's job and takes minutes, longer than a request lives.
     const integrations = await prisma.integration.findMany({ where: { status: "connected" } });
     if (integrations.length > 0) {
-      const r = await syncAllChannelsCore().catch(() => null);
+      const r = await syncAllChannelsStockCore().catch(() => null);
       if (r && r.failed.length > 0) warning = `Couldn't refresh ${r.failed.join(", ")} — the counts shown may be stale.`;
     }
   }
@@ -125,7 +126,9 @@ export async function jumpToOnboardingStep(target: number) {
  *  Returns a warning string when part of it failed (never blocks the wizard). */
 async function pullChannelData(providers: string[]): Promise<string | null> {
   const problems: string[] = [];
-  const stock = await syncAllChannelsCore().catch(() => null);
+  // Stock + catalogue only. Sales history and the money ledger import themselves in the
+  // background (the scheduler's walkers) — a wizard step must answer within one request.
+  const stock = await syncAllChannelsStockCore().catch(() => null);
   if (!stock) problems.push("stock");
   else if (stock.failed.length > 0) problems.push(...stock.failed);
   for (const p of providers) {
