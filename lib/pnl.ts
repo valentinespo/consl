@@ -4,12 +4,14 @@ import { getCurrentOrgId } from "@/lib/tenant";
 import { GROUP_ORDER, type Pnl, type PnlGroupBlock } from "@/lib/pnl-shared";
 import { getCurrentOrg } from "@/lib/org";
 import { fxRate } from "@/lib/fx";
+import { computeFinishedGoods } from "@/lib/queries";
 
 export { GROUP_ORDER, GROUP_LABEL, type Pnl, type PnlGroupBlock, type PnlTypeRow } from "@/lib/pnl-shared";
 
 /**
  * The P&L read side: sum the imported financial ledger by bucket for a date window, price the
- * shipped units with the engine's landed cost — and bridge the settlement lag.
+ * units sold first-in-first-out from what was actually shipped to the channel — and bridge the
+ * settlement lag.
  *
  * Scope: the products the company keeps in consl. Listings it never mapped (ignored at
  * onboarding, or a sister listing it doesn't manage here) are left out entirely — their sales,
@@ -46,29 +48,90 @@ export function zonedDayBounds(fromDay: string, toDay: string, tz: string): { fr
   return { from: zonedDayStart(fromDay, tz), to: new Date(zonedDayStart(next.toISOString().slice(0, 10), tz).getTime() - 1) };
 }
 
-/** Weighted-average landed cost per Amazon seller SKU, from lot lines + opening layers. */
-async function avgCostBySellerSku(): Promise<Map<string, number>> {
-  const orgId = await getCurrentOrgId();
-  if (!orgId) return new Map();
-  const lot = await prisma.$queryRaw<{ productId: string; cost: number; units: number }[]>`
-    SELECT "productId", SUM(units * COALESCE("cogPerUnit", 0)) AS cost, SUM(units) AS units
-    FROM "LotLine" WHERE "orgId" = ${orgId} GROUP BY "productId"`;
-  const open = await prisma.$queryRaw<{ productId: string; cost: number; units: number }[]>`
-    SELECT "productId", SUM(quantity * COALESCE("unitCost", 0)) AS cost, SUM(quantity) AS units
-    FROM "StockMovement"
-    WHERE "orgId" = ${orgId} AND kind = 'OPENING' AND "itemType" = 'FINISHED' AND "productId" IS NOT NULL
-    GROUP BY "productId"`;
-  const byProduct = new Map<string, { cost: number; units: number }>();
-  for (const r of [...lot, ...open]) {
-    const cur = byProduct.get(r.productId) ?? { cost: 0, units: 0 };
-    byProduct.set(r.productId, { cost: cur.cost + Number(r.cost), units: cur.units + Number(r.units) });
+type Cogs = { cogs: number; units: number; fallbackUnits: number; unmatchedSkus: Set<string> };
+
+/**
+ * Cost of goods, first-in-first-out from the channel's own queue of units.
+ *
+ * Everything that ever entered Amazon — each lot's shipment at that lot's landed cost, plus a
+ * company's day-zero starting stock — lines up by date, oldest first. Every sale on record is
+ * then replayed in date order from the very first one, each taking units from the front of the
+ * queue; the walk always starts at the beginning so that by the time it reaches the window it
+ * knows exactly which units were already gone. The window's COGS is what its sales consumed.
+ * `pending` (orders in the window not yet posted) joins the end of the same walk.
+ *
+ * Sales before a product's first recorded layer are pre-history (day-zero stock can't be eaten
+ * by sales that predate it): they're priced at the oldest cost on record and counted in
+ * `fallbackUnits`, as are sales beyond everything recorded — never silently zero.
+ */
+async function fifoCogs(from: Date, to: Date, scope: Set<string>, pending: { sku: string; units: number }[]): Promise<Cogs> {
+  const [{ shipped }, products] = await Promise.all([
+    computeFinishedGoods(),
+    prisma.product.findMany({ where: { sellerSku: { not: null } }, select: { id: true, sellerSku: true, openingUnitCost: true } }),
+  ]);
+  const productBySku = new Map(products.map((p) => [p.sellerSku as string, p]));
+  type Layer = { units: number; unitCost: number; date: number };
+  const queue = new Map<string, Layer[]>();
+  for (const l of shipped) {
+    if (l.destination !== "AMAZON" || l.units <= 0) continue;
+    const list = queue.get(l.sku) ?? [];
+    list.push({ units: l.units, unitCost: l.unitCost, date: l.date });
+    queue.set(l.sku, list);
   }
-  const products = await prisma.product.findMany({ select: { id: true, sellerSku: true } });
-  const out = new Map<string, number>();
-  for (const p of products) {
-    const agg = byProduct.get(p.id);
-    if (p.sellerSku && agg && agg.units > 0) out.set(p.sellerSku, agg.cost / agg.units);
+  for (const list of queue.values()) list.sort((a, b) => a.date - b.date);
+
+  const cursor = new Map<string, { idx: number; left: number }>();
+  const out: Cogs = { cogs: 0, units: 0, fallbackUnits: 0, unmatchedSkus: new Set() };
+  const consume = (sku: string, qty: number, at: number | null, inWindow: boolean) => {
+    const product = productBySku.get(sku);
+    if (!product) return;
+    const layers = queue.get(product.id) ?? [];
+    const fallback = layers[0]?.unitCost ?? product.openingUnitCost ?? null;
+    if (inWindow) out.units += qty;
+    // Pre-history: nothing recorded had entered the channel yet, so nothing is consumed.
+    const preHistory = at != null && layers.length > 0 && at < layers[0].date;
+    if (layers.length === 0 || preHistory) {
+      if (!inWindow) return;
+      if (fallback == null) out.unmatchedSkus.add(sku);
+      else {
+        out.cogs -= qty * fallback;
+        out.fallbackUnits += qty;
+      }
+      return;
+    }
+    const c = cursor.get(product.id) ?? { idx: 0, left: layers[0].units };
+    let want = qty;
+    while (want > 1e-9 && c.idx < layers.length) {
+      const take = Math.min(c.left, want);
+      if (inWindow) out.cogs -= take * layers[c.idx].unitCost;
+      c.left -= take;
+      want -= take;
+      if (c.left <= 1e-9) {
+        c.idx++;
+        c.left = c.idx < layers.length ? layers[c.idx].units : 0;
+      }
+    }
+    if (want > 1e-9 && inWindow) {
+      // Sold more than was ever recorded entering the channel — carry the rest at the oldest cost.
+      out.cogs -= want * (fallback ?? 0);
+      if (fallback == null) out.unmatchedSkus.add(sku);
+      else out.fallbackUnits += want;
+    }
+    cursor.set(product.id, c);
+  };
+
+  // Every posted sale on record, oldest first — the walk must start at the beginning.
+  const sales = await prisma.financeEvent.findMany({
+    where: { channel: "AMAZON", group: "sales", type: "Principal", quantity: { not: null }, sku: { in: [...scope] } },
+    select: { sku: true, quantity: true, eventAt: true },
+    orderBy: [{ eventAt: "asc" }, { id: "asc" }],
+  });
+  for (const sale of sales) {
+    const at = sale.eventAt.getTime();
+    consume(sale.sku as string, sale.quantity ?? 0, at, at >= from.getTime() && at <= to.getTime());
   }
+  // Orders in the window whose money hasn't posted: the newest sales, so they go last.
+  for (const line of pending) consume(line.sku, line.units, null, true);
   return out;
 }
 
@@ -88,15 +151,14 @@ type Bridge = {
   taxes: number;
   fba: number;
   referral: number;
-  cogs: number;
-  units: number;
+  /** Units per SKU, for the FIFO walk to price. */
+  lines: { sku: string; units: number }[];
   pendingSales: number;
-  unmatchedSkus: Set<string>;
 };
 
 /** Orders in range whose shipment money hasn't posted yet → exact revenue + estimated fees. */
-async function pendingBridge(from: Date, to: Date, costs: Map<string, number>, scope: Set<string>, baseCurrency: string): Promise<Bridge> {
-  const none: Bridge = { sales: [], taxes: 0, fba: 0, referral: 0, cogs: 0, units: 0, pendingSales: 0, unmatchedSkus: new Set() };
+async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurrency: string): Promise<Bridge> {
+  const none: Bridge = { sales: [], taxes: 0, fba: 0, referral: 0, lines: [], pendingSales: 0 };
   const orgId = await getCurrentOrgId();
   if (!orgId) return none;
 
@@ -163,8 +225,8 @@ async function pendingBridge(from: Date, to: Date, costs: Map<string, number>, s
   // Lines of in-scope orders, in-scope SKUs only (a mixed order's unmanaged line carries no fee
   // or cost here; its order-level revenue split above is the one approximation this makes).
   const lines = allLines.filter((l) => inScopeOrders.has(l.orderId) && l.sku && scope.has(l.sku));
-  let fba = 0, referral = 0, cogs = 0, units = 0;
-  const unmatched = new Set<string>();
+  let fba = 0, referral = 0;
+  const pendingLines: { sku: string; units: number }[] = [];
   for (const l of lines) {
     const sku = l.sku ?? "";
     const fx = rateOf.get(l.orderId) ?? 1;
@@ -174,10 +236,7 @@ async function pendingBridge(from: Date, to: Date, costs: Map<string, number>, s
     const gross = (l.gross || l.quantity * l.unitPrice) * fx;
     fba += l.quantity * fbaPerUnit;
     referral += gross * commissionRate;
-    units += l.quantity;
-    const c = costs.get(sku);
-    if (c != null) cogs -= l.quantity * c;
-    else if (sku) unmatched.add(sku);
+    pendingLines.push({ sku, units: l.quantity });
   }
 
   const sales = [
@@ -193,10 +252,8 @@ async function pendingBridge(from: Date, to: Date, costs: Map<string, number>, s
     taxes: -tax, // the marketplace facilitator withholds what it collects — mirrors settled rows
     fba,
     referral,
-    cogs,
-    units,
+    lines: pendingLines,
     pendingSales: principal + promo + tax + shipping + wrap,
-    unmatchedSkus: unmatched,
   };
 }
 
@@ -219,24 +276,6 @@ export async function getPnl(from: Date, to: Date): Promise<Pnl> {
     blocks.set(s.group, list);
   }
 
-  // COGS: shipped units per SKU in the window × the SKU's weighted-average landed cost.
-  const qty = await prisma.financeEvent.groupBy({
-    by: ["sku"],
-    where: { ...where, group: "sales", type: "Principal", quantity: { not: null } },
-    _sum: { quantity: true },
-  });
-  const costs = await avgCostBySellerSku();
-  let cogs = 0;
-  let unitsSold = 0;
-  const unmatched = new Set<string>();
-  for (const q of qty) {
-    const units = q._sum.quantity ?? 0;
-    unitsSold += units;
-    const c = q.sku ? costs.get(q.sku) : undefined;
-    if (c != null) cogs -= units * c;
-    else if (q.sku && units > 0) unmatched.add(q.sku);
-  }
-
   // What the scope left out: listings sold on Amazon that the company doesn't manage here.
   const left = await prisma.financeEvent.groupBy({
     by: ["sku"],
@@ -250,16 +289,19 @@ export async function getPnl(from: Date, to: Date): Promise<Pnl> {
   };
 
   // Bridge the settlement lag: recent orders whose money hasn't posted yet.
-  const bridge = await pendingBridge(from, to, costs, scope, baseCurrency);
+  const bridge = await pendingBridge(from, to, scope, baseCurrency);
   if (bridge.sales.length) {
     blocks.set("sales", [...(blocks.get("sales") ?? []), ...bridge.sales]);
     if (bridge.taxes !== 0) blocks.set("taxes", [...(blocks.get("taxes") ?? []), { type: "TaxWithheld (pending)", amount: bridge.taxes }]);
     if (bridge.fba !== 0) blocks.set("fba_fees", [...(blocks.get("fba_fees") ?? []), { type: "FBAPerUnitFulfillmentFee (pending)", amount: bridge.fba }]);
     if (bridge.referral !== 0) blocks.set("referral_fees", [...(blocks.get("referral_fees") ?? []), { type: "Commission (pending)", amount: bridge.referral }]);
-    cogs += bridge.cogs;
-    unitsSold += bridge.units;
-    for (const s of bridge.unmatchedSkus) unmatched.add(s);
   }
+
+  // Cost of goods: first-in-first-out from what was shipped to Amazon (pending units go last).
+  const fifo = await fifoCogs(from, to, scope, bridge.lines);
+  const cogs = fifo.cogs;
+  const unitsSold = fifo.units;
+  const unmatched = fifo.unmatchedSkus;
 
   const groups: PnlGroupBlock[] = GROUP_ORDER.map((g) => {
     const types = (blocks.get(g) ?? []).sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
@@ -284,6 +326,7 @@ export async function getPnl(from: Date, to: Date): Promise<Pnl> {
     roi: cogs !== 0 ? netProfit / Math.abs(cogs) : null,
     pendingSales: bridge.pendingSales,
     unmatchedSkus: [...unmatched],
+    fallbackUnits: fifo.fallbackUnits,
     ignored,
     backfillInProgress,
     hasData: groups.length > 0,

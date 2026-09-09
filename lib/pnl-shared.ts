@@ -17,6 +17,8 @@ export type Pnl = {
   /** Revenue included from orders Amazon hasn't settled yet (exact split; fees estimated). */
   pendingSales: number;
   unmatchedSkus: string[]; // managed SKUs with no cost yet — their units are NOT in cogs
+  /** Units sold before (or beyond) anything recorded entering the channel — priced at the oldest cost on record. */
+  fallbackUnits: number;
   /** Listings sold on the channel that the company doesn't manage in consl — left out entirely. */
   ignored: { skus: string[]; units: number; sales: number };
   backfillInProgress: boolean;

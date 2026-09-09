@@ -157,6 +157,12 @@ export function PnlClient({
         </div>
       )}
 
+      {pnl.fallbackUnits > 0 && (
+        <p className="max-w-3xl text-[12px] text-muted">
+          {pnl.fallbackUnits.toLocaleString()} of the units sold predate any shipment on record (or exceed what was recorded as shipped), so they
+          carry the oldest cost on record instead of a first-in-first-out cost.
+        </p>
+      )}
       {pnl.unmatchedSkus.length > 0 && (
         <p className="max-w-3xl text-[12px] text-muted">
           {pnl.unmatchedSkus.length} product{pnl.unmatchedSkus.length === 1 ? " has" : "s have"} no landed cost yet, so
