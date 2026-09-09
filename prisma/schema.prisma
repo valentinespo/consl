@@ -393,11 +393,10 @@ model Settings {
   // Round every order up to a multiple of this. 0 = order any quantity. Per-SKU `batchSize` wins.
   defaultBatchSize  Int           @default(0)
   sortMode          String        @default("sales") // inventory dashboard sort: sales | available | manual
-  // Order sources to drop from Shopify totals so channel-mirrored orders (e.g. TikTok selling
-  // through Shopify) aren't counted twice. Values are Shopify `source` keys, e.g. ["tiktok"].
+  // Retired 2026-09-09 (columns kept — migrations are additive): the double-count exclusions are
+  // no longer settings. They are derived at read time from which channels are present — see
+  // lib/order-metrics.ts activeExclusions.
   excludedShopifySources String[]  @default([])
-  // Drop Amazon MCF orders (Amazon shipping another channel's sale, $0 rows) from totals — offered
-  // once a non-Amazon channel is connected, since that channel's own order carries the sale.
   excludeMcfOrders  Boolean       @default(false)
   // Labels of the "key documents" every lot is expected to carry (e.g. BOL, COA). Each shows as a
   // pill on the lots table — purple when a matching-label document is attached, grey when missing.
@@ -775,10 +774,10 @@ model ChannelStock {
 /// Dedup lives at the SOURCE, like the MCF stock rule: a channel that mirrors its orders into
 /// Shopify (TikTok is the live example — 32 of Herbl's last 40 Shopify orders came from TikTok)
 /// would be counted twice if we took the Shopify copy AND the channel's own copy. So each Shopify
-/// order records where it originated (`source`, e.g. "tiktok"/"web"), and Settings.excludedShopifySources
-/// lists the sources to drop from Shopify totals — applied at read time, so toggling it needs no
-/// re-import. Default empty: Herbl's real TikTok history lives in Shopify today while consl only
-/// holds the TikTok sandbox, so nothing is excluded until the real TikTok shop is connected.
+/// order records where it originated (`source`, e.g. "tiktok"/"web"); at read time the Shopify copy is
+/// dropped automatically once that channel is present in consl (connected, or with orders), and so is
+/// an Amazon MCF row once any non-Amazon channel is present — lib/order-metrics.ts. Nothing is
+/// a setting: the rule follows the channels themselves.
 model SalesOrder {
   id           String          @id @default(cuid())
   orgId        String?

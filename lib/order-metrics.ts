@@ -1,14 +1,15 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrgId } from "@/lib/tenant";
-import { getOrgSettings } from "@/lib/settings";
 
 /**
  * Read side of the orders feed.
  *
- * The dedup rule lives HERE, not in the importer: a Shopify order whose originating channel is on
- * the org's exclusion list is dropped from totals, so a mirrored order (TikTok selling through
- * Shopify) is counted once. Applied at read time so the toggle is instant and reversible.
+ * The dedup rule lives HERE, not in the importer, and it is automatic — never a setting. A Shopify
+ * order created by a channel that is present in consl (connected, or with orders in the feed) is
+ * that channel's sale and counts there; an Amazon MCF order is Amazon shipping another present
+ * channel's sale. Both stay in the list, greyed out with the Voided pill. Applied at read time, so
+ * connecting a channel (or loading its history) dedups the whole past at once.
  *
  * Money: `SalesOrder.total` is what the buyer actually PAID — shipping, taxes and discounts all
  * applied (a 100%-discounted sample order is $0). That is what the Total column and the revenue
@@ -21,11 +22,11 @@ import { getOrgSettings } from "@/lib/settings";
 
 const CHANNEL_LABEL: Record<string, string> = { AMAZON: "Amazon", SHOPIFY: "Shopify", TIKTOK: "TikTok" };
 
-// Shopify `source` keyword → the consl channel it mirrors. Only offered as an exclusion toggle when
-// that channel is actually connected (never the merchant's own store, never a channel we don't pull
-// elsewhere like Faire wholesale — excluding those would just drop the sales).
+// Shopify `source` keyword → the consl channel it mirrors. Only a channel consl holds itself is a
+// mirror (never the merchant's own store, never a channel we don't pull elsewhere like Faire
+// wholesale — dropping those would just lose the sales).
 const MIRROR_TO_CHANNEL: Record<string, string> = { tiktok: "TIKTOK", amazon: "AMAZON" };
-const CHANNEL_LABEL_FROM_KEY: Record<string, string> = { TIKTOK: "TikTok", AMAZON: "Amazon" };
+const PROVIDER_CHANNEL: Record<string, string> = { amazon: "AMAZON", shopify: "SHOPIFY", tiktok: "TIKTOK" };
 
 function mirrorChannel(source: string | null): string | null {
   if (!source) return null;
@@ -73,10 +74,6 @@ export type OrderRow = {
 };
 
 export type ChannelSummary = { channel: string; label: string; orders: number; units: number; revenue: number };
-export type SourceToggle = { source: string; label: string; count: number; excluded: boolean };
-/** The Amazon-MCF exclusion toggle — offered once a non-Amazon channel is connected, since the
- *  same sale then counts on that channel's own order too. */
-export type McfToggle = { offered: boolean; count: number; excluded: boolean };
 
 export type OrdersSummary = {
   channels: ChannelSummary[];
@@ -84,13 +81,35 @@ export type OrdersSummary = {
   totalUnits: number;
   totalRevenue: number;
   currency: string;
-  sources: SourceToggle[];
-  mcf: McfToggle;
 };
+
+/** What the double-count rule drops right now: the Shopify sources that mirror a present channel,
+ *  and whether Amazon MCF orders are another present channel's sales. */
+type Exclusions = { sources: string[]; mcf: boolean };
+
+/** A channel is present once it is connected OR its orders are in the feed (a history load lands
+ *  before the connection does). */
+async function activeExclusions(alsoConnected: Iterable<string> = []): Promise<Exclusions> {
+  const [connections, withOrders, shopifySources] = await Promise.all([
+    prisma.integration.findMany({ where: { status: "connected" }, select: { provider: true } }),
+    prisma.salesOrder.groupBy({ by: ["channel"] }),
+    prisma.salesOrder.groupBy({ by: ["source"], where: { channel: "SHOPIFY", source: { not: null } } }),
+  ]);
+  const present = new Set([
+    ...alsoConnected,
+    ...connections.map((c) => PROVIDER_CHANNEL[c.provider]).filter(Boolean),
+    ...withOrders.map((r) => r.channel),
+  ]);
+  const sources = shopifySources.map((r) => r.source as string).filter((s) => {
+    const ch = mirrorChannel(s);
+    return !!ch && present.has(ch);
+  });
+  return { sources, mcf: [...present].some((c) => c !== "AMAZON") };
+}
 
 export type OrdersPage = { rows: OrderRow[]; total: number; page: number; pageSize: number; pageCount: number };
 
-/** Channel totals + the exclusion toggles, aggregated in SQL so it scales to full history. */
+/** Channel totals, aggregated in SQL so it scales to full history. */
 export async function getOrdersSummary(connectedChannels: string[] = [], filter: OrdersFilter = {}): Promise<OrdersSummary> {
   const orgId = await getCurrentOrgId();
   if (!orgId) {
@@ -100,14 +119,9 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
       totalUnits: 0,
       totalRevenue: 0,
       currency: "USD",
-      sources: [],
-      mcf: { offered: false, count: 0, excluded: false },
     };
   }
-  const settings = await getOrgSettings();
-  const excluded = settings.excludedShopifySources ?? [];
-  const excludeMcf = settings.excludeMcfOrders ?? false;
-  const connected = new Set(connectedChannels);
+  const { sources: excluded, mcf: excludeMcf } = await activeExclusions(connectedChannels);
   const { since, until } = bounds(filter);
   const channelFilter = filter.channel ?? null;
 
@@ -150,42 +164,12 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
     }))
     .sort((a, b) => b.revenue - a.revenue);
 
-  // Distinct mirrored Shopify sources whose channel is present → exclusion toggles (always global,
-  // so the toggle doesn't vanish when a filter hides Shopify).
-  const srcRows = await prisma.$queryRaw<{ source: string; count: bigint }[]>`
-    SELECT o.source, COUNT(*) AS count
-    FROM "SalesOrder" o
-    WHERE o."orgId" = ${orgId} AND o.channel = 'SHOPIFY' AND o.source IS NOT NULL
-    GROUP BY o.source`;
-  // A mirrored channel counts as present once it is connected OR its orders are in the feed
-  // (a history load lands before the connection does).
-  const present = new Set([...connected, ...(await prisma.salesOrder.groupBy({ by: ["channel"] })).map((r) => r.channel)]);
-  const sources: SourceToggle[] = srcRows
-    .map((r) => ({ source: r.source, ch: mirrorChannel(r.source), count: Number(r.count) }))
-    .filter((r) => r.ch && present.has(r.ch))
-    .map((r) => ({ source: r.source, label: CHANNEL_LABEL_FROM_KEY[r.ch!] ?? r.ch!, count: r.count, excluded: excluded.includes(r.source) }))
-    .sort((a, b) => b.count - a.count);
-
-  // The mirror in the other direction: Amazon MCF rows are Amazon shipping another channel's
-  // sale. Offered (global count, like the source toggles) once any non-Amazon channel is
-  // connected or has orders in the feed — before that, the MCF rows are the only trace of those
-  // sales, so dropping them would just lose orders. Cancelled MCF rows are left out of the count:
-  // they were never in the totals, so the number shown matches exactly what the toggle removes.
-  const mcfCount = await prisma.salesOrder.count({ where: { channel: "AMAZON", mcf: true, cancelled: false, voided: false } });
-  const mcf: McfToggle = {
-    offered: mcfCount > 0 && [...present].some((c) => c !== "AMAZON"),
-    count: mcfCount,
-    excluded: excludeMcf,
-  };
-
   return {
     channels,
     totalOrders: channels.reduce((s, c) => s + c.orders, 0),
     totalUnits: channels.reduce((s, c) => s + c.units, 0),
     totalRevenue: channels.reduce((s, c) => s + c.revenue, 0),
     currency: "USD",
-    sources,
-    mcf,
   };
 }
 
@@ -208,8 +192,6 @@ const FREE_SAMPLE_WHERE = { channel: "TIKTOK", total: 0, cancelled: false };
  * free units, a channel name filters that channel, a number matches the paid total, and anything
  * else sweeps order #, SKU, sales channel, fulfilled-at and status.
  */
-type Exclusions = { sources: string[]; mcf: boolean };
-
 function searchWhere(raw: string, ex: Exclusions): Record<string, unknown> {
   const q = raw.trim();
   const s = q.toLowerCase();
@@ -254,16 +236,14 @@ function searchWhere(raw: string, ex: Exclusions): Record<string, unknown> {
 /** One page of orders, newest first, honouring the filters + search. Excluded/cancelled orders
  *  still show (dimmed) for transparency. */
 export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilter = {}): Promise<OrdersPage> {
-  const settings = await getOrgSettings();
-  const excluded = new Set(settings.excludedShopifySources ?? []);
-  const excludeMcf = settings.excludeMcfOrders ?? false;
+  const { sources: excluded, mcf: excludeMcf } = await activeExclusions();
   const { since, until } = bounds(filter);
 
   const q = filter.q?.trim();
   const where = {
     ...(filter.channel ? { channel: filter.channel } : {}),
     ...(since || until ? { orderedAt: { ...(since ? { gte: since } : {}), ...(until ? { lte: until } : {}) } } : {}),
-    ...(q ? { AND: [searchWhere(q, { sources: [...excluded], mcf: excludeMcf })] } : {}),
+    ...(q ? { AND: [searchWhere(q, { sources: excluded, mcf: excludeMcf })] } : {}),
   };
 
   const total = await prisma.salesOrder.count({ where });
@@ -318,7 +298,7 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
       (o.status === "Shipped" || o.status === "PartiallyShipped"),
     freeSample: o.channel === "TIKTOK" && o.total === 0 && !o.cancelled,
     voided: o.voided,
-    excluded: (o.channel === "SHOPIFY" && !!o.source && excluded.has(o.source)) || (excludeMcf && o.mcf),
+    excluded: (o.channel === "SHOPIFY" && !!o.source && excluded.includes(o.source)) || (excludeMcf && o.mcf),
   }));
 
   return { rows, total, page: current, pageSize, pageCount };

@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronRight, DotsVertical, Layers, Search } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
-import { setSourceExcluded, setMcfExcluded, setOrderVoided } from "@/app/orders/actions";
+import { setOrderVoided } from "@/app/orders/actions";
 import type { OrdersSummary, OrdersPage, OrderRow } from "@/lib/order-metrics";
 import { inputCls } from "@/components/FormKit";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
@@ -111,20 +111,6 @@ function RowMenu({ id, voided }: { id: string; voided: boolean }) {
           document.body,
         )}
     </>
-  );
-}
-
-function Toggle({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
-  return (
-    <button
-      onClick={() => onChange(!on)}
-      disabled={disabled}
-      role="switch"
-      aria-checked={on}
-      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${on ? "bg-accent-strong" : "bg-border"}`}
-    >
-      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${on ? "left-[18px]" : "left-0.5"}`} />
-    </button>
   );
 }
 
@@ -260,24 +246,7 @@ export function OrdersClient({
   const pathname = usePathname();
   const params = useSearchParams();
   const { money, locale } = useMoney();
-  const [savingSource, setSavingSource] = useState<string | null>(null);
   const [search, setSearch] = useState(filter.q);
-
-  function toggleSource(source: string, excluded: boolean) {
-    setSavingSource(source);
-    void setSourceExcluded(source, excluded).then(() => {
-      router.refresh();
-      setSavingSource(null);
-    });
-  }
-
-  function toggleMcf(excluded: boolean) {
-    setSavingSource("__mcf");
-    void setMcfExcluded(excluded).then(() => {
-      router.refresh();
-      setSavingSource(null);
-    });
-  }
 
   /** Update one query param and reset to page 1 (a new filter restarts the walk). */
   function setParam(key: string, value: string) {
@@ -348,39 +317,6 @@ export function OrdersClient({
               </div>
             </div>
           ))}
-        </div>
-      )}
-
-      {/* Exclusion settings strip */}
-      {(summary.sources.length > 0 || summary.mcf.offered) && (
-        <div className="rounded-[var(--radius-card)] border border-border bg-surface-2/40 p-4">
-          <div className="text-[12px] font-medium uppercase tracking-wide text-muted">Avoid double-counting</div>
-          <p className="mt-1 max-w-[70ch] text-[12.5px] text-muted">
-            Some sales show up on two channels at once. Turn a toggle on to count each sale exactly once —
-            the dropped orders stay in the list, just greyed out.
-          </p>
-          <div className="mt-3 flex flex-col gap-2">
-            {summary.sources.map((s) => (
-              <div key={s.source} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-bg px-3 py-2">
-                <div className="min-w-0">
-                  <span className="text-[13px] font-medium text-ink">{s.label} orders in Shopify</span>
-                  <span className="ml-2 text-[11.5px] text-muted">{s.count.toLocaleString()} found</span>
-                </div>
-                <Toggle on={s.excluded} disabled={savingSource === s.source} onChange={(v) => toggleSource(s.source, v)} />
-              </div>
-            ))}
-            {summary.mcf.offered && (
-              <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-bg px-3 py-2">
-                <div className="min-w-0">
-                  <span className="text-[13px] font-medium text-ink">Amazon MCF orders</span>
-                  <span className="ml-2 text-[11.5px] text-muted">
-                    {summary.mcf.count.toLocaleString()} found — Amazon shipping your other channels&apos; sales
-                  </span>
-                </div>
-                <Toggle on={summary.mcf.excluded} disabled={savingSource === "__mcf"} onChange={toggleMcf} />
-              </div>
-            )}
-          </div>
         </div>
       )}
 

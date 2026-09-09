@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePermission, requireView } from "@/lib/membership";
-import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
 import { importAllOrders } from "@/lib/orders";
 
 /** Pull orders from every connected channel into the store. Idempotent — safe to re-run; it
@@ -26,34 +25,12 @@ export async function importOrders() {
   }
 }
 
-/** Toggle whether a mirrored Shopify source (e.g. "tiktok") is excluded from Shopify totals. */
-export async function setSourceExcluded(source: string, excluded: boolean) {
-  const gate = await requirePermission("inventory", "edit");
-  if (!gate.ok) return { ok: false as const, error: gate.error };
-  const s = await getOrgSettings();
-  const set = new Set(s.excludedShopifySources ?? []);
-  if (excluded) set.add(source);
-  else set.delete(source);
-  await saveOrgSettings({ excludedShopifySources: [...set] });
-  revalidatePath("/orders");
-  return { ok: true as const };
-}
-
 /** Void/unvoid one order from the row menu — the only writer of `voided`; imports never touch it. */
 export async function setOrderVoided(id: string, voided: boolean) {
   const gate = await requirePermission("inventory", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };
   const { prisma } = await import("@/lib/prisma");
   await prisma.salesOrder.updateMany({ where: { id }, data: { voided, voidedManual: true } });
-  revalidatePath("/orders");
-  return { ok: true as const };
-}
-
-/** Drop Amazon MCF orders from totals — the same sale already counts on its own channel. */
-export async function setMcfExcluded(excluded: boolean) {
-  const gate = await requirePermission("inventory", "edit");
-  if (!gate.ok) return { ok: false as const, error: gate.error };
-  await saveOrgSettings({ excludeMcfOrders: excluded });
   revalidatePath("/orders");
   return { ok: true as const };
 }
