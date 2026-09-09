@@ -150,16 +150,19 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
     }))
     .sort((a, b) => b.revenue - a.revenue);
 
-  // Distinct mirrored Shopify sources whose channel is connected → exclusion toggles (always global,
+  // Distinct mirrored Shopify sources whose channel is present → exclusion toggles (always global,
   // so the toggle doesn't vanish when a filter hides Shopify).
   const srcRows = await prisma.$queryRaw<{ source: string; count: bigint }[]>`
     SELECT o.source, COUNT(*) AS count
     FROM "SalesOrder" o
     WHERE o."orgId" = ${orgId} AND o.channel = 'SHOPIFY' AND o.source IS NOT NULL
     GROUP BY o.source`;
+  // A mirrored channel counts as present once it is connected OR its orders are in the feed
+  // (a history load lands before the connection does).
+  const present = new Set([...connected, ...(await prisma.salesOrder.groupBy({ by: ["channel"] })).map((r) => r.channel)]);
   const sources: SourceToggle[] = srcRows
     .map((r) => ({ source: r.source, ch: mirrorChannel(r.source), count: Number(r.count) }))
-    .filter((r) => r.ch && connected.has(r.ch))
+    .filter((r) => r.ch && present.has(r.ch))
     .map((r) => ({ source: r.source, label: CHANNEL_LABEL_FROM_KEY[r.ch!] ?? r.ch!, count: r.count, excluded: excluded.includes(r.source) }))
     .sort((a, b) => b.count - a.count);
 
@@ -169,9 +172,8 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
   // sales, so dropping them would just lose orders. Cancelled MCF rows are left out of the count:
   // they were never in the totals, so the number shown matches exactly what the toggle removes.
   const mcfCount = await prisma.salesOrder.count({ where: { channel: "AMAZON", mcf: true, cancelled: false, voided: false } });
-  const otherChannelOrders = mcfCount > 0 ? await prisma.salesOrder.count({ where: { channel: { not: "AMAZON" } } }) : 0;
   const mcf: McfToggle = {
-    offered: mcfCount > 0 && ([...connected].some((c) => c !== "AMAZON") || otherChannelOrders > 0),
+    offered: mcfCount > 0 && [...present].some((c) => c !== "AMAZON"),
     count: mcfCount,
     excluded: excludeMcf,
   };
