@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { decryptSecret } from "@/lib/secret-box";
 import { shopifyGraphQL } from "@/lib/shopify";
 import { getCurrentOrgId } from "@/lib/tenant";
-import { upsertShopifyFinanceEvents } from "@/lib/shopify-finances";
+import { upsertShopifyFinanceEvents, importShopifyPaymentsLedger, hasShopifyPaymentsScope } from "@/lib/shopify-finances";
 
 /**
  * Pull orders from the connected channels into SalesOrder/SalesOrderLine — the raw feed for
@@ -305,7 +305,14 @@ export async function importShopifyOrders(sinceDays?: number): Promise<OrderImpo
   }
 
   const result = await persist("SHOPIFY", fetched, shopifyResolver(map));
-  await upsertShopifyFinanceEvents(nodes, shopifyResolver(map));
+  // The money side: sales/tax/refunds from the orders; fees and chargebacks from Shopify Payments'
+  // own ledger when the connection can read it (else from the orders, minus the dispute fee).
+  const ledger = hasShopifyPaymentsScope(conn.scope);
+  await upsertShopifyFinanceEvents(nodes, shopifyResolver(map), ledger);
+  if (ledger) {
+    const r = await importShopifyPaymentsLedger(conn.sellerId, token, sinceDays);
+    if (Object.keys(r.skipped).length) console.log("[shopify] balance ledger kinds not modelled:", r.skipped);
+  }
   return result;
 }
 
@@ -325,7 +332,9 @@ export async function importShopifyOrderById(orderGid: string): Promise<OrderImp
   if (!data.node?.id) return { channel: "SHOPIFY", orders: 0, lines: 0 };
   const map = await productMap("SHOPIFY");
   const result = await persist("SHOPIFY", [mapShopifyOrder(data.node)], shopifyResolver(map));
-  await upsertShopifyFinanceEvents([data.node], shopifyResolver(map));
+  const ledger = hasShopifyPaymentsScope(conn.scope);
+  await upsertShopifyFinanceEvents([data.node], shopifyResolver(map), ledger);
+  if (ledger) await importShopifyPaymentsLedger(conn.sellerId, token, 3);
   return result;
 }
 
