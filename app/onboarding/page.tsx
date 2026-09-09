@@ -13,6 +13,7 @@ import { tiktokConfigured } from "@/lib/tiktok";
 import { CHANNEL_TITLES, PRODUCT_MATCH_SELECT, mappedExternalId, suggestMappings, type ChannelKey } from "@/lib/channel-catalog";
 import { ROOT_LOGO, PROVIDER_LOGO } from "@/lib/channel-logos";
 import { OnboardingWizard, type WizardMapping } from "@/components/onboarding/OnboardingWizard";
+import { readOnboardingJob } from "@/lib/onboarding-jobs";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,7 @@ export default async function OnboardingPage({
   if (org.onboardedAt) redirect("/");
   const sp = await searchParams;
 
-  const [role, orgs, settings, integrations, products, facilities, materials, openingMovs, snaps, channelHeld, access] =
+  const [role, orgs, settings, integrations, products, facilities, materials, openingMovs, snaps, channelHeld, access, job] =
     await Promise.all([
       currentRole(),
       listMyOrgs().catch(() => []),
@@ -50,6 +51,7 @@ export default async function OnboardingPage({
         select: { productId: true, units: true, facility: { select: { channel: true } } },
       }),
       getMyAccess().catch(() => null),
+      readOnboardingJob(),
     ]);
 
   const connected = new Set(integrations.map((i) => i.provider));
@@ -197,6 +199,7 @@ export default async function OnboardingPage({
       orgs={orgs}
       currency={{ symbol: org.currencySymbol, locale: org.locale, code: org.currencyCode }}
       syncTz={settings.syncTz}
+      job={job}
       providers={providers}
       channelsPullPending={channelsPullPending}
       mapping={mapping}

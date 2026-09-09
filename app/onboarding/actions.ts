@@ -9,6 +9,7 @@ import { requirePermission } from "@/lib/membership";
 import { recomputeAll } from "@/lib/recompute";
 import { syncAllChannelsStockCore } from "@/lib/sync";
 import { refreshChannelListingsCore, autoMapExact, mappedExternalId, PRODUCT_MATCH_SELECT, type ChannelKey } from "@/lib/channel-catalog";
+import { jobRunning, readOnboardingJob, startOnboardingJob } from "@/lib/onboarding-jobs";
 
 /**
  * The onboarding wizard's server side. The wizard is the ONLY thing a new company can see until
@@ -43,15 +44,16 @@ export async function backToStep(step: number) {
 
 /**
  * Move forward one step, enforcing that step's exit conditions. Where fresh platform data makes
- * the NEXT step meaningful, it's pulled here (stock after connecting; stock again after mapping,
- * because Shopify/TikTok quantities only store once their SKUs resolve to products).
+ * a LATER step meaningful (the catalogue after connecting; stock again after mapping, because
+ * Shopify/TikTok quantities only store once their SKUs resolve to products), the pull is started
+ * as a background job and the step advances at once — the wizard shows progress only on the
+ * step that needs the result.
  */
 export async function advanceOnboarding(opts?: { skipChannels?: boolean }) {
   const org = await getCurrentOrg();
   if (!org) return { ok: false as const, error: "No company open." };
   if (org.onboardedAt) return { ok: false as const, error: "Onboarding is already finished." };
   const step = org.onboardingStep;
-  let warning: string | null = null;
 
   if (step === 0) {
     if (!org.name.trim() || !org.address?.trim() || !org.email?.trim()) {
@@ -70,12 +72,16 @@ export async function advanceOnboarding(opts?: { skipChannels?: boolean }) {
     const pulledAt = settings?.onboardingPulledAt ?? null;
     const needsPull = integrations.some((i) => !pulledAt || !i.connectedAt || i.connectedAt > pulledAt);
     if (integrations.length > 0 && needsPull) {
-      warning = await pullChannelData(integrations.map((i) => i.provider));
-      // A clean pull is stamped; a partial failure leaves the stamp alone so returning offers the
-      // pull again instead of silently continuing on half-fetched data.
-      if (!warning && settings) {
-        await prisma.settings.update({ where: { id: settings.id }, data: { onboardingPulledAt: new Date() } });
-      }
+      const providers = integrations.map((i) => i.provider);
+      await startOnboardingJob("pull", 8 + 10 * providers.length, async (report) => {
+        const problem = await pullChannelData(providers, report);
+        // A clean pull is stamped; a partial failure leaves the stamp alone so returning offers
+        // the pull again instead of silently continuing on half-fetched data.
+        if (!problem && settings) {
+          await prisma.settings.update({ where: { id: settings.id }, data: { onboardingPulledAt: new Date() } });
+        }
+        return problem;
+      });
     }
   }
 
@@ -90,13 +96,16 @@ export async function advanceOnboarding(opts?: { skipChannels?: boolean }) {
     if (missingCost > 0) {
       return { ok: false as const, error: `Enter an average cost of goods for every product (${missingCost} missing) — it prices your starting inventory.` };
     }
-    // Mapping just landed, so channel quantities can finally resolve to products — pull stock
-    // again so the next step (and the final starting balances) see real channel counts. Stock
-    // only: the sales report is the scheduler's job and takes minutes, longer than a request lives.
+    // Mapping just landed, so channel quantities can finally resolve to products — read stock
+    // again in the background so the next step (and the final starting balances) see real
+    // channel counts. Stock only: the sales report is the scheduler's job.
     const integrations = await prisma.integration.findMany({ where: { status: "connected" } });
     if (integrations.length > 0) {
-      const r = await syncAllChannelsStockCore().catch(() => null);
-      if (r && r.failed.length > 0) warning = `Couldn't refresh ${r.failed.join(", ")} — the counts shown may be stale.`;
+      await startOnboardingJob("stock", 10, async (report) => {
+        await report("Reading your stock at each channel…");
+        const r = await syncAllChannelsStockCore();
+        return r.failed.length > 0 ? `Couldn't refresh ${r.failed.join(", ")} — the counts shown may be stale.` : null;
+      });
     }
   }
 
@@ -106,7 +115,7 @@ export async function advanceOnboarding(opts?: { skipChannels?: boolean }) {
     await prismaBase.organization.update({ where: { id: org.id }, data: { onboardingMaxStep: step + 1 } });
   }
   revalidatePath("/", "layout");
-  return { ok: true as const, warning };
+  return { ok: true as const };
 }
 
 /** Jump to any step already reached (the progress rail's click) — forward or backward, never
@@ -124,24 +133,55 @@ export async function jumpToOnboardingStep(target: number) {
 
 /** Stock + catalog pull for freshly connected channels, so the mapping step has rows to show.
  *  Returns a warning string when part of it failed (never blocks the wizard). */
-async function pullChannelData(providers: string[]): Promise<string | null> {
+const PROVIDER_NAME: Record<string, string> = { amazon: "Amazon", shopify: "Shopify", tiktok: "TikTok Shop" };
+
+/** Catalogue + stock for each connected channel, reporting progress as it goes. Sales history and
+ *  the money ledger import themselves in the background (the scheduler's walkers). */
+async function pullChannelData(providers: string[], report: (phase: string) => Promise<void>): Promise<string | null> {
   const problems: string[] = [];
-  // Stock + catalogue only. Sales history and the money ledger import themselves in the
-  // background (the scheduler's walkers) — a wizard step must answer within one request.
-  const stock = await syncAllChannelsStockCore().catch(() => null);
-  if (!stock) problems.push("stock");
-  else if (stock.failed.length > 0) problems.push(...stock.failed);
   for (const p of providers) {
     const channel = PROVIDER_CHANNEL[p];
     if (!channel) continue;
     try {
+      await report(`Reading your ${PROVIDER_NAME[p] ?? p} listings…`);
       await refreshChannelListingsCore(channel);
+      await report(`Matching ${PROVIDER_NAME[p] ?? p} listings to your products…`);
       await autoMapExact(channel);
     } catch {
       problems.push(`${p} catalog`);
     }
   }
+  await report("Reading your stock at each channel…");
+  const stock = await syncAllChannelsStockCore().catch(() => null);
+  if (!stock) problems.push("stock");
+  else if (stock.failed.length > 0) problems.push(...stock.failed);
   return problems.length > 0 ? `Couldn't pull everything (${[...new Set(problems)].join(", ")}) — you can retry from the mapping step.` : null;
+}
+
+/** The wizard polls this while a job runs. */
+export async function getOnboardingJob() {
+  return readOnboardingJob();
+}
+
+/** Run the last job again (the dialog's Retry). */
+export async function retryOnboardingJob() {
+  const org = await getCurrentOrg();
+  if (!org || org.onboardedAt) return { ok: false as const, error: "Onboarding is already finished." };
+  const job = await readOnboardingJob();
+  if (!job || jobRunning(job)) return { ok: true as const };
+  const integrations = await prisma.integration.findMany({ where: { status: "connected" } });
+  if (integrations.length === 0) return { ok: true as const };
+  if (job.kind === "pull") {
+    const providers = integrations.map((i) => i.provider);
+    await startOnboardingJob("pull", 8 + 10 * providers.length, (report) => pullChannelData(providers, report));
+  } else {
+    await startOnboardingJob("stock", 10, async (report) => {
+      await report("Reading your stock at each channel…");
+      const r = await syncAllChannelsStockCore();
+      return r.failed.length > 0 ? `Couldn't refresh ${r.failed.join(", ")} — the counts shown may be stale.` : null;
+    });
+  }
+  return { ok: true as const };
 }
 
 /** Mark every still-undecided listing ignored (not mapped, not already ignored) — ignoring is the
@@ -247,6 +287,8 @@ export async function completeOnboarding() {
   if (!gate.ok) return { ok: false as const, error: gate.error };
   const orgId = await getCurrentOrgId();
   if (!orgId) return { ok: false as const, error: "No company open." };
+  // The starting balances below are built from channel stock — never from a half-finished read.
+  if (jobRunning(await readOnboardingJob())) return { ok: false as const, error: "Still reading your channel data — a few more seconds." };
 
   const claimed = await prismaBase.organization.updateMany({
     where: { id: orgId, onboardedAt: null },

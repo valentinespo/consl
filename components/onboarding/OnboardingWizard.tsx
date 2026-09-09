@@ -25,10 +25,30 @@ import {
   completeOnboarding,
   deleteOnboardingFacility,
   deleteOnboardingMaterial,
+  getOnboardingJob,
   jumpToOnboardingStep,
+  retryOnboardingJob,
   saveOpeningCosts,
 } from "@/app/onboarding/actions";
 import { updateProduct } from "@/app/catalog/actions";
+import type { OnboardingJob } from "@/lib/onboarding-jobs";
+
+/** Mirror of lib/onboarding-jobs' rule (that module is server-only): a job that never reported
+ *  back — the server restarted mid-way — stops counting as running after a generous window. */
+function jobIsRunning(job: OnboardingJob | null): boolean {
+  if (!job || job.finishedAt) return false;
+  return Date.now() - new Date(job.startedAt).getTime() < Math.max(90_000, job.expectedSeconds * 6_000);
+}
+
+/** Which steps can't be worked on until the job's result is in: the mapping step needs the
+ *  catalogue pull, the stock step needs stock (a pull includes it), Finish needs everything. */
+function stepNeedsJob(step: number, job: OnboardingJob | null): boolean {
+  if (!job) return false;
+  if (step === 2) return job.kind === "pull";
+  if (step === 3) return true;
+  if (step === 6) return true;
+  return false;
+}
 
 /** The mapping payload for the active channel tab — null when no channel is connected. */
 export type WizardMapping = null | {
@@ -106,6 +126,8 @@ export function OnboardingWizard(props: {
   providers: Array<{ key: string; label: string; blurb: string; logo: string; connected: boolean; canConnect: boolean }>;
   /** A channel connected since the wizard's last data pull — step 1 offers the pull again. */
   channelsPullPending: boolean;
+  /** The background catalogue/stock job, as last written by the server. */
+  job: OnboardingJob | null;
   mapping: WizardMapping;
   products: WizardProduct[];
   facilities: WizardFacility[];
@@ -118,8 +140,33 @@ export function OnboardingWizard(props: {
   const step = props.step;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [warning, setWarning] = useState<string | null>(null);
   const [skipChannels, setSkipChannels] = useState(false);
+
+  // ---- The background job: Continue never waits on it. While it runs, poll; when it lands,
+  // refresh so the step shows what it fetched. Steps that need its result show a dialog. ----
+  // The server's copy arrives with each render; polling keeps a fresher copy of the SAME job (or
+  // a newer one started from the dialog's Retry) — whichever started last wins, no state syncing.
+  const [polled, setPolled] = useState<OnboardingJob | null>(null);
+  const job = polled && (!props.job || polled.startedAt >= props.job.startedAt) ? polled : props.job;
+  const setJob = setPolled;
+  const running = jobIsRunning(job);
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(async () => {
+      try {
+        const latest = await getOnboardingJob();
+        setJob(latest);
+        if (!jobIsRunning(latest)) router.refresh();
+      } catch {
+        // a missed poll just waits for the next one
+      }
+    }, 1500);
+    return () => clearInterval(id);
+  }, [running, router]);
+  const [dismissedJob, setDismissedJob] = useState<string | null>(null); // startedAt of a failed job the user waved off
+  const jobFailed = !!job && !running && !!job.error;
+  const showDialog = stepNeedsJob(step, job) && (running || (jobFailed && dismissedJob !== job!.startedAt));
+  const warning = jobFailed ? job!.error : null;
   // The COG grid is lifted here so Continue can save it before the server validates it.
   const [cogDraft, setCogDraft] = useState<Record<string, string>>({});
   const cogValue = (p: WizardProduct) => cogDraft[p.id] ?? (p.openingUnitCost != null ? String(p.openingUnitCost) : "");
@@ -198,7 +245,6 @@ export function OnboardingWizard(props: {
       return;
     }
     setError(null);
-    setWarning(null);
     setBusy(true);
     try {
       if (step === 6) {
@@ -215,7 +261,6 @@ export function OnboardingWizard(props: {
         setError(r.error);
         return;
       }
-      if (r.warning) setWarning(r.warning);
       router.refresh();
     } catch {
       setError("Couldn't reach the server — check your connection and try again.");
@@ -227,7 +272,6 @@ export function OnboardingWizard(props: {
   async function back() {
     if (step === 0 || busy) return;
     setError(null);
-    setWarning(null);
     await backToStep(step - 1);
     router.refresh();
   }
@@ -243,7 +287,6 @@ export function OnboardingWizard(props: {
       return;
     }
     setError(null);
-    setWarning(null);
     await jumpToOnboardingStep(i);
     router.refresh();
   }
@@ -371,6 +414,17 @@ export function OnboardingWizard(props: {
             </div>
           )}
 
+          {showDialog && job && (
+            <WorkingDialog
+              job={job}
+              onRetry={async () => {
+                await retryOnboardingJob();
+                setJob(await getOnboardingJob());
+              }}
+              onSkip={() => setDismissedJob(job.startedAt)}
+            />
+          )}
+
           {/* Footer nav — sticky so Continue is always in reach on long steps. */}
           <div className="fixed inset-x-0 bottom-0 border-t border-border bg-surface/95 backdrop-blur">
             <div className="mx-auto flex max-w-[1040px] flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
@@ -389,7 +443,13 @@ export function OnboardingWizard(props: {
                     <AlertTriangle size={13} className="mt-0.5 shrink-0" /> {error}
                   </span>
                 )}
-                {!error && warning && <span className="text-[12.5px] text-amber-600">{warning}</span>}
+                {!error && warning && <span className="text-[12.5px] text-warn">{warning}</span>}
+                {!error && !warning && running && !showDialog && (
+                  <span className="inline-flex items-center gap-1.5 text-[12.5px] text-muted">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />
+                    {job?.phase || "Working in the background…"}
+                  </span>
+                )}
               </div>
               <button
                 onClick={next}
@@ -403,6 +463,85 @@ export function OnboardingWizard(props: {
         </div>
       </AccessProvider>
     </CurrencyProvider>
+  );
+}
+
+/* ------------------------------ Progress dialog ------------------------------
+ * Shown only on a step that can't proceed without the background job's result. Plain words for
+ * what's happening, a rough time estimate, and — if the job failed — a way to retry or go on. */
+const JOB_TITLE: Record<OnboardingJob["kind"], string> = { pull: "Pulling your channel data", stock: "Reading your stock" };
+const JOB_MESSAGES: Record<OnboardingJob["kind"], string[]> = {
+  pull: ["Reading your listings…", "Matching listings to your products…", "Reading your stock at each channel…", "Nearly there…"],
+  stock: ["Reading your stock at each channel…", "Counting units at Amazon…", "Nearly there…"],
+};
+
+function WorkingDialog({ job, onRetry, onSkip }: { job: OnboardingJob; onRetry: () => Promise<void>; onSkip: () => void }) {
+  const [now, setNow] = useState(() => Date.now());
+  const [tick, setTick] = useState(0);
+  const [retrying, setRetrying] = useState(false);
+  useEffect(() => {
+    const id = setInterval(() => {
+      setNow(Date.now());
+      setTick((t) => t + 1);
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+  const running = jobIsRunning(job);
+  const elapsed = (now - new Date(job.startedAt).getTime()) / 1000;
+  const remaining = job.expectedSeconds - elapsed;
+  const eta =
+    remaining > 8 ? `About ${Math.ceil(remaining / 5) * 5} seconds left` : remaining > 0 ? "Almost done…" : "Taking a little longer than usual — still working…";
+  const messages = JOB_MESSAGES[job.kind];
+  const message = job.phase || messages[Math.floor(tick / 3) % messages.length];
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 p-4 chrome-blur">
+      <div role="dialog" aria-modal="true" aria-live="polite" className="org-pop w-full max-w-[420px] rounded-[var(--radius-card)] border border-border bg-surface p-6 shadow-xl">
+        {running ? (
+          <>
+            <div className="flex items-center gap-3">
+              <span aria-hidden className="h-7 w-7 shrink-0 animate-spin rounded-full border-2 border-border border-t-accent" />
+              <div className="min-w-0">
+                <div className="text-[15px] font-semibold text-ink">{JOB_TITLE[job.kind]}</div>
+                <div className="mt-0.5 text-[12.5px] text-muted">{eta}</div>
+              </div>
+            </div>
+            <p className="mt-4 text-[13px] leading-relaxed text-ink-soft">{message}</p>
+            <p className="mt-2 text-[12px] text-muted">This step needs that data, so it waits. Everything else you set up is saved.</p>
+          </>
+        ) : (
+          <>
+            <div className="flex items-start gap-3">
+              <AlertTriangle size={20} className="mt-0.5 shrink-0 text-warn" />
+              <div className="min-w-0">
+                <div className="text-[15px] font-semibold text-ink">Couldn&apos;t finish reading your channels</div>
+                <p className="mt-1 text-[13px] leading-relaxed text-ink-soft">{job.error ?? "The server lost track of this job — try again."}</p>
+              </div>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={onSkip} className="rounded-lg border border-border px-3.5 py-2 text-[13px] text-ink-soft hover:bg-surface-2">
+                Continue anyway
+              </button>
+              <button
+                type="button"
+                disabled={retrying}
+                onClick={async () => {
+                  setRetrying(true);
+                  try {
+                    await onRetry();
+                  } finally {
+                    setRetrying(false);
+                  }
+                }}
+                className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-bg hover:opacity-90 disabled:opacity-50"
+              >
+                {retrying ? "Retrying…" : "Try again"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
