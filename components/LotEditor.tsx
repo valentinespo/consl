@@ -412,7 +412,7 @@ export function LotEditor({
                     <td className="px-3 py-3 text-right font-semibold tabular text-ink">{l.cost ? perUnit(l.cost.cogPerUnit) : <span className="text-[11px] font-normal text-muted">new</span>}</td>
                     {/* Per-SKU lifecycle — production + payment, staged like everything else. */}
                     <td className="px-3 py-3 text-center">
-                      <div className="inline-flex flex-wrap items-center justify-center gap-1.5">
+                      <div className="inline-flex flex-nowrap items-center justify-center gap-1.5 whitespace-nowrap">
                         {productionLocked ? (
                           <span
                             className={`${DERIVED_PILL_CLS.IN_PRODUCTION} inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-medium`}
