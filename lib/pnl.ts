@@ -48,7 +48,7 @@ export function zonedDayBounds(fromDay: string, toDay: string, tz: string): { fr
   return { from: zonedDayStart(fromDay, tz), to: new Date(zonedDayStart(next.toISOString().slice(0, 10), tz).getTime() - 1) };
 }
 
-type Cogs = { cogs: number; units: number; fallbackUnits: number; unmatchedSkus: Set<string> };
+type Cogs = { cogs: number; units: number; preHistoryUnits: number; overflowUnits: number; unmatchedSkus: Set<string> };
 
 /**
  * Cost of goods, first-in-first-out from the channel's own queue of units.
@@ -61,13 +61,15 @@ type Cogs = { cogs: number; units: number; fallbackUnits: number; unmatchedSkus:
  * `pending` (orders in the window not yet posted) joins the end of the same walk.
  *
  * Sales before a product's first recorded layer are pre-history (day-zero stock can't be eaten
- * by sales that predate it): they're priced at the oldest cost on record and counted in
- * `fallbackUnits`, as are sales beyond everything recorded — never silently zero.
+ * by sales that predate it): they're priced at the product's pre-consl average cost (set from
+ * the P&L; the starting cost, then the oldest layer, stand in until then) and counted in
+ * `preHistoryUnits`. Sales beyond everything recorded take the newest layer's cost and count in
+ * `overflowUnits` — never silently zero.
  */
 async function fifoCogs(from: Date, to: Date, scope: Set<string>, pending: { sku: string; units: number }[]): Promise<Cogs> {
   const [{ shipped }, products] = await Promise.all([
     computeFinishedGoods(),
-    prisma.product.findMany({ where: { sellerSku: { not: null } }, select: { id: true, sellerSku: true, openingUnitCost: true } }),
+    prisma.product.findMany({ where: { sellerSku: { not: null } }, select: { id: true, sellerSku: true, openingUnitCost: true, preConslUnitCost: true } }),
   ]);
   const productBySku = new Map(products.map((p) => [p.sellerSku as string, p]));
   type Layer = { units: number; unitCost: number; date: number };
@@ -81,21 +83,21 @@ async function fifoCogs(from: Date, to: Date, scope: Set<string>, pending: { sku
   for (const list of queue.values()) list.sort((a, b) => a.date - b.date);
 
   const cursor = new Map<string, { idx: number; left: number }>();
-  const out: Cogs = { cogs: 0, units: 0, fallbackUnits: 0, unmatchedSkus: new Set() };
+  const out: Cogs = { cogs: 0, units: 0, preHistoryUnits: 0, overflowUnits: 0, unmatchedSkus: new Set() };
   const consume = (sku: string, qty: number, at: number | null, inWindow: boolean) => {
     const product = productBySku.get(sku);
     if (!product) return;
     const layers = queue.get(product.id) ?? [];
-    const fallback = layers[0]?.unitCost ?? product.openingUnitCost ?? null;
+    const preConsl = product.preConslUnitCost ?? product.openingUnitCost ?? layers[0]?.unitCost ?? null;
     if (inWindow) out.units += qty;
     // Pre-history: nothing recorded had entered the channel yet, so nothing is consumed.
     const preHistory = at != null && layers.length > 0 && at < layers[0].date;
     if (layers.length === 0 || preHistory) {
       if (!inWindow) return;
-      if (fallback == null) out.unmatchedSkus.add(sku);
+      if (preConsl == null) out.unmatchedSkus.add(sku);
       else {
-        out.cogs -= qty * fallback;
-        out.fallbackUnits += qty;
+        out.cogs -= qty * preConsl;
+        out.preHistoryUnits += qty;
       }
       return;
     }
@@ -112,10 +114,14 @@ async function fifoCogs(from: Date, to: Date, scope: Set<string>, pending: { sku
       }
     }
     if (want > 1e-9 && inWindow) {
-      // Sold more than was ever recorded entering the channel — carry the rest at the oldest cost.
-      out.cogs -= want * (fallback ?? 0);
-      if (fallback == null) out.unmatchedSkus.add(sku);
-      else out.fallbackUnits += want;
+      // Sold more than was ever recorded entering the channel — most likely the newest shipment
+      // wasn't recorded, so the rest carries the newest cost on record.
+      const newest = layers[layers.length - 1]?.unitCost ?? preConsl;
+      if (newest == null) out.unmatchedSkus.add(sku);
+      else {
+        out.cogs -= want * newest;
+        out.overflowUnits += want;
+      }
     }
     cursor.set(product.id, c);
   };
@@ -326,7 +332,8 @@ export async function getPnl(from: Date, to: Date): Promise<Pnl> {
     roi: cogs !== 0 ? netProfit / Math.abs(cogs) : null,
     pendingSales: bridge.pendingSales,
     unmatchedSkus: [...unmatched],
-    fallbackUnits: fifo.fallbackUnits,
+    preHistoryUnits: fifo.preHistoryUnits,
+    overflowUnits: fifo.overflowUnits,
     ignored,
     backfillInProgress,
     hasData: groups.length > 0,

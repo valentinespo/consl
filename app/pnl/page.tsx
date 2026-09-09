@@ -2,8 +2,9 @@ import { PageHeader } from "@/components/ui";
 import { requireView } from "@/lib/membership";
 import { getPnl, oldestFinanceDate, zonedDayBounds } from "@/lib/pnl";
 import { getOrgSettings } from "@/lib/settings";
+import { prisma } from "@/lib/prisma";
 import { todayIn } from "@/lib/channel-tz";
-import { PnlClient } from "@/components/PnlClient";
+import { PnlClient, PreConslCostButton } from "@/components/PnlClient";
 import { rangeBounds, RANGES, type RangeKey } from "@/lib/chart";
 
 export const dynamic = "force-dynamic";
@@ -33,10 +34,17 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
   const b = rangeBounds(rangeKey, newest, str(sp.from), str(sp.to));
   const bounds = zonedDayBounds(rangeKey === "all" ? oldest : (b.from ?? oldest), rangeKey === "all" ? newest : (b.to ?? newest), tz);
   const pnl = await getPnl(bounds.from, bounds.to);
+  const products = await prisma.product.findMany({
+    where: { sellerSku: { not: null } },
+    select: { id: true, code: true, name: true, imageUrl: true, preConslUnitCost: true, openingUnitCost: true },
+    orderBy: { code: "asc" },
+  });
 
   return (
     <>
-      <PageHeader title="P&L" subtitle="Every dollar Amazon moved, period by period — and what was left." />
+      <PageHeader title="P&L" subtitle="Every dollar Amazon moved, period by period — and what was left.">
+        <PreConslCostButton products={products} />
+      </PageHeader>
       <PnlClient
         pnl={pnl}
         filter={{ range: { key: rangeKey, from: b.from ?? oldest, to: b.to ?? newest } }}

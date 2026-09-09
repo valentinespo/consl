@@ -3,12 +3,15 @@
 import Image from "next/image";
 import { useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { ChevronDown, PnlFilled } from "@/components/icons";
+import { ChevronDown, PnlFilled, X } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
 import { GROUP_LABEL, type Pnl, type PnlGroupBlock } from "@/lib/pnl-shared";
 import { ROOT_LOGO } from "@/lib/channel-logos";
 import { EmptyState } from "@/components/EmptyState";
+import { SkuAvatar } from "@/components/ui";
+import { useCan } from "@/components/AccessProvider";
+import { savePreConslCosts } from "@/app/pnl/actions";
 
 /** "FBAPerUnitFulfillmentFee" → "FBA per unit fulfillment fee"; refund prefixes fold away. */
 function humanize(raw: string): string {
@@ -157,10 +160,15 @@ export function PnlClient({
         </div>
       )}
 
-      {pnl.fallbackUnits > 0 && (
+      {pnl.preHistoryUnits > 0 && (
         <p className="max-w-3xl text-[12px] text-muted">
-          {pnl.fallbackUnits.toLocaleString()} of the units sold predate any shipment on record (or exceed what was recorded as shipped), so they
-          carry the oldest cost on record instead of a first-in-first-out cost.
+          {pnl.preHistoryUnits.toLocaleString()} of the units sold predate the first shipment on record for their product, so they carry the
+          pre-consl average cost (set it with the button top right; until then the starting cost stands in).
+        </p>
+      )}
+      {pnl.overflowUnits > 0 && (
+        <p className="max-w-3xl text-[12px] text-muted">
+          {pnl.overflowUnits.toLocaleString()} units were sold beyond what was recorded as shipped, so they carry the newest cost on record.
         </p>
       )}
       {pnl.unmatchedSkus.length > 0 && (
@@ -179,5 +187,129 @@ export function PnlClient({
         </p>
       )}
     </div>
+  );
+}
+
+
+/* ---------------------------- Pre-consl average cost ----------------------------
+ * The cost of a unit sold before consl kept the books — what prices sales that predate a
+ * product's first recorded shipment. One number per product, entered once. */
+type CostProduct = { id: string; code: string; name: string; imageUrl: string | null; preConslUnitCost: number | null; openingUnitCost: number | null };
+
+export function PreConslCostButton({ products }: { products: CostProduct[] }) {
+  const canEdit = useCan("catalog", "edit");
+  const router = useRouter();
+  const { money } = useMoney();
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!canEdit || products.length === 0) return null;
+
+  const value = (p: CostProduct) => draft[p.id] ?? (p.preConslUnitCost != null ? String(p.preConslUnitCost) : "");
+  const dirty = products.some((p) => draft[p.id] !== undefined && draft[p.id] !== (p.preConslUnitCost != null ? String(p.preConslUnitCost) : ""));
+  const missing = products.filter((p) => p.preConslUnitCost == null).length;
+
+  function close() {
+    setOpen(false);
+    setDraft({});
+    setError(null);
+  }
+  async function save() {
+    setPending(true);
+    setError(null);
+    try {
+      const entries = products
+        .filter((p) => draft[p.id] !== undefined)
+        .map((p) => ({ productId: p.id, cost: draft[p.id].trim() === "" ? null : Number(draft[p.id]) }));
+      if (entries.some((e) => e.cost != null && !Number.isFinite(e.cost))) {
+        setError("Enter a number for every cost you fill in.");
+        return;
+      }
+      const r = await savePreConslCosts(entries);
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      close();
+      router.refresh();
+    } catch {
+      setError("Couldn't reach the server — try again.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-[12.5px] font-medium text-ink-soft hover:bg-surface-2"
+        title="The cost of a unit sold before consl kept your books"
+      >
+        Pre-consl Avg COG
+        {missing > 0 && <span className="pill-amber inline-flex items-center rounded-full border px-1.5 py-[1px] text-[10.5px] font-medium">{missing} unset</span>}
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={close}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="org-pop max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-1 flex items-center justify-between">
+              <h3 className="text-[15px] font-semibold text-ink">Pre-consl average cost of goods</h3>
+              <button type="button" onClick={close} className="text-muted hover:text-ink" aria-label="Close">
+                <X size={18} />
+              </button>
+            </div>
+            <p className="mb-4 text-[12.5px] leading-relaxed text-muted">
+              What one unit cost you before consl kept the books. Sales that predate a product&apos;s first recorded shipment are
+              priced at this; everything after is first-in-first-out from real shipments. Leave blank to use the starting cost from
+              onboarding.
+            </p>
+            <div className="divide-y divide-line">
+              {products.map((p) => (
+                <div key={p.id} className="flex items-center gap-3 py-2">
+                  <SkuAvatar code={p.code} size={28} imageUrl={p.imageUrl} />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] font-medium text-ink">{p.code}</div>
+                    <div className="truncate text-[11.5px] text-muted">{p.name}</div>
+                  </div>
+                  <div className="relative">
+                    <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[12.5px] text-muted">$</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={value(p)}
+                      onChange={(e) => setDraft((d) => ({ ...d, [p.id]: e.target.value }))}
+                      placeholder={p.openingUnitCost != null ? money(p.openingUnitCost, 2).replace(/^[^0-9]*/, "") : "0.00"}
+                      className="h-9 w-28 rounded-lg border border-border bg-surface pl-6 pr-2.5 text-right text-[13px] tabular text-ink outline-none focus:border-accent-strong"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+            {error && <div className="mt-3 text-[12.5px] text-negative">{error}</div>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={close} className="rounded-lg border border-border px-3.5 py-2 text-[13px] text-ink-soft hover:bg-surface-2">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={save}
+                disabled={pending || !dirty}
+                className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-bg hover:opacity-90 disabled:opacity-50"
+              >
+                {pending ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
