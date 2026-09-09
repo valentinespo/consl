@@ -1829,6 +1829,7 @@ function WizardLotPanel({
             hideSaveBar
             onDirtyState={onDirtyState}
             statusSlotId={slotId}
+            productionLocked
           />
           <div className="mt-8">
             <h3 className="mb-1 text-[14px] font-semibold text-ink">Production costs</h3>

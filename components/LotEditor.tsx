@@ -84,6 +84,7 @@ export function LotEditor({
   hideSaveBar = false,
   onDirtyState,
   statusSlotId = "lot-status-slot",
+  productionLocked = false,
 }: {
   lotId: string;
   initial: {
@@ -104,6 +105,8 @@ export function LotEditor({
   onDirtyState?: (s: { save: () => Promise<string | null>; discard: () => void } | null) => void;
   /** Where the derived status pills portal to (a page header slot; unique per editor on a page). */
   statusSlotId?: string;
+  /** Onboarding: every run set up here is still cooking — no SKU can be marked finished yet. */
+  productionLocked?: boolean;
 }) {
   const { money, perUnit, qty } = useMoney();
   const router = useRouter();
@@ -410,23 +413,32 @@ export function LotEditor({
                     {/* Per-SKU lifecycle — production + payment, staged like everything else. */}
                     <td className="px-3 py-3 text-center">
                       <div className="inline-flex flex-wrap items-center justify-center gap-1.5">
-                        <StatusDropdown
-                          value={l.status}
-                          edited={seedLine ? l.status !== seedLine.status : l.status !== "IN_PRODUCTION"}
-                          onChange={(v) => {
-                            const next = v as "IN_PRODUCTION" | "FINISHED";
-                            // Flipping to Finished proposes today; the field stays editable and is
-                            // this SKU's source of truth — flipping back erases it on save.
-                            patchLine(l.key, {
-                              status: next,
-                              ...(next === "FINISHED" && !l.finishedAtISO ? { finishedAtISO: new Date().toLocaleDateString("en-CA") } : {}),
-                            });
-                          }}
-                          options={[
-                            { value: "IN_PRODUCTION", label: "In production" },
-                            { value: "FINISHED", label: "Finished" },
-                          ]}
-                        />
+                        {productionLocked ? (
+                          <span
+                            className={`${DERIVED_PILL_CLS.IN_PRODUCTION} inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-medium`}
+                            title="Runs set up during onboarding are in production — finish them from Production Lots once you're in"
+                          >
+                            In production
+                          </span>
+                        ) : (
+                          <StatusDropdown
+                            value={l.status}
+                            edited={seedLine ? l.status !== seedLine.status : l.status !== "IN_PRODUCTION"}
+                            onChange={(v) => {
+                              const next = v as "IN_PRODUCTION" | "FINISHED";
+                              // Flipping to Finished proposes today; the field stays editable and is
+                              // this SKU's source of truth — flipping back erases it on save.
+                              patchLine(l.key, {
+                                status: next,
+                                ...(next === "FINISHED" && !l.finishedAtISO ? { finishedAtISO: new Date().toLocaleDateString("en-CA") } : {}),
+                              });
+                            }}
+                            options={[
+                              { value: "IN_PRODUCTION", label: "In production" },
+                              { value: "FINISHED", label: "Finished" },
+                            ]}
+                          />
+                        )}
                         <StatusDropdown
                           value={l.paymentStatus}
                           edited={seedLine ? l.paymentStatus !== seedLine.paymentStatus : false}
