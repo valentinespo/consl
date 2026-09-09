@@ -102,18 +102,6 @@ export function PnlClient({
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-2">
         <DateRangePicker value={filter.range} onChange={setRange} newest={dataBounds.newest} oldest={dataBounds.oldest} locale={locale} />
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 py-1 text-[12px] font-medium text-ink-soft">
-          <Image src={ROOT_LOGO.AMAZON} alt="" width={14} height={14} className="rounded-[3px]" />
-          Amazon
-        </span>
-        {pnl.pendingSales > 0 && (
-          <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
-            <span className="pill-amber inline-flex items-center rounded-full border px-2 py-[3px] text-[11px] font-medium">
-              {money(pnl.pendingSales)} pending
-            </span>
-            orders placed but not shipped yet — Amazon posts the exact money the moment they ship.
-          </span>
-        )}
         {pnl.backfillInProgress && (
           <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />
@@ -129,7 +117,7 @@ export function PnlClient({
           body="Amazon's financial events are importing in the background. Fresh fees post within the hour; history fills in window by window."
         />
       ) : (
-        <div className="max-w-3xl overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface">
+        <div className="overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface">
           <div className="divide-y divide-line">
             {salesBlock && <GroupRow block={salesBlock} money={money} />}
             <div className="flex items-center justify-between gap-3 px-4 py-2.5 text-[13px]">
@@ -160,6 +148,16 @@ export function PnlClient({
         </div>
       )}
 
+      {pnl.pendingSales > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-[12px] text-muted">
+          <span className="pill-amber inline-flex items-center gap-1.5 rounded-full border px-2.5 py-[3px] text-[11px] font-medium">
+            <Image src={ROOT_LOGO.AMAZON} alt="" width={14} height={14} className="rounded-[3px]" />
+            Amazon
+            <span>{money(pnl.pendingSales)} pending</span>
+          </span>
+          orders placed but not shipped yet — Amazon posts the exact money the moment they ship.
+        </div>
+      )}
       {pnl.preHistoryUnits > 0 && (
         <p className="max-w-3xl text-[12px] text-muted">
           {pnl.preHistoryUnits.toLocaleString()} of the units sold predate the first shipment on record for their product, so they carry the
