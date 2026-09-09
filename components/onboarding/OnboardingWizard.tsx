@@ -34,6 +34,7 @@ import { updateProduct } from "@/app/catalog/actions";
 import type { OnboardingJob } from "@/lib/onboarding-jobs";
 import Image from "next/image";
 import { ROOT_LOGO } from "@/lib/channel-logos";
+import { SEG } from "@/lib/segments";
 
 /** Mirror of lib/onboarding-jobs' rule (that module is server-only): a job that never reported
  *  back — the server restarted mid-way — stops counting as running after a generous window. */
@@ -383,7 +384,17 @@ export function OnboardingWizard(props: {
               {step === 5 && (
                 <StepRawStock ownFacilities={ownFacilities} materials={props.materials} products={props.products} rawOpenings={props.rawOpenings} />
               )}
-              {step === 6 && <StepFinish anyConnected={anyConnected} channelCounts={props.channelCounts} />}
+              {step === 6 && (
+                <StepFinish
+                  anyConnected={anyConnected}
+                  channelCounts={props.channelCounts}
+                  facilities={props.facilities}
+                  products={props.products}
+                  materials={props.materials}
+                  finishedOpenings={props.finishedOpenings}
+                  rawOpenings={props.rawOpenings}
+                />
+              )}
             </DirtyContext.Provider>
           </main>
 
@@ -1334,14 +1345,120 @@ function RawBalanceCard({
 
 /* ---------------------------------- Step 6: finish ---------------------------------- */
 
-function StepFinish({ anyConnected, channelCounts }: { anyConnected: boolean; channelCounts: ChannelCount[] }) {
+/** One slice of the starting inventory: a place (channel or facility) and what it holds. */
+type OpeningSlice = { key: string; label: string; sub: string; value: number; color: string };
+
+const CHANNEL_COLOR: Record<string, string> = { AMAZON: SEG.available, SHOPIFY: SEG.shopify, TIKTOK: SEG.tiktok };
+
+function StepFinish({
+  anyConnected,
+  channelCounts,
+  facilities,
+  products,
+  materials,
+  finishedOpenings,
+  rawOpenings,
+}: {
+  anyConnected: boolean;
+  channelCounts: ChannelCount[];
+  facilities: WizardFacility[];
+  products: WizardProduct[];
+  materials: WizardMaterial[];
+  finishedOpenings: Record<string, Record<string, number>>;
+  rawOpenings: Record<string, RawLine[]>;
+}) {
+  const { money } = useMoney();
   const totalChannelUnits = channelCounts.reduce((s, c) => s + c.skus.reduce((x, k) => x + k.units, 0), 0);
+
+  // What Finish records, place by place, at the costs entered — the same arithmetic the server
+  // runs, shown up front so nothing lands in the books unseen.
+  const costById = new Map(products.map((p) => [p.id, p.openingUnitCost ?? 0]));
+  const facilityName = new Map(facilities.map((f) => [f.id, f.name]));
+  const materialName = new Map(materials.map((m) => [m.id, m.name]));
+  const slices: OpeningSlice[] = [];
+  for (const c of channelCounts) {
+    const units = c.skus.reduce((t, k) => t + k.units, 0);
+    if (units === 0) continue;
+    slices.push({
+      key: `channel:${c.channel}`,
+      label: c.label,
+      sub: `${units.toLocaleString()} units · ${c.skus.length} product${c.skus.length === 1 ? "" : "s"}`,
+      value: c.skus.reduce((t, k) => t + (k.value ?? 0), 0),
+      color: CHANNEL_COLOR[c.channel] ?? SEG.locations,
+    });
+  }
+  for (const [facilityId, byProduct] of Object.entries(finishedOpenings)) {
+    const entries = Object.entries(byProduct).filter(([, q]) => q > 0);
+    const units = entries.reduce((t, [, q]) => t + q, 0);
+    if (units === 0) continue;
+    slices.push({
+      key: `finished:${facilityId}`,
+      label: facilityName.get(facilityId) ?? "Your location",
+      sub: `${units.toLocaleString()} finished units · ${entries.length} product${entries.length === 1 ? "" : "s"}`,
+      value: entries.reduce((t, [productId, q]) => t + q * (costById.get(productId) ?? 0), 0),
+      color: SEG.locations,
+    });
+  }
+  for (const [facilityId, lines] of Object.entries(rawOpenings)) {
+    const live = lines.filter((l) => l.quantity > 0);
+    if (live.length === 0) continue;
+    const names = [...new Set(live.map((l) => materialName.get(l.materialTypeId) ?? "material"))];
+    slices.push({
+      key: `raw:${facilityId}`,
+      label: `Raw materials at ${facilityName.get(facilityId) ?? "your location"}`,
+      sub: names.length <= 3 ? names.join(", ") : `${names.slice(0, 2).join(", ")} +${names.length - 2} more`,
+      value: live.reduce((t, l) => t + l.quantity * l.unitCost, 0),
+      color: SEG.raw,
+    });
+  }
+  const totalValue = slices.reduce((t, x) => t + x.value, 0);
+  const shown = [...slices].sort((a, b) => b.value - a.value);
+
   return (
     <div className="space-y-4">
       <StepHeader
         title="Almost done"
         body="One last thing to know, then consl opens with your starting balances in place."
       />
+      <div className={panelCls}>
+        <div className="text-[12px] font-medium uppercase tracking-wide text-muted">Starting inventory you&apos;re recording</div>
+        <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <span className="text-[30px] font-semibold tracking-tight text-ink">{money(totalValue, 0)}</span>
+          <span className="text-[12.5px] text-muted">
+            {shown.length === 0
+              ? "nothing counted yet — you can still finish and add stock later"
+              : `across ${shown.length} place${shown.length === 1 ? "" : "s"}, at the costs you entered`}
+          </span>
+        </div>
+        {shown.length > 0 && (
+          <>
+            <div className="mt-4 flex h-2.5 w-full overflow-hidden rounded-full bg-surface-2" aria-hidden>
+              {shown.map((x) => (
+                <span
+                  key={x.key}
+                  className="h-full"
+                  style={{ width: `${totalValue > 0 ? Math.max(1.5, (x.value / totalValue) * 100) : 100 / shown.length}%`, background: x.color }}
+                />
+              ))}
+            </div>
+            <div className="mt-3 divide-y divide-line/70">
+              {shown.map((x) => (
+                <div key={x.key} className="flex items-center gap-3 py-2 text-[13px]">
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: x.color }} aria-hidden />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium text-ink">{x.label}</div>
+                    <div className="truncate text-[11.5px] text-muted">{x.sub}</div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <div className="tabular font-semibold text-ink">{money(x.value, 0)}</div>
+                    <div className="tabular text-[11px] text-muted">{totalValue > 0 ? `${Math.round((x.value / totalValue) * 100)}%` : ""}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
       <div className={panelCls}>
         <h2 className="mb-2 text-[14px] font-semibold text-ink">Production already in progress?</h2>
         <p className="text-[13px] leading-relaxed text-ink-soft">
