@@ -10,6 +10,7 @@ import { recomputeAll } from "@/lib/recompute";
 import { syncAllChannelsStockCore } from "@/lib/sync";
 import { refreshChannelListingsCore, autoMapExact, mappedExternalId, PRODUCT_MATCH_SELECT, type ChannelKey } from "@/lib/channel-catalog";
 import { jobRunning, readOnboardingJob, startOnboardingJob } from "@/lib/onboarding-jobs";
+import { createLotCore } from "@/lib/lot-core";
 
 /**
  * The onboarding wizard's server side. The wizard is the ONLY thing a new company can see until
@@ -156,6 +157,34 @@ async function pullChannelData(providers: string[], report: (phase: string) => P
   if (!stock) problems.push("stock");
   else if (stock.failed.length > 0) problems.push(...stock.failed);
   return problems.length > 0 ? `Couldn't pull everything (${[...new Set(problems)].join(", ")}) — you can retry from the mapping step.` : null;
+}
+
+/**
+ * A production run already under way when the company joins — created the way the app creates
+ * lots (facility, SKUs, units, inherited recipes), always in production; its costs are attached
+ * as back-dated transactions from the same forms the lot page uses. Numbering is the operator's:
+ * defaults to the next free number, editable so their real lot numbers carry over.
+ */
+export async function createOnboardingLot(input: { lotNr: number; poNumber: string | null; poDateISO: string | null; facilityId: string; lines: { productId: string; units: number }[] }) {
+  const gate = await requirePermission("lots", "create");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  const org = await getCurrentOrg();
+  if (!org || org.onboardedAt) return { ok: false as const, error: "Onboarding is already finished." };
+  return createLotCore({ ...input, status: "IN_PRODUCTION" });
+}
+
+/** Wizard-only: remove a lot created a step ago. Its transactions stay (unassigned), as in the app. */
+export async function deleteOnboardingLot(lotId: string) {
+  const gate = await requirePermission("lots", "delete");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  const org = await getCurrentOrg();
+  if (!org || org.onboardedAt) return { ok: false as const, error: "Onboarding is already finished." };
+  const owned = await prisma.lot.findFirst({ where: { id: lotId }, select: { id: true } });
+  if (!owned) return { ok: false as const, error: "That lot no longer exists." };
+  await prisma.lot.delete({ where: { id: lotId } });
+  await recomputeAll();
+  revalidatePath("/", "layout");
+  return { ok: true as const };
 }
 
 /** The wizard polls this while a job runs. */

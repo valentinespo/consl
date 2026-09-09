@@ -70,9 +70,16 @@ export async function createLotCore(input: {
   facilityId: string;
   status: "IN_PRODUCTION" | "FINISHED";
   lines: { productId: string; units: number }[];
+  /** A number of the caller's choosing (onboarding continues the operator's own numbering);
+   *  omitted = the next free one. */
+  lotNr?: number;
 }) {
   const lines = input.lines.filter((l) => l.productId && l.units > 0);
   if (!input.facilityId || lines.length === 0) return { ok: false as const, error: "Pick a facility and at least one SKU with units" };
+  if (input.lotNr != null) {
+    if (!Number.isInteger(input.lotNr) || input.lotNr < 1) return { ok: false as const, error: "Lot number must be a whole number of 1 or more." };
+    if (await prisma.lot.findFirst({ where: { lotNr: input.lotNr }, select: { id: true } })) return { ok: false as const, error: `Lot #${input.lotNr} already exists.` };
+  }
 
   // Every id the browser sent must belong to the caller's org — a foreign facility or product id
   // otherwise lands on the new lot and leaks that org's data back through nested reads.
@@ -82,7 +89,7 @@ export async function createLotCore(input: {
   ]);
   if (bad) return bad;
 
-  const lotNr = await nextFreeLotNr();
+  const lotNr = input.lotNr ?? (await nextFreeLotNr());
 
   // Resolved BEFORE the lot exists — otherwise each just-created (still material-less) line would
   // itself be the SKU's "latest line" and every new lot would inherit an empty recipe.

@@ -14,6 +14,11 @@ import { ChannelMappingClient } from "@/components/ChannelMappingClient";
 import { SelectMenu } from "@/components/SelectMenu";
 import { NewProductButton, NewMaterialButton } from "@/components/CreateButtons";
 import { SkuAvatar, Card } from "@/components/ui";
+import { LotEditor, type EditorLine } from "@/components/LotEditor";
+import { TransactionInvoicesTable } from "@/components/TransactionInvoicesTable";
+import type { InvoiceRow, LotOption } from "@/components/TransactionInvoiceForm";
+import type { MaterialType } from "@/components/LotBom";
+import { DatePicker } from "@/components/DatePicker";
 import { Field, inputCls } from "@/components/FormKit";
 import { FACILITY_TYPES } from "@/lib/facility-types";
 import { Check, AlertTriangle, ChevronLeft, Plus, X, Package, Lock, Pencil } from "@/components/icons";
@@ -23,6 +28,8 @@ import {
   advanceOnboarding,
   backToStep,
   completeOnboarding,
+  createOnboardingLot,
+  deleteOnboardingLot,
   deleteOnboardingFacility,
   deleteOnboardingMaterial,
   getOnboardingJob,
@@ -72,6 +79,27 @@ export type WizardMapping = null | {
 };
 
 type WizardProduct = { id: string; code: string; name: string; imageUrl: string | null; openingUnitCost: number | null };
+/** A lot created in the wizard, prepared exactly as the lot page prepares its editor + costs. */
+export type WizardLot = {
+  id: string;
+  lotNr: number;
+  updatedAt: string;
+  initial: { poNumber: string | null; poDateISO: string | null; facilityId: string; notes: string | null };
+  initialLines: EditorLine[];
+  skuTxnCounts: Record<string, number>;
+  totalCog: number;
+  invoices: InvoiceRow[];
+};
+type LotEditing = {
+  lots: WizardLot[];
+  lotOptions: LotOption[];
+  suppliers: string[];
+  categories: string[];
+  skuImages: Record<string, string | null>;
+  materialTypes: MaterialType[];
+  nextLotNr: number;
+};
+type InProduction = { lots: number; units: number; value: number; rawConsumedByFacility: Record<string, number> };
 type WizardFacility = { id: string; code: string; name: string; type: string; channel: string | null; locked: boolean };
 type WizardMaterial = { id: string; code: string; name: string; unitLabel: string; skuSpecific: boolean };
 /** `value` = units × the product's starting cost; null while that cost is still missing. */
@@ -83,8 +111,8 @@ const STEPS = [
   "Sales channels",
   "Products & costs",
   "Facilities & stock",
-  "Raw materials",
-  "Material stock",
+  "Materials & stock",
+  "Production in progress",
   "Finish",
 ];
 
@@ -139,6 +167,10 @@ export function OnboardingWizard(props: {
   materials: WizardMaterial[];
   finishedOpenings: Record<string, Record<string, number>>;
   rawOpenings: Record<string, RawLine[]>;
+  /** Step 5: the lots created so far plus everything their editors and cost forms need. */
+  lotEditing: LotEditing;
+  /** What those lots have accumulated — the Finish widget's "In production" slice. */
+  inProduction: InProduction;
 }) {
   const router = useRouter();
   const step = props.step;
@@ -380,10 +412,10 @@ export function OnboardingWizard(props: {
                   finishedOpenings={props.finishedOpenings}
                 />
               )}
-              {step === 4 && <StepMaterials materials={props.materials} />}
-              {step === 5 && (
-                <StepRawStock ownFacilities={ownFacilities} materials={props.materials} products={props.products} rawOpenings={props.rawOpenings} />
+              {step === 4 && (
+                <StepMaterialsAndStock ownFacilities={ownFacilities} materials={props.materials} products={props.products} rawOpenings={props.rawOpenings} />
               )}
+              {step === 5 && <StepProduction ownFacilities={ownFacilities} products={props.products} editing={props.lotEditing} />}
               {step === 6 && (
                 <StepFinish
                   anyConnected={anyConnected}
@@ -393,6 +425,7 @@ export function OnboardingWizard(props: {
                   materials={props.materials}
                   finishedOpenings={props.finishedOpenings}
                   rawOpenings={props.rawOpenings}
+                  inProduction={props.inProduction}
                 />
               )}
             </DirtyContext.Provider>
@@ -1142,13 +1175,31 @@ function FinishedBalanceCard({
 
 /* ---------------------------------- Step 4: materials ---------------------------------- */
 
-function StepMaterials({ materials }: { materials: WizardMaterial[] }) {
+function StepMaterialsAndStock({
+  ownFacilities,
+  materials,
+  products,
+  rawOpenings,
+}: {
+  ownFacilities: WizardFacility[];
+  materials: WizardMaterial[];
+  products: WizardProduct[];
+  rawOpenings: Record<string, RawLine[]>;
+}) {
   return (
     <div className="space-y-4">
       <StepHeader
-        title="Your raw materials"
-        body="Create everything your finished products consume when they're made — ingredients, bags, pouches, boxes, labels. consl tracks their stock and cost, and every production run consumes them automatically. If you don't make anything (you only buy finished goods), just continue."
+        title="Your raw materials and their stock"
+        body="Create everything your finished products consume when they're made — ingredients, bags, pouches, boxes, labels — then enter how much of each sits at every facility today and what you paid per unit. They become your oldest stock, used up first by production. If you don't make anything (you only buy finished goods), just continue."
       />
+      <div className="flex items-start gap-3 rounded-[var(--radius-card)] border tint-amber px-4 py-3">
+        <AlertTriangle size={18} className="mt-0.5 shrink-0 text-warn" />
+        <div className="text-[13px] leading-relaxed text-ink">
+          <span className="font-semibold">Count the material that is already inside a production run, too.</span> On the next step you&apos;ll
+          create the lots that are in production right now, and each one consumes its materials from what you enter here. Leave that
+          material out and those lots will come up short.
+        </div>
+      </div>
       <div className={`${panelCls}`}>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-[14px] font-semibold text-ink">Raw materials</h2>
@@ -1180,37 +1231,18 @@ function StepMaterials({ materials }: { materials: WizardMaterial[] }) {
           </div>
         )}
       </div>
-    </div>
-  );
-}
 
-/* ------------------------------- Step 5: raw starting stock ------------------------------- */
-
-function StepRawStock({
-  ownFacilities,
-  materials,
-  products,
-  rawOpenings,
-}: {
-  ownFacilities: WizardFacility[];
-  materials: WizardMaterial[];
-  products: WizardProduct[];
-  rawOpenings: Record<string, RawLine[]>;
-}) {
-  return (
-    <div className="space-y-6">
-      <StepHeader
-        title="Raw material starting balances"
-        body="For each facility, enter the raw materials sitting there today and what you paid per unit — they become your oldest stock, used up first by production. Include EVERYTHING you physically have, even material earmarked for runs already in progress: when those runs are rebuilt inside consl, they'll consume it automatically."
-      />
-      {materials.length === 0 ? (
-        <div className={`${panelCls} text-[13px] text-muted`}>No raw materials created — continue.</div>
-      ) : ownFacilities.length === 0 ? (
-        <div className={`${panelCls} text-[13px] text-muted`}>No facilities to hold raw materials — go back to add one, or continue.</div>
-      ) : (
-        ownFacilities.map((f) => (
-          <RawBalanceCard key={f.id} facility={f} materials={materials} products={products} initial={rawOpenings[f.id] ?? []} />
-        ))
+      {materials.length > 0 && (
+        <>
+          <h2 className="pt-2 text-[15px] font-semibold text-ink">Starting balances</h2>
+          {ownFacilities.length === 0 ? (
+            <div className={`${panelCls} text-[13px] text-muted`}>No facilities to hold raw materials — go back to add one, or continue.</div>
+          ) : (
+            ownFacilities.map((f) => (
+              <RawBalanceCard key={f.id} facility={f} materials={materials} products={products} initial={rawOpenings[f.id] ?? []} />
+            ))
+          )}
+        </>
       )}
     </div>
   );
@@ -1358,6 +1390,7 @@ function StepFinish({
   materials,
   finishedOpenings,
   rawOpenings,
+  inProduction,
 }: {
   anyConnected: boolean;
   channelCounts: ChannelCount[];
@@ -1366,6 +1399,7 @@ function StepFinish({
   materials: WizardMaterial[];
   finishedOpenings: Record<string, Record<string, number>>;
   rawOpenings: Record<string, RawLine[]>;
+  inProduction: InProduction;
 }) {
   const { money } = useMoney();
   const totalChannelUnits = channelCounts.reduce((s, c) => s + c.skus.reduce((x, k) => x + k.units, 0), 0);
@@ -1403,12 +1437,26 @@ function StepFinish({
     const live = lines.filter((l) => l.quantity > 0);
     if (live.length === 0) continue;
     const names = [...new Set(live.map((l) => materialName.get(l.materialTypeId) ?? "material"))];
+    const counted = live.reduce((t, l) => t + l.quantity * l.unitCost, 0);
+    // Whatever the lots in production already drew is theirs now — it shows under "In production".
+    const drawn = Math.min(counted, inProduction.rawConsumedByFacility[facilityId] ?? 0);
     slices.push({
       key: `raw:${facilityId}`,
       label: `Raw materials at ${facilityName.get(facilityId) ?? "your location"}`,
-      sub: names.length <= 3 ? names.join(", ") : `${names.slice(0, 2).join(", ")} +${names.length - 2} more`,
-      value: live.reduce((t, l) => t + l.quantity * l.unitCost, 0),
+      sub:
+        (names.length <= 3 ? names.join(", ") : `${names.slice(0, 2).join(", ")} +${names.length - 2} more`) +
+        (drawn > 0 ? ` · after ${money(drawn, 0)} drawn by production` : ""),
+      value: counted - drawn,
       color: SEG.raw,
+    });
+  }
+  if (inProduction.lots > 0) {
+    slices.push({
+      key: "production",
+      label: "In production",
+      sub: `${inProduction.lots} lot${inProduction.lots === 1 ? "" : "s"} · ${inProduction.units.toLocaleString()} units on the way · materials and costs so far`,
+      value: inProduction.value,
+      color: SEG.production,
     });
   }
   const totalValue = slices.reduce((t, x) => t + x.value, 0);
@@ -1460,14 +1508,13 @@ function StepFinish({
         )}
       </div>
       <div className={panelCls}>
-        <h2 className="mb-2 text-[14px] font-semibold text-ink">Production already in progress?</h2>
+        <h2 className="mb-2 text-[14px] font-semibold text-ink">
+          {inProduction.lots > 0 ? "Runs in production" : "Nothing in production?"}
+        </h2>
         <p className="text-[13px] leading-relaxed text-ink-soft">
-          If a co-packer is mid-run on a batch right now, rebuild it inside consl once you&apos;re in: open a production lot for it,
-          create purchases for any materials it uses that you did NOT count in the previous step, and attach the payments you&apos;ve
-          already made to it. The materials you DID count are consumed automatically when the lot is created — no double counting.
-        </p>
-        <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
-          This is the one fiddly part of getting started — your onboarding specialist will happily do it with you.
+          {inProduction.lots > 0
+            ? `The ${inProduction.lots} lot${inProduction.lots === 1 ? "" : "s"} you created open as live production runs: their materials are already consumed from your starting stock, the costs you attached count towards their COG, and you finish them from Production Lots when the units are ready.`
+            : "If a co-packer is mid-run on a batch right now, go back one step and add it — it will consume its materials from the stock you counted and carry the payments you attach. You can also add it later from Production Lots."}
         </p>
       </div>
       {anyConnected && (
@@ -1480,6 +1527,251 @@ function StepFinish({
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ------------------------------ Step 5: production in progress ------------------------------
+ * Lots are created the way the app creates them and then edited with the app's own lot editor
+ * (SKUs, units, a recipe per SKU) and costed with its own transaction forms — nothing here is a
+ * wizard-only imitation, so what's set up is exactly what Production Lots shows afterwards. */
+
+function StepProduction({ ownFacilities, products, editing }: { ownFacilities: WizardFacility[]; products: WizardProduct[]; editing: LotEditing }) {
+  const [adding, setAdding] = useState(editing.lots.length === 0);
+  return (
+    <div className="space-y-4">
+      <StepHeader
+        title="Production in progress"
+        body="Anything a co-packer is making for you right now: create it as a lot with the products and units on order. Each lot consumes its materials from the stock you just counted, and the payments you attach to it count towards its cost — exactly as in the app from here on. Nothing in production? Just continue."
+      />
+      {editing.lots.map((lot) => (
+        <WizardLotPanel key={lot.id} lot={lot} ownFacilities={ownFacilities} products={products} editing={editing} />
+      ))}
+      {adding ? (
+        <NewLotPanel
+          ownFacilities={ownFacilities}
+          products={products}
+          nextLotNr={editing.nextLotNr}
+          onDone={() => setAdding(false)}
+          cancellable={editing.lots.length > 0}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-border px-3.5 py-2 text-[13px] font-medium text-ink-soft hover:bg-surface-2"
+        >
+          <Plus size={15} /> Add another lot
+        </button>
+      )}
+    </div>
+  );
+}
+
+function NewLotPanel({
+  ownFacilities,
+  products,
+  nextLotNr,
+  onDone,
+  cancellable,
+}: {
+  ownFacilities: WizardFacility[];
+  products: WizardProduct[];
+  nextLotNr: number;
+  onDone: () => void;
+  cancellable: boolean;
+}) {
+  const router = useRouter();
+  const [lotNr, setLotNr] = useState(String(nextLotNr));
+  const [facilityId, setFacilityId] = useState(ownFacilities[0]?.id ?? "");
+  const [poNumber, setPoNumber] = useState("");
+  const [poDate, setPoDate] = useState("");
+  const [lines, setLines] = useState<{ key: number; productId: string; units: string }[]>([{ key: 1, productId: "", units: "" }]);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const dirty = lines.some((l) => l.productId || l.units.trim() !== "") || poNumber.trim() !== "" || poDate !== "";
+  useDirtySection("new-lot", dirty, {
+    label: "the new lot",
+    save: async () => save(),
+    discard: () => {
+      setLines([{ key: 1, productId: "", units: "" }]);
+      setPoNumber("");
+      setPoDate("");
+      setError(null);
+    },
+  });
+  const productOptions = products.map((p) => ({
+    value: p.id,
+    label: p.code,
+    hint: p.name,
+    icon: <SkuAvatar code={p.code} size={20} imageUrl={p.imageUrl} />,
+  }));
+
+  async function save(): Promise<string | null> {
+    setError(null);
+    if (!facilityId) return fail("Pick the facility making this lot.");
+    const clean = lines.filter((l) => l.productId).map((l) => ({ productId: l.productId, units: Number(l.units) || 0 }));
+    if (clean.length === 0 || clean.some((l) => l.units <= 0)) return fail("Add at least one product with the units being made.");
+    setPending(true);
+    try {
+      const r = await createOnboardingLot({ lotNr: Number(lotNr) || 0, poNumber: poNumber.trim() || null, poDateISO: poDate || null, facilityId, lines: clean });
+      if (!r.ok) return fail(r.error ?? "Couldn't create the lot.");
+      onDone();
+      router.refresh();
+      return null;
+    } catch {
+      return fail("Couldn't reach the server — try again.");
+    } finally {
+      setPending(false);
+    }
+  }
+  function fail(msg: string): string {
+    setError(msg);
+    return msg;
+  }
+
+  return (
+    <div className="rounded-[var(--radius-card)] border border-accent-strong bg-surface p-5">
+      <div className="mb-4 text-[13px] font-semibold text-ink-soft">New lot in production</div>
+      <div className="grid gap-3 sm:grid-cols-4">
+        <Field label="Lot number">
+          <input type="number" min={1} value={lotNr} onChange={(e) => setLotNr(e.target.value)} className={inputCls} />
+        </Field>
+        <Field label="Made at">
+          <SelectMenu
+            value={facilityId}
+            onChange={setFacilityId}
+            options={ownFacilities.map((f) => ({ value: f.id, label: f.code, hint: f.name }))}
+            placeholder="Pick a facility"
+          />
+        </Field>
+        <Field label="PO number (optional)">
+          <input value={poNumber} onChange={(e) => setPoNumber(e.target.value)} className={inputCls} placeholder={`#${lotNr || nextLotNr}`} />
+        </Field>
+        <Field label="Started on">
+          <DatePicker value={poDate} onChange={setPoDate} />
+        </Field>
+      </div>
+      <div className="mt-4">
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className="text-[12px] font-medium text-muted">Products being made</span>
+          <button
+            type="button"
+            onClick={() => setLines((p) => [...p, { key: Date.now(), productId: "", units: "" }])}
+            className="text-[12px] font-medium text-accent hover:underline"
+          >
+            + Add product
+          </button>
+        </div>
+        <div className="space-y-2">
+          {lines.map((ln) => (
+            <div key={ln.key} className="flex items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <SelectMenu
+                  value={ln.productId}
+                  onChange={(v) => setLines((p) => p.map((x) => (x.key === ln.key ? { ...x, productId: v } : x)))}
+                  options={productOptions.filter((o) => o.value === ln.productId || !lines.some((x) => x.productId === o.value))}
+                  placeholder="Which product?"
+                />
+              </div>
+              <input
+                type="number"
+                min={1}
+                value={ln.units}
+                onChange={(e) => setLines((p) => p.map((x) => (x.key === ln.key ? { ...x, units: e.target.value } : x)))}
+                placeholder="Units"
+                className="h-9 w-28 rounded-lg border border-border bg-surface px-2.5 text-right text-[13px] tabular text-ink outline-none focus:border-accent-strong"
+              />
+              <button
+                type="button"
+                onClick={() => setLines((p) => (p.length === 1 ? p : p.filter((x) => x.key !== ln.key)))}
+                disabled={lines.length === 1}
+                className="text-muted hover:text-negative disabled:opacity-30"
+                title="Remove"
+              >
+                <X size={15} />
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+      {error && <div className="mt-3 text-[12.5px] text-negative">{error}</div>}
+      <div className="mt-4 flex justify-end gap-2">
+        {cancellable && (
+          <button type="button" onClick={onDone} className="rounded-lg border border-border px-3.5 py-2 text-[13px] text-ink-soft hover:bg-surface-2">
+            Cancel
+          </button>
+        )}
+        <button type="button" onClick={() => void save()} disabled={pending} className="rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-bg hover:opacity-90 disabled:opacity-50">
+          {pending ? "Creating…" : "Create lot"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function WizardLotPanel({ lot, ownFacilities, products, editing }: { lot: WizardLot; ownFacilities: WizardFacility[]; products: WizardProduct[]; editing: LotEditing }) {
+  const router = useRouter();
+  const [bridge, setBridge] = useState<{ save: () => Promise<string | null>; discard: () => void } | null>(null);
+  const onDirtyState = useCallback((s: { save: () => Promise<string | null>; discard: () => void } | null) => setBridge(s), []);
+  useDirtySection(`lot-${lot.id}`, !!bridge, {
+    label: `lot #${lot.lotNr}`,
+    save: () => (bridge ? bridge.save() : Promise.resolve(null)),
+    discard: () => bridge?.discard(),
+  });
+  const facility = ownFacilities.find((f) => f.id === lot.initial.facilityId);
+  const units = lot.initialLines.reduce((t, l) => t + l.units, 0);
+  const slotId = `lot-status-slot-${lot.id}`;
+  return (
+    <div className={panelCls}>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="min-w-0">
+          <div className="text-[15px] font-semibold text-ink">Lot #{lot.lotNr}</div>
+          <div className="text-[12px] text-muted">
+            {facility ? `${facility.code} · ${facility.name}` : "Facility"} · {lot.initialLines.length} SKU{lot.initialLines.length === 1 ? "" : "s"} · {units.toLocaleString()} units
+          </div>
+        </div>
+        <span id={slotId} className="flex items-center gap-2" />
+        <div className="ml-auto">
+          <DeleteX
+            label={`lot #${lot.lotNr}`}
+            onDelete={async () => {
+              const r = await deleteOnboardingLot(lot.id);
+              if (r.ok) router.refresh();
+              return r;
+            }}
+          />
+        </div>
+      </div>
+      <LotEditor
+        key={lot.updatedAt}
+        lotId={lot.id}
+        initial={lot.initial}
+        initialLines={lot.initialLines}
+        facilities={ownFacilities.map((f) => ({ id: f.id, code: f.code, name: f.name }))}
+        products={products.map((p) => ({ id: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl }))}
+        materialTypes={editing.materialTypes}
+        skuTxnCounts={lot.skuTxnCounts}
+        totalCog={lot.totalCog}
+        hideSaveBar
+        onDirtyState={onDirtyState}
+        statusSlotId={slotId}
+      />
+      <div className="mt-8">
+        <h3 className="mb-1 text-[14px] font-semibold text-ink">Production costs</h3>
+        <p className="mb-3 text-[12.5px] text-muted">
+          Payments already made for this run — add them as transactions, dated when they happened, and assign each line to the products it covers.
+        </p>
+        <TransactionInvoicesTable
+          invoices={lot.invoices}
+          lots={editing.lotOptions}
+          suppliers={editing.suppliers}
+          categories={editing.categories}
+          skuImages={editing.skuImages}
+          showLotColumn={false}
+          defaultLotId={lot.id}
+        />
+      </div>
     </div>
   );
 }

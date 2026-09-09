@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Plus, X, AlertTriangle, ChevronDown, Pencil } from "@/components/icons";
@@ -81,6 +81,9 @@ export function LotEditor({
   materialTypes,
   skuTxnCounts,
   totalCog,
+  hideSaveBar = false,
+  onDirtyState,
+  statusSlotId = "lot-status-slot",
 }: {
   lotId: string;
   initial: {
@@ -95,6 +98,12 @@ export function LotEditor({
   materialTypes: MaterialType[];
   skuTxnCounts: Record<string, number>;
   totalCog: number; // saved COG snapshot for the hero card (refreshes after a save)
+  /** A host with its own save bar (the onboarding wizard) hides this one and takes the
+   *  save/discard closures instead — the same bridge CompanyEditor offers. */
+  hideSaveBar?: boolean;
+  onDirtyState?: (s: { save: () => Promise<string | null>; discard: () => void } | null) => void;
+  /** Where the derived status pills portal to (a page header slot; unique per editor on a page). */
+  statusSlotId?: string;
 }) {
   const { money, perUnit, qty } = useMoney();
   const router = useRouter();
@@ -133,7 +142,7 @@ export function LotEditor({
   // The page header reserves a slot for the status pills; the editor portals its dropdowns there
   // so status/payment stay part of THIS form's staged state and single save bar.
   const [pillSlot, setPillSlot] = useState<Element | null>(null);
-  useEffect(() => setPillSlot(document.getElementById("lot-status-slot")), []);
+  useEffect(() => setPillSlot(document.getElementById(statusSlotId)), [statusSlotId]);
 
   const facility = facilities.find((f) => f.id === facilityId);
   const availableProducts = products.filter((p) => !lines.some((l) => l.productId === p.id));
@@ -216,18 +225,20 @@ export function LotEditor({
     setConfirmRemove(null);
     setError(null);
   }
-  async function save() {
+  async function save(): Promise<string | null> {
     // Finished SKUs must carry a date, and never one before the lot's PO date — checked here for
     // an instant message; the server enforces the same rule.
     for (const l of lines) {
       if (l.status !== "FINISHED") continue;
       if (!l.finishedAtISO) {
-        setError(`${l.code} is finished — pick its finished date.`);
-        return;
+        const msg = `${l.code} is finished — pick its finished date.`;
+        setError(msg);
+        return msg;
       }
       if (poDateISO && l.finishedAtISO < poDateISO) {
-        setError(`${l.code}'s finished date is before the lot's PO date — it can't finish before the lot started.`);
-        return;
+        const msg = `${l.code}'s finished date is before the lot's PO date — it can't finish before the lot started.`;
+        setError(msg);
+        return msg;
       }
     }
     setError(null);
@@ -252,20 +263,35 @@ export function LotEditor({
         })),
       });
       if (!res.ok) {
-        setError(res.error ?? "Could not save.");
-        return;
+        const msg = res.error ?? "Could not save.";
+        setError(msg);
+        return msg;
       }
       router.refresh(); // lot.updatedAt changes → the page remounts this editor with fresh data
+      return null;
     } catch {
       // The lot commits before the cost recompute + revalidate run, so a hiccup there (or a slow
       // response) can reject here with the change already saved. Refresh to show reality and let the
       // button recover, instead of hanging on "Saving" until a manual reload.
       router.refresh();
       setError("Saved — the page was just slow to refresh. If your change isn't shown, reload.");
+      return null;
     } finally {
       setPending(false); // never rely on the remount alone to clear this
     }
   }
+
+  // Host bridge: hand the current save/discard closures over while dirty, withdraw them when
+  // clean or unmounted. Refs keep the closures fresh without re-registering on every keystroke.
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  const resetRef = useRef(reset);
+  resetRef.current = reset;
+  useEffect(() => {
+    if (!onDirtyState) return;
+    onDirtyState(dirty ? { save: () => saveRef.current(), discard: () => resetRef.current() } : null);
+  }, [dirty, onDirtyState]);
+  useEffect(() => () => onDirtyState?.(null), [onDirtyState]);
 
   const bomLines = lines.map((l) => ({ key: l.key, sku: l.code, productName: l.name, imageUrl: l.imageUrl, units: Number(l.units) || 0 }));
 
@@ -486,8 +512,8 @@ export function LotEditor({
         <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={5} placeholder="Internal notes…" className="w-full rounded-[var(--radius-card)] border border-border bg-surface px-3 py-2.5 text-[13px] text-ink outline-none focus:border-accent-strong" />
       </div>
 
-      {/* Floating save bar */}
-      {dirty && (
+      {/* Floating save bar (a host with its own bar hides it) */}
+      {dirty && !hideSaveBar && (
         <div className="fixed inset-x-0 top-4 z-50 flex justify-center px-4">
           <div className="flex items-center gap-3 rounded-full border border-border bg-surface/95 px-4 py-2 shadow-lg backdrop-blur">
             <span className="text-[12.5px] font-medium text-ink-soft">

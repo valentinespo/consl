@@ -5,14 +5,16 @@ import { listMyOrgs } from "@/lib/orgs";
 import { currentRole, getMyAccess } from "@/lib/membership";
 import { RESOURCE_KEYS, actionsOf } from "@/lib/permissions";
 import { getOrgSettings } from "@/lib/settings";
-import { getMaterialTypes } from "@/lib/queries";
+import { getMaterialTypes, getLotOptions, getSupplierNames, getProductImageMap, getCategoriesInUse, getTransactionInvoices } from "@/lib/queries";
+import { buildCostChips } from "@/lib/lot-costs";
+import type { EditorLine } from "@/components/LotEditor";
 import { PROVIDERS, type Provider } from "@/lib/integrations";
 import { amazonOAuthConfigured } from "@/lib/amazon-oauth";
 import { shopifyOAuthConfigured } from "@/lib/shopify-oauth";
 import { tiktokConfigured } from "@/lib/tiktok";
 import { CHANNEL_TITLES, PRODUCT_MATCH_SELECT, mappedExternalId, suggestMappings, type ChannelKey } from "@/lib/channel-catalog";
 import { ROOT_LOGO, PROVIDER_LOGO } from "@/lib/channel-logos";
-import { OnboardingWizard, type WizardMapping } from "@/components/onboarding/OnboardingWizard";
+import { OnboardingWizard, type WizardMapping, type WizardLot } from "@/components/onboarding/OnboardingWizard";
 import { readOnboardingJob } from "@/lib/onboarding-jobs";
 
 export const dynamic = "force-dynamic";
@@ -168,6 +170,72 @@ export default async function OnboardingPage({
     ? Object.fromEntries(RESOURCE_KEYS.map((r) => [r, actionsOf(r).filter((a) => access.can(r, a))]))
     : null;
 
+  // ---- Step 5: production runs already under way, edited with the app's own lot editor and costed
+  // with its own transaction forms — so the wizard shows exactly what the lot page will. ----
+  const lots = await prisma.lot.findMany({
+    include: { lines: { include: { product: true, materials: true }, orderBy: { seq: "asc" } } },
+    orderBy: { lotNr: "asc" },
+  });
+  const [lotOptions, suppliers, skuImages, categories] = lots.length
+    ? await Promise.all([getLotOptions(), getSupplierNames(), getProductImageMap(), getCategoriesInUse()])
+    : [[], [], {}, []];
+  const matName = (code: string) => materials.find((m) => m.code === code)?.name ?? code;
+  const wizardLots: WizardLot[] = [];
+  for (const lot of lots) {
+    const invoices = await getTransactionInvoices(lot.id);
+    const skuTxnCounts: Record<string, number> = {};
+    for (const inv of invoices)
+      for (const line of inv.lines) if (line.lotId === lot.id && line.sku && line.appliesToCog) skuTxnCounts[line.sku] = (skuTxnCounts[line.sku] ?? 0) + 1;
+    const initialLines: EditorLine[] = lot.lines.map((ln) => ({
+      id: ln.id,
+      productId: ln.productId,
+      code: ln.product.code,
+      name: ln.product.name,
+      imageUrl: ln.product.imageUrl,
+      units: ln.units,
+      status: ln.status,
+      paymentStatus: ln.paymentStatus === "PAID" ? "PAID" : "DUE",
+      finishedAtISO: ln.finishedAt ? ln.finishedAt.toISOString().slice(0, 10) : null,
+      expiryISO: ln.expiryAt ? ln.expiryAt.toISOString().slice(0, 10) : null,
+      batchNr: ln.batchNr,
+      materials: ln.materials.map((m) => ({ materialTypeId: m.materialTypeId, perUnit: m.perUnit })),
+      costs: buildCostChips(ln.materialCostsJson, ln.transactionCostsJson, ln.shortfallsJson, matName),
+      cogPerUnit: ln.cogPerUnit,
+      shortfalls: JSON.parse(ln.shortfallsJson),
+    }));
+    wizardLots.push({
+      id: lot.id,
+      lotNr: lot.lotNr,
+      updatedAt: lot.updatedAt.toISOString(),
+      initial: { poNumber: lot.poNumber, poDateISO: lot.poDate ? lot.poDate.toISOString().slice(0, 10) : null, facilityId: lot.facilityId, notes: lot.notes },
+      initialLines,
+      skuTxnCounts,
+      totalCog: lot.lines.reduce((t, l) => t + l.cogPerUnit * l.units, 0),
+      invoices,
+    });
+  }
+  const nextLotNr = lots.reduce((m, l) => Math.max(m, l.lotNr), 0) + 1;
+  const inProdLines = lots.flatMap((l) => l.lines.filter((ln) => ln.status === "IN_PRODUCTION").map((ln) => ({ ln, facilityId: l.facilityId })));
+  // Material a lot has already drawn from a facility's counted stock — netted out of that
+  // facility's raw slice on Finish, so the widget's total counts it once, inside the lot.
+  const rawConsumedByFacility: Record<string, number> = {};
+  const lineMaterialCost = (json: string) => {
+    try {
+      return Object.values(JSON.parse(json) as Record<string, number>).reduce((t, v) => t + (Number(v) || 0), 0);
+    } catch {
+      return 0;
+    }
+  };
+  for (const { ln, facilityId } of inProdLines) {
+    rawConsumedByFacility[facilityId] = (rawConsumedByFacility[facilityId] ?? 0) + lineMaterialCost(ln.materialCostsJson) * ln.units;
+  }
+  const inProduction = {
+    lots: lots.filter((l) => l.lines.some((ln) => ln.status === "IN_PRODUCTION")).length,
+    units: inProdLines.reduce((t, { ln }) => t + ln.units, 0),
+    value: inProdLines.reduce((t, { ln }) => t + ln.cogPerUnit * ln.units, 0),
+    rawConsumedByFacility,
+  };
+
   // Which steps actually hold saved content — a visited-ahead step only stays lit (and clickable)
   // on the rail when something was really saved there; untouched defaults dim like unvisited.
   const ownFacCount = facilities.filter((f) => !f.channel).length;
@@ -176,8 +244,8 @@ export default async function OnboardingPage({
     integrations.length > 0,
     products.length > 0,
     ownFacCount > 0 || openingMovs.some((m) => m.itemType === "FINISHED"),
-    materials.length > 0,
-    openingMovs.some((m) => m.itemType === "RAW"),
+    materials.length > 0 || openingMovs.some((m) => m.itemType === "RAW"), // 4 — materials & their stock
+    lots.length > 0, // 5 — production in progress
     false, // 6 — Finish saves nothing until it runs
   ];
 
@@ -206,6 +274,8 @@ export default async function OnboardingPage({
       currency={{ symbol: org.currencySymbol, locale: org.locale, code: org.currencyCode }}
       syncTz={settings.syncTz}
       job={job}
+      lotEditing={{ lots: wizardLots, lotOptions, suppliers, categories, skuImages, materialTypes: materials, nextLotNr }}
+      inProduction={inProduction}
       providers={providers}
       channelsPullPending={channelsPullPending}
       mapping={mapping}
