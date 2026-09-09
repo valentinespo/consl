@@ -885,6 +885,7 @@ function StepFacilities({
   finishedOpenings: Record<string, Record<string, number>>;
 }) {
   const { money } = useMoney();
+  const imageByCode = new Map(products.map((p) => [p.code, p.imageUrl]));
   return (
     <div className="space-y-6">
       <StepHeader
@@ -911,31 +912,42 @@ function StepFacilities({
             These are what your connected channels report holding right now. When you finish setup, consl records them as your
             starting balance at your starting cost — nothing to type here.
           </p>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-2">
             {channelCounts.map((c) => {
               const units = c.skus.reduce((t, s) => t + s.units, 0);
               const value = c.skus.reduce((t, s) => t + (s.value ?? 0), 0);
               const unpriced = c.skus.some((s) => s.value == null);
+              const cols = "grid grid-cols-[minmax(0,1fr)_5.5rem_6.5rem] items-center gap-x-3";
               return (
-                <div key={c.channel} className="rounded-lg border border-border bg-surface-2 p-3">
-                  <div className="mb-2 flex items-center gap-2 text-[12.5px] font-semibold text-ink">
-                    {ROOT_LOGO[c.channel] && <Image src={ROOT_LOGO[c.channel]} alt="" width={18} height={18} className="rounded-[4px]" />}
-                    {c.label}
+                <div key={c.channel} className="flex flex-col rounded-xl border border-border bg-surface p-4">
+                  <div className="flex items-center gap-2.5">
+                    {ROOT_LOGO[c.channel] && (
+                      <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-lg border border-border bg-surface-2">
+                        <Image src={ROOT_LOGO[c.channel]} alt="" width={20} height={20} />
+                      </span>
+                    )}
+                    <div className="min-w-0">
+                      <div className="truncate text-[13px] font-semibold text-ink">{c.label}</div>
+                      <div className="text-[11.5px] text-muted">
+                        {c.skus.length === 0 ? "Nothing in stock right now" : `${c.skus.length} product${c.skus.length === 1 ? "" : "s"} in stock`}
+                      </div>
+                    </div>
                   </div>
-                  {c.skus.length === 0 ? (
-                    <div className="text-[12px] text-muted">Nothing in stock</div>
-                  ) : (
+                  {c.skus.length > 0 && (
                     <>
-                      <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 text-[10.5px] font-medium uppercase tracking-wide text-muted">
-                        <span>SKU</span>
+                      <div className={`${cols} mt-4 border-b border-line pb-1.5 text-[10.5px] font-medium uppercase tracking-wider text-muted`}>
+                        <span>Product</span>
                         <span className="text-right">Units</span>
                         <span className="text-right">Value</span>
                       </div>
-                      <div className="mt-1 space-y-0.5">
+                      <div className="divide-y divide-line/70">
                         {c.skus.map((s) => (
-                          <div key={s.code} className="grid grid-cols-[1fr_auto_auto] gap-x-4 text-[12px]">
-                            <span className="text-ink-soft">{s.code}</span>
-                            <span className="tabular text-right font-medium text-ink">{s.units.toLocaleString()}</span>
+                          <div key={s.code} className={`${cols} py-1.5 text-[12.5px]`}>
+                            <span className="flex min-w-0 items-center gap-2">
+                              <SkuAvatar code={s.code} size={20} imageUrl={imageByCode.get(s.code) ?? null} />
+                              <span className="truncate font-medium text-ink">{s.code}</span>
+                            </span>
+                            <span className="tabular text-right text-ink">{s.units.toLocaleString()}</span>
                             <span
                               className="tabular text-right text-ink-soft"
                               title={s.value == null ? "Enter this product's starting cost on the previous step" : undefined}
@@ -945,16 +957,16 @@ function StepFacilities({
                           </div>
                         ))}
                       </div>
-                      <div className="mt-2 grid grid-cols-[1fr_auto_auto] gap-x-4 border-t border-border pt-2 text-[12px]">
-                        <span className="font-medium text-ink">Total</span>
-                        <span className="tabular text-right font-medium text-ink">{units.toLocaleString()}</span>
+                      <div className={`${cols} mt-3 rounded-lg bg-surface-2 px-2.5 py-2 text-[12.5px]`}>
+                        <span className="font-semibold text-ink">Total</span>
+                        <span className="tabular text-right font-semibold text-ink">{units.toLocaleString()}</span>
                         <span className="tabular text-right font-semibold text-ink">
                           {money(value, 0)}
                           {unpriced ? "*" : ""}
                         </span>
                       </div>
                       {unpriced && (
-                        <div className="mt-1 text-[11px] text-muted">* products without a starting cost yet aren&apos;t in the value.</div>
+                        <div className="mt-1.5 text-[11px] text-muted">* products without a starting cost yet aren&apos;t in the value.</div>
                       )}
                     </>
                   )}
