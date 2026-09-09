@@ -2,6 +2,8 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { decryptSecret } from "@/lib/secret-box";
 import { shopifyGraphQL } from "@/lib/shopify";
+import { getCurrentOrgId } from "@/lib/tenant";
+import { upsertShopifyFinanceEvents } from "@/lib/shopify-finances";
 
 /**
  * Pull orders from the connected channels into SalesOrder/SalesOrderLine — the raw feed for
@@ -189,6 +191,16 @@ type ShopifyOrderNode = {
       originalUnitPriceSet: { shopMoney: { amount: string } } | null;
     }>;
   };
+  // The money side (fees, refunds, chargebacks) feeds the SHOPIFY finance ledger — see
+  // lib/shopify-finances.ts.
+  transactions?: Array<{ kind: string; status: string; fees?: Array<{ type?: string | null; amount: { amount: string } }> | null }> | null;
+  refunds?: Array<{
+    id: string;
+    createdAt: string;
+    totalRefundedSet: { shopMoney: { amount: string } } | null;
+    refundLineItems: { nodes: Array<{ quantity: number; subtotalSet: { shopMoney: { amount: string } } | null; totalTaxSet: { shopMoney: { amount: string } } | null; lineItem: { sku: string | null; variant: { id: string } | null } | null }> } | null;
+  }> | null;
+  disputes?: Array<{ id: string; status: string | null; initiatedAs: string | null }> | null;
 };
 
 // One field list shared by the paged importer and the webhook's single-order refetch, so the two
@@ -205,7 +217,13 @@ const SHOPIFY_ORDER_FIELDS = `
   fulfillments(first: 3) { location { name } }
   lineItems(first: 100) {
     nodes { sku quantity variant { id } discountedUnitPriceSet { shopMoney { amount } } originalUnitPriceSet { shopMoney { amount } } }
-  }`;
+  }
+  transactions(first: 10) { kind status fees { type amount { amount } } }
+  refunds(first: 20) {
+    id createdAt totalRefundedSet { shopMoney { amount } }
+    refundLineItems(first: 50) { nodes { quantity subtotalSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } lineItem { sku variant { id } } } }
+  }
+  disputes { id status initiatedAs }`;
 
 function mapShopifyOrder(o: ShopifyOrderNode): Fetched {
   const location = o.fulfillments.map((f) => f.location?.name).find(Boolean);
@@ -247,7 +265,7 @@ function mapShopifyOrder(o: ShopifyOrderNode): Fetched {
   };
 }
 
-const shopifyResolver = (map: Awaited<ReturnType<typeof productMap>>) => (l: FetchedLine) =>
+const shopifyResolver = (map: Awaited<ReturnType<typeof productMap>>) => (l: { sku: string | null; variantId?: string }) =>
   (l.variantId ? map.byVariant.get(l.variantId) : undefined) ?? (l.sku ? map.bySku.get(l.sku) ?? null : null);
 
 /**
@@ -263,6 +281,7 @@ export async function importShopifyOrders(sinceDays?: number): Promise<OrderImpo
 
   const filter = sinceDays ? `created_at:>=${new Date(Date.now() - sinceDays * 86_400_000).toISOString()}` : "";
   const fetched: Fetched[] = [];
+  const nodes: ShopifyOrderNode[] = [];
   let cursor: string | null = null;
 
   for (let page = 0; page < 60; page++) {
@@ -280,11 +299,14 @@ export async function importShopifyOrders(sinceDays?: number): Promise<OrderImpo
       { cursor, q: filter },
     );
     fetched.push(...data.orders.nodes.map(mapShopifyOrder));
+    nodes.push(...data.orders.nodes);
     if (!data.orders.pageInfo.hasNextPage) break;
     cursor = data.orders.pageInfo.endCursor;
   }
 
-  return persist("SHOPIFY", fetched, shopifyResolver(map));
+  const result = await persist("SHOPIFY", fetched, shopifyResolver(map));
+  await upsertShopifyFinanceEvents(nodes, shopifyResolver(map));
+  return result;
 }
 
 /** Refetch ONE Shopify order by gid and upsert it — the webhook handler's workhorse. The webhook
@@ -302,7 +324,36 @@ export async function importShopifyOrderById(orderGid: string): Promise<OrderImp
   );
   if (!data.node?.id) return { channel: "SHOPIFY", orders: 0, lines: 0 };
   const map = await productMap("SHOPIFY");
-  return persist("SHOPIFY", [mapShopifyOrder(data.node)], shopifyResolver(map));
+  const result = await persist("SHOPIFY", [mapShopifyOrder(data.node)], shopifyResolver(map));
+  await upsertShopifyFinanceEvents([data.node], shopifyResolver(map));
+  return result;
+}
+
+/**
+ * Point every stored order line of a channel at the product its SKU maps to today. Lines are
+ * resolved when an order is imported, so a product mapped AFTER its orders arrived (the usual
+ * onboarding order of events) left them unlinked — the mapping screen calls this so history
+ * catches up the moment a listing is linked or unlinked.
+ */
+export async function relinkOrderLines(channel: "SHOPIFY" | "AMAZON" | "TIKTOK"): Promise<number> {
+  const orgId = await getCurrentOrgId();
+  if (!orgId) return 0;
+  const map = await productMap(channel);
+  const pairs = [...map.bySku.entries()];
+  let changed = 0;
+  for (const [sku, productId] of pairs) {
+    // (`NOT: { productId }` alone would skip the unlinked rows — SQL's NULL never equals anything.)
+    changed += await prisma.salesOrderLine.updateMany({
+      where: { sku, order: { channel }, OR: [{ productId: null }, { productId: { not: productId } }] },
+      data: { productId },
+    }).then((r) => r.count);
+  }
+  // A SKU that no longer maps anywhere loses its link too.
+  changed += await prisma.salesOrderLine.updateMany({
+    where: { order: { channel }, productId: { not: null }, OR: [{ sku: null }, { sku: { notIn: pairs.map(([sku]) => sku) } }] },
+    data: { productId: null },
+  }).then((r) => r.count);
+  return changed;
 }
 
 export type TikTokOrder = {

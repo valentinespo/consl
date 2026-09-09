@@ -85,11 +85,11 @@ export type OrdersSummary = {
 
 /** What the double-count rule drops right now: the Shopify sources that mirror a present channel,
  *  and whether Amazon MCF orders are another present channel's sales. */
-type Exclusions = { sources: string[]; mcf: boolean };
+export type Exclusions = { sources: string[]; mcf: boolean };
 
 /** A channel is present once it is connected OR its orders are in the feed (a history load lands
- *  before the connection does). */
-async function activeExclusions(alsoConnected: Iterable<string> = []): Promise<Exclusions> {
+ *  before the connection does). Shared with the P&L, which drops the same orders. */
+export async function activeExclusions(alsoConnected: Iterable<string> = []): Promise<Exclusions> {
   const [connections, withOrders, shopifySources] = await Promise.all([
     prisma.integration.findMany({ where: { status: "connected" }, select: { provider: true } }),
     prisma.salesOrder.groupBy({ by: ["channel"] }),

@@ -1,30 +1,41 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrgId } from "@/lib/tenant";
-import { GROUP_ORDER, type Pnl, type PnlGroupBlock } from "@/lib/pnl-shared";
+import { GROUP_ORDER, type Pnl, type PnlChannel, type PnlGroupBlock } from "@/lib/pnl-shared";
 import { getCurrentOrg } from "@/lib/org";
 import { fxRate } from "@/lib/fx";
 import { computeFinishedGoods } from "@/lib/queries";
+import { activeExclusions } from "@/lib/order-metrics";
 
-export { GROUP_ORDER, GROUP_LABEL, type Pnl, type PnlGroupBlock, type PnlTypeRow } from "@/lib/pnl-shared";
+export { GROUP_ORDER, GROUP_LABEL, PNL_CHANNEL_LABEL, type Pnl, type PnlChannel, type PnlGroupBlock, type PnlTypeRow } from "@/lib/pnl-shared";
 
 /**
- * The P&L read side: sum the imported financial ledger by bucket for a date window, price the
- * units sold first-in-first-out from what was actually shipped to the channel — and bridge the
- * settlement lag.
+ * The P&L read side, across channels: sum each channel's financial ledger by bucket for a date
+ * window, price every unit sold first-in-first-out from ONE queue per product — what was shipped
+ * to Amazon, since that is where the units physically leave from whichever channel sold them
+ * (Amazon's own orders, and Shopify's and TikTok's shipped through MCF) — and bridge each
+ * channel's settlement lag.
  *
- * Scope: the products the company keeps in consl. Listings it never mapped (ignored at
- * onboarding, or a sister listing it doesn't manage here) are left out entirely — their sales,
- * fees, refunds and units alike — so the statement never shows revenue it can't cost. Money with
- * no SKU on it (ad invoices, storage bills, subscriptions) is the account's and always counts.
- * Amounts are the company's currency (`baseAmount`), so a Canadian sale adds up with a US one.
+ * Ledgers: Amazon's Finances feed, TikTok's settlement statements, and Shopify's orders (written
+ * as ledger rows at import — Shopify has no separate money feed). Units for cost of goods come
+ * from Amazon's posted sale rows, and from the order lines themselves for Shopify and TikTok
+ * (a $0 sample still leaves the warehouse). Amazon's MCF shipments post no sale, only their
+ * fulfilment fee — so a TikTok or Shopify sale shipped by Amazon is counted once, on its own
+ * channel, and the MCF fee still lands under Amazon's fees.
  *
- * Amazon books an order's money when it ships (held for payout, but exact), so only orders placed
- * and not yet shipped are missing from the ledger. Those are added as "(pending)" rows: their
- * revenue split comes from the order record itself (exact), their fees from this seller's own
- * per-SKU history (estimate). Every pending row is replaced by the real posted money the moment
- * the order ships — the statement converges to the ledger within a day or two.
+ * Scope: the products the company keeps in consl. Listings it never mapped are left out entirely
+ * — their sales, fees, refunds and units alike — so the statement never shows revenue it can't
+ * cost. Money with no SKU on it (ad invoices, storage bills) is the account's and always counts.
+ * Orders the double-count rule drops on the Orders tab (Shopify mirrors of a present channel)
+ * are dropped here too. Amounts are the company's currency (`baseAmount`).
+ *
+ * Settlement lag: Amazon books an order's money when it ships, TikTok when it is delivered, so
+ * orders placed before that are missing from those ledgers. They are added as "(pending)" rows:
+ * the revenue from the order record itself (exact), the fees from the seller's own history
+ * (estimate); every pending row is replaced by the real posted money the moment it lands.
  */
+
+export const PNL_CHANNELS: PnlChannel[] = ["AMAZON", "SHOPIFY", "TIKTOK"];
 
 /** UTC instant of local midnight starting `day` (YYYY-MM-DD) in `tz`, DST-safe. */
 export function zonedDayStart(day: string, tz: string): Date {
@@ -48,17 +59,44 @@ export function zonedDayBounds(fromDay: string, toDay: string, tz: string): { fr
   return { from: zonedDayStart(fromDay, tz), to: new Date(zonedDayStart(next.toISOString().slice(0, 10), tz).getTime() - 1) };
 }
 
+/** Channels with anything to show — a ledger, or orders. */
+export async function presentPnlChannels(): Promise<PnlChannel[]> {
+  const [ledger, orders] = await Promise.all([prisma.financeEvent.groupBy({ by: ["channel"] }), prisma.salesOrder.groupBy({ by: ["channel"] })]);
+  const seen = new Set([...ledger.map((r) => r.channel), ...orders.map((r) => r.channel)]);
+  return PNL_CHANNELS.filter((c) => seen.has(c));
+}
+
+type ProductCost = { id: string; code: string; openingUnitCost: number | null; preConslUnitCost: number | null };
+/** The statement's scope: the company's products, keyed the way each channel's ledger names them. */
+type Scope = { amazon: Map<string, ProductCost>; tiktok: Map<string, ProductCost>; byId: Map<string, ProductCost> };
+
+async function loadScope(): Promise<Scope> {
+  const products = await prisma.product.findMany({
+    select: { id: true, code: true, sellerSku: true, tiktokSku: true, openingUnitCost: true, preConslUnitCost: true },
+  });
+  const scope: Scope = { amazon: new Map(), tiktok: new Map(), byId: new Map() };
+  for (const p of products) {
+    const cost = { id: p.id, code: p.code, openingUnitCost: p.openingUnitCost, preConslUnitCost: p.preConslUnitCost };
+    scope.byId.set(p.id, cost);
+    if (p.sellerSku) scope.amazon.set(p.sellerSku, cost);
+    if (p.tiktokSku) scope.tiktok.set(p.tiktokSku, cost);
+  }
+  return scope;
+}
+
+/** One sale to price: units of a product on a channel at an instant (null = not posted yet — goes last). */
+type Sale = { productId: string; units: number; at: number | null; channel: PnlChannel };
 type Cogs = { cogs: number; units: number; preHistoryUnits: number; overflowUnits: number; unmatchedSkus: Set<string> };
 
 /**
- * Cost of goods, first-in-first-out from the channel's own queue of units.
+ * Cost of goods, first-in-first-out from one queue of units per product.
  *
  * Everything that ever entered Amazon — each lot's shipment at that lot's landed cost, plus a
- * company's day-zero starting stock — lines up by date, oldest first. Every sale on record is
- * then replayed in date order from the very first one, each taking units from the front of the
- * queue; the walk always starts at the beginning so that by the time it reaches the window it
- * knows exactly which units were already gone. The window's COGS is what its sales consumed.
- * `pending` (orders in the window not yet posted) joins the end of the same walk.
+ * company's day-zero starting stock — lines up by date, oldest first. Every sale on record, from
+ * every channel, is then replayed in date order from the very first one, each taking units from
+ * the front of the queue; the walk always starts at the beginning so that by the time it reaches
+ * the window it knows exactly which units were already gone. The window's COGS is what the
+ * selected channels' sales consumed there. Pending sales (not posted yet) join the end.
  *
  * Sales before a product's first recorded layer are pre-history (day-zero stock can't be eaten
  * by sales that predate it): they're priced at the product's pre-consl average cost (set from
@@ -66,17 +104,13 @@ type Cogs = { cogs: number; units: number; preHistoryUnits: number; overflowUnit
  * `preHistoryUnits`. Sales beyond everything recorded take the newest layer's cost and count in
  * `overflowUnits` — never silently zero.
  */
-async function fifoCogs(from: Date, to: Date, scope: Set<string>, pending: { sku: string; units: number }[]): Promise<Cogs> {
-  const [{ shipped }, products] = await Promise.all([
-    computeFinishedGoods(),
-    prisma.product.findMany({ where: { sellerSku: { not: null } }, select: { id: true, sellerSku: true, openingUnitCost: true, preConslUnitCost: true } }),
-  ]);
-  const productBySku = new Map(products.map((p) => [p.sellerSku as string, p]));
+async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlChannel>, scope: Scope): Promise<Cogs> {
+  const { shipped } = await computeFinishedGoods();
   type Layer = { units: number; unitCost: number; date: number };
   const queue = new Map<string, Layer[]>();
   for (const l of shipped) {
     if (l.destination !== "AMAZON" || l.units <= 0) continue;
-    const list = queue.get(l.sku) ?? [];
+    const list = queue.get(l.sku) ?? []; // `sku` here is the product id
     list.push({ units: l.units, unitCost: l.unitCost, date: l.date });
     queue.set(l.sku, list);
   }
@@ -84,22 +118,26 @@ async function fifoCogs(from: Date, to: Date, scope: Set<string>, pending: { sku
 
   const cursor = new Map<string, { idx: number; left: number }>();
   const out: Cogs = { cogs: 0, units: 0, preHistoryUnits: 0, overflowUnits: 0, unmatchedSkus: new Set() };
-  const consume = (sku: string, qty: number, at: number | null, inWindow: boolean) => {
-    const product = productBySku.get(sku);
-    if (!product) return;
+  const order = (s: Sale) => s.at ?? Number.MAX_SAFE_INTEGER;
+  for (const sale of [...sales].sort((a, b) => order(a) - order(b))) {
+    const product = scope.byId.get(sale.productId);
+    if (!product) continue;
+    const qty = sale.units;
+    const at = sale.at;
+    const inWindow = selected.has(sale.channel) && (at == null || (at >= from.getTime() && at <= to.getTime()));
     const layers = queue.get(product.id) ?? [];
     const preConsl = product.preConslUnitCost ?? product.openingUnitCost ?? layers[0]?.unitCost ?? null;
     if (inWindow) out.units += qty;
     // Pre-history: nothing recorded had entered the channel yet, so nothing is consumed.
     const preHistory = at != null && layers.length > 0 && at < layers[0].date;
     if (layers.length === 0 || preHistory) {
-      if (!inWindow) return;
-      if (preConsl == null) out.unmatchedSkus.add(sku);
+      if (!inWindow) continue;
+      if (preConsl == null) out.unmatchedSkus.add(product.code);
       else {
         out.cogs -= qty * preConsl;
         out.preHistoryUnits += qty;
       }
-      return;
+      continue;
     }
     const c = cursor.get(product.id) ?? { idx: 0, left: layers[0].units };
     let want = qty;
@@ -117,39 +155,15 @@ async function fifoCogs(from: Date, to: Date, scope: Set<string>, pending: { sku
       // Sold more than was ever recorded entering the channel — most likely the newest shipment
       // wasn't recorded, so the rest carries the newest cost on record.
       const newest = layers[layers.length - 1]?.unitCost ?? preConsl;
-      if (newest == null) out.unmatchedSkus.add(sku);
+      if (newest == null) out.unmatchedSkus.add(product.code);
       else {
         out.cogs -= want * newest;
         out.overflowUnits += want;
       }
     }
     cursor.set(product.id, c);
-  };
-
-  // Every posted sale on record, oldest first — the walk must start at the beginning.
-  const sales = await prisma.financeEvent.findMany({
-    where: { channel: "AMAZON", group: "sales", type: "Principal", quantity: { not: null }, sku: { in: [...scope] } },
-    select: { sku: true, quantity: true, eventAt: true },
-    orderBy: [{ eventAt: "asc" }, { id: "asc" }],
-  });
-  for (const sale of sales) {
-    const at = sale.eventAt.getTime();
-    consume(sale.sku as string, sale.quantity ?? 0, at, at >= from.getTime() && at <= to.getTime());
   }
-  // Orders in the window whose money hasn't posted: the newest sales, so they go last.
-  for (const line of pending) consume(line.sku, line.units, null, true);
   return out;
-}
-
-/** Amazon seller SKUs the company manages in consl — the statement's scope. */
-async function mappedSellerSkus(): Promise<Set<string>> {
-  const products = await prisma.product.findMany({ where: { sellerSku: { not: null } }, select: { sellerSku: true } });
-  return new Set(products.map((p) => p.sellerSku as string));
-}
-
-/** Prisma filter: rows about one of `skus`, or about no SKU at all (account-level money). */
-function inScope(skus: Set<string>) {
-  return { OR: [{ sku: null }, { sku: { in: [...skus] } }] };
 }
 
 type Bridge = {
@@ -263,85 +277,190 @@ async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurre
   };
 }
 
-export async function getPnl(from: Date, to: Date): Promise<Pnl> {
-  const scope = await mappedSellerSkus();
-  const baseCurrency = (await getCurrentOrg())?.currencyCode ?? "USD";
-  const window = { channel: "AMAZON", eventAt: { gte: from, lte: to } };
-  const where = { ...window, ...inScope(scope) };
+/** TikTok orders in range that no statement transaction covers yet (placed, not delivered): the
+ *  sale from the order (what the buyer paid for the goods after the seller's discount, plus the
+ *  shipping they paid), the fees at this shop's own historical rate. Units are NOT added here —
+ *  every TikTok order's lines already drive cost of goods. */
+async function tiktokPendingBridge(orgId: string, from: Date, to: Date, baseCurrency: string): Promise<{ sales: number; fees: number }> {
+  const orders = await prisma.$queryRaw<
+    { total: number; currency: string; orderedAt: Date; productGross: number | null; discounts: number | null; shipping: number | null; sourceData: unknown }[]
+  >`
+    SELECT so.total, so.currency, so."orderedAt", so."productGross", so.discounts, so.shipping, so."sourceData"
+    FROM "SalesOrder" so
+    WHERE so."orgId" = ${orgId} AND so.channel = 'TIKTOK'
+      AND so.cancelled = false AND so.voided = false AND so.total <> 0
+      AND so."orderedAt" >= ${from} AND so."orderedAt" <= ${to}
+      AND NOT EXISTS (
+        SELECT 1 FROM "FinanceEvent" fe
+        WHERE fe."orgId" = so."orgId" AND fe.channel = 'TIKTOK' AND fe."orderId" = so."externalId")`;
+  if (orders.length === 0) return { sales: 0, fees: 0 };
+  const hist = await prisma.financeEvent.groupBy({ by: ["group"], where: { channel: "TIKTOK" }, _sum: { baseAmount: true } });
+  const histSales = hist.filter((h) => h.group === "sales").reduce((t, h) => t + (h._sum.baseAmount ?? 0), 0);
+  const histFees = hist.filter((h) => ["referral_fees", "payment_fees", "advertising", "other"].includes(h.group)).reduce((t, h) => t + (h._sum.baseAmount ?? 0), 0);
+  const rate = histSales > 0 ? Math.abs(histFees) / histSales : 0;
+  let sales = 0;
+  for (const o of orders) {
+    const sd = o.sourceData as { payment?: { sub_total?: string | null } } | null;
+    const goods = sd?.payment?.sub_total != null ? Number(sd.payment.sub_total) : (o.productGross ?? 0) - (o.discounts ?? 0);
+    const fx = o.currency === baseCurrency ? 1 : await fxRate(o.currency, baseCurrency, o.orderedAt);
+    sales += (Math.max(0, goods) + (o.shipping ?? 0)) * fx;
+  }
+  return { sales, fees: -sales * rate };
+}
 
-  const sums = await prisma.financeEvent.groupBy({
-    by: ["group", "type"],
-    where,
-    _sum: { baseAmount: true },
-  });
+const EMPTY: Pnl = {
+  groups: [], sales: 0, cogs: 0, unitsSold: 0, netProfit: 0, margin: null, roi: null, pending: [],
+  unmatchedSkus: [], preHistoryUnits: 0, overflowUnits: 0, ignored: { skus: [], units: 0, sales: 0 }, backfillInProgress: false, hasData: false,
+};
 
+/** The statement for a window, over the given channels (default: every channel with data). */
+export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Promise<Pnl> {
+  const orgId = await getCurrentOrgId();
+  const present = await presentPnlChannels();
+  const selected = (channels ?? present).filter((c) => present.includes(c));
+  const selectedSet = new Set(selected);
+  if (!orgId || selected.length === 0) return EMPTY;
+  const [scope, org, exclusions] = await Promise.all([loadScope(), getCurrentOrg(), activeExclusions()]);
+  const baseCurrency = org?.currencyCode ?? "USD";
+  const excludedSources = exclusions.sources;
+  const amazonSkus = [...scope.amazon.keys()];
+  const tiktokSkus = [...scope.tiktok.keys()];
+  const lineChannels = selected.filter((c) => c !== "AMAZON");
+
+  // The ledgers, by bucket. Amazon and TikTok rows are scoped by the SKU they name; Shopify rows
+  // exist only for managed lines. A Shopify order the Orders tab drops is dropped here too.
+  const sums = await prisma.$queryRaw<{ group: string; type: string; amount: number }[]>`
+    SELECT fe."group", fe."type", COALESCE(SUM(fe."baseAmount"), 0)::float8 AS amount
+    FROM "FinanceEvent" fe
+    WHERE fe."orgId" = ${orgId} AND fe.channel = ANY(${selected}::text[])
+      AND fe."eventAt" >= ${from} AND fe."eventAt" <= ${to}
+      AND (fe.sku IS NULL OR fe.channel = 'SHOPIFY'
+        OR (fe.channel = 'AMAZON' AND fe.sku = ANY(${amazonSkus}::text[]))
+        OR (fe.channel = 'TIKTOK' AND fe.sku = ANY(${tiktokSkus}::text[])))
+      AND NOT (fe.channel = 'SHOPIFY' AND EXISTS (
+        SELECT 1 FROM "SalesOrder" so
+        WHERE so."orgId" = fe."orgId" AND so.channel = 'SHOPIFY' AND so."externalId" = fe."orderId"
+          AND (so.voided OR so.source = ANY(${excludedSources}::text[]))))
+    GROUP BY 1, 2`;
   const blocks = new Map<string, { type: string; amount: number }[]>();
-  for (const s of sums) {
-    const list = blocks.get(s.group) ?? [];
-    list.push({ type: s.type, amount: s._sum.baseAmount ?? 0 });
-    blocks.set(s.group, list);
+  const add = (group: string, type: string, amount: number) => blocks.set(group, [...(blocks.get(group) ?? []), { type, amount }]);
+  for (const s of sums) add(s.group, s.type, s.amount);
+
+  // What the scope left out: listings sold that the company doesn't manage here.
+  const ignored = { skus: [] as string[], units: 0, sales: 0 };
+  if (selectedSet.has("AMAZON")) {
+    const left = await prisma.financeEvent.groupBy({
+      by: ["sku"],
+      where: { channel: "AMAZON", eventAt: { gte: from, lte: to }, group: "sales", type: "Principal", sku: { notIn: amazonSkus, not: null } },
+      _sum: { quantity: true, baseAmount: true },
+    });
+    for (const r of left) {
+      ignored.skus.push(r.sku as string);
+      ignored.units += r._sum.quantity ?? 0;
+      ignored.sales += r._sum.baseAmount ?? 0;
+    }
+  }
+  if (lineChannels.length) {
+    const left = await prisma.$queryRaw<{ sku: string | null; units: number; sales: number }[]>`
+      SELECT l.sku, SUM(l.quantity)::int AS units, COALESCE(SUM(l.quantity * l."unitPrice"), 0)::float8 AS sales
+      FROM "SalesOrderLine" l JOIN "SalesOrder" o ON o.id = l."orderId"
+      WHERE o."orgId" = ${orgId} AND o.channel = ANY(${lineChannels}::text[]) AND l."productId" IS NULL
+        AND o.cancelled = false AND o.voided = false AND o."orderedAt" >= ${from} AND o."orderedAt" <= ${to}
+        AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excludedSources}::text[]))
+      GROUP BY 1`;
+    for (const r of left) {
+      if (r.sku && !ignored.skus.includes(r.sku)) ignored.skus.push(r.sku);
+      ignored.units += r.units;
+      ignored.sales += r.sales;
+    }
+  }
+  ignored.skus.sort();
+
+  // Bridge each channel's settlement lag.
+  const pending: Pnl["pending"] = [];
+  const pendingSales: Sale[] = [];
+  if (selectedSet.has("AMAZON")) {
+    const bridge = await pendingBridge(from, to, new Set(amazonSkus), baseCurrency);
+    if (bridge.sales.length) {
+      for (const s of bridge.sales) add("sales", s.type, s.amount);
+      if (bridge.taxes !== 0) add("taxes", "TaxWithheld (pending)", bridge.taxes);
+      if (bridge.fba !== 0) add("fba_fees", "FBAPerUnitFulfillmentFee (pending)", bridge.fba);
+      if (bridge.referral !== 0) add("referral_fees", "Commission (pending)", bridge.referral);
+      pending.push({ channel: "AMAZON", sales: bridge.pendingSales });
+    }
+    for (const l of bridge.lines) {
+      const p = scope.amazon.get(l.sku);
+      if (p) pendingSales.push({ productId: p.id, units: l.units, at: null, channel: "AMAZON" });
+    }
+  }
+  if (selectedSet.has("TIKTOK")) {
+    const bridge = await tiktokPendingBridge(orgId, from, to, baseCurrency);
+    if (bridge.sales !== 0) {
+      add("sales", "Sales (pending)", bridge.sales);
+      if (bridge.fees !== 0) add("referral_fees", "Fees (pending)", bridge.fees);
+      pending.push({ channel: "TIKTOK", sales: bridge.sales });
+    }
   }
 
-  // What the scope left out: listings sold on Amazon that the company doesn't manage here.
-  const left = await prisma.financeEvent.groupBy({
-    by: ["sku"],
-    where: { ...window, group: "sales", type: "Principal", sku: { notIn: [...scope], not: null } },
-    _sum: { quantity: true, baseAmount: true },
+  // Every sale on record, from every channel — the FIFO walk needs all of history.
+  const amazonRows = await prisma.financeEvent.findMany({
+    where: { channel: "AMAZON", group: "sales", type: "Principal", quantity: { not: null }, sku: { in: amazonSkus } },
+    select: { sku: true, quantity: true, eventAt: true },
+    orderBy: [{ eventAt: "asc" }, { id: "asc" }],
   });
-  const ignored = {
-    skus: left.map((r) => r.sku as string).sort(),
-    units: left.reduce((t, r) => t + (r._sum.quantity ?? 0), 0),
-    sales: left.reduce((t, r) => t + (r._sum.baseAmount ?? 0), 0),
-  };
-
-  // Bridge the settlement lag: recent orders whose money hasn't posted yet.
-  const bridge = await pendingBridge(from, to, scope, baseCurrency);
-  if (bridge.sales.length) {
-    blocks.set("sales", [...(blocks.get("sales") ?? []), ...bridge.sales]);
-    if (bridge.taxes !== 0) blocks.set("taxes", [...(blocks.get("taxes") ?? []), { type: "TaxWithheld (pending)", amount: bridge.taxes }]);
-    if (bridge.fba !== 0) blocks.set("fba_fees", [...(blocks.get("fba_fees") ?? []), { type: "FBAPerUnitFulfillmentFee (pending)", amount: bridge.fba }]);
-    if (bridge.referral !== 0) blocks.set("referral_fees", [...(blocks.get("referral_fees") ?? []), { type: "Commission (pending)", amount: bridge.referral }]);
+  const sales: Sale[] = [];
+  for (const r of amazonRows) {
+    const p = scope.amazon.get(r.sku as string);
+    if (p) sales.push({ productId: p.id, units: r.quantity ?? 0, at: r.eventAt.getTime(), channel: "AMAZON" });
   }
+  const lineRows = await prisma.$queryRaw<{ channel: string; productId: string; units: number; at: Date }[]>`
+    SELECT o.channel, l."productId", l.quantity::int AS units, o."orderedAt" AS at
+    FROM "SalesOrderLine" l JOIN "SalesOrder" o ON o.id = l."orderId"
+    WHERE o."orgId" = ${orgId} AND o.channel IN ('SHOPIFY', 'TIKTOK') AND l."productId" IS NOT NULL
+      AND o.cancelled = false AND o.voided = false
+      AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excludedSources}::text[]))`;
+  for (const r of lineRows) sales.push({ productId: r.productId, units: r.units, at: r.at.getTime(), channel: r.channel as PnlChannel });
 
-  // Cost of goods: first-in-first-out from what was shipped to Amazon (pending units go last).
-  const fifo = await fifoCogs(from, to, scope, bridge.lines);
-  const cogs = fifo.cogs;
-  const unitsSold = fifo.units;
-  const unmatched = fifo.unmatchedSkus;
+  const fifo = await fifoCogs([...sales, ...pendingSales], from, to, selectedSet, scope);
 
   const groups: PnlGroupBlock[] = GROUP_ORDER.map((g) => {
     const types = (blocks.get(g) ?? []).sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
     return { group: g, total: types.reduce((t, r) => t + r.amount, 0), types };
   }).filter((b) => b.types.length > 0);
 
-  const sales = groups.find((g) => g.group === "sales")?.total ?? 0;
+  const salesTotal = groups.find((g) => g.group === "sales")?.total ?? 0;
   const ledgerTotal = groups.reduce((t, g) => t + g.total, 0);
-  const netProfit = ledgerTotal + cogs;
+  const netProfit = ledgerTotal + fifo.cogs;
 
   const settings = await prisma.settings.findFirst({ select: { financeBackfillCursor: true } });
   const floor = new Date(Date.now() - 725 * 86_400_000);
-  const backfillInProgress = !settings?.financeBackfillCursor || new Date(settings.financeBackfillCursor) > floor;
+  const backfillInProgress = selectedSet.has("AMAZON") && (!settings?.financeBackfillCursor || new Date(settings.financeBackfillCursor) > floor);
 
   return {
     groups,
-    sales,
-    cogs,
-    unitsSold,
+    sales: salesTotal,
+    cogs: fifo.cogs,
+    unitsSold: fifo.units,
     netProfit,
-    margin: sales !== 0 ? netProfit / sales : null,
-    roi: cogs !== 0 ? netProfit / Math.abs(cogs) : null,
-    pendingSales: bridge.pendingSales,
-    unmatchedSkus: [...unmatched],
+    margin: salesTotal !== 0 ? netProfit / salesTotal : null,
+    roi: fifo.cogs !== 0 ? netProfit / Math.abs(fifo.cogs) : null,
+    pending: pending.filter((p) => p.sales > 0),
+    unmatchedSkus: [...fifo.unmatchedSkus],
     preHistoryUnits: fifo.preHistoryUnits,
     overflowUnits: fifo.overflowUnits,
     ignored,
     backfillInProgress,
-    hasData: groups.length > 0,
+    hasData: groups.length > 0 || fifo.units > 0,
   };
 }
 
-/** Oldest posted event — the date picker's lower bound. */
+/** Oldest dated money or order across the channels — the date picker's lower bound. */
 export async function oldestFinanceDate(): Promise<string | null> {
-  const first = await prisma.financeEvent.findFirst({ where: { channel: "AMAZON" }, orderBy: { eventAt: "asc" }, select: { eventAt: true } });
-  return first ? first.eventAt.toISOString().slice(0, 10) : null;
+  const [fe, so] = await Promise.all([
+    prisma.financeEvent.findFirst({ orderBy: { eventAt: "asc" }, select: { eventAt: true } }),
+    prisma.salesOrder.findFirst({ where: { channel: { in: ["SHOPIFY", "TIKTOK"] } }, orderBy: { orderedAt: "asc" }, select: { orderedAt: true } }),
+  ]);
+  const dates = [fe?.eventAt, so?.orderedAt].filter((d): d is Date => !!d);
+  if (dates.length === 0) return null;
+  return new Date(Math.min(...dates.map((d) => d.getTime()))).toISOString().slice(0, 10);
 }

@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/ui";
 import { requireView } from "@/lib/membership";
-import { getPnl, oldestFinanceDate, zonedDayBounds } from "@/lib/pnl";
+import { getPnl, oldestFinanceDate, presentPnlChannels, zonedDayBounds, type PnlChannel } from "@/lib/pnl";
 import { getOrgSettings } from "@/lib/settings";
 import { prisma } from "@/lib/prisma";
 import { todayIn } from "@/lib/channel-tz";
@@ -10,9 +10,9 @@ import { rangeBounds, RANGES, type RangeKey } from "@/lib/chart";
 export const dynamic = "force-dynamic";
 
 /**
- * P&L — the Sellerise-shaped statement over the imported Amazon financial ledger: every money
- * movement bucketed (sales, fees, refunds, ads, storage…), plus engine-priced COGS. Amazon first;
- * Shopify/TikTok join once their ledgers are imported.
+ * P&L — the Sellerise-shaped statement over every channel's ledger: each money movement bucketed
+ * (sales, fees, refunds, ads, storage…), plus engine-priced COGS from one FIFO queue per product.
+ * One channel at a time or all together, on the company's own calendar.
  */
 export default async function PnlPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   await requireView("dashboard");
@@ -29,11 +29,15 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
   const settings = await getOrgSettings();
   const tz = settings.syncTz;
 
+  const present = await presentPnlChannels();
+  const channelParam = str(sp.channel)?.toUpperCase();
+  const channel = channelParam && (present as string[]).includes(channelParam) ? (channelParam as PnlChannel) : undefined;
+
   const newest = todayIn(tz);
   const oldest = (await oldestFinanceDate()) ?? newest;
   const b = rangeBounds(rangeKey, newest, str(sp.from), str(sp.to));
   const bounds = zonedDayBounds(rangeKey === "all" ? oldest : (b.from ?? oldest), rangeKey === "all" ? newest : (b.to ?? newest), tz);
-  const pnl = await getPnl(bounds.from, bounds.to);
+  const pnl = await getPnl(bounds.from, bounds.to, channel ? [channel] : undefined);
   const products = await prisma.product.findMany({
     where: { sellerSku: { not: null } },
     select: { id: true, code: true, name: true, imageUrl: true, preConslUnitCost: true, openingUnitCost: true },
@@ -42,12 +46,13 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
 
   return (
     <>
-      <PageHeader title="P&L" subtitle="Every dollar Amazon moved, period by period — and what was left.">
+      <PageHeader title="P&L" subtitle="Every dollar your channels moved, period by period — and what was left.">
         <PreConslCostButton products={products} />
       </PageHeader>
       <PnlClient
         pnl={pnl}
-        filter={{ range: { key: rangeKey, from: b.from ?? oldest, to: b.to ?? newest } }}
+        channels={present}
+        filter={{ channel: channel ?? "", range: { key: rangeKey, from: b.from ?? oldest, to: b.to ?? newest } }}
         dataBounds={{ newest, oldest }}
       />
     </>

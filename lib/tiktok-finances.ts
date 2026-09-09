@@ -70,8 +70,8 @@ function bucket(section: "revenue" | "fee" | "shipping", line: TikTokStatementLi
   const name = (line.name ?? line.type ?? "").trim() || "Other";
   if (/refund/i.test(name) || /refund/i.test(line.type ?? "")) return { group: "refunds", type: `Refund:${name.replace(/\s*refund\s*$/i, "")}` };
   if (section !== "fee") return { group: "sales", type: name };
-  if (/referral|commission fee|platform commission/i.test(name) && !/affiliate/i.test(name)) return { group: "referral_fees", type: name };
-  if (/promotion|\bads?\b|advertis/i.test(name)) return { group: "advertising", type: name };
+  if (/affiliate|promotion|\bads?\b|advertis/i.test(name)) return { group: "advertising", type: name };
+  if (/referral|commission fee|platform commission/i.test(name)) return { group: "referral_fees", type: name };
   return { group: "other", type: name };
 }
 

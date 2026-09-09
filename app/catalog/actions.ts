@@ -6,6 +6,7 @@ import { recomputeAll } from "@/lib/recompute";
 import { saveImage, deleteStored, safeKeySegment } from "@/lib/storage";
 import { checkOwned, type OwnedModel } from "@/lib/ownership";
 import { requirePermission } from "@/lib/membership";
+import { relinkOrderLines } from "@/lib/orders";
 
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB
 const OK_EXT = new Set(["png", "jpg", "jpeg", "webp", "gif", "avif"]);
@@ -310,6 +311,7 @@ export async function updateProductChannels(input: {
       tiktokSku: clean(input.tiktokSku),
     },
   });
+  for (const channel of ["AMAZON", "SHOPIFY", "TIKTOK"] as const) await relinkOrderLines(channel);
   revalidatePath("/", "layout");
   return { ok: true as const };
 }
@@ -494,6 +496,9 @@ export async function applyChannelMappings(channel: "SHOPIFY" | "AMAZON" | "TIKT
       results.push({ listingId: item.listingId, ok: false, error: (e as Error).message.slice(0, 160) });
     }
   }
+  // Order history follows the mapping: lines imported before a listing was linked pick up their
+  // product now (and lose it on unmap), so velocity and the P&L see the whole past.
+  await relinkOrderLines(channel);
 
   revalidatePath("/", "layout");
   const failed = results.filter((r) => !r.ok);

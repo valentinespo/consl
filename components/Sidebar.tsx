@@ -15,7 +15,6 @@ import {
   ImagesFilled,
   ReorderFilled,
   OrdersFilled,
-  SalesProfitFilled,
   PnlFilled,
   ChevronDown,
   Plug,
@@ -26,9 +25,8 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 
 type NavItem = { href: string; label: string; icon: LucideIcon; exact?: boolean; resource: string };
 
-// Finances — sales, profit and the P&L built on the orders underneath. Collapsible as a group.
+// Finances — the P&L and the orders underneath it. Collapsible as a group.
 const FINANCES_NAV: NavItem[] = [
-  { href: "/sales-profit", label: "Sales & Profit", icon: SalesProfitFilled, resource: "dashboard" },
   { href: "/pnl", label: "P&L", icon: PnlFilled, resource: "dashboard" },
   { href: "/orders", label: "Orders", icon: OrdersFilled, resource: "dashboard" },
 ];
@@ -167,7 +165,7 @@ export function Sidebar({
           and the footer stay put below it — flex would otherwise squeeze them (the hairline is a
           1px item and simply vanished once the tabs outgrew the sidebar). */}
       <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
-        {/* Finances — Sales & Profit, P&L and Orders. Collapsible, above Production. */}
+        {/* Finances — P&L and Orders. Collapsible, above Production. */}
         {finances.length > 0 && (
           <>
             <SectionHeader

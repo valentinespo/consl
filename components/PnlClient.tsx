@@ -6,7 +6,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { ChevronDown, PnlFilled, X } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
-import { GROUP_LABEL, type Pnl, type PnlGroupBlock } from "@/lib/pnl-shared";
+import { GROUP_LABEL, PNL_CHANNEL_LABEL, type Pnl, type PnlChannel, type PnlGroupBlock } from "@/lib/pnl-shared";
 import { ROOT_LOGO } from "@/lib/channel-logos";
 import { EmptyState } from "@/components/EmptyState";
 import { SkuAvatar } from "@/components/ui";
@@ -69,11 +69,14 @@ function GroupRow({ block, money }: { block: PnlGroupBlock; money: (n: number) =
 
 export function PnlClient({
   pnl,
+  channels,
   filter,
   dataBounds,
 }: {
   pnl: Pnl;
-  filter: { range: Range };
+  /** Channels with data, in display order — the filter's choices. */
+  channels: PnlChannel[];
+  filter: { range: Range; channel: string };
   dataBounds: { newest: string; oldest: string };
 }) {
   const router = useRouter();
@@ -94,6 +97,13 @@ export function PnlClient({
     router.push(`${pathname}?${q.toString()}`);
   }
 
+  function setChannel(channel: string) {
+    const q = new URLSearchParams(params.toString());
+    if (channel) q.set("channel", channel.toLowerCase());
+    else q.delete("channel");
+    router.push(`${pathname}?${q.toString()}`);
+  }
+
   const pct = (v: number | null) => (v == null ? "—" : `${(v * 100).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`);
   const salesBlock = pnl.groups.find((g) => g.group === "sales");
   const rest = pnl.groups.filter((g) => g.group !== "sales");
@@ -102,6 +112,28 @@ export function PnlClient({
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-2">
         <DateRangePicker value={filter.range} onChange={setRange} newest={dataBounds.newest} oldest={dataBounds.oldest} locale={locale} />
+        {channels.length > 1 && (
+          <div role="radiogroup" aria-label="Channel" className="flex h-9 items-center gap-0.5 rounded-lg border border-border bg-surface p-0.5">
+            {[{ v: "", label: "All channels", logo: null as string | null }, ...channels.map((c) => ({ v: c, label: PNL_CHANNEL_LABEL[c], logo: ROOT_LOGO[c] ?? null }))].map((o) => {
+              const active = filter.channel === o.v;
+              return (
+                <button
+                  key={o.v || "all"}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => setChannel(o.v)}
+                  className={`flex h-full items-center gap-1.5 rounded-md px-2.5 text-[12px] transition-colors ${
+                    active ? "bg-surface-2 font-medium text-ink" : "text-muted hover:text-ink-soft"
+                  }`}
+                >
+                  {o.logo && <Image src={o.logo} alt="" width={14} height={14} className="rounded-[3px]" />}
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
         {pnl.backfillInProgress && (
           <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />
@@ -148,19 +180,20 @@ export function PnlClient({
         </div>
       )}
 
-      {pnl.pendingSales > 0 && (
-        <div className="flex flex-wrap items-center gap-2 text-[12px] text-muted">
+      {pnl.pending.map((p) => (
+        <div key={p.channel} className="flex flex-wrap items-center gap-2 text-[12px] text-muted">
           <span className="pill-amber inline-flex items-center gap-1.5 rounded-full border px-2.5 py-[3px] text-[11px] font-medium">
-            <Image src={ROOT_LOGO.AMAZON} alt="" width={14} height={14} className="rounded-[3px]" />
-            Amazon
-            <span>{money(pnl.pendingSales)} pending</span>
+            {ROOT_LOGO[p.channel] && <Image src={ROOT_LOGO[p.channel]} alt="" width={14} height={14} className="rounded-[3px]" />}
+            {PNL_CHANNEL_LABEL[p.channel]}
+            <span>{money(p.sales)} pending</span>
           </span>
           <span>
-            Orders placed but not shipped yet. They already count in this P&amp;L — the sale at the order&apos;s price, the fees estimated
-            from your past orders. When Amazon ships them and posts the real money, that replaces the estimate.
+            Orders placed that {PNL_CHANNEL_LABEL[p.channel]} hasn&apos;t posted the money for yet. They already count in this P&amp;L — the sale
+            at the order&apos;s price, the fees estimated from your past orders. When {PNL_CHANNEL_LABEL[p.channel]} posts the real money,
+            that replaces the estimate.
           </span>
         </div>
-      )}
+      ))}
       {pnl.preHistoryUnits > 0 && (
         <p className="text-[12px] text-muted">
           {pnl.preHistoryUnits.toLocaleString()} of the units sold predate the first shipment on record for their product, so they carry the
