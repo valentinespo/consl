@@ -189,6 +189,10 @@ type ShopifyOrderNode = {
       variant: { id: string } | null;
       discountedUnitPriceSet: { shopMoney: { amount: string } } | null;
       originalUnitPriceSet: { shopMoney: { amount: string } } | null;
+      originalTotalSet: { shopMoney: { amount: string } } | null;
+      // Every discount that landed on the line — line-level AND the line's share of an order-level
+      // code. (discountedUnitPriceSet only knows the line-level ones.)
+      discountAllocations: Array<{ allocatedAmountSet: { shopMoney: { amount: string } } }>;
     }>;
   };
   // The money side (fees, refunds, chargebacks) feeds the SHOPIFY finance ledger — see
@@ -216,7 +220,11 @@ const SHOPIFY_ORDER_FIELDS = `
   shippingAddress { city provinceCode zip countryCodeV2 }
   fulfillments(first: 3) { location { name } }
   lineItems(first: 100) {
-    nodes { sku quantity variant { id } discountedUnitPriceSet { shopMoney { amount } } originalUnitPriceSet { shopMoney { amount } } }
+    nodes {
+      sku quantity variant { id }
+      discountedUnitPriceSet { shopMoney { amount } } originalUnitPriceSet { shopMoney { amount } } originalTotalSet { shopMoney { amount } }
+      discountAllocations { allocatedAmountSet { shopMoney { amount } } }
+    }
   }
   transactions(first: 10) { kind status fees { type amount { amount } } }
   refunds(first: 20) {
@@ -224,6 +232,15 @@ const SHOPIFY_ORDER_FIELDS = `
     refundLineItems(first: 50) { nodes { quantity subtotalSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } lineItem { sku variant { id } } } }
   }
   disputes { id status initiatedAs }`;
+
+/** A line's list total and what the buyer actually paid for it after every discount. */
+export function shopifyLineMoney(l: ShopifyOrderNode["lineItems"]["nodes"][number]): { gross: number; net: number } {
+  const gross = l.originalTotalSet ? money(l.originalTotalSet.shopMoney.amount) : l.quantity * money(l.originalUnitPriceSet?.shopMoney.amount);
+  const allocated = (l.discountAllocations ?? []).reduce((s, a) => s + money(a.allocatedAmountSet?.shopMoney.amount), 0);
+  // Older records without allocations: fall back to the line-level discounted price.
+  const net = l.discountAllocations ? Math.max(0, gross - allocated) : l.quantity * money(l.discountedUnitPriceSet?.shopMoney.amount ?? l.originalUnitPriceSet?.shopMoney.amount);
+  return { gross, net };
+}
 
 function mapShopifyOrder(o: ShopifyOrderNode): Fetched {
   const location = o.fulfillments.map((f) => f.location?.name).find(Boolean);
@@ -250,13 +267,13 @@ function mapShopifyOrder(o: ShopifyOrderNode): Fetched {
     platformUpdatedAt: o.updatedAt ? new Date(o.updatedAt) : null,
     sourceData: o as unknown,
     lines: o.lineItems.nodes.map((l) => {
-      const gross = l.quantity * money(l.originalUnitPriceSet?.shopMoney.amount);
-      const net = l.quantity * money(l.discountedUnitPriceSet?.shopMoney.amount ?? l.originalUnitPriceSet?.shopMoney.amount);
+      const { gross, net } = shopifyLineMoney(l);
       return {
         sku: l.sku?.trim() || null,
         quantity: l.quantity,
-        // Prefer the discounted unit price so promo/coupon discounts are reflected in revenue.
-        unitPrice: money(l.discountedUnitPriceSet?.shopMoney.amount ?? l.originalUnitPriceSet?.shopMoney.amount),
+        // Net of every discount (line-level and the line's share of an order-level code), so a
+        // 100%-off giveaway is $0 revenue, not list price.
+        unitPrice: l.quantity > 0 ? net / l.quantity : 0,
         variantId: l.variant?.id ?? undefined,
         gross,
         promoDiscount: Math.max(0, gross - net),

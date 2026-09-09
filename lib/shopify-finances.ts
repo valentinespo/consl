@@ -49,6 +49,8 @@ export type ShopifyFinanceNode = {
       variant: { id: string } | null;
       discountedUnitPriceSet?: Money;
       originalUnitPriceSet?: Money;
+      originalTotalSet?: Money;
+      discountAllocations?: Array<{ allocatedAmountSet: Money }>;
     }>;
   };
   transactions?: Array<{ kind: string; status: string; fees?: Array<{ type?: string | null; amount: { amount: string } }> | null }> | null;
@@ -106,8 +108,12 @@ export function flattenShopifyOrder(
   };
 
   for (const l of managed) {
-    const unit = num(l.discountedUnitPriceSet ?? l.originalUnitPriceSet);
-    push({ group: "sales", type: "Product sales", amount: l.quantity * unit, sku: lineKey(l), quantity: l.quantity });
+    // What the buyer paid for the line after every discount — line-level and its share of an
+    // order-level code (Shopify's discounted unit price only carries the line-level ones).
+    const gross = l.originalTotalSet ? num(l.originalTotalSet) : l.quantity * num(l.originalUnitPriceSet);
+    const allocated = (l.discountAllocations ?? []).reduce((t, a) => t + num(a.allocatedAmountSet), 0);
+    const net = l.discountAllocations ? Math.max(0, gross - allocated) : l.quantity * num(l.discountedUnitPriceSet ?? l.originalUnitPriceSet);
+    push({ group: "sales", type: "Product sales", amount: net, sku: lineKey(l), quantity: l.quantity });
   }
   push({ group: "sales", type: "Shipping", amount: num(o.totalShippingPriceSet) });
   const tax = num(o.totalTaxSet);
