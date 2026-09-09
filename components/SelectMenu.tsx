@@ -41,7 +41,9 @@ export function SelectMenu({
 }) {
   const btn = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
-  const [box, setBox] = useState<{ top: number; left: number; width: number } | null>(null);
+  // Where the panel sits: below the trigger by default, flipped above it when the viewport has
+  // more room there; `maxH` caps the list so the last option is always reachable by scrolling.
+  const [box, setBox] = useState<{ top?: number; bottom?: number; left: number; width: number; maxH: number } | null>(null);
   const lastBox = useRef(box);
   if (box) lastBox.current = box;
   const open = box !== null;
@@ -56,12 +58,23 @@ export function SelectMenu({
 
   // The panel can outgrow a narrow trigger (up to 320px) — keep it inside the viewport.
   const clampLeft = (r: DOMRect) => Math.max(8, Math.min(r.left, window.innerWidth - Math.max(r.width, 320) - 8));
+  const GAP = 6, EDGE = 12, ROW = 36, CHROME = 10 + (filterable ? 44 : 0);
+  /** Below the trigger when the list fits (or nothing fits better); above it when the viewport
+   *  has more room above. Either way the list is capped to the room it has. */
+  const placement = (r: DOMRect) => {
+    const wanted = Math.min(shown.length, 7) * ROW + CHROME + 2;
+    const below = window.innerHeight - r.bottom - GAP - EDGE;
+    const above = r.top - GAP - EDGE;
+    const common = { left: clampLeft(r), width: r.width };
+    if (wanted <= below || below >= above) return { ...common, top: r.bottom + GAP, maxH: Math.max(ROW * 2, below) };
+    return { ...common, bottom: window.innerHeight - r.top + GAP, maxH: Math.max(ROW * 2, above) };
+  };
 
   useEffect(() => {
     if (!open) return;
     const place = () => {
       const r = btn.current?.getBoundingClientRect();
-      if (r) setBox({ top: r.bottom + 6, left: clampLeft(r), width: r.width });
+      if (r) setBox(placement(r));
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setBox(null);
     const onDown = (e: MouseEvent) => {
@@ -87,7 +100,7 @@ export function SelectMenu({
     if (open) return setBox(null);
     const r = btn.current!.getBoundingClientRect();
     setFilter("");
-    setBox({ top: r.bottom + 6, left: clampLeft(r), width: r.width });
+    setBox(placement(r));
   }
 
   function choose(v: string) {
@@ -118,7 +131,14 @@ export function SelectMenu({
             ref={panel}
             role="listbox"
             aria-label={ariaLabel}
-            style={{ position: "fixed", top: lastBox.current.top, left: lastBox.current.left, minWidth: lastBox.current.width, maxWidth: Math.max(lastBox.current.width, 320) }}
+            style={{
+              position: "fixed",
+              top: lastBox.current.top,
+              bottom: lastBox.current.bottom,
+              left: lastBox.current.left,
+              minWidth: lastBox.current.width,
+              maxWidth: Math.max(lastBox.current.width, 320),
+            }}
             className={`${exit.closing ? "dropdown-out" : "dropdown-in"} z-[300] rounded-xl border border-border bg-surface p-1 shadow-xl`}
           >
             {filterable && (
@@ -133,7 +153,7 @@ export function SelectMenu({
                 />
               </div>
             )}
-            <div className="max-h-64 overflow-y-auto">
+            <div className="overflow-y-auto" style={{ maxHeight: Math.min(256, lastBox.current.maxH - CHROME) }}>
               {shown.length === 0 && <div className="px-2.5 py-2 text-[12.5px] text-muted">No matches.</div>}
               {shown.map((o) => {
                 const active = o.value === value;
