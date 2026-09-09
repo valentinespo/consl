@@ -111,7 +111,7 @@ export function LotBom({
           <select
             value=""
             onChange={(e) => e.target.value && startOverride(e.target.value)}
-            className="h-9 rounded-lg border border-dashed border-border bg-surface px-3 text-[12.5px] text-muted outline-none focus:border-accent-strong"
+            className="h-9 max-w-full truncate rounded-lg border border-dashed border-border bg-surface px-3 text-[12.5px] text-muted outline-none focus:border-accent-strong"
           >
             <option value="">+ Override a specific SKU…</option>
             {availableToOverride.map((l) => (

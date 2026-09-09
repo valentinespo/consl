@@ -21,7 +21,7 @@ import type { MaterialType } from "@/components/LotBom";
 import { DatePicker } from "@/components/DatePicker";
 import { Field, inputCls } from "@/components/FormKit";
 import { FACILITY_TYPES } from "@/lib/facility-types";
-import { Check, AlertTriangle, ChevronLeft, Plus, X, Package, Lock, Pencil } from "@/components/icons";
+import { Check, AlertTriangle, ChevronDown, ChevronLeft, Plus, X, Package, Lock, Pencil } from "@/components/icons";
 import type { MyOrg } from "@/lib/orgs";
 import { createFacility, saveFinishedOpenings, saveRawOpenings } from "@/app/facilities/actions";
 import {
@@ -42,6 +42,7 @@ import type { OnboardingJob } from "@/lib/onboarding-jobs";
 import Image from "next/image";
 import { ROOT_LOGO } from "@/lib/channel-logos";
 import { SEG } from "@/lib/segments";
+import { deriveProduction, derivePayment, PRODUCTION_LABEL, PAYMENT_LABEL, DERIVED_PILL_CLS } from "@/lib/lot-status";
 
 /** Mirror of lib/onboarding-jobs' rule (that module is server-only): a job that never reported
  *  back — the server restarted mid-way — stops counting as running after a generous window. */
@@ -1538,21 +1539,40 @@ function StepFinish({
 
 function StepProduction({ ownFacilities, products, editing }: { ownFacilities: WizardFacility[]; products: WizardProduct[]; editing: LotEditing }) {
   const [adding, setAdding] = useState(editing.lots.length === 0);
+  // One lot open at a time — the list stays scannable however many runs there are. A lot just
+  // created opens itself; otherwise everything starts folded to its summary line.
+  const [openId, setOpenId] = useState<string | null>(null);
   return (
     <div className="space-y-4">
       <StepHeader
         title="Production in progress"
         body="Anything a co-packer is making for you right now: create it as a lot with the products and units on order. Each lot consumes its materials from the stock you just counted, and the payments you attach to it count towards its cost — exactly as in the app from here on. Nothing in production? Just continue."
       />
-      {editing.lots.map((lot) => (
-        <WizardLotPanel key={lot.id} lot={lot} ownFacilities={ownFacilities} products={products} editing={editing} />
-      ))}
+      {editing.lots.length > 0 && (
+        <div className="overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface">
+          {editing.lots.map((lot, i) => (
+            <WizardLotPanel
+              key={lot.id}
+              lot={lot}
+              ownFacilities={ownFacilities}
+              products={products}
+              editing={editing}
+              open={openId === lot.id}
+              onToggle={() => setOpenId((cur) => (cur === lot.id ? null : lot.id))}
+              last={i === editing.lots.length - 1}
+            />
+          ))}
+        </div>
+      )}
       {adding ? (
         <NewLotPanel
           ownFacilities={ownFacilities}
           products={products}
           nextLotNr={editing.nextLotNr}
-          onDone={() => setAdding(false)}
+          onDone={(createdId) => {
+            setAdding(false);
+            if (createdId) setOpenId(createdId);
+          }}
           cancellable={editing.lots.length > 0}
         />
       ) : (
@@ -1578,7 +1598,7 @@ function NewLotPanel({
   ownFacilities: WizardFacility[];
   products: WizardProduct[];
   nextLotNr: number;
-  onDone: () => void;
+  onDone: (createdId?: string) => void;
   cancellable: boolean;
 }) {
   const router = useRouter();
@@ -1616,7 +1636,7 @@ function NewLotPanel({
     try {
       const r = await createOnboardingLot({ lotNr: Number(lotNr) || 0, poNumber: poNumber.trim() || null, poDateISO: poDate || null, facilityId, lines: clean });
       if (!r.ok) return fail(r.error ?? "Couldn't create the lot.");
-      onDone();
+      onDone(r.lotId);
       router.refresh();
       return null;
     } catch {
@@ -1698,7 +1718,7 @@ function NewLotPanel({
       {error && <div className="mt-3 text-[12.5px] text-negative">{error}</div>}
       <div className="mt-4 flex justify-end gap-2">
         {cancellable && (
-          <button type="button" onClick={onDone} className="rounded-lg border border-border px-3.5 py-2 text-[13px] text-ink-soft hover:bg-surface-2">
+          <button type="button" onClick={() => onDone()} className="rounded-lg border border-border px-3.5 py-2 text-[13px] text-ink-soft hover:bg-surface-2">
             Cancel
           </button>
         )}
@@ -1710,8 +1730,25 @@ function NewLotPanel({
   );
 }
 
-function WizardLotPanel({ lot, ownFacilities, products, editing }: { lot: WizardLot; ownFacilities: WizardFacility[]; products: WizardProduct[]; editing: LotEditing }) {
+function WizardLotPanel({
+  lot,
+  ownFacilities,
+  products,
+  editing,
+  open,
+  onToggle,
+  last,
+}: {
+  lot: WizardLot;
+  ownFacilities: WizardFacility[];
+  products: WizardProduct[];
+  editing: LotEditing;
+  open: boolean;
+  onToggle: () => void;
+  last: boolean;
+}) {
   const router = useRouter();
+  const { money } = useMoney();
   const [bridge, setBridge] = useState<{ save: () => Promise<string | null>; discard: () => void } | null>(null);
   const onDirtyState = useCallback((s: { save: () => Promise<string | null>; discard: () => void } | null) => setBridge(s), []);
   useDirtySection(`lot-${lot.id}`, !!bridge, {
@@ -1722,56 +1759,94 @@ function WizardLotPanel({ lot, ownFacilities, products, editing }: { lot: Wizard
   const facility = ownFacilities.find((f) => f.id === lot.initial.facilityId);
   const units = lot.initialLines.reduce((t, l) => t + l.units, 0);
   const slotId = `lot-status-slot-${lot.id}`;
+  // Folded: the saved state's pills. Open: the editor portals live pills into the slot instead,
+  // so staged status edits preview in the header exactly as on the lot page.
+  const prod = deriveProduction(lot.initialLines);
+  const pay = derivePayment(lot.initialLines);
   return (
-    <div className={panelCls}>
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+    <div className={last ? "" : "border-b border-line"}>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onToggle();
+          }
+        }}
+        aria-expanded={open}
+        className={`flex cursor-pointer flex-wrap items-center gap-3 px-4 py-3 ${open ? "bg-surface-2" : "hover:bg-surface-2"}`}
+      >
+        <ChevronDown size={15} className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`} />
         <div className="min-w-0">
-          <div className="text-[15px] font-semibold text-ink">Lot #{lot.lotNr}</div>
+          <div className="text-[14px] font-semibold text-ink">Lot #{lot.lotNr}</div>
           <div className="text-[12px] text-muted">
-            {facility ? `${facility.code} · ${facility.name}` : "Facility"} · {lot.initialLines.length} SKU{lot.initialLines.length === 1 ? "" : "s"} · {units.toLocaleString()} units
+            {facility ? `${facility.code} · ${facility.name}` : "Facility"} · {lot.initialLines.map((l) => l.code).join(", ")} · {units.toLocaleString()} units
           </div>
         </div>
-        <span id={slotId} className="flex items-center gap-2" />
-        <div className="ml-auto">
-          <DeleteX
-            label={`lot #${lot.lotNr}`}
-            onDelete={async () => {
-              const r = await deleteOnboardingLot(lot.id);
-              if (r.ok) router.refresh();
-              return r;
-            }}
-          />
+        {open ? (
+          <span id={slotId} className="flex items-center gap-2" onClick={(e) => e.stopPropagation()} />
+        ) : (
+          <span className="flex items-center gap-2">
+            <span className={`${DERIVED_PILL_CLS[prod]} inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-medium`}>
+              {PRODUCTION_LABEL[prod]}
+            </span>
+            <span className={`${DERIVED_PILL_CLS[pay]} inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-medium`}>
+              {PAYMENT_LABEL[pay]}
+            </span>
+          </span>
+        )}
+        <div className="ml-auto flex items-center gap-3">
+          <div className="text-right">
+            <div className="text-[10.5px] uppercase tracking-wide text-muted">Cost so far</div>
+            <div className="tabular text-[13px] font-semibold text-ink">{money(lot.totalCog, 0)}</div>
+          </div>
+          <span onClick={(e) => e.stopPropagation()}>
+            <DeleteX
+              label={`lot #${lot.lotNr}`}
+              onDelete={async () => {
+                const r = await deleteOnboardingLot(lot.id);
+                if (r.ok) router.refresh();
+                return r;
+              }}
+            />
+          </span>
         </div>
       </div>
-      <LotEditor
-        key={lot.updatedAt}
-        lotId={lot.id}
-        initial={lot.initial}
-        initialLines={lot.initialLines}
-        facilities={ownFacilities.map((f) => ({ id: f.id, code: f.code, name: f.name }))}
-        products={products.map((p) => ({ id: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl }))}
-        materialTypes={editing.materialTypes}
-        skuTxnCounts={lot.skuTxnCounts}
-        totalCog={lot.totalCog}
-        hideSaveBar
-        onDirtyState={onDirtyState}
-        statusSlotId={slotId}
-      />
-      <div className="mt-8">
-        <h3 className="mb-1 text-[14px] font-semibold text-ink">Production costs</h3>
-        <p className="mb-3 text-[12.5px] text-muted">
-          Payments already made for this run — add them as transactions, dated when they happened, and assign each line to the products it covers.
-        </p>
-        <TransactionInvoicesTable
-          invoices={lot.invoices}
-          lots={editing.lotOptions}
-          suppliers={editing.suppliers}
-          categories={editing.categories}
-          skuImages={editing.skuImages}
-          showLotColumn={false}
-          defaultLotId={lot.id}
-        />
-      </div>
+      {open && (
+        <div className="dropdown-in border-t border-line px-4 pb-5 pt-4">
+          <LotEditor
+            key={lot.updatedAt}
+            lotId={lot.id}
+            initial={lot.initial}
+            initialLines={lot.initialLines}
+            facilities={ownFacilities.map((f) => ({ id: f.id, code: f.code, name: f.name }))}
+            products={products.map((p) => ({ id: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl }))}
+            materialTypes={editing.materialTypes}
+            skuTxnCounts={lot.skuTxnCounts}
+            totalCog={lot.totalCog}
+            hideSaveBar
+            onDirtyState={onDirtyState}
+            statusSlotId={slotId}
+          />
+          <div className="mt-8">
+            <h3 className="mb-1 text-[14px] font-semibold text-ink">Production costs</h3>
+            <p className="mb-3 text-[12.5px] text-muted">
+              Payments already made for this run — add them as transactions, dated when they happened, and assign each line to the products it covers.
+            </p>
+            <TransactionInvoicesTable
+              invoices={lot.invoices}
+              lots={editing.lotOptions}
+              suppliers={editing.suppliers}
+              categories={editing.categories}
+              skuImages={editing.skuImages}
+              showLotColumn={false}
+              defaultLotId={lot.id}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
