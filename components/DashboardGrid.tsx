@@ -47,15 +47,16 @@ const WIDGETS: Record<string, Meta> = {
   leadTime: { title: "Production lead time", minW: 4, minH: 3, w: 4, h: 5 },
 };
 
+// What a freshly onboarded company sees: the arrangement the founder settled on for Herbl —
+// the value chart with lead time and cover beside it, then the two donuts with reorder alerts.
+// Anything else (recent lots, value by bucket) stays available from the edit mode's tray.
 const DEFAULT_LAYOUT: Item[] = [
-  { id: "totalValue", x: 0, y: 0, w: 12, h: 4 },
-  { id: "reorderAlerts", x: 0, y: 4, w: 5, h: 4 },
-  { id: "daysCover", x: 5, y: 4, w: 3, h: 2 },
-  { id: "leadTime", x: 8, y: 4, w: 4, h: 4 },
-  { id: "producedValue", x: 0, y: 8, w: 4, h: 6 },
-  { id: "amountSpent", x: 4, y: 8, w: 4, h: 6 },
-  { id: "recentLots", x: 8, y: 8, w: 4, h: 6 },
-  { id: "valueByBucket", x: 0, y: 14, w: 8, h: 4 },
+  { id: "totalValue", x: 0, y: 0, w: 8, h: 5 },
+  { id: "leadTime", x: 8, y: 0, w: 4, h: 3 },
+  { id: "daysCover", x: 8, y: 3, w: 4, h: 2 },
+  { id: "producedValue", x: 0, y: 5, w: 4, h: 5 },
+  { id: "amountSpent", x: 4, y: 5, w: 4, h: 5 },
+  { id: "reorderAlerts", x: 8, y: 5, w: 4, h: 3 },
 ];
 
 const overlap = (a: Item, b: Item) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
