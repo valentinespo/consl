@@ -161,6 +161,7 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
       if (Date.now() - last >= ORDERS_REFRESH_MS) {
         lastOrdersRefresh.set(orgId, Date.now());
         const { importShopifyOrders, importTikTokOrders } = await import("@/lib/orders");
+        const { IMPORTER_VERSIONS, importerVersion, stampImporterVersion } = await import("@/lib/import-versions");
         for (const [provider, channel, recent, full] of [
           ["shopify", "SHOPIFY", () => importShopifyOrders(3), () => importShopifyOrders()],
           ["tiktok", "TIKTOK", () => importTikTokOrders(3), () => importTikTokOrders()],
@@ -169,10 +170,17 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
           try {
             // A connected channel with zero orders means its history was never pulled (connected
             // outside onboarding, or a fresh database) — self-heal with one full import; every
-            // later pass is the cheap 3-day window.
+            // later pass is the cheap 3-day window. A Shopify ledger written by an older importer
+            // generation gets one full re-read too, then carries the current generation.
             const existing = await prisma.salesOrder.count({ where: { channel } });
-            await (existing === 0 ? full() : recent());
+            const settingsNow = await getOrgSettings();
+            const behind = provider === "shopify" && importerVersion(settingsNow.importerVersions, "shopifyFinance") < IMPORTER_VERSIONS.shopifyFinance;
+            await (existing === 0 || behind ? full() : recent());
             if (existing === 0) console.log(`[scheduler] ${provider} full order history imported for org ${orgId}`);
+            if (behind) {
+              await saveOrgSettings({ importerVersions: stampImporterVersion(settingsNow.importerVersions, "shopifyFinance") });
+              console.log(`[scheduler] shopify ledger re-read for ${orgId}: on the current importer`);
+            }
           } catch (e) {
             console.error(`[scheduler] ${provider} orders failed for org ${orgId}:`, (e as Error).message);
           }
@@ -268,9 +276,13 @@ async function backfillTick(): Promise<void> {
           if (r.imported > 0) console.log(`[scheduler] amazon order backfill for ${orgId}: +${r.imported} (cursor ${r.cursor}${r.done ? ", done" : ""})`);
           // The finance ledger walks back alongside the orders — different rate pool, so the two
           // steps in one tick never contend.
-          const { backfillAmazonFinancesStep } = await import("@/lib/finances");
+          const { backfillAmazonFinancesStep, amazonFinanceRewalkStep } = await import("@/lib/finances");
           const f = await backfillAmazonFinancesStep();
           if (f.rows > 0) console.log(`[scheduler] amazon finance backfill for ${orgId}: +${f.rows} rows (cursor ${f.cursor}${f.done ? ", done" : ""})`);
+          // A ledger written by an older importer generation is re-read window by window until it
+          // carries the current one — so an importer fix reaches every company on its own.
+          const rw = await amazonFinanceRewalkStep();
+          if (rw.active) console.log(`[scheduler] amazon finance re-read for ${orgId}: ${rw.done ? "complete — ledger is on the current importer" : `+${rw.rows} rows`}`);
         });
       } catch (e) {
         console.error(`[scheduler] backfill failed for org ${orgId}:`, (e as Error).message);

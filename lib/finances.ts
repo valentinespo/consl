@@ -6,6 +6,7 @@ import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { getCurrentOrg } from "@/lib/org";
 import { fxRate } from "@/lib/fx";
+import { IMPORTER_VERSIONS, importerVersion, stampImporterVersion } from "@/lib/import-versions";
 
 /**
  * Amazon's financial ledger → FinanceEvent rows, the raw material of the P&L.
@@ -376,6 +377,36 @@ export async function backfillAmazonFinancesStep(): Promise<{ done: boolean; row
   }
   await saveOrgSettings({ financeBackfillCursor: start.toISOString() });
   return { done: start.getTime() <= floor.getTime(), rows, cursor: start.toISOString() };
+}
+
+/**
+ * One step of a background RE-READ of the whole ledger, run when the importer's generation has
+ * moved on since this company's history was written (lib/import-versions.ts). Same windows as
+ * the backfill, from now back to the floor, one per tick, replacing each window's rows with what
+ * Amazon reports today; the new generation is stamped when the walk reaches the floor. Waits for
+ * the first backfill to finish, and never touches that walk's cursor.
+ */
+export async function amazonFinanceRewalkStep(): Promise<{ active: boolean; done: boolean; rows: number }> {
+  const s = await getOrgSettings();
+  if (importerVersion(s.importerVersions, "amazonFinance") >= IMPORTER_VERSIONS.amazonFinance) return { active: false, done: true, rows: 0 };
+  const floor = new Date(Date.now() - BACKFILL_FLOOR_DAYS * 86_400_000);
+  if (!s.financeBackfillCursor || new Date(s.financeBackfillCursor) > floor) return { active: false, done: false, rows: 0 };
+  const client = await amazonClient();
+  if (!client) return { active: false, done: false, rows: 0 };
+  const cursorEnd = s.financeRewalkCursor ? new Date(s.financeRewalkCursor) : new Date(Date.now() - 3 * 60_000);
+  if (cursorEnd <= floor) {
+    await saveOrgSettings({ importerVersions: stampImporterVersion(s.importerVersions, "amazonFinance"), financeRewalkCursor: null });
+    return { active: true, done: true, rows: 0 };
+  }
+  const start = new Date(Math.max(floor.getTime(), cursorEnd.getTime() - BACKFILL_WINDOW_DAYS * 86_400_000));
+  let rows = 0;
+  try {
+    rows = (await importAmazonFinances(start, cursorEnd)).rows;
+  } catch (e) {
+    if (!/2 years/i.test((e as Error).message)) throw e;
+  }
+  await saveOrgSettings({ financeRewalkCursor: start.toISOString() });
+  return { active: true, done: false, rows };
 }
 
 /** The live leg: sweep [cursor − overlap, now − 2 min) forward. Upserts make the overlap free,

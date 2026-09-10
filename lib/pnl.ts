@@ -450,9 +450,10 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
   const ledgerTotal = groups.reduce((t, g) => t + g.total, 0);
   const netProfit = ledgerTotal + fifo.cogs;
 
-  const settings = await prisma.settings.findFirst({ select: { financeBackfillCursor: true } });
+  const settings = await prisma.settings.findFirst({ select: { financeBackfillCursor: true, financeRewalkCursor: true } });
   const floor = new Date(Date.now() - 725 * 86_400_000);
-  const backfillInProgress = selectedSet.has("AMAZON") && (!settings?.financeBackfillCursor || new Date(settings.financeBackfillCursor) > floor);
+  const backfillInProgress =
+    selectedSet.has("AMAZON") && (!settings?.financeBackfillCursor || new Date(settings.financeBackfillCursor) > floor || !!settings?.financeRewalkCursor);
 
   return {
     groups,
