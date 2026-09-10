@@ -20,6 +20,10 @@ import type { InvoiceRow, LotOption } from "@/components/TransactionInvoiceForm"
 import type { MaterialType } from "@/components/LotBom";
 import { DatePicker } from "@/components/DatePicker";
 import { Field, inputCls } from "@/components/FormKit";
+import { HoverHint } from "@/components/HoverHint";
+import { BATCH_HELP, BUFFER_HELP, FLOOR_HELP, LEAD_HELP, REORDER_TO_HELP, SHIP_HELP } from "@/lib/restock-help";
+import { updateGlobalDefaults } from "@/app/inventory/actions";
+import type { Defaults as ReorderDefaults } from "@/components/RestockDashboard";
 import { FACILITY_TYPES } from "@/lib/facility-types";
 import { Check, AlertTriangle, ChevronDown, ChevronLeft, Plus, X, Package, Lock, Pencil } from "@/components/icons";
 import type { MyOrg } from "@/lib/orgs";
@@ -163,6 +167,8 @@ export function OnboardingWizard(props: {
   job: OnboardingJob | null;
   mapping: WizardMapping;
   products: WizardProduct[];
+  /** The company-wide reorder rules (floor, lead time, shipping, order size, batch) — set in step 2. */
+  reorderDefaults: ReorderDefaults;
   facilities: WizardFacility[];
   channelCounts: ChannelCount[];
   materials: WizardMaterial[];
@@ -401,6 +407,7 @@ export function OnboardingWizard(props: {
                 <StepProducts
                   mapping={props.mapping}
                   products={props.products}
+                  reorderDefaults={props.reorderDefaults}
                   cogValue={cogValue}
                   setCog={(id, v) => setCogDraft((d) => ({ ...d, [id]: v }))}
                 />
@@ -746,11 +753,13 @@ function StepChannels({
 function StepProducts({
   mapping,
   products,
+  reorderDefaults,
   cogValue,
   setCog,
 }: {
   mapping: WizardMapping;
   products: WizardProduct[];
+  reorderDefaults: ReorderDefaults;
   cogValue: (p: WizardProduct) => string;
   setCog: (id: string, v: string) => void;
 }) {
@@ -786,8 +795,8 @@ function StepProducts({
         title="Your products"
         body={
           mapping
-            ? "Every listing your channels sell needs a decision: map it to a product, import it as a new one, or ignore it (bundles, samples, discontinued items). Then tell consl what one unit of each product costs you today — that prices your starting stock."
-            : "No channels connected — create your products (SKUs) by hand, then tell consl what one unit of each costs you today. That prices your starting stock."
+            ? "Every listing your channels sell needs a decision: map it to a product, import it as a new one, or ignore it (bundles, samples, discontinued items). Then tell consl what one unit of each product costs you today — that prices your starting stock — and set the rules it reorders by."
+            : "No channels connected — create your products (SKUs) by hand, then tell consl what one unit of each costs you today. That prices your starting stock. Last, set the rules it reorders by."
         }
       />
 
@@ -912,7 +921,80 @@ function StepProducts({
           </p>
         )}
       </section>
+
+      {/* Remounts on every saved value set, so a fresh draft always starts from what the server holds. */}
+      <ReorderDefaultsSection key={JSON.stringify(reorderDefaults)} defaults={reorderDefaults} />
     </div>
+  );
+}
+
+/* ----------------------------- Step 2 (cont.): reorder rules ----------------------------- */
+
+const REORDER_FIELDS: { key: keyof ReorderDefaults; label: string; help: { title: string; body: string }; step: string }[] = [
+  { key: "minMonths", label: "Floor (months of cover)", help: FLOOR_HELP, step: "0.5" },
+  { key: "leadMonths", label: "Production lead time (months)", help: LEAD_HELP, step: "0.5" },
+  { key: "shipDays", label: "Shipping time (days)", help: SHIP_HELP, step: "1" },
+  { key: "shipBufferX", label: "Shipping buffer (×)", help: BUFFER_HELP, step: "0.5" },
+  { key: "reorderTo", label: "Order size (months of sales)", help: REORDER_TO_HELP, step: "0.5" },
+  { key: "batchSize", label: "Batch size (units)", help: BATCH_HELP, step: "1" },
+];
+
+const reorderDraftOf = (d: ReorderDefaults) => Object.fromEntries(REORDER_FIELDS.map((f) => [f.key, String(d[f.key])])) as Record<keyof ReorderDefaults, string>;
+
+/** The company-wide reorder rules — the same six settings the Reorder page's gear edits, asked
+ *  once here so the first restock alerts already speak the company's numbers. Saved through the
+ *  wizard's floating bar like every other section; blank falls back to the current value. */
+function ReorderDefaultsSection({ defaults }: { defaults: ReorderDefaults }) {
+  const baseline = reorderDraftOf(defaults);
+  const [draft, setDraft] = useState(baseline);
+  const dirty = REORDER_FIELDS.some((f) => draft[f.key] !== baseline[f.key]);
+  const parsed = (): ReorderDefaults => {
+    const num = (k: keyof ReorderDefaults) => {
+      const v = draft[k].trim();
+      const n = v === "" ? defaults[k] : parseFloat(v.replace(",", "."));
+      return Number.isFinite(n) ? n : defaults[k];
+    };
+    return { minMonths: num("minMonths"), leadMonths: num("leadMonths"), shipDays: num("shipDays"), shipBufferX: num("shipBufferX"), reorderTo: num("reorderTo"), batchSize: num("batchSize") };
+  };
+  useDirtySection("reorder", dirty, {
+    label: "reorder rules",
+    save: async () => {
+      try {
+        const r = await updateGlobalDefaults(parsed());
+        return r.ok ? null : (r.error ?? "Couldn't save the reorder rules.");
+      } catch {
+        return "Couldn't reach the server — try again.";
+      }
+    },
+    discard: () => setDraft(baseline),
+  });
+  return (
+    <section className={panelCls}>
+      <h2 className="text-[14px] font-semibold text-ink">How consl reorders</h2>
+      <p className="mt-1 max-w-[80ch] text-[12.5px] text-muted">
+        The rules behind every restock alert: how much cover to keep, how long a production run and a shipment take, and how big an
+        order should be. Company-wide defaults — any product can get its own numbers later from the Reorder page. Hover a label for
+        what it means.
+      </p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {REORDER_FIELDS.map((f) => (
+          <label key={f.key} className="text-[11.5px] text-muted">
+            <div className="mb-1 flex items-center gap-1">
+              {f.label}
+              <HoverHint {...f.help} size={11} />
+            </div>
+            <input
+              type="number"
+              min="0"
+              step={f.step}
+              value={draft[f.key]}
+              onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}
+              className={`${inputCls} tabular`}
+            />
+          </label>
+        ))}
+      </div>
+    </section>
   );
 }
 

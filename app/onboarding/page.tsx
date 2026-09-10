@@ -280,6 +280,14 @@ export default async function OnboardingPage({
       channelsPullPending={channelsPullPending}
       mapping={mapping}
       products={products.map((p) => ({ id: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl, openingUnitCost: p.openingUnitCost }))}
+      reorderDefaults={{
+        minMonths: settings.defaultMinMonths,
+        leadMonths: settings.defaultLeadMonths,
+        shipDays: settings.shipDays,
+        shipBufferX: settings.shipBufferX,
+        reorderTo: settings.defaultReorderTo,
+        batchSize: settings.defaultBatchSize,
+      }}
       facilities={facilities.map((f) => ({ id: f.id, code: f.code, name: f.name, type: f.type, channel: f.channel, locked: f.locked }))}
       channelCounts={channelCounts}
       materials={materials.map((m) => ({ id: m.id, code: m.code, name: m.name, unitLabel: m.unitLabel, skuSpecific: m.skuSpecific }))}
