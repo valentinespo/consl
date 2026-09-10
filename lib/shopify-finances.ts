@@ -9,10 +9,21 @@ import type { PnlGroup } from "@/lib/finances";
 /**
  * A Shopify order's money → FinanceEvent rows (channel SHOPIFY), so Shopify adds up like the
  * other channels: product sales per line (with units — the unit driver, like Amazon's Principal),
- * shipping charged, the sales tax collected AND the same amount remitted (a pass-through: the
- * customer pays it, the merchant hands it to the state, it is never income — it nets to zero,
- * exactly as Amazon's facilitator tax does), the processing fee Shopify Payments took, each
- * refund on the day it was issued, and a chargeback the merchant lost.
+ * shipping as the customer actually paid it (after any shipping discount code), tips, the sales
+ * tax collected AND the same amount remitted (a pass-through: the customer pays it, the merchant
+ * hands it to the state, it is never income — it nets to zero, exactly as Amazon's facilitator
+ * tax does; duties and other collected fees such as a retail delivery fee pass through the same
+ * way), the processing fee Shopify Payments took, each refund on the day it was issued, and a
+ * chargeback the merchant lost. Everything the customer was charged is on the statement, so the
+ * sales rows of an order always add up to what the customer paid.
+ *
+ * Stores that show prices with tax included (`taxesIncluded`): the tax inside each line's and
+ * the shipping's price is taken out before booking, so it is counted once, on the tax rows.
+ *
+ * NOT on the statement, on purpose: Shopify's own third-party transaction fee for stores using a
+ * separate payment provider. It is billed on the monthly Shopify bill, not per order, and the
+ * founder's call is to leave it to the accounting system (it would need its own clearing entry
+ * against the Shopify bill payment there).
  *
  * Shopify has no settlement lag worth bridging: an order carries its own money the moment it is
  * placed, so the rows are written straight from the order at import time and rewritten on every
@@ -42,6 +53,11 @@ export type ShopifyFinanceNode = {
   currentTotalPriceSet?: Money;
   totalTaxSet?: Money;
   totalShippingPriceSet?: Money;
+  taxesIncluded?: boolean | null;
+  totalTipReceivedSet?: Money;
+  originalTotalDutiesSet?: Money;
+  originalTotalAdditionalFeesSet?: Money;
+  shippingLines?: { nodes: Array<{ originalPriceSet?: Money; discountedPriceSet?: Money; taxLines?: Array<{ priceSet?: Money }> | null }> } | null;
   lineItems: {
     nodes: Array<{
       sku: string | null;
@@ -51,6 +67,7 @@ export type ShopifyFinanceNode = {
       originalUnitPriceSet?: Money;
       originalTotalSet?: Money;
       discountAllocations?: Array<{ allocatedAmountSet: Money }>;
+      taxLines?: Array<{ priceSet?: Money }> | null;
     }>;
   };
   transactions?: Array<{ kind: string; status: string; fees?: Array<{ type?: string | null; amount: { amount: string } }> | null }> | null;
@@ -107,18 +124,35 @@ export function flattenShopifyOrder(
     rows.push({ ...base, sku: null, quantity: null, ...r, amount: round2(r.amount) });
   };
 
+  const inclusive = !!o.taxesIncluded;
+  const taxOf = (lines: Array<{ priceSet?: Money }> | null | undefined) => (lines ?? []).reduce((t, x) => t + num(x.priceSet), 0);
   for (const l of managed) {
     // What the buyer paid for the line after every discount — line-level and its share of an
-    // order-level code (Shopify's discounted unit price only carries the line-level ones).
+    // order-level code (Shopify's discounted unit price only carries the line-level ones) — and,
+    // in a tax-inclusive store, without the tax that sits inside that price.
     const gross = l.originalTotalSet ? num(l.originalTotalSet) : l.quantity * num(l.originalUnitPriceSet);
     const allocated = (l.discountAllocations ?? []).reduce((t, a) => t + num(a.allocatedAmountSet), 0);
-    const net = l.discountAllocations ? Math.max(0, gross - allocated) : l.quantity * num(l.discountedUnitPriceSet ?? l.originalUnitPriceSet);
+    const paid = l.discountAllocations ? Math.max(0, gross - allocated) : l.quantity * num(l.discountedUnitPriceSet ?? l.originalUnitPriceSet);
+    const net = inclusive ? Math.max(0, paid - taxOf(l.taxLines)) : paid;
     push({ group: "sales", type: "Product sales", amount: net, sku: lineKey(l), quantity: l.quantity });
   }
-  push({ group: "sales", type: "Shipping", amount: num(o.totalShippingPriceSet) });
+  // Shipping as the customer paid it: after a shipping discount code, and without its tax when
+  // prices include tax. (`totalShippingPriceSet` is the price before discounts.)
+  const shipLines = o.shippingLines?.nodes;
+  const shippingPaid = shipLines ? shipLines.reduce((t, s) => t + num(s.discountedPriceSet), 0) : num(o.totalShippingPriceSet);
+  const shippingTax = inclusive && shipLines ? shipLines.reduce((t, s) => t + taxOf(s.taxLines), 0) : 0;
+  push({ group: "sales", type: "Shipping", amount: Math.max(0, shippingPaid - shippingTax) });
+  push({ group: "sales", type: "Tips", amount: num(o.totalTipReceivedSet) });
   const tax = num(o.totalTaxSet);
   push({ group: "sales", type: "Tax collected", amount: tax });
   push({ group: "taxes", type: "Tax remitted", amount: -tax });
+  // Duties and other collected fees (a retail delivery fee) pass through like the tax.
+  const duties = num(o.originalTotalDutiesSet);
+  push({ group: "sales", type: "Duties collected", amount: duties });
+  push({ group: "taxes", type: "Duties remitted", amount: -duties });
+  const extraFees = num(o.originalTotalAdditionalFeesSet);
+  push({ group: "sales", type: "Additional fees collected", amount: extraFees });
+  push({ group: "taxes", type: "Additional fees remitted", amount: -extraFees });
 
   // What Shopify Payments kept on the capture(s) — only when the ledger isn't the source.
   if (!ledgerFees) {
@@ -138,8 +172,9 @@ export function flattenShopifyOrder(
     let lines = 0;
     let lineTax = 0;
     for (const rl of r.refundLineItems?.nodes ?? []) {
-      const sub = num(rl.subtotalSet);
       const t = num(rl.totalTaxSet);
+      // A tax-inclusive store's refund subtotal carries the tax inside it, like its prices.
+      const sub = inclusive ? Math.max(0, num(rl.subtotalSet) - t) : num(rl.subtotalSet);
       lines += sub;
       lineTax += t;
       push({ group: "refunds", type: "Refund:Product sales", amount: -sub, sku: rl.lineItem ? lineKey(rl.lineItem) : null, txId: r.id, postedAt: at, eventAt: at });

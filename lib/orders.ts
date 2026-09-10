@@ -196,6 +196,14 @@ type ShopifyOrderNode = {
   totalTaxSet: { shopMoney: { amount: string } } | null;
   totalShippingPriceSet: { shopMoney: { amount: string } } | null;
   totalDiscountsSet: { shopMoney: { amount: string } } | null;
+  // Everything else the customer can be charged, and whether prices carry the tax inside them.
+  taxesIncluded?: boolean | null;
+  totalTipReceivedSet?: { shopMoney: { amount: string } } | null;
+  originalTotalDutiesSet?: { shopMoney: { amount: string } } | null;
+  originalTotalAdditionalFeesSet?: { shopMoney: { amount: string } } | null;
+  // Shipping as charged: the list price and what the customer actually paid after any shipping
+  // discount code (`totalShippingPriceSet` is the price BEFORE discounts).
+  shippingLines?: { nodes: Array<{ originalPriceSet: { shopMoney: { amount: string } } | null; discountedPriceSet: { shopMoney: { amount: string } } | null; taxLines?: Array<{ priceSet: { shopMoney: { amount: string } } | null }> | null }> } | null;
   shippingAddress: { city: string | null; provinceCode: string | null; zip: string | null; countryCodeV2: string | null } | null;
   fulfillments: Array<{
     location: { id: string | null; name: string | null; isFulfillmentService?: boolean | null; fulfillmentService?: { handle: string | null; serviceName: string | null } | null } | null;
@@ -211,6 +219,8 @@ type ShopifyOrderNode = {
       // Every discount that landed on the line — line-level AND the line's share of an order-level
       // code. (discountedUnitPriceSet only knows the line-level ones.)
       discountAllocations: Array<{ allocatedAmountSet: { shopMoney: { amount: string } } }>;
+      // The tax inside the line's price, for stores that show prices with tax included.
+      taxLines?: Array<{ priceSet: { shopMoney: { amount: string } } | null }> | null;
     }>;
   };
   // How it was paid: every gateway on the order, and per transaction the gateway that took it and
@@ -237,14 +247,18 @@ type ShopifyOrderNode = {
 
 // One field list shared by the paged importer and the webhook's single-order refetch, so the two
 // can never drift apart on what an order means.
-const SHOPIFY_ORDER_FIELDS = `
-  id name createdAt updatedAt sourceName cancelledAt displayFinancialStatus displayFulfillmentStatus
+export const SHOPIFY_ORDER_FIELDS = `
+  id name createdAt updatedAt sourceName cancelledAt displayFinancialStatus displayFulfillmentStatus taxesIncluded
   app { name }
   channelInformation { channelDefinition { channelName } }
   currentTotalPriceSet { shopMoney { amount currencyCode } }
   totalTaxSet { shopMoney { amount } }
   totalShippingPriceSet { shopMoney { amount } }
   totalDiscountsSet { shopMoney { amount } }
+  totalTipReceivedSet { shopMoney { amount } }
+  originalTotalDutiesSet { shopMoney { amount } }
+  originalTotalAdditionalFeesSet { shopMoney { amount } }
+  shippingLines(first: 10) { nodes { originalPriceSet { shopMoney { amount } } discountedPriceSet { shopMoney { amount } } taxLines { priceSet { shopMoney { amount } } } } }
   shippingAddress { city provinceCode zip countryCodeV2 }
   fulfillments(first: 3) { location { id name isFulfillmentService fulfillmentService { handle serviceName } } }
   paymentGatewayNames
@@ -253,6 +267,7 @@ const SHOPIFY_ORDER_FIELDS = `
       sku quantity variant { id }
       discountedUnitPriceSet { shopMoney { amount } } originalUnitPriceSet { shopMoney { amount } } originalTotalSet { shopMoney { amount } }
       discountAllocations { allocatedAmountSet { shopMoney { amount } } }
+      taxLines { priceSet { shopMoney { amount } } }
     }
   }
   transactions(first: 10) {
@@ -312,7 +327,8 @@ function mapShopifyOrder(o: ShopifyOrderNode): Fetched {
     productGross: o.lineItems.nodes.reduce((s, l) => s + l.quantity * money(l.originalUnitPriceSet?.shopMoney.amount), 0),
     discounts: money(o.totalDiscountsSet?.shopMoney.amount),
     tax: money(o.totalTaxSet?.shopMoney.amount),
-    shipping: money(o.totalShippingPriceSet?.shopMoney.amount),
+    // What the customer paid for shipping after any shipping discount code.
+    shipping: o.shippingLines ? o.shippingLines.nodes.reduce((s, l) => s + money(l.discountedPriceSet?.shopMoney.amount), 0) : money(o.totalShippingPriceSet?.shopMoney.amount),
     shipCity: o.shippingAddress?.city ?? null,
     shipState: o.shippingAddress?.provinceCode ?? null,
     shipPostalCode: o.shippingAddress?.zip ?? null,
