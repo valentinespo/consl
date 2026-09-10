@@ -111,9 +111,9 @@ type RuleInput = FeeInput & {
   paymentMethod: string | null;
   facilityId: string | null;
   tag: string | null;
-  /** "future": orders from now on · "all": past and future · "period": orders placed inside `period`. */
-  scope: "future" | "all" | "period";
-  period?: { from: string; to: string } | null; // company-calendar days, YYYY-MM-DD
+  /** "all": past and future · "from": orders placed on `period.from` or later · "period": orders placed inside `period`. */
+  scope: "all" | "from" | "period";
+  period?: { from: string; to: string | null } | null; // company-calendar days, YYYY-MM-DD
 };
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -127,14 +127,17 @@ export async function createFeeRule(input: RuleInput) {
   if (input.channel && !["AMAZON", "SHOPIFY", "TIKTOK"].includes(input.channel)) return { ok: false as const, error: "Unknown channel." };
   if (input.tag && !FEE_TAGS[input.tag]) return { ok: false as const, error: "Unknown tag." };
   if (input.facilityId && !(await prisma.facility.findFirst({ where: { id: input.facilityId }, select: { id: true } }))) return { ok: false as const, error: "Pick a facility." };
-  if (!input.paymentMethod && input.bucket === "payment_fees" && !input.name.trim()) return { ok: false as const, error: "Give the fee a name." };
-  let period: { from: Date; to: Date } | null = null;
+  let period: { from: Date; to: Date | null } | null = null;
   if (input.scope === "period") {
     const p = input.period;
-    if (!p || !DAY.test(p.from) || !DAY.test(p.to)) return { ok: false as const, error: "Pick the first and last day the rule covers." };
+    if (!p || !DAY.test(p.from) || !p.to || !DAY.test(p.to)) return { ok: false as const, error: "Pick the first and last day the rule covers." };
     if (p.from > p.to) return { ok: false as const, error: "The period ends before it starts." };
     period = zonedDayBounds(p.from, p.to, (await getOrgSettings()).syncTz);
-  } else if (input.scope !== "future" && input.scope !== "all") return { ok: false as const, error: "Choose which orders the rule covers." };
+  } else if (input.scope === "from") {
+    const p = input.period;
+    if (!p || !DAY.test(p.from)) return { ok: false as const, error: "Pick the day the rule starts." };
+    period = { from: zonedDayBounds(p.from, p.from, (await getOrgSettings()).syncTz).from, to: null };
+  } else if (input.scope !== "all") return { ok: false as const, error: "Choose which orders the rule covers." };
   const rule = await prisma.orderFeeRule.create({
     data: {
       name: input.name.trim(),

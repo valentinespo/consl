@@ -104,8 +104,8 @@ export type FeeRuleRow = {
   facility: { id: string; name: string } | null;
   tag: string | null;
   appliesToPast: boolean;
-  /** Company-calendar days the rule covers, when it covers a period. */
-  period: { from: string; to: string } | null;
+  /** Company-calendar days the rule covers: from a day on (`to` null), or a closed period. */
+  period: { from: string; to: string | null } | null;
   active: boolean;
   orders: number;
 };
@@ -166,7 +166,7 @@ export async function feeRuleOptions(): Promise<FeeRuleOptions> {
     rules: rules.map((r) => ({
       id: r.id, name: r.name, kind: r.kind, value: r.value, extraFixed: r.extraFixed, bucket: r.bucket, channel: r.channel, source: r.source,
       paymentMethod: r.paymentMethod, facility: r.facility, tag: r.tag, appliesToPast: r.appliesToPast,
-      period: r.periodFrom && r.periodTo ? { from: dayIn(r.periodFrom, tz), to: dayIn(r.periodTo, tz) } : null,
+      period: r.periodFrom ? { from: dayIn(r.periodFrom, tz), to: r.periodTo ? dayIn(r.periodTo, tz) : null } : null,
       active: r.active, orders: r._count.fees,
     })),
     sources: src,

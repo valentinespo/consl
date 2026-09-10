@@ -897,8 +897,9 @@ model OrderFeeRule {
   tag          String? // mcf | free_sample | replacement | free_unit
   // Whether the rule was also written onto orders that predate it; otherwise it starts today.
   appliesToPast Boolean      @default(false)
-  // Set together: the rule covers only orders placed inside this window (company calendar days,
-  // stored as instants) — past orders in it right away, later ones as they arrive.
+  // The rule covers orders placed from `periodFrom` on, or inside [periodFrom, periodTo] when both
+  // are set (company calendar days, stored as instants) — past orders in it right away, later ones
+  // as they arrive. Neither set: from the rule's creation on, or the whole past (appliesToPast).
   periodFrom   DateTime?
   periodTo     DateTime?
   active       Boolean       @default(true)

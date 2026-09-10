@@ -6,6 +6,7 @@ import { X, Plus, Check } from "@/components/icons";
 import { inputCls } from "@/components/FormKit";
 import { SelectMenu } from "@/components/SelectMenu";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
+import { DatePicker } from "@/components/DatePicker";
 import { rangeBounds } from "@/lib/chart";
 import { useMoney } from "@/components/CurrencyProvider";
 import { paymentMethodLabel } from "@/lib/payment-methods";
@@ -77,7 +78,15 @@ function FeeFields({ draft, onChange }: { draft: FeeDraft; onChange: (d: FeeDraf
         </div>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
-        {draft.kind === "percent" ? (
+        <SelectMenu
+          value={draft.bucket}
+          onChange={(v) => onChange({ ...draft, bucket: v as Bucket })}
+          options={[
+            { value: "custom_fees", label: "Shows on the P&L under Custom fees" },
+            { value: "payment_fees", label: "Shows on the P&L under Payment processing" },
+          ]}
+        />
+        {draft.kind === "percent" && (
           <div className="relative">
             <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[12px] text-muted">+</span>
             <input
@@ -88,17 +97,7 @@ function FeeFields({ draft, onChange }: { draft: FeeDraft; onChange: (d: FeeDraf
               className={`${inputCls} pl-7`}
             />
           </div>
-        ) : (
-          <div />
         )}
-        <SelectMenu
-          value={draft.bucket}
-          onChange={(v) => onChange({ ...draft, bucket: v as Bucket })}
-          options={[
-            { value: "custom_fees", label: "Shows on the P&L under Custom fees" },
-            { value: "payment_fees", label: "Shows on the P&L under Payment processing" },
-          ]}
-        />
       </div>
     </div>
   );
@@ -315,10 +314,10 @@ export function OrderDialog({ order, facilities, onClose }: { order: OrderRow; f
   );
 }
 
-type Scope = "future" | "all" | "period";
+type Scope = "all" | "from" | "period";
 const SCOPES: { value: Scope; label: string }[] = [
-  { value: "future", label: "From now on" },
   { value: "all", label: "All orders, past and future" },
+  { value: "from", label: "From a date on" },
   { value: "period", label: "Only a date range" },
 ];
 
@@ -334,7 +333,8 @@ export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClo
   const [method, setMethod] = useState("");
   const [where, setWhere] = useState("");
   const [tag, setTag] = useState("");
-  const [scope, setScope] = useState<Scope>("future");
+  const [scope, setScope] = useState<Scope>("from");
+  const [fromDay, setFromDay] = useState(options.days.today); // "From a date on" starts today
   // The picker's trigger shows the preset's dates, so the draft must hold those same concrete
   // days from the start — a rule created without opening the picker covers what it displays.
   const [period, setPeriod] = useState<Range>(() => {
@@ -360,7 +360,14 @@ export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClo
     ]
       .filter(Boolean)
       .join(" · ") || "every order";
-  const when = (r: FeeRuleRow) => (r.period ? `orders from ${day(r.period.from)} to ${day(r.period.to)}` : r.appliesToPast ? "past orders too" : "from its creation on");
+  const when = (r: FeeRuleRow) =>
+    r.period
+      ? r.period.to
+        ? `orders from ${day(r.period.from)} to ${day(r.period.to)}`
+        : `orders from ${day(r.period.from)} on`
+      : r.appliesToPast
+        ? "all orders, past and future"
+        : "from its creation on";
   const amount = (r: FeeRuleRow) =>
     r.kind === "percent" ? `${r.value}% of amount paid${r.extraFixed ? ` + ${money(r.extraFixed)} per order` : ""}` : `${money(r.value)} per order`;
   const methodOpt = options.paymentMethods.find((m) => m.value === method);
@@ -459,6 +466,7 @@ export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClo
               );
             })}
           </div>
+          {scope === "from" && <DatePicker value={fromDay} onChange={setFromDay} fullWidth={false} isDayDisabled={(d) => d > options.days.today} />}
           {scope === "period" && <DateRangePicker value={period} onChange={setPeriod} newest={options.days.today} oldest={options.days.oldest} locale={locale} />}
         </div>
         <div className="flex items-center gap-2">
@@ -475,7 +483,7 @@ export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClo
                   facilityId: where || null,
                   tag: tag || null,
                   scope,
-                  period: scope === "period" ? { from: period.from, to: period.to } : null,
+                  period: scope === "period" ? { from: period.from, to: period.to } : scope === "from" ? { from: fromDay, to: null } : null,
                 });
                 if (r.ok) {
                   setDraft(emptyFee);
@@ -485,7 +493,8 @@ export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClo
                   setMethod("");
                   setWhere("");
                   setTag("");
-                  setScope("future");
+                  setScope("from");
+                  setFromDay(options.days.today);
                 }
                 return r;
               })

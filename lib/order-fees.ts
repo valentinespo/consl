@@ -11,8 +11,8 @@ import { prisma } from "@/lib/prisma";
  * sample, …) — and it charges a flat amount per order, or a share of what the customer paid plus
  * an optional flat amount on top (PayPal's 3.49% + $0.49 is one rule).
  *
- * When a rule applies: from its creation on (the default), to the whole past as well, or only to
- * orders placed inside a period. Each fee lands in the P&L bucket the rule chose — "Custom fees",
+ * When a rule applies: from a chosen day on (today by default), to the whole past as well, or
+ * only to orders placed inside a period. Each fee lands in the P&L bucket the rule chose — "Custom fees",
  * or "Payment processing" for a processor's charge — under the rule's own name.
  */
 
