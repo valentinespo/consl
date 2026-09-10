@@ -257,7 +257,7 @@ const SHOPIFY_ORDER_FIELDS = `
   }
   transactions(first: 10) {
     kind status gateway amountSet { shopMoney { amount } } fees { type amount { amount } }
-    paymentDetails { __typename ... on CardPaymentDetails { paymentMethodName wallet company } ... on LocalPaymentMethodsPaymentDetails { paymentMethodName } ... on ShopPayInstallmentsPaymentDetails { paymentMethodName } }
+    paymentDetails { __typename ... on CardPaymentDetails { paymentMethodName wallet company } ... on LocalPaymentMethodsPaymentDetails { paymentMethodName } ... on ShopPayInstallmentsPaymentDetails { paymentMethodName } ... on PaypalWalletPaymentDetails { paymentMethodName } }
   }
   refunds(first: 20) {
     id createdAt totalRefundedSet { shopMoney { amount } }
@@ -285,7 +285,10 @@ function shopifyPayment(o: ShopifyOrderNode): { paymentMethod: string | null; pa
   let detail: string | null = null;
   if (d?.__typename === "CardPaymentDetails") detail = [walletLabel(d.wallet), d.company].filter(Boolean).join(" · ") || null;
   else if (d?.__typename === "ShopPayInstallmentsPaymentDetails") detail = "Shop Pay Installments";
-  else if (d?.paymentMethodName) detail = d.paymentMethodName;
+  // PayPal Wallet inside Shopify Payments (US): Shopify processes it, its fee sits in the Payments
+  // ledger like a card's — the method stays shopify_payments, the wallet is the detail.
+  else if (d?.__typename === "PaypalWalletPaymentDetails") detail = "PayPal";
+  else if (d?.paymentMethodName) detail = paymentMethodLabel(d.paymentMethodName);
   const others = (o.paymentGatewayNames ?? []).filter((g) => g !== key).map((g) => paymentMethodLabel(g)).filter((x): x is string => !!x);
   if (others.length) detail = [detail, `with ${others.join(", ")}`].filter(Boolean).join(" · ");
   return { paymentMethod: key, paymentDetail: detail };

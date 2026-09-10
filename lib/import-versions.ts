@@ -7,9 +7,10 @@
  *  amazonFinance 3 — region-wide Finances v2024 walk: sister marketplaces (CAD/MXN with FX) and
  *                    MCF shipment fees ("Non-Amazon" marketplace) included.
  *  shopifyFinance 2 — line revenue net of order-level discounts; fees from the Payments ledger.
- *  shopifyOrders  1 — the payment method (gateway + wallet/card) captured on every order.
+ *  shopifyOrders  2 — the payment method (gateway + wallet/card) captured on every order; PayPal
+ *                    Wallet inside Shopify Payments named as such.
  */
-export const IMPORTER_VERSIONS = { amazonFinance: 3, shopifyFinance: 2, shopifyOrders: 1 } as const;
+export const IMPORTER_VERSIONS = { amazonFinance: 3, shopifyFinance: 2, shopifyOrders: 2 } as const;
 export type ImporterKey = keyof typeof IMPORTER_VERSIONS;
 
 /** The generation a company's ledger was written with (0 = before generations were tracked). */

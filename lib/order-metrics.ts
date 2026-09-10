@@ -110,8 +110,11 @@ export type FeeRuleRow = {
   orders: number;
 };
 
-/** A payment method seen on the company's orders, and whether the platform already reports its fee. */
-export type PaymentMethodOption = { value: string; label: string; channels: string[]; feesRead: boolean };
+/** A payment method seen on the company's orders, and whether the platform already reports its fee.
+ *  `mirror` names the consl channel the method stands for when it is another channel's sale
+ *  mirrored into Shopify ("tiktok_shop" → TIKTOK): those orders are counted on that channel with
+ *  its own fees, never on Shopify. */
+export type PaymentMethodOption = { value: string; label: string; channels: string[]; feesRead: boolean; mirror: string | null };
 
 export type FeeRuleOptions = {
   rules: FeeRuleRow[];
@@ -161,7 +164,10 @@ export async function feeRuleOptions(): Promise<FeeRuleOptions> {
   }
   const paymentMethods: PaymentMethodOption[] = [...byMethod.entries()]
     .sort((a, b) => b[1].orders - a[1].orders)
-    .map(([value, v]) => ({ value, label: paymentMethodLabel(value) ?? value, channels: v.channels, feesRead: v.feesRead }));
+    .map(([value, v]) => {
+      const mirror = mirrorChannel(value);
+      return { value, label: paymentMethodLabel(value) ?? value, channels: v.channels, feesRead: v.feesRead || !!mirror, mirror };
+    });
   return {
     rules: rules.map((r) => ({
       id: r.id, name: r.name, kind: r.kind, value: r.value, extraFixed: r.extraFixed, bucket: r.bucket, channel: r.channel, source: r.source,

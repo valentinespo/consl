@@ -443,9 +443,11 @@ export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClo
         </div>
         {methodOpt && (
           <p className={`rounded-lg border px-3 py-2 text-[12px] ${methodOpt.feesRead ? "pill-amber" : "border-border text-muted"}`}>
-            {methodOpt.feesRead
-              ? `consl already reads the ${methodOpt.label} fee from ${methodOpt.channels.map((c) => CHANNEL_NAME[c] ?? c).join(" and ")} on every order paid this way — it is on the P&L under Payment processing. Only add a rule here if someone charges you on top of it.`
-              : `consl reads no fee for ${methodOpt.label} orders — ${methodOpt.channels.map((c) => CHANNEL_NAME[c] ?? c).join(" and ")} doesn't report one. Add what the processor charges you.`}
+            {methodOpt.mirror
+              ? `These are ${CHANNEL_NAME[methodOpt.mirror] ?? methodOpt.mirror} sales mirrored into Shopify. consl counts them on ${CHANNEL_NAME[methodOpt.mirror] ?? methodOpt.mirror}, with ${CHANNEL_NAME[methodOpt.mirror] ?? methodOpt.mirror}'s own fees from its statements, and leaves the Shopify copy out — no rule needed here.`
+              : methodOpt.feesRead
+                ? `consl already reads the ${methodOpt.label} fee from ${methodOpt.channels.map((c) => CHANNEL_NAME[c] ?? c).join(" and ")} on every order paid this way${methodOpt.value === "shopify_payments" ? ", wallets included (Shop Pay, Apple Pay, Google Pay, PayPal)" : ""} — it is on the P&L under Payment processing. Only add a rule here if someone charges you on top of it.`
+                : `consl reads no fee for ${methodOpt.label} orders — ${methodOpt.channels.map((c) => CHANNEL_NAME[c] ?? c).join(" and ")} doesn't report one. Add what the processor charges you.`}
           </p>
         )}
         <div className="flex flex-wrap items-center gap-2">
