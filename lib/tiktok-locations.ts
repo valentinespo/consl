@@ -107,6 +107,17 @@ export async function syncTikTokWarehouses(accessToken: string, shopCipher: stri
     created++;
   }
 
+  // Every sales warehouse on record by id — the Amazon MCF one included — so an order that names
+  // one always resolves from TikTok's own list (see lib/fulfillment.ts).
+  const facilities = await prisma.facility.findMany({ where: { channel: "TIKTOK", externalId: { not: null } }, select: { id: true, externalId: true } });
+  const facilityByExternal = new Map(facilities.map((f) => [f.externalId as string, f.id]));
+  for (const w of all.filter((x) => x.type === "SALES_WAREHOUSE")) {
+    const data = { name: w.name, facilityId: facilityByExternal.get(w.id) ?? null, amazonMirror: /amazon/i.test(w.name), active: w.effect_status === "ENABLED" };
+    const row = await prisma.channelLocation.findFirst({ where: { channel: "TIKTOK", externalId: w.id }, select: { id: true } });
+    if (row) await prisma.channelLocation.update({ where: { id: row.id }, data });
+    else await prisma.channelLocation.create({ data: { channel: "TIKTOK", externalId: w.id, ...data } });
+  }
+
   // A warehouse that vanished or was disabled is RETIRED, never deleted — it can carry lots and
   // movements, and losing that history would be worse than a stale row.
   let retired = 0;

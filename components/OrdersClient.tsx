@@ -399,7 +399,7 @@ export function OrdersClient({
       </div>
 
       {rulesOpen && <FeeRulesPanel options={fees} onClose={() => setRulesOpen(false)} />}
-      {selectedIds.length > 0 && <BulkBar ids={selectedIds} onClear={() => setSelected(new Set())} />}
+      {selectedIds.length > 0 && <BulkBar ids={selectedIds} facilities={fees.facilities} onClear={() => setSelected(new Set())} />}
 
       {/* Orders table */}
       {orders.rows.length === 0 ? (
@@ -501,13 +501,13 @@ export function OrdersClient({
                     <td className="px-4 py-2.5 text-ink-soft">
                       <HoverHint
                         title="Fulfilled at"
-                        body={`${o.channelLabel} says "${o.fulfillmentLabel ?? "unknown"}"${o.fulfilledAt ? ` — consl places it at ${o.fulfilledAt.name}${o.viaMcf ? " (shipped by Amazon MCF)" : ""}` : " — not placed at a facility yet"}.`}
+                        body={`${o.channelLabel} says "${o.fulfillmentLabel ?? "unknown"}"${o.fulfilledAt ? ` — consl places it at ${o.fulfilledAt.name}${o.viaMcf ? " (shipped by Amazon MCF)" : ""}` : " — consl has no record of that place, so it isn't placed at a facility; pick one from the order menu"}.`}
                         className="block"
                       >
                         <span className="flex flex-col leading-tight">
                           {o.fulfilledAtDetected && <span className="text-[11.5px] text-muted line-through">{o.fulfilledAtDetected.name}</span>}
                           <span>
-                            {o.fulfilledAt?.name ?? o.fulfillmentLabel ?? "—"}
+                            {o.fulfilledAt ? o.fulfilledAt.name : <span className="text-muted">Not placed</span>}
                             {o.viaMcf && <span className="ml-1 text-[11px] text-muted">via MCF</span>}
                           </span>
                         </span>

@@ -6,7 +6,7 @@ import { X, Plus, Check } from "@/components/icons";
 import { inputCls } from "@/components/FormKit";
 import { SelectMenu } from "@/components/SelectMenu";
 import { useMoney } from "@/components/CurrencyProvider";
-import { addOrderFees, removeOrderFee, setFulfillmentOverride, setOrdersVoided, createFeeRule, deleteFeeRule, setFeeRuleActive } from "@/app/orders/actions";
+import { addOrderFees, removeOrderFee, setFulfillmentOverride, setFulfillmentOverrides, setOrdersVoided, createFeeRule, deleteFeeRule, setFeeRuleActive } from "@/app/orders/actions";
 import type { OrderRow, FeeRuleRow } from "@/lib/order-metrics";
 
 /**
@@ -64,10 +64,12 @@ function FeeFields({ draft, onChange }: { draft: FeeDraft; onChange: (d: FeeDraf
 }
 
 /** Actions over the ticked rows: void, unvoid, or put the same fee on each. */
-export function BulkBar({ ids, onClear }: { ids: string[]; onClear: () => void }) {
+export function BulkBar({ ids, facilities, onClear }: { ids: string[]; facilities: { id: string; name: string }[]; onClear: () => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [feeOpen, setFeeOpen] = useState(false);
+  const [placeOpen, setPlaceOpen] = useState(false);
+  const [place, setPlace] = useState("");
   const [draft, setDraft] = useState<FeeDraft>(emptyFee);
   const [error, setError] = useState<string | null>(null);
   const run = (fn: () => Promise<Result>) =>
@@ -76,6 +78,7 @@ export function BulkBar({ ids, onClear }: { ids: string[]; onClear: () => void }
       if (!r.ok) return setError(r.error ?? "Something went wrong.");
       setError(null);
       setFeeOpen(false);
+      setPlaceOpen(false);
       setDraft(emptyFee);
       onClear();
       router.refresh();
@@ -91,13 +94,31 @@ export function BulkBar({ ids, onClear }: { ids: string[]; onClear: () => void }
       <button className={btnSecondary} disabled={pending} onClick={() => run(() => setOrdersVoided(ids, false))}>
         Unvoid
       </button>
-      <button className={btnSecondary} disabled={pending} onClick={() => setFeeOpen((o) => !o)}>
+      <button className={btnSecondary} disabled={pending} onClick={() => { setFeeOpen((o) => !o); setPlaceOpen(false); }}>
         <Plus size={13} /> Add fee
+      </button>
+      <button className={btnSecondary} disabled={pending} onClick={() => { setPlaceOpen((o) => !o); setFeeOpen(false); }}>
+        Fulfilled at…
       </button>
       {error && <span className="text-[12px] text-negative">{error}</span>}
       <button className="ml-auto text-[12px] text-muted hover:text-ink" onClick={onClear}>
         Clear selection
       </button>
+      {placeOpen && (
+        <div className="basis-full">
+          <div className="mt-1 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface p-3">
+            <div className="min-w-[240px] flex-1">
+              <SelectMenu value={place} onChange={setPlace} options={[{ value: "", label: "Back to what consl detected" }, ...facilities.map((f) => ({ value: f.id, label: f.name }))]} />
+            </div>
+            <button className={btnPrimary} disabled={pending} onClick={() => run(() => setFulfillmentOverrides(ids, place || null))}>
+              <Check size={13} /> {pending ? "Saving…" : `Set on ${ids.length} order${ids.length === 1 ? "" : "s"}`}
+            </button>
+            <button className={btnSecondary} onClick={() => setPlaceOpen(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       {feeOpen && (
         <div className="basis-full">
           <div className="mt-1 flex flex-col gap-2 rounded-lg border border-border bg-surface p-3">

@@ -81,16 +81,20 @@ export async function removeOrderFee(feeId: string) {
   return { ok: true as const };
 }
 
-/** Correct which facility an order shipped from. Null clears the correction. Fee rules keyed on
- *  the facility follow the correction. */
-export async function setFulfillmentOverride(orderId: string, facilityId: string | null) {
+/** Correct which facility orders shipped from — one from its dialog, or a selection at once.
+ *  Null clears the correction. Fee rules keyed on the facility follow the correction. */
+export async function setFulfillmentOverrides(orderIds: string[], facilityId: string | null) {
   const gate = await requirePermission("inventory", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };
   if (facilityId && !(await prisma.facility.findFirst({ where: { id: facilityId }, select: { id: true } }))) return { ok: false as const, error: "Pick a facility." };
-  await prisma.salesOrder.updateMany({ where: { id: orderId }, data: { fulfillmentOverrideFacilityId: facilityId } });
-  await applyFeeRulesToOrders([orderId]);
+  await prisma.salesOrder.updateMany({ where: { id: { in: orderIds } }, data: { fulfillmentOverrideFacilityId: facilityId } });
+  await applyFeeRulesToOrders(orderIds);
   touched();
   return { ok: true as const };
+}
+
+export async function setFulfillmentOverride(orderId: string, facilityId: string | null) {
+  return setFulfillmentOverrides([orderId], facilityId);
 }
 
 type RuleInput = FeeInput & { channel: string | null; source: string | null; facilityId: string | null; tag: string | null; appliesToPast: boolean };

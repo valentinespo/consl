@@ -137,6 +137,17 @@ export async function syncShopifyLocations(
     created++;
   }
 
+  // Every location the shop has, on record by id — the MCF mirror included — so an order that
+  // names one always resolves from Shopify's own list (see lib/fulfillment.ts).
+  const facilities = await prisma.facility.findMany({ where: { channel: "SHOPIFY", externalId: { not: null } }, select: { id: true, externalId: true } });
+  const facilityByExternal = new Map(facilities.map((f) => [f.externalId as string, f.id]));
+  for (const loc of all) {
+    const data = { name: loc.name, facilityId: facilityByExternal.get(loc.id) ?? null, amazonMirror: isAmazonMirror(loc), active: loc.isActive };
+    const row = await prisma.channelLocation.findFirst({ where: { channel: "SHOPIFY", externalId: loc.id }, select: { id: true } });
+    if (row) await prisma.channelLocation.update({ where: { id: row.id }, data });
+    else await prisma.channelLocation.create({ data: { channel: "SHOPIFY", externalId: loc.id, ...data } });
+  }
+
   // A location that vanished or was deactivated is RETIRED, never deleted — it can carry lots and
   // movements, and losing that history would be worse than a stale row.
   let retired = 0;

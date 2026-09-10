@@ -80,6 +80,7 @@ model Organization {
   integrations            Integration[]
   orderFeeRules           OrderFeeRule[]
   orderFees               OrderFee[]
+  channelLocations        ChannelLocation[]
 }
 
 /// A tenant's connection to an external sales platform (Amazon, Shopify, TikTok Shop). Holds the
@@ -181,6 +182,7 @@ model Facility {
   fulfilledOrders SalesOrder[]    @relation("OrderFulfilledAt")
   overriddenOrders SalesOrder[]   @relation("OrderFulfilledAtOverride")
   feeRules        OrderFeeRule[]
+  channelLocations ChannelLocation[]
   movementsOut    StockMovement[] @relation("MovementFrom")
   movementsIn     StockMovement[] @relation("MovementTo")
   createdAt       DateTime        @default(now())
@@ -901,6 +903,27 @@ model OrderFee {
 
   @@index([orgId, orderId])
   @@index([ruleId])
+}
+
+/// Every place a connected channel can ship from, exactly as the platform lists it: the ones that
+/// became facilities, the ones that are Amazon's MCF under another name (they resolve to Amazon
+/// FBA), and the retired ones. Written by the location/warehouse syncs, read when an order names
+/// a place by id — so "fulfilled at" always comes from the platform's own record, never a guess.
+model ChannelLocation {
+  id           String        @id @default(cuid())
+  orgId        String?
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  channel      String // SHOPIFY | TIKTOK
+  externalId   String // the platform's location / warehouse id
+  name         String
+  facility     Facility?     @relation(fields: [facilityId], references: [id], onDelete: SetNull)
+  facilityId   String? // the consl facility that mirrors it, when it is a real place of its own
+  amazonMirror Boolean       @default(false) // Amazon's MCF — the FBA pool by another name
+  active       Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@unique([orgId, channel, externalId])
 }
 
 /// One SKU line of a `SalesOrder`. `productId` is the mapped consl product (null when the channel

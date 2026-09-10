@@ -190,7 +190,9 @@ type ShopifyOrderNode = {
   totalShippingPriceSet: { shopMoney: { amount: string } } | null;
   totalDiscountsSet: { shopMoney: { amount: string } } | null;
   shippingAddress: { city: string | null; provinceCode: string | null; zip: string | null; countryCodeV2: string | null } | null;
-  fulfillments: Array<{ location: { id: string | null; name: string | null } | null }>;
+  fulfillments: Array<{
+    location: { id: string | null; name: string | null; isFulfillmentService?: boolean | null; fulfillmentService?: { handle: string | null; serviceName: string | null } | null } | null;
+  }>;
   lineItems: {
     nodes: Array<{
       sku: string | null;
@@ -227,7 +229,7 @@ const SHOPIFY_ORDER_FIELDS = `
   totalShippingPriceSet { shopMoney { amount } }
   totalDiscountsSet { shopMoney { amount } }
   shippingAddress { city provinceCode zip countryCodeV2 }
-  fulfillments(first: 3) { location { id name } }
+  fulfillments(first: 3) { location { id name isFulfillmentService fulfillmentService { handle serviceName } } }
   lineItems(first: 100) {
     nodes {
       sku quantity variant { id }

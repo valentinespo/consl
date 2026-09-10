@@ -1,69 +1,132 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
+import { decryptSecret } from "@/lib/secret-box";
 
 /**
- * "Fulfilled at" as a consl facility.
+ * "Fulfilled at" as a consl facility — always from the platform's own record, never a guess.
  *
- * Every platform names the place an order shipped from in its own words — Shopify a location
- * name (two of Herbl's were Amazon's MCF app under two names), TikTok a warehouse id, Amazon
- * "Amazon"/"Merchant". None of those is a place consl can cost from. So each order is resolved
- * to a FACILITY: an Amazon-fulfilled order to Amazon FBA; a Shopify order to the facility that
- * mirrors its location, or to Amazon FBA when the location is Amazon's MCF app (consl skips that
- * location on purpose — FBA already is that stock); a TikTok order to the facility that mirrors
- * its warehouse, else to Amazon FBA (a seller-fulfilled TikTok order ships through MCF unless a
- * warehouse says otherwise). Unfulfilled and merchant-shipped orders resolve to nothing until
- * the operator corrects them. The platform's own label is kept next to it, untouched.
+ * Every platform names the place an order shipped from in its own words: Shopify a location,
+ * TikTok a warehouse, Amazon "Amazon"/"Merchant". Each order is resolved to a FACILITY through
+ * the record of places the location/warehouse syncs keep (ChannelLocation): a place that is a
+ * real facility of its own resolves to it; a place that is Amazon's MCF under any name resolves
+ * to Amazon FBA (that stock already lives there); an Amazon-fulfilled order resolves to Amazon
+ * FBA. A Shopify fulfillment whose location Shopify itself flags as the Amazon fulfilment service
+ * resolves to FBA even when that location has since been removed from the shop.
+ *
+ * A place consl has never seen triggers one sync of the channel's places, then a second look.
+ * Whatever still can't be identified stays UNPLACED and says so on the Orders tab, for the
+ * operator to correct — it is never assumed.
  */
 
-type FacilityLite = { id: string; name: string; channel: string | null; externalId: string | null };
+type Ctx = {
+  fba: string | null;
+  facilityByExternal: Map<string, string>; // "CHANNEL|externalId" → facility id
+  places: Map<string, { facilityId: string | null; amazonMirror: boolean }>; // "CHANNEL|externalId"
+  placesByName: Map<string, { facilityId: string | null; amazonMirror: boolean }>; // "CHANNEL|name"
+};
 
-function pick(facilities: FacilityLite[]) {
-  const fba = facilities.find((f) => f.channel === "AMAZON_FBA") ?? null;
-  const byExternal = new Map(facilities.filter((f) => f.externalId).map((f) => [f.externalId as string, f]));
-  const byName = new Map(facilities.map((f) => [f.name.trim().toLowerCase(), f]));
-  return { fba, byExternal, byName };
+async function loadContext(): Promise<Ctx> {
+  const [facilities, places] = await Promise.all([
+    prisma.facility.findMany({ where: { inactive: false }, select: { id: true, channel: true, externalId: true } }),
+    prisma.channelLocation.findMany({ select: { channel: true, externalId: true, name: true, facilityId: true, amazonMirror: true } }),
+  ]);
+  const ctx: Ctx = { fba: facilities.find((f) => f.channel === "AMAZON_FBA")?.id ?? null, facilityByExternal: new Map(), places: new Map(), placesByName: new Map() };
+  for (const f of facilities) if (f.externalId && f.channel) ctx.facilityByExternal.set(`${f.channel}|${f.externalId}`, f.id);
+  for (const p of places) {
+    ctx.places.set(`${p.channel}|${p.externalId}`, p);
+    ctx.placesByName.set(`${p.channel}|${p.name.trim().toLowerCase()}`, p);
+  }
+  return ctx;
 }
 
 type OrderLite = { id: string; channel: string; fulfillment: string | null; fulfillmentLabel: string | null; sourceData: unknown };
+type ShopifyLoc = { id?: string | null; name?: string | null; isFulfillmentService?: boolean | null; fulfillmentService?: { handle?: string | null; serviceName?: string | null } | null };
 
-/** The facility one order resolves to today, or null. */
-export function detectFacility(o: OrderLite, f: ReturnType<typeof pick>): string | null {
-  const label = (o.fulfillmentLabel ?? "").trim();
-  if (o.channel === "AMAZON") return o.fulfillment === "Amazon" ? (f.fba?.id ?? null) : null;
+const placeFacility = (ctx: Ctx, p: { facilityId: string | null; amazonMirror: boolean } | undefined) =>
+  p === undefined ? undefined : (p.facilityId ?? (p.amazonMirror ? ctx.fba : null));
+
+/** The facility one order resolves to, null when unplaced; `unknown` names a place consl has no record of. */
+export function detectFacility(o: OrderLite, ctx: Ctx): { facilityId: string | null; unknown?: string } {
+  if (o.channel === "AMAZON") return { facilityId: o.fulfillment === "Amazon" ? ctx.fba : null };
   if (o.channel === "SHOPIFY") {
-    const sd = o.sourceData as { fulfillments?: Array<{ location?: { id?: string | null; name?: string | null } | null }> } | null;
+    const sd = o.sourceData as { fulfillments?: Array<{ location?: ShopifyLoc | null }> } | null;
     const loc = sd?.fulfillments?.map((x) => x.location).find((l) => l?.id || l?.name);
-    const byId = loc?.id ? f.byExternal.get(loc.id) : undefined;
-    if (byId) return byId.id;
-    const byName = label ? f.byName.get(label.toLowerCase()) : undefined;
-    if (byName) return byName.id;
-    if (/amazon/i.test(label) && f.fba) return f.fba.id;
-    return null;
+    if (!loc) return { facilityId: null };
+    // Shopify's own flag: this fulfilment was done by the Amazon fulfilment service.
+    const hay = `${loc.fulfillmentService?.handle ?? ""} ${loc.fulfillmentService?.serviceName ?? ""} ${loc.name ?? ""}`.toLowerCase();
+    if (loc.isFulfillmentService && hay.includes("amazon")) return { facilityId: ctx.fba };
+    if (loc.id) {
+      const byPlace = placeFacility(ctx, ctx.places.get(`SHOPIFY|${loc.id}`));
+      if (byPlace !== undefined) return { facilityId: byPlace };
+      const byFacility = ctx.facilityByExternal.get(`SHOPIFY|${loc.id}`);
+      if (byFacility) return { facilityId: byFacility };
+      return { facilityId: null, unknown: loc.id };
+    }
+    const byName = placeFacility(ctx, ctx.placesByName.get(`SHOPIFY|${(loc.name ?? "").trim().toLowerCase()}`));
+    return { facilityId: byName ?? null };
   }
   if (o.channel === "TIKTOK") {
     const sd = o.sourceData as { warehouse_id?: string | null } | null;
-    const byId = sd?.warehouse_id ? f.byExternal.get(sd.warehouse_id) : undefined;
-    if (byId) return byId.id;
-    return o.fulfillment === "TIKTOK" ? null : (f.fba?.id ?? null);
+    const wid = sd?.warehouse_id;
+    if (!wid) return { facilityId: null };
+    const byPlace = placeFacility(ctx, ctx.places.get(`TIKTOK|${wid}`));
+    if (byPlace !== undefined) return { facilityId: byPlace };
+    const byFacility = ctx.facilityByExternal.get(`TIKTOK|${wid}`);
+    if (byFacility) return { facilityId: byFacility };
+    return { facilityId: null, unknown: wid };
   }
-  return null;
+  return { facilityId: null };
 }
 
-/** Resolve these orders' fulfilled-at facility from today's facilities; writes only changes. */
-export async function resolveFulfillmentFacilities(orderIds: string[]): Promise<number> {
+/** Refresh a channel's record of places from the platform, when it is connected. */
+async function refreshPlaces(channel: "SHOPIFY" | "TIKTOK"): Promise<boolean> {
+  try {
+    if (channel === "SHOPIFY") {
+      const conn = await prisma.integration.findFirst({ where: { provider: "shopify", status: "connected" } });
+      if (!conn?.refreshTokenEnc || !conn.sellerId) return false;
+      const amazon = await prisma.integration.findFirst({ where: { provider: "amazon", status: "connected" }, select: { id: true } });
+      const { syncShopifyLocations } = await import("@/lib/shopify-locations");
+      await syncShopifyLocations(conn.sellerId, decryptSecret(conn.refreshTokenEnc), { amazonConnected: !!amazon });
+      return true;
+    }
+    const conn = await prisma.integration.findFirst({ where: { provider: "tiktok", status: "connected" } });
+    if (!conn?.marketplaceId) return false;
+    const { getTikTokAccessToken } = await import("@/lib/tiktok-oauth");
+    const { syncTikTokWarehouses } = await import("@/lib/tiktok-locations");
+    await syncTikTokWarehouses(await getTikTokAccessToken(conn), conn.marketplaceId);
+    return true;
+  } catch (e) {
+    console.error(`[fulfillment] ${channel} places refresh failed:`, (e as Error).message);
+    return false;
+  }
+}
+
+/** Resolve these orders' fulfilled-at facility; writes only changes. Unknown places get one sync. */
+export async function resolveFulfillmentFacilities(orderIds: string[], opts: { sync?: boolean } = { sync: true }): Promise<number> {
   if (orderIds.length === 0) return 0;
-  const facilities = await prisma.facility.findMany({ where: { inactive: false }, select: { id: true, name: true, channel: true, externalId: true } });
-  const f = pick(facilities);
+  let ctx = await loadContext();
   const orders = await prisma.salesOrder.findMany({
     where: { id: { in: orderIds } },
     select: { id: true, channel: true, fulfillment: true, fulfillmentLabel: true, sourceData: true, fulfillmentFacilityId: true },
   });
+  let results = orders.map((o) => ({ o, r: detectFacility(o, ctx) }));
+
+  // A place consl has no record of: refresh that channel's places once, then look again.
+  const unknownChannels = new Set(results.filter((x) => x.r.unknown).map((x) => x.o.channel as "SHOPIFY" | "TIKTOK"));
+  if (opts.sync !== false && unknownChannels.size > 0) {
+    let refreshed = false;
+    for (const ch of unknownChannels) refreshed = (await refreshPlaces(ch)) || refreshed;
+    if (refreshed) {
+      ctx = await loadContext();
+      results = orders.map((o) => ({ o, r: detectFacility(o, ctx) }));
+    }
+  }
+
   // One write per target facility, not per order — a history of tens of thousands stays quick.
   const byTarget = new Map<string | null, string[]>();
-  for (const o of orders) {
-    const next = detectFacility(o, f);
-    if (next === o.fulfillmentFacilityId) continue;
-    byTarget.set(next, [...(byTarget.get(next) ?? []), o.id]);
+  for (const { o, r } of results) {
+    if (r.facilityId === o.fulfillmentFacilityId) continue;
+    byTarget.set(r.facilityId, [...(byTarget.get(r.facilityId) ?? []), o.id]);
   }
   let changed = 0;
   for (const [facilityId, ids] of byTarget) {
@@ -73,11 +136,11 @@ export async function resolveFulfillmentFacilities(orderIds: string[]): Promise<
   return changed;
 }
 
-/** Re-resolve the whole history — after a facility appears or vanishes (a location sync), or once
- *  at rollout. `onlyUnresolved` limits it to orders that still point nowhere. */
+/** Re-resolve the whole history — after a facility appears or vanishes, or once at rollout. */
 export async function resolveAllFulfillment(opts: { onlyUnresolved?: boolean } = {}): Promise<number> {
   let changed = 0;
   let cursor: string | undefined;
+  let synced = false;
   for (;;) {
     const batch = await prisma.salesOrder.findMany({
       where: opts.onlyUnresolved ? { fulfillmentFacilityId: null } : {},
@@ -87,7 +150,9 @@ export async function resolveAllFulfillment(opts: { onlyUnresolved?: boolean } =
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
     if (batch.length === 0) break;
-    changed += await resolveFulfillmentFacilities(batch.map((b) => b.id));
+    // The places refresh runs at most once per walk.
+    changed += await resolveFulfillmentFacilities(batch.map((b) => b.id), { sync: !synced });
+    synced = true;
     cursor = batch[batch.length - 1].id;
     if (batch.length < 1000) break;
   }
