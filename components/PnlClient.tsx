@@ -161,6 +161,15 @@ export function PnlClient({
               </span>
               <Amount value={pnl.cogs} money={money} />
             </div>
+            {pnl.mcf.units > 0 && (
+              <div className="flex items-center justify-between gap-3 px-4 py-1.5 pl-8 text-[12.5px] text-ink-soft">
+                <span className="min-w-0 truncate">
+                  of which MCF orders · {pnl.mcf.units.toLocaleString()} units
+                  <span className="ml-1.5 text-[11.5px] text-muted">shipped by Amazon for another channel, no sale reported</span>
+                </span>
+                <Amount value={pnl.mcf.cogs} money={money} />
+              </div>
+            )}
             {rest.map((g) => (
               <GroupRow key={g.group} block={g} money={money} />
             ))}
@@ -203,6 +212,12 @@ export function PnlClient({
       {pnl.overflowUnits > 0 && (
         <p className="text-[12px] text-muted">
           {pnl.overflowUnits.toLocaleString()} units were sold beyond what was recorded as shipped, so they carry the newest cost on record.
+        </p>
+      )}
+      {pnl.unplacedUnits > 0 && (
+        <p className="text-[12px] text-muted">
+          {pnl.unplacedUnits.toLocaleString()} unit{pnl.unplacedUnits === 1 ? "" : "s"} sold in this period come from orders not placed at any facility, so they
+          carry no cost here. Set &ldquo;Fulfilled at&rdquo; on those orders from the Orders tab and they will be priced from that facility&apos;s stock.
         </p>
       )}
       {pnl.unmatchedSkus.length > 0 && (

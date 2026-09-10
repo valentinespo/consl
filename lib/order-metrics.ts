@@ -1,6 +1,9 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrgId } from "@/lib/tenant";
+import { getOrgSettings } from "@/lib/settings";
+import { todayIn } from "@/lib/channel-tz";
+import { paymentMethodLabel } from "@/lib/payment-methods";
 
 /**
  * Read side of the orders feed.
@@ -62,6 +65,11 @@ export type OrderRow = {
   fulfilledAtDetected: { id: string; name: string } | null;
   /** A non-Amazon order that shipped from Amazon FBA — through MCF. */
   viaMcf: boolean;
+  /** How the buyer paid: the platform's gateway key, and the wallet/card behind it. Null when the platform never says (Amazon). */
+  paymentMethod: string | null;
+  paymentDetail: string | null;
+  /** Processor fees the platform itself reported for this order (the Shopify Payments ledger, TikTok's statements). */
+  platformFees: { name: string; amount: number }[];
   orderedAt: string;
   units: number;
   total: number;
@@ -88,31 +96,83 @@ export type FeeRuleRow = {
   name: string;
   kind: string;
   value: number;
+  extraFixed: number | null;
+  bucket: string;
   channel: string | null;
   source: string | null;
+  paymentMethod: string | null;
   facility: { id: string; name: string } | null;
   tag: string | null;
   appliesToPast: boolean;
+  /** Company-calendar days the rule covers, when it covers a period. */
+  period: { from: string; to: string } | null;
   active: boolean;
   orders: number;
 };
 
-/** The fee rules plus the vocab the rule form offers: known Shopify sources and the facilities. */
-export async function feeRuleOptions(): Promise<{ rules: FeeRuleRow[]; sources: { value: string; label: string }[]; facilities: { id: string; name: string }[] }> {
-  const [rules, sources, facilities] = await Promise.all([
+/** A payment method seen on the company's orders, and whether the platform already reports its fee. */
+export type PaymentMethodOption = { value: string; label: string; channels: string[]; feesRead: boolean };
+
+export type FeeRuleOptions = {
+  rules: FeeRuleRow[];
+  sources: { value: string; label: string }[];
+  paymentMethods: PaymentMethodOption[];
+  facilities: { id: string; name: string }[];
+  /** Today and the oldest order, as company-calendar days — the period picker's bounds. */
+  days: { today: string; oldest: string };
+};
+
+/** A date as a YYYY-MM-DD day in a time zone. */
+const dayIn = (d: Date, tz: string) => new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+
+/** The fee rules plus the vocab the rule form offers: known Shopify sources, payment methods and the facilities. */
+export async function feeRuleOptions(): Promise<FeeRuleOptions> {
+  const orgId = await getCurrentOrgId();
+  const [rules, sources, facilities, settings, oldestRow, methods] = await Promise.all([
     prisma.orderFeeRule.findMany({ orderBy: { createdAt: "asc" }, include: { _count: { select: { fees: true } }, facility: { select: { id: true, name: true } } } }),
     prisma.salesOrder.groupBy({ by: ["source", "sourceLabel"], where: { channel: "SHOPIFY", source: { not: null } } }),
     prisma.facility.findMany({ where: { inactive: false }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    getOrgSettings(),
+    prisma.salesOrder.findFirst({ orderBy: { orderedAt: "asc" }, select: { orderedAt: true } }),
+    // Every payment method on record, with whether the platform's own ledger carries fees for
+    // orders paid that way — what tells the rule form "consl already reads this".
+    orgId
+      ? prisma.$queryRaw<{ channel: string; method: string; orders: number; withFees: number }[]>`
+          SELECT o.channel, o."paymentMethod" AS method, COUNT(*)::int AS orders,
+            COUNT(*) FILTER (WHERE EXISTS (
+              SELECT 1 FROM "FinanceEvent" fe
+              WHERE fe."orgId" = o."orgId" AND fe.channel = o.channel AND fe."group" = 'payment_fees' AND fe."orderId" = o."externalId"))::int AS "withFees"
+          FROM "SalesOrder" o
+          WHERE o."orgId" = ${orgId} AND o."paymentMethod" IS NOT NULL
+          GROUP BY 1, 2`
+      : Promise.resolve([]),
   ]);
+  const tz = settings.syncTz;
   const seen = new Set<string>();
   const src = sources
     .map((s) => ({ value: s.source as string, label: s.sourceLabel ?? (s.source as string) }))
     .filter((s) => !seen.has(s.value) && seen.add(s.value))
     .sort((a, b) => a.label.localeCompare(b.label));
+  // One entry per method key; TikTok's own statements always carry its fees.
+  const byMethod = new Map<string, { orders: number; channels: string[]; feesRead: boolean }>();
+  for (const m of methods) {
+    const cur = byMethod.get(m.method) ?? { orders: 0, channels: [], feesRead: false };
+    byMethod.set(m.method, { orders: cur.orders + m.orders, channels: [...cur.channels, m.channel], feesRead: cur.feesRead || m.withFees > 0 || m.channel === "TIKTOK" });
+  }
+  const paymentMethods: PaymentMethodOption[] = [...byMethod.entries()]
+    .sort((a, b) => b[1].orders - a[1].orders)
+    .map(([value, v]) => ({ value, label: paymentMethodLabel(value) ?? value, channels: v.channels, feesRead: v.feesRead }));
   return {
-    rules: rules.map((r) => ({ id: r.id, name: r.name, kind: r.kind, value: r.value, channel: r.channel, source: r.source, facility: r.facility, tag: r.tag, appliesToPast: r.appliesToPast, active: r.active, orders: r._count.fees })),
+    rules: rules.map((r) => ({
+      id: r.id, name: r.name, kind: r.kind, value: r.value, extraFixed: r.extraFixed, bucket: r.bucket, channel: r.channel, source: r.source,
+      paymentMethod: r.paymentMethod, facility: r.facility, tag: r.tag, appliesToPast: r.appliesToPast,
+      period: r.periodFrom && r.periodTo ? { from: dayIn(r.periodFrom, tz), to: dayIn(r.periodTo, tz) } : null,
+      active: r.active, orders: r._count.fees,
+    })),
     sources: src,
+    paymentMethods,
     facilities,
+    days: { today: todayIn(tz), oldest: oldestRow ? dayIn(oldestRow.orderedAt, tz) : todayIn(tz) },
   };
 }
 
@@ -267,6 +327,9 @@ function searchWhere(raw: string, ex: Exclusions): Record<string, unknown> {
     OR: [
       { orderNumber: contains(q) },
       { sourceLabel: contains(q) },
+      // "paypal", "shop pay", "shopify payments" — the method key or the wallet/card behind it.
+      { paymentMethod: contains(s.replace(/\s+/g, "_")) },
+      { paymentDetail: contains(q) },
       { fulfillmentLabel: contains(q) },
       { fulfillmentFacility: { name: contains(q) } },
       { fulfillmentOverrideFacility: { name: contains(q) } },
@@ -302,11 +365,14 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
     take: pageSize,
     select: {
       id: true,
+      externalId: true,
       orderNumber: true,
       channel: true,
       source: true,
       sourceLabel: true,
       fulfillmentLabel: true,
+      paymentMethod: true,
+      paymentDetail: true,
       fulfillmentFacility: { select: { id: true, name: true, channel: true } },
       fulfillmentOverrideFacility: { select: { id: true, name: true, channel: true } },
       orderedAt: true,
@@ -322,6 +388,20 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
     },
   });
 
+  // What the platform itself charged to process each order on this page — shown beside any
+  // manual fee so a processor's charge is never entered twice.
+  const feeRows = orders.length
+    ? await prisma.financeEvent.findMany({
+        where: { group: "payment_fees", orderId: { in: orders.map((o) => o.externalId) } },
+        select: { channel: true, orderId: true, type: true, amount: true, baseAmount: true },
+      })
+    : [];
+  const platformFees = new Map<string, { name: string; amount: number }[]>();
+  for (const f of feeRows) {
+    const k = `${f.channel}|${f.orderId}`;
+    platformFees.set(k, [...(platformFees.get(k) ?? []), { name: f.type, amount: f.baseAmount ?? f.amount }]);
+  }
+
   const rows: OrderRow[] = orders.map((o) => ({
     id: o.id,
     orderNumber: o.orderNumber,
@@ -332,6 +412,9 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
     fulfilledAt: (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility) ? { id: (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility)!.id, name: (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility)!.name } : null,
     fulfilledAtDetected: o.fulfillmentOverrideFacility && o.fulfillmentFacility ? { id: o.fulfillmentFacility.id, name: o.fulfillmentFacility.name } : null,
     viaMcf: o.channel !== "AMAZON" && (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility)?.channel === "AMAZON_FBA",
+    paymentMethod: o.paymentMethod,
+    paymentDetail: o.paymentDetail,
+    platformFees: platformFees.get(`${o.channel}|${o.externalId}`) ?? [],
     orderedAt: o.orderedAt.toISOString(),
     units: o.lines.reduce((s, l) => s + l.quantity, 0),
     total: o.total,

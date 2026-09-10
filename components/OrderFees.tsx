@@ -5,9 +5,12 @@ import { useRouter } from "next/navigation";
 import { X, Plus, Check } from "@/components/icons";
 import { inputCls } from "@/components/FormKit";
 import { SelectMenu } from "@/components/SelectMenu";
+import { DateRangePicker, type Range } from "@/components/DateRangePicker";
+import { rangeBounds } from "@/lib/chart";
 import { useMoney } from "@/components/CurrencyProvider";
+import { paymentMethodLabel } from "@/lib/payment-methods";
 import { addOrderFees, removeOrderFee, setFulfillmentOverride, setFulfillmentOverrides, setOrdersVoided, createFeeRule, deleteFeeRule, setFeeRuleActive } from "@/app/orders/actions";
-import type { OrderRow, FeeRuleRow } from "@/lib/order-metrics";
+import type { OrderRow, FeeRuleRow, FeeRuleOptions } from "@/lib/order-metrics";
 
 /**
  * Custom fees on orders: the bulk bar over a selection, the per-order "Fees & fulfillment"
@@ -15,7 +18,7 @@ import type { OrderRow, FeeRuleRow } from "@/lib/order-metrics";
  * server actions and refresh the page; nothing is kept locally beyond the form drafts.
  */
 
-export type FeeOptions = { rules: FeeRuleRow[]; sources: { value: string; label: string }[]; facilities: { id: string; name: string }[] };
+export type FeeOptions = FeeRuleOptions;
 
 // Client-side copy of the rule vocabulary (the server module can't be imported here).
 const FEE_TAGS: Record<string, string> = { mcf: "MCF", free_sample: "Free sample", replacement: "Replacement", free_unit: "Free unit" };
@@ -26,38 +29,76 @@ const btnSecondary = "inline-flex h-8 items-center gap-1.5 rounded-lg border bor
 const iconBtn = "inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-ink";
 
 type Result = { ok: boolean; error?: string };
-type FeeDraft = { name: string; kind: "fixed" | "percent"; value: string };
-const emptyFee: FeeDraft = { name: "", kind: "fixed", value: "" };
-const parseFee = (d: FeeDraft) => ({ name: d.name.trim(), kind: d.kind, value: Number(d.value.replace(",", ".")) });
+type Bucket = "custom_fees" | "payment_fees";
+type FeeDraft = { name: string; kind: "fixed" | "percent"; value: string; extra: string; bucket: Bucket };
+const emptyFee: FeeDraft = { name: "", kind: "fixed", value: "", extra: "", bucket: "custom_fees" };
+const num = (s: string) => Number(s.replace(",", "."));
+const parseFee = (d: FeeDraft) => ({
+  name: d.name.trim(),
+  kind: d.kind,
+  value: num(d.value),
+  extraFixed: d.kind === "percent" && d.extra.trim() ? num(d.extra) : null,
+  bucket: d.bucket,
+});
 
-/** Name + type + amount — shared by the bulk bar, the order dialog and the rule form. */
+/** "Processing fee", "Chargeback fee" — a ledger type as words. */
+const spell = (t: string) => t.replace(/[_-]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^\w/, (c) => c.toUpperCase());
+
+/** Name + type + amount (+ a flat amount on top of a percentage) + the P&L bucket — shared by the
+ *  bulk bar, the order dialog and the rule form. */
 function FeeFields({ draft, onChange }: { draft: FeeDraft; onChange: (d: FeeDraft) => void }) {
   return (
-    <div className="grid gap-2 sm:grid-cols-[1fr_170px_110px]">
-      <input
-        value={draft.name}
-        onChange={(e) => onChange({ ...draft, name: e.target.value })}
-        placeholder="Fee name, e.g. Faire commission"
-        className={inputCls}
-        maxLength={60}
-      />
-      <SelectMenu
-        value={draft.kind}
-        onChange={(v) => onChange({ ...draft, kind: v as FeeDraft["kind"] })}
-        options={[
-          { value: "fixed", label: "Fixed amount" },
-          { value: "percent", label: "% of amount paid" },
-        ]}
-      />
-      <div className="relative">
+    <div className="flex flex-col gap-2">
+      <div className="grid gap-2 sm:grid-cols-[1fr_170px_110px]">
         <input
-          value={draft.value}
-          onChange={(e) => onChange({ ...draft, value: e.target.value })}
-          inputMode="decimal"
-          placeholder={draft.kind === "percent" ? "15" : "2.50"}
-          className={`${inputCls} ${draft.kind === "percent" ? "pr-7" : ""}`}
+          value={draft.name}
+          onChange={(e) => onChange({ ...draft, name: e.target.value })}
+          placeholder="Fee name, e.g. Faire commission"
+          className={inputCls}
+          maxLength={60}
         />
-        {draft.kind === "percent" && <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[12px] text-muted">%</span>}
+        <SelectMenu
+          value={draft.kind}
+          onChange={(v) => onChange({ ...draft, kind: v as FeeDraft["kind"] })}
+          options={[
+            { value: "fixed", label: "Fixed amount" },
+            { value: "percent", label: "% of amount paid" },
+          ]}
+        />
+        <div className="relative">
+          <input
+            value={draft.value}
+            onChange={(e) => onChange({ ...draft, value: e.target.value })}
+            inputMode="decimal"
+            placeholder={draft.kind === "percent" ? "15" : "2.50"}
+            className={`${inputCls} ${draft.kind === "percent" ? "pr-7" : ""}`}
+          />
+          {draft.kind === "percent" && <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[12px] text-muted">%</span>}
+        </div>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {draft.kind === "percent" ? (
+          <div className="relative">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[12px] text-muted">+</span>
+            <input
+              value={draft.extra}
+              onChange={(e) => onChange({ ...draft, extra: e.target.value })}
+              inputMode="decimal"
+              placeholder="flat amount per order on top, e.g. 0.49 (optional)"
+              className={`${inputCls} pl-7`}
+            />
+          </div>
+        ) : (
+          <div />
+        )}
+        <SelectMenu
+          value={draft.bucket}
+          onChange={(v) => onChange({ ...draft, bucket: v as Bucket })}
+          options={[
+            { value: "custom_fees", label: "Shows on the P&L under Custom fees" },
+            { value: "payment_fees", label: "Shows on the P&L under Payment processing" },
+          ]}
+        />
       </div>
     </div>
   );
@@ -138,7 +179,7 @@ export function BulkBar({ ids, facilities, onClear }: { ids: string[]; facilitie
   );
 }
 
-/** One order's custom fees and its fulfilled-at correction. */
+/** One order's custom fees, the fees its platform reported, and its fulfilled-at correction. */
 export function OrderDialog({ order, facilities, onClose }: { order: OrderRow; facilities: { id: string; name: string }[]; onClose: () => void }) {
   const router = useRouter();
   const { money } = useMoney();
@@ -147,6 +188,7 @@ export function OrderDialog({ order, facilities, onClose }: { order: OrderRow; f
   const [error, setError] = useState<string | null>(null);
   const detected = order.fulfilledAtDetected ?? (order.fulfilledAt && !order.fulfilledAtDetected ? order.fulfilledAt : null);
   const [loc, setLoc] = useState(order.fulfilledAtDetected ? (order.fulfilledAt?.id ?? "") : "");
+  const channelName = CHANNEL_NAME[order.channel] ?? order.channel;
   const act = (fn: () => Promise<Result>) =>
     start(async () => {
       const r = await fn();
@@ -171,13 +213,40 @@ export function OrderDialog({ order, facilities, onClose }: { order: OrderRow; f
           <div>
             <div className="text-[15px] font-semibold text-ink">Order {order.orderNumber ?? ""}</div>
             <div className="text-[12px] text-muted">
-              {CHANNEL_NAME[order.channel] ?? order.channel} · {money(order.total)} paid
+              {channelName} · {money(order.total)} paid
+              {order.paymentMethod && (
+                <>
+                  {" "}with {paymentMethodLabel(order.paymentMethod)}
+                  {order.paymentDetail ? ` · ${order.paymentDetail}` : ""}
+                </>
+              )}
             </div>
           </div>
           <button onClick={onClose} className={iconBtn} aria-label="Close">
             <X size={16} />
           </button>
         </div>
+
+        {order.channel !== "AMAZON" && (
+          <section className="mt-4">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-muted">Fees read from {channelName}</div>
+            {order.platformFees.length === 0 ? (
+              <p className="mt-1 text-[12.5px] text-muted">
+                {channelName} reported no processing fee for this order
+                {order.paymentMethod ? ` (paid with ${paymentMethodLabel(order.paymentMethod)})` : ""}. If a processor charged you, add it below.
+              </p>
+            ) : (
+              <ul className="mt-1 divide-y divide-line rounded-lg border border-border">
+                {order.platformFees.map((f, i) => (
+                  <li key={i} className="flex items-center justify-between gap-2 px-3 py-2 text-[13px]">
+                    <span className="truncate text-ink">{spell(f.name)}</span>
+                    <span className="tabular text-ink-soft">{f.amount < 0 ? `−${money(-f.amount)}` : money(f.amount)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
 
         <section className="mt-4">
           <div className="text-[11px] font-medium uppercase tracking-wide text-muted">Custom fees</div>
@@ -224,7 +293,7 @@ export function OrderDialog({ order, facilities, onClose }: { order: OrderRow; f
         <section className="mt-5">
           <div className="text-[11px] font-medium uppercase tracking-wide text-muted">Fulfilled at</div>
           <p className="mt-1 text-[12.5px] text-muted">
-            {CHANNEL_NAME[order.channel] ?? order.channel} says &ldquo;{order.fulfillmentLabel ?? "unknown"}&rdquo;
+            {channelName} says &ldquo;{order.fulfillmentLabel ?? "unknown"}&rdquo;
             {detected ? `, which consl reads as ${detected.name}` : ", which consl can't place yet"}. Pick the facility it really shipped from — the
             detected one stays on the record, struck through.
           </p>
@@ -246,17 +315,32 @@ export function OrderDialog({ order, facilities, onClose }: { order: OrderRow; f
   );
 }
 
-/** The rules: every order that matches carries the fee, in the P&L under Custom fees. */
+type Scope = "future" | "all" | "period";
+const SCOPES: { value: Scope; label: string }[] = [
+  { value: "future", label: "From now on" },
+  { value: "all", label: "All orders, past and future" },
+  { value: "period", label: "Only a date range" },
+];
+
+/** The rules: every order that matches carries the fee, in the P&L under the bucket it chose. */
 export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClose: () => void }) {
   const router = useRouter();
-  const { money } = useMoney();
+  const { money, locale } = useMoney();
   const [pending, start] = useTransition();
   const [draft, setDraft] = useState<FeeDraft>(emptyFee);
+  const [bucketTouched, setBucketTouched] = useState(false);
   const [channel, setChannel] = useState("");
   const [source, setSource] = useState("");
+  const [method, setMethod] = useState("");
   const [where, setWhere] = useState("");
   const [tag, setTag] = useState("");
-  const [past, setPast] = useState(true);
+  const [scope, setScope] = useState<Scope>("future");
+  // The picker's trigger shows the preset's dates, so the draft must hold those same concrete
+  // days from the start — a rule created without opening the picker covers what it displays.
+  const [period, setPeriod] = useState<Range>(() => {
+    const b = rangeBounds("30", options.days.today);
+    return { key: "30", from: b.from ?? options.days.oldest, to: b.to ?? options.days.today };
+  });
   const [error, setError] = useState<string | null>(null);
   const act = (fn: () => Promise<Result>) =>
     start(async () => {
@@ -265,16 +349,28 @@ export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClo
       setError(null);
       router.refresh();
     });
+  const day = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString(locale, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
   const describe = (r: FeeRuleRow) =>
     [
       r.channel && CHANNEL_NAME[r.channel],
       r.source && (options.sources.find((s) => s.value === r.source)?.label ?? r.source),
+      r.paymentMethod && `paid with ${paymentMethodLabel(r.paymentMethod)}`,
       r.facility && `fulfilled at ${r.facility.name}`,
       r.tag && FEE_TAGS[r.tag],
     ]
       .filter(Boolean)
       .join(" · ") || "every order";
-  const amount = (r: FeeRuleRow) => (r.kind === "percent" ? `${r.value}% of amount paid` : `${money(r.value)} per order`);
+  const when = (r: FeeRuleRow) => (r.period ? `orders from ${day(r.period.from)} to ${day(r.period.to)}` : r.appliesToPast ? "past orders too" : "from its creation on");
+  const amount = (r: FeeRuleRow) =>
+    r.kind === "percent" ? `${r.value}% of amount paid${r.extraFixed ? ` + ${money(r.extraFixed)} per order` : ""}` : `${money(r.value)} per order`;
+  const methodOpt = options.paymentMethods.find((m) => m.value === method);
+
+  // A rule keyed on a payment method is a processor's charge: it belongs under Payment processing
+  // unless the operator says otherwise.
+  function chooseMethod(v: string) {
+    setMethod(v);
+    if (!bucketTouched) setDraft((d) => ({ ...d, bucket: v ? "payment_fees" : "custom_fees" }));
+  }
 
   return (
     <div className="dropdown-in rounded-[var(--radius-card)] border border-border bg-surface-2/40 p-4">
@@ -283,7 +379,7 @@ export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClo
           <div className="text-[12px] font-medium uppercase tracking-wide text-muted">Fee rules</div>
           <p className="mt-1 max-w-[72ch] text-[12.5px] text-muted">
             A cost added to every order that matches — a marketplace commission consl can&apos;t see on its own, a handling charge per MCF
-            shipment. Rules show in the P&amp;L under Custom fees.
+            shipment, what a payment processor keeps. Each rule shows in the P&amp;L under its own name, in the bucket it picks.
           </p>
         </div>
         <button onClick={onClose} className={iconBtn} aria-label="Close">
@@ -297,8 +393,8 @@ export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClo
             <li key={r.id} className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-[13px] ${r.active ? "" : "opacity-60"}`}>
               <span className="font-medium text-ink">{r.name}</span>
               <span className="text-muted">
-                {amount(r)} · {describe(r)}
-                {r.appliesToPast ? " · past orders too" : ""}
+                {amount(r)} · {describe(r)} · {when(r)}
+                {r.bucket === "payment_fees" ? " · under Payment processing" : ""}
               </span>
               <span className="text-[12px] text-muted">{r.orders.toLocaleString()} orders</span>
               <span className="ml-auto flex items-center gap-1">
@@ -316,34 +412,80 @@ export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClo
 
       <div className="mt-3 flex flex-col gap-2 rounded-lg border border-border bg-surface p-3">
         <div className="text-[12.5px] font-medium text-ink">New rule</div>
-        <FeeFields draft={draft} onChange={setDraft} />
-        <div className="grid gap-2 sm:grid-cols-4">
+        <FeeFields
+          draft={draft}
+          onChange={(d) => {
+            if (d.bucket !== draft.bucket) setBucketTouched(true);
+            setDraft(d);
+          }}
+        />
+        <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-5">
           <SelectMenu
             value={channel}
             onChange={setChannel}
             options={[{ value: "", label: "Any channel" }, ...Object.entries(CHANNEL_NAME).map(([v, l]) => ({ value: v, label: l }))]}
           />
           <SelectMenu value={source} onChange={setSource} options={[{ value: "", label: "Any sales channel" }, ...options.sources]} />
+          <SelectMenu
+            value={method}
+            onChange={chooseMethod}
+            options={[{ value: "", label: "Any payment method" }, ...options.paymentMethods.map((m) => ({ value: m.value, label: m.label }))]}
+          />
           <SelectMenu value={where} onChange={setWhere} options={[{ value: "", label: "Fulfilled anywhere" }, ...options.facilities.map((f) => ({ value: f.id, label: f.name }))]} />
           <SelectMenu value={tag} onChange={setTag} options={[{ value: "", label: "Any tag" }, ...Object.entries(FEE_TAGS).map(([v, l]) => ({ value: v, label: l }))]} />
         </div>
-        <label className="flex items-center gap-2 text-[12.5px] text-ink-soft">
-          <input type="checkbox" checked={past} onChange={(e) => setPast(e.target.checked)} className="h-4 w-4 accent-accent-strong" />
-          Also apply to past orders
-        </label>
+        {methodOpt && (
+          <p className={`rounded-lg border px-3 py-2 text-[12px] ${methodOpt.feesRead ? "pill-amber" : "border-border text-muted"}`}>
+            {methodOpt.feesRead
+              ? `consl already reads the ${methodOpt.label} fee from ${methodOpt.channels.map((c) => CHANNEL_NAME[c] ?? c).join(" and ")} on every order paid this way — it is on the P&L under Payment processing. Only add a rule here if someone charges you on top of it.`
+              : `consl reads no fee for ${methodOpt.label} orders — ${methodOpt.channels.map((c) => CHANNEL_NAME[c] ?? c).join(" and ")} doesn't report one. Add what the processor charges you.`}
+          </p>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <div role="radiogroup" aria-label="Which orders" className="flex h-9 items-center gap-0.5 rounded-lg border border-border bg-surface p-0.5">
+            {SCOPES.map((o) => {
+              const active = scope === o.value;
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => setScope(o.value)}
+                  className={`flex h-full items-center rounded-md px-2.5 text-[12px] transition-colors ${active ? "bg-surface-2 font-medium text-ink" : "text-muted hover:text-ink-soft"}`}
+                >
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>
+          {scope === "period" && <DateRangePicker value={period} onChange={setPeriod} newest={options.days.today} oldest={options.days.oldest} locale={locale} />}
+        </div>
         <div className="flex items-center gap-2">
           <button
             className={btnPrimary}
             disabled={pending}
             onClick={() =>
               act(async () => {
-                const r = await createFeeRule({ ...parseFee(draft), channel: channel || null, source: source || null, facilityId: where || null, tag: tag || null, appliesToPast: past });
+                const r = await createFeeRule({
+                  ...parseFee(draft),
+                  channel: channel || null,
+                  source: source || null,
+                  paymentMethod: method || null,
+                  facilityId: where || null,
+                  tag: tag || null,
+                  scope,
+                  period: scope === "period" ? { from: period.from, to: period.to } : null,
+                });
                 if (r.ok) {
                   setDraft(emptyFee);
+                  setBucketTouched(false);
                   setChannel("");
                   setSource("");
+                  setMethod("");
                   setWhere("");
                   setTag("");
+                  setScope("future");
                 }
                 return r;
               })

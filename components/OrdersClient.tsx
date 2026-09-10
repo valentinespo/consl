@@ -14,6 +14,7 @@ import { HoverHint } from "@/components/HoverHint";
 import { useExitAnimation } from "@/components/animate";
 import { ROOT_LOGO } from "@/lib/channel-logos";
 import { BulkBar, OrderDialog, FeeRulesPanel, type FeeOptions } from "@/components/OrderFees";
+import { paymentMethodLabel } from "@/lib/payment-methods";
 
 // Channel marks come from the shared map — Orders always talks about a whole channel.
 const CHANNEL_LOGO = ROOT_LOGO;
@@ -416,7 +417,7 @@ export function OrdersClient({
       ) : (
         <div>
           <div className="overflow-x-auto rounded-[var(--radius-card)] border border-border">
-            <table className="w-full min-w-[900px] border-collapse text-[13px]">
+            <table className="w-full min-w-[1000px] border-collapse text-[13px]">
               <thead>
                 <tr className="border-b border-border bg-surface-2/50 text-[11px] font-medium uppercase tracking-wide text-muted">
                   <th className="w-9 px-3 py-2.5">
@@ -427,6 +428,7 @@ export function OrdersClient({
                   <th className="px-4 py-2.5 text-left font-medium">Source</th>
                   <th className="px-4 py-2.5 text-left font-medium">Sales channel</th>
                   <th className="px-4 py-2.5 text-left font-medium">Fulfilled at</th>
+                  <th className="px-4 py-2.5 text-left font-medium">Payment</th>
                   <th className="px-4 py-2.5 text-left font-medium">Status</th>
                   <th className="px-4 py-2.5 text-right font-medium">Units</th>
                   <th className="px-4 py-2.5 text-right font-medium">Total</th>
@@ -512,6 +514,16 @@ export function OrdersClient({
                           </span>
                         </span>
                       </HoverHint>
+                    </td>
+                    <td className="px-4 py-2.5 text-ink-soft">
+                      {o.paymentMethod ? (
+                        <span className="flex flex-col leading-tight">
+                          <span>{paymentMethodLabel(o.paymentMethod)}</span>
+                          {o.paymentDetail && <span className="text-[11px] text-muted">{o.paymentDetail}</span>}
+                        </span>
+                      ) : (
+                        <span className="text-muted">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5">{st ? <span className={`${PILL} ${st.cls}`}>{st.label}</span> : <span className="text-muted">—</span>}</td>
                     <td className="px-4 py-2.5 text-right tabular text-ink-soft">{o.units.toLocaleString()}</td>

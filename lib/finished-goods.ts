@@ -57,6 +57,18 @@ export interface ShippedLayer {
   date: number;
 }
 
+/** A layer as it ENTERED one of your facilities — produced there, transferred in, or pulled back
+ *  from a channel — with the cost it carried. The full intake history of a pool, in order, for
+ *  anything that must replay a facility's units from the beginning (the P&L prices sales from the
+ *  facility an order shipped from this way). */
+export interface FacilityEntry {
+  sku: string;
+  facilityId: string;
+  units: number;
+  unitCost: number;
+  date: number;
+}
+
 /** A movement that asked for more units than the location actually held. */
 export interface MovementShortfall {
   movementId: string;
@@ -70,6 +82,7 @@ export interface MovementShortfall {
 export interface FinishedResult {
   pools: FinishedPool[]; // remaining stock at your own facilities
   shipped: ShippedLayer[]; // units that left the network, with their carried cost
+  entries: FacilityEntry[]; // every layer that ever entered one of your facilities, in order
   shortfalls: MovementShortfall[];
 }
 
@@ -131,9 +144,15 @@ export function runFinishedGoodsEngine(
     if (!p) pools.set(k, (p = new FinishedPoolStack()));
     return p;
   };
+  // Every layer landing at a facility is also kept as its intake history.
+  const entries: FacilityEntry[] = [];
+  const landAt = (sku: string, facilityId: string, units: number, unitCost: number, date: number, seq: number) => {
+    stackFor(sku, facilityId).add(units, unitCost, date, seq);
+    if (units > 0) entries.push({ sku, facilityId, units, unitCost, date });
+  };
 
   // Seed every pool with what its facility produced.
-  for (const s of supply) stackFor(s.sku, s.facilityId).add(s.units, s.unitCost, s.date, s.seq);
+  for (const s of supply) landAt(s.sku, s.facilityId, s.units, s.unitCost, s.date, s.seq);
 
   // Per (channel, SKU) ledger of everything that entered that channel — starting balances plus
   // recorded shipments. Valuation covers the channel's reported count from the NEWEST of these;
@@ -176,8 +195,7 @@ export function runFinishedGoodsEngine(
         });
       }
       if (m.toFacilityId) {
-        const to = stackFor(m.sku, m.toFacilityId);
-        for (const d of drawn) to.add(d.units, d.unitCost, m.date, m.seq);
+        for (const d of drawn) landAt(m.sku, m.toFacilityId, d.units, d.unitCost, m.date, m.seq);
       } else if (m.toDestination && m.toDestination !== "CUSTOMER" && m.toDestination !== "LOSS") {
         const to = ledgerFor(m.toDestination, m.sku);
         for (const d of drawn) to.add(d.units, d.unitCost, m.date, m.seq);
@@ -203,8 +221,7 @@ export function runFinishedGoodsEngine(
 
     if (m.toFacilityId) {
       // Transfer: the same units, at the same cost, now live at the destination.
-      const to = stackFor(m.sku, m.toFacilityId);
-      for (const d of drawn) to.add(d.units, d.unitCost, m.date, m.seq);
+      for (const d of drawn) landAt(m.sku, m.toFacilityId, d.units, d.unitCost, m.date, m.seq);
     } else if (m.toDestination) {
       // Left the network — its channel ledger records what those units cost us.
       const ledger = ledgerFor(m.toDestination, m.sku);
@@ -228,7 +245,8 @@ export function runFinishedGoodsEngine(
     }
   }
 
-  return { pools: out, shipped, shortfalls };
+  entries.sort((a, b) => a.date - b.date);
+  return { pools: out, shipped, entries, shortfalls };
 }
 
 /**

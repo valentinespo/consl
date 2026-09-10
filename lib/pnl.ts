@@ -11,17 +11,28 @@ export { GROUP_ORDER, GROUP_LABEL, PNL_CHANNEL_LABEL, type Pnl, type PnlChannel,
 
 /**
  * The P&L read side, across channels: sum each channel's financial ledger by bucket for a date
- * window, price every unit sold first-in-first-out from ONE queue per product — what was shipped
- * to Amazon, since that is where the units physically leave from whichever channel sold them
- * (Amazon's own orders, and Shopify's and TikTok's shipped through MCF) — and bridge each
- * channel's settlement lag.
+ * window, price every unit sold first-in-first-out from the queue of the PLACE it shipped from,
+ * and bridge each channel's settlement lag.
  *
  * Ledgers: Amazon's Finances feed, TikTok's settlement statements, and Shopify's orders (written
  * as ledger rows at import — Shopify has no separate money feed). Units for cost of goods come
  * from Amazon's posted sale rows, and from the order lines themselves for Shopify and TikTok
- * (a $0 sample still leaves the warehouse). Amazon's MCF shipments post no sale, only their
- * fulfilment fee — so a TikTok or Shopify sale shipped by Amazon is counted once, on its own
- * channel, and the MCF fee still lands under Amazon's fees.
+ * (a $0 sample still leaves the warehouse).
+ *
+ * Queues: one per product per place. A channel's stock (Amazon FBA/AWD, a Shopify- or
+ * TikTok-run warehouse) is what was shipped to that channel; one of the company's own facilities
+ * is everything that ever entered it — lots finished there, transfers in, its day-zero balance —
+ * minus what left it for somewhere else. Each sale takes its units from the queue of the
+ * facility its order was fulfilled from (the operator's correction winning), found on the order
+ * record — an Amazon sale row is looked up by its order id. An order placed nowhere prices
+ * nothing: its units are reported as unplaced, never guessed onto Amazon.
+ *
+ * MCF: Amazon's MCF shipments post no sale, only their fulfilment fee. With another channel
+ * present, the TikTok or Shopify order that sold the unit carries it, counted once, on its own
+ * channel, and the MCF fee still lands under Amazon's fees. With Amazon the only channel, the
+ * MCF orders' units count here (from the Orders tab, priced from Amazon's queue) and are shown
+ * as their own line — Amazon reports no money for them, so their cost and fee count with no sale
+ * against them until the channel that sold them is connected.
  *
  * Scope: the products the company keeps in consl. Listings it never mapped are left out entirely
  * — their sales, fees, refunds and units alike — so the statement never shows revenue it can't
@@ -84,84 +95,134 @@ async function loadScope(): Promise<Scope> {
   return scope;
 }
 
-/** One sale to price: units of a product on a channel at an instant (null = not posted yet — goes last). */
-type Sale = { productId: string; units: number; at: number | null; channel: PnlChannel };
-type Cogs = { cogs: number; units: number; preHistoryUnits: number; overflowUnits: number; unmatchedSkus: Set<string> };
+/**
+ * Where a unit is priced from: a channel's stock — "AMAZON" | "SHOPIFY" | "TIKTOK", what was
+ * shipped to that channel — or one of the company's own facilities, by id. Null = the order is
+ * placed at no facility, so nothing can price it.
+ */
+type QueueKey = string;
+/** One sale to price: units of a product on a channel at an instant (null = not posted yet — goes last), from a queue. */
+type Sale = { productId: string; units: number; at: number | null; channel: PnlChannel; queue: QueueKey | null; mcf?: boolean };
+type Cogs = {
+  cogs: number;
+  units: number;
+  preHistoryUnits: number;
+  overflowUnits: number;
+  unplacedUnits: number;
+  mcfUnits: number;
+  mcfCogs: number;
+  unmatchedSkus: Set<string>;
+};
+type Layer = { units: number; unitCost: number; date: number };
+
+/** The queues: every place a unit can leave from, each holding its products' layers oldest first. */
+async function loadQueues(): Promise<Map<QueueKey, Map<string, Layer[]>>> {
+  const { shipped, entries } = await computeFinishedGoods();
+  const queues = new Map<QueueKey, Map<string, Layer[]>>();
+  const push = (queue: QueueKey, productId: string, l: Layer) => {
+    if (l.units <= 0) return;
+    const q = queues.get(queue) ?? new Map<string, Layer[]>();
+    const list = q.get(productId) ?? [];
+    list.push(l);
+    q.set(productId, list);
+    queues.set(queue, q);
+  };
+  // `sku` on both is the product id.
+  for (const l of shipped) push(l.destination, l.sku, { units: l.units, unitCost: l.unitCost, date: l.date });
+  for (const e of entries) push(e.facilityId, e.sku, { units: e.units, unitCost: e.unitCost, date: e.date });
+  for (const q of queues.values()) for (const list of q.values()) list.sort((a, b) => a.date - b.date);
+  return queues;
+}
 
 /**
- * Cost of goods, first-in-first-out from one queue of units per product.
+ * Cost of goods, first-in-first-out from one queue of units per product per place.
  *
- * Everything that ever entered Amazon — each lot's shipment at that lot's landed cost, plus a
- * company's day-zero starting stock — lines up by date, oldest first. Every sale on record, from
- * every channel, is then replayed in date order from the very first one, each taking units from
- * the front of the queue; the walk always starts at the beginning so that by the time it reaches
- * the window it knows exactly which units were already gone. The window's COGS is what the
+ * Every sale on record, from every channel, is replayed in date order from the very first one,
+ * each taking units from the front of its place's queue; the walk always starts at the beginning
+ * so that by the time it reaches the window it knows exactly which units were already gone.
+ * Units that left a facility for somewhere else (a shipment to Amazon, a transfer, a write-off)
+ * take from its queue in the same order but are never charged. The window's COGS is what the
  * selected channels' sales consumed there. Pending sales (not posted yet) join the end.
  *
- * Sales before a product's first recorded layer are pre-history (day-zero stock can't be eaten
- * by sales that predate it): they're priced at the product's pre-consl average cost (set from
- * the P&L; the starting cost, then the oldest layer, stand in until then) and counted in
+ * Sales before a place's first recorded layer are pre-history (day-zero stock can't be eaten by
+ * sales that predate it): they're priced at the product's pre-consl average cost (set from the
+ * P&L; the starting cost, then the oldest layer, stand in until then) and counted in
  * `preHistoryUnits`. Sales beyond everything recorded take the newest layer's cost and count in
- * `overflowUnits` — never silently zero.
+ * `overflowUnits` — never silently zero. Sales from an order placed nowhere count in
+ * `unplacedUnits` and carry no cost.
  */
 async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlChannel>, scope: Scope): Promise<Cogs> {
-  const { shipped } = await computeFinishedGoods();
-  type Layer = { units: number; unitCost: number; date: number };
-  const queue = new Map<string, Layer[]>();
-  for (const l of shipped) {
-    if (l.destination !== "AMAZON" || l.units <= 0) continue;
-    const list = queue.get(l.sku) ?? []; // `sku` here is the product id
-    list.push({ units: l.units, unitCost: l.unitCost, date: l.date });
-    queue.set(l.sku, list);
-  }
-  for (const list of queue.values()) list.sort((a, b) => a.date - b.date);
+  const queues = await loadQueues();
+  const exits = await prisma.stockMovement.findMany({
+    where: { itemType: "FINISHED", kind: "STANDARD", fromFacilityId: { not: null }, productId: { not: null } },
+    select: { productId: true, fromFacilityId: true, quantity: true, date: true },
+  });
+  type Draw = { queue: QueueKey | null; productId: string; units: number; at: number | null; sale: Sale | null };
+  const draws: Draw[] = [
+    ...exits.map((e) => ({ queue: e.fromFacilityId as string, productId: e.productId as string, units: e.quantity, at: e.date.getTime(), sale: null })),
+    ...sales.map((s) => ({ queue: s.queue, productId: s.productId, units: s.units, at: s.at, sale: s })),
+  ];
+  const order = (d: Draw) => d.at ?? Number.MAX_SAFE_INTEGER;
+  draws.sort((a, b) => order(a) - order(b));
 
-  const cursor = new Map<string, { idx: number; left: number }>();
-  const out: Cogs = { cogs: 0, units: 0, preHistoryUnits: 0, overflowUnits: 0, unmatchedSkus: new Set() };
-  const order = (s: Sale) => s.at ?? Number.MAX_SAFE_INTEGER;
-  for (const sale of [...sales].sort((a, b) => order(a) - order(b))) {
-    const product = scope.byId.get(sale.productId);
+  const cursor = new Map<string, { idx: number; left: number }>(); // "queue|product"
+  const out: Cogs = { cogs: 0, units: 0, preHistoryUnits: 0, overflowUnits: 0, unplacedUnits: 0, mcfUnits: 0, mcfCogs: 0, unmatchedSkus: new Set() };
+  for (const d of draws) {
+    const product = scope.byId.get(d.productId);
     if (!product) continue;
-    const qty = sale.units;
-    const at = sale.at;
-    const inWindow = selected.has(sale.channel) && (at == null || (at >= from.getTime() && at <= to.getTime()));
-    const layers = queue.get(product.id) ?? [];
+    const qty = d.units;
+    const at = d.at;
+    const sale = d.sale;
+    const inWindow = !!sale && selected.has(sale.channel) && (at == null || (at >= from.getTime() && at <= to.getTime()));
+    if (d.queue == null) {
+      if (inWindow) out.unplacedUnits += qty;
+      continue;
+    }
+    const layers = queues.get(d.queue)?.get(product.id) ?? [];
     const preConsl = product.preConslUnitCost ?? product.openingUnitCost ?? layers[0]?.unitCost ?? null;
-    if (inWindow) out.units += qty;
-    // Pre-history: nothing recorded had entered the channel yet, so nothing is consumed.
+    let cost = 0; // what this draw is charged, as a positive number
+    // Pre-history: nothing recorded had entered the place yet, so nothing is consumed.
     const preHistory = at != null && layers.length > 0 && at < layers[0].date;
     if (layers.length === 0 || preHistory) {
       if (!inWindow) continue;
       if (preConsl == null) out.unmatchedSkus.add(product.code);
       else {
-        out.cogs -= qty * preConsl;
+        cost = qty * preConsl;
         out.preHistoryUnits += qty;
       }
-      continue;
-    }
-    const c = cursor.get(product.id) ?? { idx: 0, left: layers[0].units };
-    let want = qty;
-    while (want > 1e-9 && c.idx < layers.length) {
-      const take = Math.min(c.left, want);
-      if (inWindow) out.cogs -= take * layers[c.idx].unitCost;
-      c.left -= take;
-      want -= take;
-      if (c.left <= 1e-9) {
-        c.idx++;
-        c.left = c.idx < layers.length ? layers[c.idx].units : 0;
+    } else {
+      const ck = `${d.queue}|${product.id}`;
+      const c = cursor.get(ck) ?? { idx: 0, left: layers[0].units };
+      let want = qty;
+      while (want > 1e-9 && c.idx < layers.length) {
+        const take = Math.min(c.left, want);
+        if (inWindow) cost += take * layers[c.idx].unitCost;
+        c.left -= take;
+        want -= take;
+        if (c.left <= 1e-9) {
+          c.idx++;
+          c.left = c.idx < layers.length ? layers[c.idx].units : 0;
+        }
+      }
+      cursor.set(ck, c);
+      if (!inWindow) continue;
+      if (want > 1e-9) {
+        // Sold more than was ever recorded entering the place — most likely the newest shipment
+        // wasn't recorded, so the rest carries the newest cost on record.
+        const newest = layers[layers.length - 1]?.unitCost ?? preConsl;
+        if (newest == null) out.unmatchedSkus.add(product.code);
+        else {
+          cost += want * newest;
+          out.overflowUnits += want;
+        }
       }
     }
-    if (want > 1e-9 && inWindow) {
-      // Sold more than was ever recorded entering the channel — most likely the newest shipment
-      // wasn't recorded, so the rest carries the newest cost on record.
-      const newest = layers[layers.length - 1]?.unitCost ?? preConsl;
-      if (newest == null) out.unmatchedSkus.add(product.code);
-      else {
-        out.cogs -= want * newest;
-        out.overflowUnits += want;
-      }
+    out.units += qty;
+    out.cogs -= cost;
+    if (sale?.mcf) {
+      out.mcfUnits += qty;
+      out.mcfCogs -= cost;
     }
-    cursor.set(product.id, c);
   }
   return out;
 }
@@ -171,8 +232,8 @@ type Bridge = {
   taxes: number;
   fba: number;
   referral: number;
-  /** Units per SKU, for the FIFO walk to price. */
-  lines: { sku: string; units: number }[];
+  /** Units per SKU, with the facility the order was fulfilled from, for the FIFO walk to price. */
+  lines: { sku: string; units: number; facility: string | null }[];
   pendingSales: number;
 };
 
@@ -183,9 +244,10 @@ async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurre
   if (!orgId) return none;
 
   const candidates = await prisma.$queryRaw<
-    { id: string; total: number; currency: string; orderedAt: Date; productGross: number | null; discounts: number | null; tax: number | null; shipping: number | null; giftWrap: number | null }[]
+    { id: string; total: number; currency: string; orderedAt: Date; productGross: number | null; discounts: number | null; tax: number | null; shipping: number | null; giftWrap: number | null; facility: string | null }[]
   >`
-    SELECT so.id, so.total, so.currency, so."orderedAt", so."productGross", so.discounts, so.tax, so.shipping, so."giftWrap"
+    SELECT so.id, so.total, so.currency, so."orderedAt", so."productGross", so.discounts, so.tax, so.shipping, so."giftWrap",
+      COALESCE(so."fulfillmentOverrideFacilityId", so."fulfillmentFacilityId") AS facility
     FROM "SalesOrder" so
     WHERE so."orgId" = ${orgId} AND so.channel = 'AMAZON'
       AND so.cancelled = false AND so.voided = false AND so.total <> 0
@@ -205,6 +267,7 @@ async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurre
   const inScopeOrders = new Set(allLines.filter((l) => l.sku && scope.has(l.sku)).map((l) => l.orderId));
   const orders = candidates.filter((o) => inScopeOrders.has(o.id));
   if (orders.length === 0) return none;
+  const facilityOf = new Map(orders.map((o) => [o.id, o.facility]));
 
   // Revenue split straight off the order records — exact, not an estimate — in the company's
   // currency (a sister-marketplace order converts at its day's reference rate).
@@ -246,7 +309,7 @@ async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurre
   // or cost here; its order-level revenue split above is the one approximation this makes).
   const lines = allLines.filter((l) => inScopeOrders.has(l.orderId) && l.sku && scope.has(l.sku));
   let fba = 0, referral = 0;
-  const pendingLines: { sku: string; units: number }[] = [];
+  const pendingLines: { sku: string; units: number; facility: string | null }[] = [];
   for (const l of lines) {
     const sku = l.sku ?? "";
     const fx = rateOf.get(l.orderId) ?? 1;
@@ -256,7 +319,7 @@ async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurre
     const gross = (l.gross || l.quantity * l.unitPrice) * fx;
     fba += l.quantity * fbaPerUnit;
     referral += gross * commissionRate;
-    pendingLines.push({ sku, units: l.quantity });
+    pendingLines.push({ sku, units: l.quantity, facility: facilityOf.get(l.orderId) ?? null });
   }
 
   const sales = [
@@ -310,7 +373,7 @@ async function tiktokPendingBridge(orgId: string, from: Date, to: Date, baseCurr
 
 const EMPTY: Pnl = {
   groups: [], sales: 0, cogs: 0, unitsSold: 0, netProfit: 0, margin: null, roi: null, pending: [],
-  unmatchedSkus: [], preHistoryUnits: 0, overflowUnits: 0, ignored: { skus: [], units: 0, sales: 0 }, backfillInProgress: false, hasData: false,
+  unmatchedSkus: [], preHistoryUnits: 0, overflowUnits: 0, unplacedUnits: 0, mcf: { units: 0, cogs: 0 }, ignored: { skus: [], units: 0, sales: 0 }, backfillInProgress: false, hasData: false,
 };
 
 /** The statement for a window, over the given channels (default: every channel with data). */
@@ -320,7 +383,15 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
   const selected = (channels ?? present).filter((c) => present.includes(c));
   const selectedSet = new Set(selected);
   if (!orgId || selected.length === 0) return EMPTY;
-  const [scope, org, exclusions] = await Promise.all([loadScope(), getCurrentOrg(), activeExclusions()]);
+  const [scope, org, exclusions, facilities] = await Promise.all([loadScope(), getCurrentOrg(), activeExclusions(), prisma.facility.findMany({ select: { id: true, channel: true } })]);
+  // The queue an order's facility prices from: a channel facility is that channel's stock
+  // (Amazon FBA and AWD share Amazon's), one of the company's own places is its own queue.
+  const facilityChannel = new Map(facilities.map((f) => [f.id, f.channel]));
+  const queueOf = (facilityId: string | null): QueueKey | null => {
+    if (!facilityId || !facilityChannel.has(facilityId)) return null;
+    const ch = facilityChannel.get(facilityId);
+    return ch ? (ch.startsWith("AMAZON") ? "AMAZON" : ch) : facilityId;
+  };
   const baseCurrency = org?.currencyCode ?? "USD";
   const excludedSources = exclusions.sources;
   const amazonSkus = [...scope.amazon.keys()];
@@ -350,19 +421,23 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
   // fee counts whenever its order counts; on an MCF order it always counts (the fee is a real
   // cost even though that order's revenue lives on another channel); on a Shopify order the
   // double-count rule drops, only a hand-written fee counts.
-  const feeRows = await prisma.$queryRaw<{ name: string; currency: string; amount: number; orderedAt: Date }[]>`
-    SELECT f.name, o.currency, f.amount::float8 AS amount, o."orderedAt"
+  const feeRows = await prisma.$queryRaw<{ name: string; bucket: string; currency: string; amount: number; orderedAt: Date }[]>`
+    SELECT f.name, f.bucket, o.currency, f.amount::float8 AS amount, o."orderedAt"
     FROM "OrderFee" f JOIN "SalesOrder" o ON o.id = f."orderId"
     WHERE o."orgId" = ${orgId} AND o.channel = ANY(${selected}::text[])
       AND o."orderedAt" >= ${from} AND o."orderedAt" <= ${to}
       AND o.cancelled = false AND o.voided = false
       AND (f."ruleId" IS NULL OR o.mcf OR NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excludedSources}::text[])))`;
-  const feeByName = new Map<string, number>();
+  // Each fee lands in the bucket its rule chose — a processor's charge under Payment processing,
+  // everything else under Custom fees — as its own line.
+  const feeByName = new Map<string, { bucket: string; name: string; amount: number }>();
   for (const f of feeRows) {
     const fx = f.currency === baseCurrency ? 1 : await fxRate(f.currency, baseCurrency, f.orderedAt);
-    feeByName.set(f.name, (feeByName.get(f.name) ?? 0) - f.amount * fx);
+    const bucket = f.bucket === "payment_fees" ? "payment_fees" : "custom_fees";
+    const k = `${bucket}|${f.name}`;
+    feeByName.set(k, { bucket, name: f.name, amount: (feeByName.get(k)?.amount ?? 0) - f.amount * fx });
   }
-  for (const [name, amount] of feeByName) add("custom_fees", name, amount);
+  for (const f of feeByName.values()) add(f.bucket, f.name, f.amount);
 
   // What the scope left out: listings sold that the company doesn't manage here.
   const ignored = { skus: [] as string[], units: 0, sales: 0 };
@@ -408,7 +483,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
     }
     for (const l of bridge.lines) {
       const p = scope.amazon.get(l.sku);
-      if (p) pendingSales.push({ productId: p.id, units: l.units, at: null, channel: "AMAZON" });
+      if (p) pendingSales.push({ productId: p.id, units: l.units, at: null, channel: "AMAZON", queue: queueOf(l.facility) });
     }
   }
   if (selectedSet.has("TIKTOK")) {
@@ -420,24 +495,48 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
     }
   }
 
-  // Every sale on record, from every channel — the FIFO walk needs all of history.
-  const amazonRows = await prisma.financeEvent.findMany({
-    where: { channel: "AMAZON", group: "sales", type: "Principal", quantity: { not: null }, sku: { in: amazonSkus } },
-    select: { sku: true, quantity: true, eventAt: true },
-    orderBy: [{ eventAt: "asc" }, { id: "asc" }],
-  });
+  // Every sale on record, from every channel — the FIFO walk needs all of history. Each carries
+  // the queue of the facility its order shipped from; an order placed nowhere carries none.
+  // Amazon's sale rows don't say where they shipped from, so each is looked up on its order; a
+  // row with no order record on file is Amazon's when Amazon charged an FBA fee for that order.
+  const amazonRows = await prisma.$queryRaw<{ sku: string; units: number; at: Date; facility: string | null; placed: boolean; fbaFee: boolean }[]>`
+    SELECT fe.sku, fe.quantity::int AS units, fe."eventAt" AS at,
+      COALESCE(so."fulfillmentOverrideFacilityId", so."fulfillmentFacilityId") AS facility,
+      (so.id IS NOT NULL) AS placed,
+      CASE WHEN so.id IS NULL THEN EXISTS (
+        SELECT 1 FROM "FinanceEvent" f2
+        WHERE f2."orgId" = fe."orgId" AND f2.channel = 'AMAZON' AND f2."orderId" = fe."orderId" AND f2.type LIKE 'FBA%')
+      ELSE false END AS "fbaFee"
+    FROM "FinanceEvent" fe
+    LEFT JOIN "SalesOrder" so ON so."orgId" = fe."orgId" AND so.channel = 'AMAZON' AND so."externalId" = fe."orderId"
+    WHERE fe."orgId" = ${orgId} AND fe.channel = 'AMAZON' AND fe."group" = 'sales' AND fe.type = 'Principal'
+      AND fe.quantity IS NOT NULL AND fe.sku = ANY(${amazonSkus}::text[])
+    ORDER BY fe."eventAt" ASC, fe.id ASC`;
   const sales: Sale[] = [];
   for (const r of amazonRows) {
-    const p = scope.amazon.get(r.sku as string);
-    if (p) sales.push({ productId: p.id, units: r.quantity ?? 0, at: r.eventAt.getTime(), channel: "AMAZON" });
+    const p = scope.amazon.get(r.sku);
+    if (!p) continue;
+    const queue = r.placed ? queueOf(r.facility) : r.fbaFee ? "AMAZON" : null;
+    sales.push({ productId: p.id, units: r.units, at: r.at.getTime(), channel: "AMAZON", queue });
   }
-  const lineRows = await prisma.$queryRaw<{ channel: string; productId: string; units: number; at: Date }[]>`
-    SELECT o.channel, l."productId", l.quantity::int AS units, o."orderedAt" AS at
+  const lineRows = await prisma.$queryRaw<{ channel: string; productId: string; units: number; at: Date; facility: string | null }[]>`
+    SELECT o.channel, l."productId", l.quantity::int AS units, o."orderedAt" AS at,
+      COALESCE(o."fulfillmentOverrideFacilityId", o."fulfillmentFacilityId") AS facility
     FROM "SalesOrderLine" l JOIN "SalesOrder" o ON o.id = l."orderId"
     WHERE o."orgId" = ${orgId} AND o.channel IN ('SHOPIFY', 'TIKTOK') AND l."productId" IS NOT NULL
       AND o.cancelled = false AND o.voided = false
       AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excludedSources}::text[]))`;
-  for (const r of lineRows) sales.push({ productId: r.productId, units: r.units, at: r.at.getTime(), channel: r.channel as PnlChannel });
+  for (const r of lineRows) sales.push({ productId: r.productId, units: r.units, at: r.at.getTime(), channel: r.channel as PnlChannel, queue: queueOf(r.facility) });
+  // Amazon the only channel: the MCF orders' units count too, from the Orders tab, as their own line.
+  if (!exclusions.mcf) {
+    const mcfRows = await prisma.$queryRaw<{ productId: string; units: number; at: Date; facility: string | null }[]>`
+      SELECT l."productId", l.quantity::int AS units, o."orderedAt" AS at,
+        COALESCE(o."fulfillmentOverrideFacilityId", o."fulfillmentFacilityId") AS facility
+      FROM "SalesOrderLine" l JOIN "SalesOrder" o ON o.id = l."orderId"
+      WHERE o."orgId" = ${orgId} AND o.channel = 'AMAZON' AND o.mcf = true AND l."productId" IS NOT NULL
+        AND o.cancelled = false AND o.voided = false`;
+    for (const r of mcfRows) sales.push({ productId: r.productId, units: r.units, at: r.at.getTime(), channel: "AMAZON", queue: queueOf(r.facility), mcf: true });
+  }
 
   const fifo = await fifoCogs([...sales, ...pendingSales], from, to, selectedSet, scope);
 
@@ -467,6 +566,8 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
     unmatchedSkus: [...fifo.unmatchedSkus],
     preHistoryUnits: fifo.preHistoryUnits,
     overflowUnits: fifo.overflowUnits,
+    unplacedUnits: fifo.unplacedUnits,
+    mcf: { units: fifo.mcfUnits, cogs: fifo.mcfCogs },
     ignored,
     backfillInProgress,
     hasData: groups.length > 0 || fifo.units > 0,

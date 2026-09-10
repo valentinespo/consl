@@ -174,11 +174,14 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
             // generation gets one full re-read too, then carries the current generation.
             const existing = await prisma.salesOrder.count({ where: { channel } });
             const settingsNow = await getOrgSettings();
-            const behind = provider === "shopify" && importerVersion(settingsNow.importerVersions, "shopifyFinance") < IMPORTER_VERSIONS.shopifyFinance;
+            const behind =
+              provider === "shopify" &&
+              (importerVersion(settingsNow.importerVersions, "shopifyFinance") < IMPORTER_VERSIONS.shopifyFinance ||
+                importerVersion(settingsNow.importerVersions, "shopifyOrders") < IMPORTER_VERSIONS.shopifyOrders);
             await (existing === 0 || behind ? full() : recent());
             if (existing === 0) console.log(`[scheduler] ${provider} full order history imported for org ${orgId}`);
             if (behind) {
-              await saveOrgSettings({ importerVersions: stampImporterVersion(settingsNow.importerVersions, "shopifyFinance") });
+              await saveOrgSettings({ importerVersions: stampImporterVersion(stampImporterVersion(settingsNow.importerVersions, "shopifyFinance"), "shopifyOrders") });
               console.log(`[scheduler] shopify ledger re-read for ${orgId}: on the current importer`);
             }
           } catch (e) {

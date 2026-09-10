@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import { requirePermission, requireView } from "@/lib/membership";
 import { importAllOrders } from "@/lib/orders";
 import { prisma } from "@/lib/prisma";
-import { applyFeeRule, applyFeeRulesToOrders, feeAmount, FEE_TAGS, type FeeKind } from "@/lib/order-fees";
+import { applyFeeRule, applyFeeRulesToOrders, feeAmount, FEE_TAGS, FEE_BUCKETS, type FeeKind, type FeeBucket } from "@/lib/order-fees";
+import { getOrgSettings } from "@/lib/settings";
+import { zonedDayBounds } from "@/lib/pnl";
 
 /** Pull orders from every connected channel into the store. Idempotent — safe to re-run; it
  *  backfills new orders and refreshes changed ones. Gated on inventory:edit like the other syncs. */
@@ -46,7 +48,7 @@ export async function setOrderVoided(id: string, voided: boolean) {
   return setOrdersVoided([id], voided);
 }
 
-type FeeInput = { name: string; kind: FeeKind; value: number };
+type FeeInput = { name: string; kind: FeeKind; value: number; extraFixed?: number | null; bucket?: FeeBucket };
 
 function checkFee(fee: FeeInput): string | null {
   const name = fee.name.trim();
@@ -55,8 +57,14 @@ function checkFee(fee: FeeInput): string | null {
   if (!Number.isFinite(fee.value) || fee.value <= 0) return "Enter an amount above zero.";
   if (fee.kind === "percent" && fee.value > 100) return "A percentage can't exceed 100.";
   if (fee.kind !== "percent" && fee.kind !== "fixed") return "Choose a fee type.";
+  if (fee.extraFixed != null && (!Number.isFinite(fee.extraFixed) || fee.extraFixed < 0)) return "The flat amount on top can't be negative.";
+  if (fee.bucket && !FEE_BUCKETS.includes(fee.bucket)) return "Choose where the fee shows on the P&L.";
   return null;
 }
+
+/** A flat amount on top only means something on a percentage; a fixed fee IS the flat amount. */
+const extraOf = (fee: FeeInput) => (fee.kind === "percent" && fee.extraFixed ? fee.extraFixed : null);
+const bucketOf = (fee: FeeInput): FeeBucket => fee.bucket ?? "custom_fees";
 
 /** Write a fee by hand onto one order or a selection. A percentage is of what each customer paid. */
 export async function addOrderFees(orderIds: string[], fee: FeeInput) {
@@ -67,7 +75,7 @@ export async function addOrderFees(orderIds: string[], fee: FeeInput) {
   const orders = await prisma.salesOrder.findMany({ where: { id: { in: orderIds } }, select: { id: true, total: true } });
   if (orders.length === 0) return { ok: false as const, error: "No orders selected." };
   await prisma.orderFee.createMany({
-    data: orders.map((o) => ({ orderId: o.id, ruleId: null, name: fee.name.trim(), amount: feeAmount(fee.kind, fee.value, o.total) })),
+    data: orders.map((o) => ({ orderId: o.id, ruleId: null, name: fee.name.trim(), amount: feeAmount(fee.kind, fee.value, o.total, extraOf(fee)), bucket: bucketOf(fee) })),
   });
   touched();
   return { ok: true as const, count: orders.length };
@@ -97,9 +105,20 @@ export async function setFulfillmentOverride(orderId: string, facilityId: string
   return setFulfillmentOverrides([orderId], facilityId);
 }
 
-type RuleInput = FeeInput & { channel: string | null; source: string | null; facilityId: string | null; tag: string | null; appliesToPast: boolean };
+type RuleInput = FeeInput & {
+  channel: string | null;
+  source: string | null;
+  paymentMethod: string | null;
+  facilityId: string | null;
+  tag: string | null;
+  /** "future": orders from now on · "all": past and future · "period": orders placed inside `period`. */
+  scope: "future" | "all" | "period";
+  period?: { from: string; to: string } | null; // company-calendar days, YYYY-MM-DD
+};
 
-/** Create a rule and write it onto every order it covers (the past too when asked). */
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Create a rule and write it onto every order it covers (the past, or its period, when asked). */
 export async function createFeeRule(input: RuleInput) {
   const gate = await requirePermission("inventory", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };
@@ -108,16 +127,29 @@ export async function createFeeRule(input: RuleInput) {
   if (input.channel && !["AMAZON", "SHOPIFY", "TIKTOK"].includes(input.channel)) return { ok: false as const, error: "Unknown channel." };
   if (input.tag && !FEE_TAGS[input.tag]) return { ok: false as const, error: "Unknown tag." };
   if (input.facilityId && !(await prisma.facility.findFirst({ where: { id: input.facilityId }, select: { id: true } }))) return { ok: false as const, error: "Pick a facility." };
+  if (!input.paymentMethod && input.bucket === "payment_fees" && !input.name.trim()) return { ok: false as const, error: "Give the fee a name." };
+  let period: { from: Date; to: Date } | null = null;
+  if (input.scope === "period") {
+    const p = input.period;
+    if (!p || !DAY.test(p.from) || !DAY.test(p.to)) return { ok: false as const, error: "Pick the first and last day the rule covers." };
+    if (p.from > p.to) return { ok: false as const, error: "The period ends before it starts." };
+    period = zonedDayBounds(p.from, p.to, (await getOrgSettings()).syncTz);
+  } else if (input.scope !== "future" && input.scope !== "all") return { ok: false as const, error: "Choose which orders the rule covers." };
   const rule = await prisma.orderFeeRule.create({
     data: {
       name: input.name.trim(),
       kind: input.kind,
       value: input.value,
+      extraFixed: extraOf(input),
+      bucket: bucketOf(input),
       channel: input.channel || null,
       source: input.source?.trim() || null,
+      paymentMethod: input.paymentMethod?.trim() || null,
       facilityId: input.facilityId || null,
       tag: input.tag || null,
-      appliesToPast: input.appliesToPast,
+      appliesToPast: input.scope === "all",
+      periodFrom: period?.from ?? null,
+      periodTo: period?.to ?? null,
     },
   });
   const count = await applyFeeRule(rule.id);

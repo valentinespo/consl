@@ -6,6 +6,7 @@ import { getCurrentOrgId } from "@/lib/tenant";
 import { upsertShopifyFinanceEvents, importShopifyPaymentsLedger, hasShopifyPaymentsScope } from "@/lib/shopify-finances";
 import { applyFeeRulesToOrders } from "@/lib/order-fees";
 import { resolveFulfillmentFacilities } from "@/lib/fulfillment";
+import { paymentMethodKey, paymentMethodLabel, walletLabel } from "@/lib/payment-methods";
 
 /**
  * Pull orders from the connected channels into SalesOrder/SalesOrderLine — the raw feed for
@@ -44,6 +45,10 @@ type Fetched = {
   replacement?: boolean;
   fulfillment: string | null;
   fulfillmentLabel: string | null;
+  // How the buyer paid (platform gateway key + wallet/card detail). Undefined = the source doesn't
+  // say (Amazon), so an existing value is left alone.
+  paymentMethod?: string | null;
+  paymentDetail?: string | null;
   total: number;
   currency: string;
   /** Keep an existing non-zero total when this fetch carries $0 — the live Orders API hides a
@@ -115,6 +120,8 @@ async function persist(
         replacement: o.replacement ?? false,
         fulfillment: o.fulfillment,
         fulfillmentLabel: o.fulfillmentLabel,
+        ...(o.paymentMethod !== undefined ? { paymentMethod: o.paymentMethod } : {}),
+        ...(o.paymentDetail !== undefined ? { paymentDetail: o.paymentDetail } : {}),
         ...(keepTotal ? {} : { total: o.total }),
         currency: o.currency,
         // `voided` is the operator's alone (row menu) — imports never touch it.
@@ -206,9 +213,19 @@ type ShopifyOrderNode = {
       discountAllocations: Array<{ allocatedAmountSet: { shopMoney: { amount: string } } }>;
     }>;
   };
+  // How it was paid: every gateway on the order, and per transaction the gateway that took it and
+  // the wallet/card behind it.
+  paymentGatewayNames?: string[] | null;
   // The money side (fees, refunds, chargebacks) feeds the SHOPIFY finance ledger — see
   // lib/shopify-finances.ts.
-  transactions?: Array<{ kind: string; status: string; fees?: Array<{ type?: string | null; amount: { amount: string } }> | null }> | null;
+  transactions?: Array<{
+    kind: string;
+    status: string;
+    gateway?: string | null;
+    amountSet?: { shopMoney: { amount: string } } | null;
+    paymentDetails?: { __typename?: string; paymentMethodName?: string | null; wallet?: string | null; company?: string | null } | null;
+    fees?: Array<{ type?: string | null; amount: { amount: string } }> | null;
+  }> | null;
   refunds?: Array<{
     id: string;
     createdAt: string;
@@ -230,6 +247,7 @@ const SHOPIFY_ORDER_FIELDS = `
   totalDiscountsSet { shopMoney { amount } }
   shippingAddress { city provinceCode zip countryCodeV2 }
   fulfillments(first: 3) { location { id name isFulfillmentService fulfillmentService { handle serviceName } } }
+  paymentGatewayNames
   lineItems(first: 100) {
     nodes {
       sku quantity variant { id }
@@ -237,7 +255,10 @@ const SHOPIFY_ORDER_FIELDS = `
       discountAllocations { allocatedAmountSet { shopMoney { amount } } }
     }
   }
-  transactions(first: 10) { kind status fees { type amount { amount } } }
+  transactions(first: 10) {
+    kind status gateway amountSet { shopMoney { amount } } fees { type amount { amount } }
+    paymentDetails { __typename ... on CardPaymentDetails { paymentMethodName wallet company } ... on LocalPaymentMethodsPaymentDetails { paymentMethodName } ... on ShopPayInstallmentsPaymentDetails { paymentMethodName } }
+  }
   refunds(first: 20) {
     id createdAt totalRefundedSet { shopMoney { amount } }
     refundLineItems(first: 50) { nodes { quantity subtotalSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } lineItem { sku variant { id } } } }
@@ -253,9 +274,27 @@ export function shopifyLineMoney(l: ShopifyOrderNode["lineItems"]["nodes"][numbe
   return { gross, net };
 }
 
+/** The order's payment method: the gateway that took the most (a gift card plus a card names the
+ *  card), with the wallet/card behind it and any other method that chipped in. */
+function shopifyPayment(o: ShopifyOrderNode): { paymentMethod: string | null; paymentDetail: string | null } {
+  const paid = (o.transactions ?? []).filter((t) => t.status === "SUCCESS" && ["SALE", "CAPTURE"].includes(t.kind));
+  const primary = [...paid].sort((a, b) => money(b.amountSet?.shopMoney.amount) - money(a.amountSet?.shopMoney.amount))[0];
+  const key = primary?.gateway ?? o.paymentGatewayNames?.[0] ?? null;
+  if (!key) return { paymentMethod: null, paymentDetail: null };
+  const d = primary?.paymentDetails;
+  let detail: string | null = null;
+  if (d?.__typename === "CardPaymentDetails") detail = [walletLabel(d.wallet), d.company].filter(Boolean).join(" · ") || null;
+  else if (d?.__typename === "ShopPayInstallmentsPaymentDetails") detail = "Shop Pay Installments";
+  else if (d?.paymentMethodName) detail = d.paymentMethodName;
+  const others = (o.paymentGatewayNames ?? []).filter((g) => g !== key).map((g) => paymentMethodLabel(g)).filter((x): x is string => !!x);
+  if (others.length) detail = [detail, `with ${others.join(", ")}`].filter(Boolean).join(" · ");
+  return { paymentMethod: key, paymentDetail: detail };
+}
+
 function mapShopifyOrder(o: ShopifyOrderNode): Fetched {
   const location = o.fulfillments.map((f) => f.location?.name).find(Boolean);
   return {
+    ...shopifyPayment(o),
     externalId: o.id,
     orderNumber: o.name || null,
     orderedAt: new Date(o.createdAt),
@@ -402,6 +441,7 @@ export type TikTokOrder = {
   paid_time?: number | null;
   fulfillment_type?: string | null; // FULFILLMENT_BY_TIKTOK | FULFILLMENT_BY_SELLER
   warehouse_id?: string | null;
+  payment_method_name?: string | null;
   payment?: {
     sub_total?: string | null;
     total_amount?: string | null;
@@ -508,6 +548,7 @@ function mapTikTokOrder(o: TikTokOrder, warehouseName: Map<string, string>): Fet
     fulfillment: byTikTok ? "TIKTOK" : o.fulfillment_type ? "SELLER" : null,
     fulfillmentLabel:
       (o.warehouse_id ? warehouseName.get(o.warehouse_id) : undefined) ?? (byTikTok ? "TikTok" : o.fulfillment_type ? "Seller" : null),
+    ...(o.payment_method_name ? { paymentMethod: paymentMethodKey(o.payment_method_name), paymentDetail: null } : {}),
     // The order's Total is what the buyer actually PAID — shipping, taxes and discounts all
     // applied (a 100%-discounted sample is $0). Product-only revenue lives on the lines.
     total: money(o.payment?.total_amount ?? o.payment?.sub_total),
