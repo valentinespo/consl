@@ -1,5 +1,6 @@
 "use client";
 
+import { NAME_MAX } from "@/lib/format";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SignOutButton } from "@clerk/nextjs";
@@ -862,6 +863,7 @@ function StepProducts({
                       onKeyDown={(e) => (e.key === "Enter" ? saveEdit() : e.key === "Escape" ? setEdit(null) : undefined)}
                       aria-label="Product title"
                       className={`${inputCls} min-w-0 flex-1`}
+                      maxLength={NAME_MAX}
                     />
                     <button
                       onClick={saveEdit}

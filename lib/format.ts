@@ -134,3 +134,18 @@ export function skuColor(code: string): { bg: string; fg: string } {
   for (let i = 0; i < code.length; i++) h = (h * 31 + code.charCodeAt(i)) >>> 0;
   return palette[h % palette.length];
 }
+
+/** The most characters a product or material name keeps — Amazon listing titles run to 200+ and
+ *  would swamp every table they appear in. */
+export const NAME_MAX = 80;
+
+/** Cut a name at `max` characters, on a word boundary when one falls in the last third, with any
+ *  dangling separator dropped. Names already within the limit come back untouched. */
+export function clampName(s: string, max = NAME_MAX): string {
+  const t = s.replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  let cut = t.slice(0, max);
+  const space = cut.lastIndexOf(" ");
+  if (space >= Math.floor(max * 0.66)) cut = cut.slice(0, space);
+  return cut.replace(/[\s\-–—|,;:·/&+]+$/u, "").trim() || t.slice(0, max).trim();
+}

@@ -146,7 +146,7 @@ export default async function FacilityDetailPage({ params }: { params: Promise<{
                     </span>
                   )}
                   <div className="min-w-0 flex-1">
-                    <div className="text-[12.5px] font-semibold text-ink">{r.name}</div>
+                    <div className="truncate text-[12.5px] font-semibold text-ink">{r.name}</div>
                     {r.sku && <div className="truncate text-[11px] text-muted">for {r.sku}</div>}
                   </div>
                   <div className="text-right">

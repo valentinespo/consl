@@ -380,9 +380,9 @@ export function LotEditor({
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2.5">
                         <SkuAvatar code={l.code} size={30} imageUrl={l.imageUrl} />
-                        <div>
+                        <div className="min-w-0 max-w-[260px]">
                           <div className="font-medium text-ink">{l.code}</div>
-                          <div className="text-[11px] text-muted">{l.name}</div>
+                          <div className="truncate text-[11px] text-muted">{l.name}</div>
                         </div>
                       </div>
                     </td>

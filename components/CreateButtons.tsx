@@ -6,7 +6,7 @@ import { Plus, X } from "@/components/icons";
 import { SkuAvatar } from "@/components/ui";
 import { createProduct, createMaterial, uploadEntityImage } from "@/app/catalog/actions";
 import { SearchSelect } from "@/components/SearchSelect";
-import { COMMON_UNIT_LABELS } from "@/lib/format";
+import { COMMON_UNIT_LABELS, NAME_MAX } from "@/lib/format";
 import { useCan } from "@/components/AccessProvider";
 
 
@@ -146,7 +146,7 @@ export function NewProductButton() {
               </div>
               <div className="min-w-0 flex-1 space-y-3">
                 <Field label="Product name">
-                  <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Lavender Hand Cream" />
+                  <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Lavender Hand Cream" maxLength={NAME_MAX} />
                 </Field>
                 <Field label="Abbreviation">
                   <input
@@ -210,7 +210,7 @@ export function NewMaterialButton() {
         <Modal title="New raw material" onClose={() => setOpen(false)}>
           <div className="space-y-3">
             <Field label="Material name">
-              <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Box sleeve" />
+              <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Box sleeve" maxLength={NAME_MAX} />
             </Field>
             {/* Consumption rates are set on the first lot that uses the material and inherited by
                 later lots — no per-unit default at the catalog level. */}

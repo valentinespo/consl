@@ -1,5 +1,6 @@
 "use client";
 
+import { NAME_MAX } from "@/lib/format";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, SkuAvatar } from "@/components/ui";
@@ -73,7 +74,7 @@ export function ProductEditor({ product }: { product: ProductForEdit }) {
               <input value={code} onChange={(e) => setCode(e.target.value.slice(0, 8))} maxLength={8} className={`${inputCls} font-semibold uppercase`} />
             </Field>
             <Field label="Product name">
-              <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
+              <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} maxLength={NAME_MAX} />
             </Field>
           </div>
           <Field label="Notes" hint="Internal only — never shown to customers.">

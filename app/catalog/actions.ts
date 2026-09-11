@@ -1,5 +1,6 @@
 "use server";
 
+import { clampName } from "@/lib/format";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { recomputeAll } from "@/lib/recompute";
@@ -130,7 +131,7 @@ export async function importAmazonCatalog() {
   let images = 0;
   for (const r of rows) {
     if (!r.sellerSku || knownSku.has(r.sellerSku) || (r.asin && knownAsin.has(r.asin))) continue;
-    const name = r.name?.trim() || r.sellerSku;
+    const name = clampName(r.name?.trim() || r.sellerSku);
     const code = uniqueProductCode(name, usedCodes);
     knownSku.add(r.sellerSku);
     if (r.asin) knownAsin.add(r.asin);
@@ -168,7 +169,7 @@ export async function createProduct(input: { code: string; name?: string }) {
   if (!gate.ok) return { ok: false as const, error: gate.error };
   const code = input.code.trim().toUpperCase().replace(/\s+/g, "").slice(0, 8);
   if (!code) return { ok: false as const, error: "Abbreviation required" };
-  const name = (input.name ?? "").trim() || code;
+  const name = clampName((input.name ?? "").trim() || code);
   const existing = await prisma.product.findFirst({ where: { code } });
   if (existing) return { ok: true as const, id: existing.id, code: existing.code, name: existing.name, existed: true };
   const p = await prisma.product.create({ data: { code, name } });
@@ -184,7 +185,7 @@ export async function createMaterial(input: {
 }) {
   const gate = await requirePermission("catalog", "create");
   if (!gate.ok) return { ok: false as const, error: gate.error };
-  const name = input.name.trim();
+  const name = clampName(input.name);
   if (!name) return { ok: false as const, error: "Material name required" };
   let code = slugCode(name);
   let n = 1;
@@ -208,7 +209,7 @@ export async function updateProduct(input: { id: string; code: string; name: str
   const gate = await requirePermission("catalog", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };
   const code = input.code.trim().toUpperCase().replace(/\s+/g, "").slice(0, 8);
-  const name = input.name.trim();
+  const name = clampName(input.name);
   if (!code) return { ok: false as const, error: "Abbreviation required" };
   if (!name) return { ok: false as const, error: "Name required" };
   const current = await prisma.product.findUnique({ where: { id: input.id } });
@@ -243,7 +244,7 @@ export async function updateMaterial(input: {
 }) {
   const gate = await requirePermission("catalog", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };
-  const name = input.name.trim();
+  const name = clampName(input.name);
   if (!name) return { ok: false as const, error: "Name required" };
 
   const current = await prisma.materialType.findFirst({ where: { id: input.id } });
@@ -487,7 +488,7 @@ export async function applyChannelMappings(channel: "SHOPIFY" | "AMAZON" | "TIKT
 
         const { mappingData: md } = await import("@/lib/channel-catalog");
         await prisma.product.create({
-          data: { code, name: listing.title, imageUrl, importedFromListing: true, ...md(channel, listing) },
+          data: { code, name: clampName(listing.title), imageUrl, importedFromListing: true, ...md(channel, listing) },
         });
         if (listing.ignored) await prisma.channelListing.update({ where: { id: listing.id }, data: { ignored: false } });
       }

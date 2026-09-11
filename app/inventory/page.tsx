@@ -141,7 +141,7 @@ export default async function InventoryPage() {
   const item = (img: React.ReactNode, name: string, sub?: string | null) => (
     <div className="flex items-center gap-2.5">
       {img}
-      <div className="min-w-0">
+      <div className="min-w-0 max-w-[300px]">
         <div className="truncate text-[13px] font-medium text-ink">{name}</div>
         {sub && <div className="truncate text-[11px] text-muted">{sub}</div>}
       </div>
@@ -379,7 +379,7 @@ function RawMaterialRows({
           this table. A section start is carried by its bold name and totals instead. */}
       <tr className="border-b border-line">
         <td colSpan={5} className="px-4 py-2 text-[12px]">
-          <span className="font-semibold text-ink">{s.name}</span>
+          <span className="inline-block max-w-[420px] truncate align-bottom font-semibold text-ink">{s.name}</span>
           <span className="ml-2 tabular text-muted">
             {qty(s.totalQty, cur)} {inflectUnit(s.unitLabel, s.totalQty)} · {money(s.value, 2, cur)}
           </span>
@@ -407,7 +407,7 @@ function RawMaterialRows({
               <td className="py-2.5 pl-4 pr-3">
                 <div className="flex items-center gap-2.5">
                   {img}
-                  <div className="min-w-0">
+                  <div className="min-w-0 max-w-[300px]">
                     <div className="truncate text-[13px] font-medium text-ink">{g.sku ? `${s.name} for ${g.sku}` : s.name}</div>
                     <div className="truncate text-[11px] text-muted">{g.sku ? (g.productName ?? g.sku) : inflectUnit(s.unitLabel, g.totalQty)}</div>
                   </div>
