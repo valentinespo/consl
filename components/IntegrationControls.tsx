@@ -10,10 +10,13 @@ export function IntegrationControls({
   provider,
   connected,
   canConnect,
+  addLabel,
 }: {
   provider: Provider;
   connected: boolean;
   canConnect: boolean;
+  /** Providers that can link more accounts after connecting (Meta Ads) show this next to Disconnect. */
+  addLabel?: string;
 }) {
   const [pending, start] = useTransition();
   const [confirm, setConfirm] = useState(false);
@@ -21,6 +24,14 @@ export function IntegrationControls({
   const router = useRouter();
 
   if (connected) {
+    const add = addLabel && canConnect && !confirm && (
+      <a
+        href={`/api/integrations/${provider.replace("_", "-")}/connect`}
+        className="rounded-lg bg-accent-strong px-3.5 py-2 text-[13px] font-medium text-white hover:opacity-90"
+      >
+        {addLabel}
+      </a>
+    );
     return confirm ? (
       <span className="inline-flex items-center gap-1.5">
         <button
@@ -42,13 +53,16 @@ export function IntegrationControls({
         </button>
       </span>
     ) : (
-      <button
-        type="button"
-        onClick={() => setConfirm(true)}
-        className="rounded-lg border border-border bg-surface px-3.5 py-2 text-[13px] font-medium text-ink-soft hover:border-negative hover:text-negative"
-      >
-        Disconnect
-      </button>
+      <span className="inline-flex items-center gap-1.5">
+        {add}
+        <button
+          type="button"
+          onClick={() => setConfirm(true)}
+          className="rounded-lg border border-border bg-surface px-3.5 py-2 text-[13px] font-medium text-ink-soft hover:border-negative hover:text-negative"
+        >
+          Disconnect
+        </button>
+      </span>
     );
   }
 

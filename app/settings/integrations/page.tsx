@@ -5,6 +5,7 @@ import { Card } from "@/components/ui";
 import { PROVIDERS, type Provider } from "@/lib/integrations";
 import { PROVIDER_LOGO } from "@/lib/channel-logos";
 import { IntegrationControls } from "@/components/IntegrationControls";
+import { MetaAdAccountList } from "@/components/MetaAdAccountList";
 import { amazonOAuthConfigured } from "@/lib/amazon-oauth";
 import { shopifyOAuthConfigured } from "@/lib/shopify-oauth";
 import { tiktokConfigured } from "@/lib/tiktok";
@@ -26,10 +27,11 @@ export default async function IntegrationsSettingsPage({
 }) {
   await requireView("settings");
   const sp = await searchParams;
-  const [integrations, lastSnapshot, channelFacilities, { date }] = await Promise.all([
+  const [integrations, lastSnapshot, channelFacilities, metaAccounts, { date }] = await Promise.all([
     prisma.integration.findMany(),
     prisma.skuSnapshot.findFirst({ orderBy: { capturedAt: "desc" }, select: { capturedAt: true } }),
     prisma.facility.findMany({ where: { channel: { not: null } }, select: { channel: true } }),
+    prisma.metaAdAccount.findMany({ orderBy: { name: "asc" }, select: { accountId: true, name: true, businessName: true, currency: true, status: true, lastError: true } }),
     getFmt(),
   ]);
   const byProvider = new Map(integrations.map((i) => [i.provider, i]));
@@ -104,6 +106,14 @@ export default async function IntegrationsSettingsPage({
                 )}
               </div>
               <div className="mt-0.5 text-[12.5px] text-muted">{def.blurb}</div>
+              {p === "meta_ads" && liveConn && (
+                <>
+                  <MetaAdAccountList accounts={metaAccounts} />
+                  <div className="mt-1.5 text-[11.5px] text-muted">
+                    Meta&apos;s dialog is where you tick the ad accounts to share, one business portfolio per pass. Add ad accounts runs another pass; each linked account is imported on its own.
+                  </div>
+                </>
+              )}
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 {def.locationBased && (
                   <span className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[10.5px] font-medium text-ink-soft">
@@ -125,7 +135,7 @@ export default async function IntegrationsSettingsPage({
             </div>
             {/* Disconnect only for a real per-tenant connection; a legacy (workspace-key) Amazon
                 still offers Connect so the seller can establish the real OAuth connection. */}
-            <IntegrationControls provider={p} connected={liveConn} canConnect={CONNECTABLE[p]} />
+            <IntegrationControls provider={p} connected={liveConn} canConnect={CONNECTABLE[p]} addLabel={p === "meta_ads" ? "Add ad accounts" : undefined} />
           </Card>
         );
       })}

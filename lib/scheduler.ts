@@ -256,7 +256,7 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
           try {
             const { importMetaAdsSpend } = await import("@/lib/meta-ads-spend");
             const r = await importMetaAdsSpend();
-            if (r) console.log(`[scheduler] meta ads for ${orgId}: ${r.rows} day rows (${r.from} → ${r.to})`);
+            if (r) console.log(`[scheduler] meta ads for ${orgId}: ${r.rows} day rows across ${r.accounts} ad account(s)`);
           } catch (e) {
             console.error(`[scheduler] meta ads failed for org ${orgId}:`, (e as Error).message);
           }

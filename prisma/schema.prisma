@@ -78,6 +78,7 @@ model Organization {
   purchaseOrderLines      PurchaseOrderLine[]
   stockMovements          StockMovement[]
   integrations            Integration[]
+  metaAdAccounts          MetaAdAccount[]
   orderFeeRules           OrderFeeRule[]
   orderFees               OrderFee[]
   channelLocations        ChannelLocation[]
@@ -122,6 +123,35 @@ model Integration {
   updatedAt       DateTime      @updatedAt
 
   @@unique([orgId, provider])
+}
+
+// Meta Ads: one row per linked ad account. A connection pass (Facebook Login for Business with a
+// business portfolio) grants exactly the ad accounts the person ticks in Meta's dialog; a company
+// can run several passes to link accounts from several portfolios. Each row keeps the token of
+// the pass that granted it (a system-user token never expires) and its own import marker.
+model MetaAdAccount {
+  id                   String        @id @default(cuid())
+  orgId                String?
+  organization         Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  accountId            String // "act_<id>"
+  accountNumber        String? // "<id>"
+  name                 String
+  currency             String?
+  timezone             String? // the account's own calendar — Meta reports spend by it
+  businessId           String?
+  businessName         String?
+  accessTokenEnc       String?
+  accessTokenExpiresAt DateTime? // null = never expires (system-user token)
+  status               String        @default("connected") // connected | error
+  lastError            String?
+  connectedAt          DateTime      @default(now())
+  lastSyncAt           DateTime?
+  syncedThrough        DateTime? // last day of spend read for this account
+  since                DateTime? // first day of spend on the ledger for this account
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  @@unique([orgId, accountId])
 }
 
 /// Links a Clerk user account to an Organization (which company they belong to + their role).
