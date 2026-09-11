@@ -9,6 +9,7 @@ import { amazonOAuthConfigured } from "@/lib/amazon-oauth";
 import { shopifyOAuthConfigured } from "@/lib/shopify-oauth";
 import { tiktokConfigured } from "@/lib/tiktok";
 import { amazonAdsConfigured } from "@/lib/amazon-ads";
+import { metaAdsConfigured } from "@/lib/meta-ads";
 import { getFmt } from "@/lib/fmt-server";
 import { requireView } from "@/lib/membership";
 
@@ -40,7 +41,7 @@ export default async function IntegrationsSettingsPage({
 
   // Amazon "live" via a real per-tenant connection, or (legacy) the workspace-key sync that's
   // produced snapshots. Only providers with modelled data can connect.
-  const CONNECTABLE: Record<Provider, boolean> = { amazon: amazonReady, shopify: shopifyOAuthConfigured(), tiktok: tiktokConfigured(), amazon_ads: amazonAdsConfigured() };
+  const CONNECTABLE: Record<Provider, boolean> = { amazon: amazonReady, shopify: shopifyOAuthConfigured(), tiktok: tiktokConfigured(), amazon_ads: amazonAdsConfigured(), meta_ads: metaAdsConfigured() };
 
   return (
     <div className="max-w-3xl space-y-3">
@@ -91,6 +92,10 @@ export default async function IntegrationsSettingsPage({
                 {isConnected ? (
                   <span className="pill-green inline-flex items-center gap-1 rounded-full px-2 py-[3px] text-[11px] font-medium leading-none">
                     <Check size={11} /> Active
+                  </span>
+                ) : row?.status === "error" ? (
+                  <span className="pill-red inline-flex items-center gap-1 rounded-full px-2 py-[3px] text-[11px] font-medium leading-none" title={row.lastError ?? undefined}>
+                    <AlertTriangle size={11} /> Needs reconnect
                   </span>
                 ) : (
                   <span className="pill-neutral inline-flex items-center rounded-full px-2 py-[3px] text-[11px] font-medium leading-none">

@@ -66,6 +66,7 @@ export default async function OnboardingPage({
     shopify: shopifyOAuthConfigured(),
     tiktok: tiktokConfigured(),
     amazon_ads: false, // not a sales channel — connected from Settings → Integrations, not the wizard
+    meta_ads: false,
   };
   const providers = CHANNEL_PROVIDERS.map((p) => ({
     key: p,

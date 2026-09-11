@@ -134,11 +134,11 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
       const s = await getOrgSettings();
       if (!s.syncEnabled) return;
       const conns = await prisma.integration.findMany({
-        where: { provider: { in: ["amazon", "shopify", "tiktok", "amazon_ads"] }, status: "connected" },
+        where: { provider: { in: ["amazon", "shopify", "tiktok", "amazon_ads", "meta_ads"] }, status: "connected" },
         select: { provider: true },
       });
       for (const c of conns) {
-        if (c.provider === "amazon_ads") continue; // no stock — its pass runs below
+        if (c.provider === "amazon_ads" || c.provider === "meta_ads") continue; // no stock — their passes run below
         try {
           if (c.provider === "amazon") {
             await syncAmazonStockCore();
@@ -247,6 +247,22 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
         }
       }
 
+      // Meta Ads: daily spend for the P&L, a synchronous read every six hours (Meta finalises spend
+      // late, so the last days are re-read each time).
+      if (conns.some((c) => c.provider === "meta_ads")) {
+        const lastMeta = lastMetaAdsTick.get(orgId) ?? 0;
+        if (Date.now() - lastMeta >= META_ADS_TICK_MS) {
+          lastMetaAdsTick.set(orgId, Date.now());
+          try {
+            const { importMetaAdsSpend } = await import("@/lib/meta-ads-spend");
+            const r = await importMetaAdsSpend();
+            if (r) console.log(`[scheduler] meta ads for ${orgId}: ${r.rows} day rows (${r.from} → ${r.to})`);
+          } catch (e) {
+            console.error(`[scheduler] meta ads failed for org ${orgId}:`, (e as Error).message);
+          }
+        }
+      }
+
       // Amazon Ads: daily spend for the P&L. Reports are asynchronous, so each pass first collects
       // what Amazon finished generating, then asks for the days not yet on record.
       if (conns.some((c) => c.provider === "amazon_ads")) {
@@ -273,6 +289,7 @@ const AMAZON_POLL_MS = 3 * 60 * 1000; // getOrders allows ~1/min per seller; 3 m
 const AMAZON_ORDER_REPORT_MS = 6 * 60 * 60 * 1000;
 const AMAZON_FINANCE_SWEEP_MS = 15 * 60 * 1000;
 const AMAZON_ADS_TICK_MS = 5 * 60 * 1000; // reports finish in minutes; a quick pass collects them
+const META_ADS_TICK_MS = 6 * 60 * 60 * 1000;
 // In-process per-org timestamps; a restart just refreshes once immediately, which is harmless.
 const lastOrdersRefresh = new Map<string, number>();
 const lastMfnShipFromStep = new Map<string, number>();
@@ -280,6 +297,7 @@ const lastAmazonPoll = new Map<string, number>();
 const lastAmazonOrderReport = new Map<string, number>();
 const lastAmazonFinanceSweep = new Map<string, number>();
 const lastAmazonAdsTick = new Map<string, number>();
+const lastMetaAdsTick = new Map<string, number>();
 
 let backfilling = false;
 
