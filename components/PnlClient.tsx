@@ -134,10 +134,16 @@ export function PnlClient({
             })}
           </div>
         )}
-        {pnl.backfillInProgress && (
-          <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />
-            Importing your fee history in the background — older periods fill in on their own.
+        {pnl.importProgress && (
+          <span className="inline-flex flex-wrap items-center gap-2 text-[12px] text-muted" title="Amazon's money report is read a week at a time, from today back to two years ago. Older periods fill in as it goes.">
+            <span className={`h-1.5 w-1.5 rounded-full ${pnl.importProgress.stalled ? "bg-warn" : "animate-pulse bg-accent"}`} aria-hidden />
+            {pnl.importProgress.phase === "history" ? "Importing your fee history" : "Re-reading your fee history with the latest importer"}
+            <span className="text-ink-soft">· reached {new Date(`${pnl.importProgress.reached}T00:00:00Z`).toLocaleDateString(locale, { month: "short", year: "numeric", timeZone: "UTC" })}</span>
+            <span className="h-1.5 w-28 overflow-hidden rounded-full bg-surface-2" role="progressbar" aria-valuenow={pnl.importProgress.percent} aria-valuemin={0} aria-valuemax={100}>
+              <span className="block h-full rounded-full bg-accent" style={{ width: `${pnl.importProgress.percent}%` }} />
+            </span>
+            <span className="tabular">{pnl.importProgress.percent}%</span>
+            {pnl.importProgress.stalled && <span className="pill-amber inline-flex items-center rounded-full border px-2 py-px text-[11px] font-medium">paused — consl keeps retrying</span>}
           </span>
         )}
       </div>
@@ -174,7 +180,7 @@ export function PnlClient({
               <div className="flex items-center justify-between gap-3 px-4 py-1.5 pl-8 text-[12.5px] text-ink-soft">
                 <span className="min-w-0 truncate">
                   of which free units &amp; replacements · {pnl.unreported.units.toLocaleString()} units
-                  <span className="ml-1.5 text-[11.5px] text-muted">shipped, but Amazon reported no money for them, so they come from the Orders tab</span>
+                  <span className="ml-1.5 text-[11.5px] text-muted">shipped, but Amazon reported no money for them</span>
                 </span>
                 <Amount value={pnl.unreported.cogs} money={money} />
               </div>

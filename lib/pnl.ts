@@ -6,6 +6,7 @@ import { getCurrentOrg } from "@/lib/org";
 import { fxRate } from "@/lib/fx";
 import { computeFinishedGoods } from "@/lib/queries";
 import { activeExclusions } from "@/lib/order-metrics";
+import { IMPORTER_VERSIONS, importerVersion } from "@/lib/import-versions";
 
 export { GROUP_ORDER, GROUP_LABEL, PNL_CHANNEL_LABEL, type Pnl, type PnlChannel, type PnlGroupBlock, type PnlTypeRow } from "@/lib/pnl-shared";
 
@@ -382,7 +383,7 @@ async function tiktokPendingBridge(orgId: string, from: Date, to: Date, baseCurr
 
 const EMPTY: Pnl = {
   groups: [], sales: 0, cogs: 0, unitsSold: 0, netProfit: 0, margin: null, roi: null, pending: [],
-  unmatchedSkus: [], preHistoryUnits: 0, overflowUnits: 0, unplacedUnits: 0, mcf: { units: 0, cogs: 0 }, unreported: { units: 0, cogs: 0 }, ignored: { skus: [], units: 0, sales: 0 }, backfillInProgress: false, hasData: false,
+  unmatchedSkus: [], preHistoryUnits: 0, overflowUnits: 0, unplacedUnits: 0, mcf: { units: 0, cogs: 0 }, unreported: { units: 0, cogs: 0 }, ignored: { skus: [], units: 0, sales: 0 }, backfillInProgress: false, importProgress: null, hasData: false,
 };
 
 /** The statement for a window, over the given channels (default: every channel with data). */
@@ -578,10 +579,11 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
   const ledgerTotal = groups.reduce((t, g) => t + g.total, 0);
   const netProfit = ledgerTotal + fifo.cogs;
 
-  const settings = await prisma.settings.findFirst({ select: { financeBackfillCursor: true, financeRewalkCursor: true } });
-  const floor = new Date(Date.now() - 725 * 86_400_000);
-  const backfillInProgress =
-    selectedSet.has("AMAZON") && (!settings?.financeBackfillCursor || new Date(settings.financeBackfillCursor) > floor || !!settings?.financeRewalkCursor);
+  const [settings, amazonConnected] = await Promise.all([
+    prisma.settings.findFirst({ select: { financeBackfillCursor: true, financeRewalkCursor: true, financeProgressAt: true, importerVersions: true } }),
+    prisma.integration.findFirst({ where: { provider: "amazon", status: "connected" }, select: { id: true } }),
+  ]);
+  const importProgress = selectedSet.has("AMAZON") && amazonConnected ? amazonImportProgress(settings) : null;
 
   return {
     groups,
@@ -599,9 +601,39 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
     mcf: { units: fifo.mcfUnits, cogs: fifo.mcfCogs },
     unreported: { units: fifo.unreportedUnits, cogs: fifo.unreportedCogs },
     ignored,
-    backfillInProgress,
+    backfillInProgress: importProgress !== null,
+    importProgress,
     hasData: groups.length > 0 || fifo.units > 0,
   };
+}
+
+/**
+ * Where the Amazon ledger walks stand. Two can run, one after the other: the first history import
+ * (walks back from today to Amazon's two-year floor) and, whenever the code's importer generation
+ * is newer than the one that wrote this ledger, a re-read over the same span. Both walk backwards
+ * a week per minute, so "reached" is the day they are at and the percentage is how much of the
+ * span is behind them. A walk whose last window completed over half an hour ago has stalled —
+ * the scheduler retries every minute, but the notice says so instead of pretending.
+ */
+export function amazonImportProgress(
+  s: { financeBackfillCursor: string | null; financeRewalkCursor: string | null; financeProgressAt: Date | null; importerVersions: unknown } | null,
+): Pnl["importProgress"] {
+  const now = Date.now();
+  const floor = now - 725 * 86_400_000;
+  const backfillDone = !!s?.financeBackfillCursor && new Date(s.financeBackfillCursor).getTime() <= floor;
+  const rereadDue = importerVersion(s?.importerVersions, "amazonFinance") < IMPORTER_VERSIONS.amazonFinance;
+  let phase: "history" | "reread";
+  let reachedAt: number;
+  if (!backfillDone) {
+    phase = "history";
+    reachedAt = s?.financeBackfillCursor ? new Date(s.financeBackfillCursor).getTime() : now;
+  } else if (rereadDue) {
+    phase = "reread";
+    reachedAt = s?.financeRewalkCursor ? new Date(s.financeRewalkCursor).getTime() : now;
+  } else return null;
+  const percent = Math.max(0, Math.min(100, Math.round(((now - reachedAt) / (now - floor)) * 100)));
+  const stalled = !!s?.financeProgressAt && now - s.financeProgressAt.getTime() > 30 * 60_000;
+  return { phase, reached: new Date(reachedAt).toISOString().slice(0, 10), percent, stalled };
 }
 
 /** Oldest dated money or order across the channels — the date picker's lower bound. */

@@ -375,7 +375,7 @@ export async function backfillAmazonFinancesStep(): Promise<{ done: boolean; row
     // Amazon's retention edge moves with the clock; hitting it means the history is fully walked.
     if (!/2 years/i.test((e as Error).message)) throw e;
   }
-  await saveOrgSettings({ financeBackfillCursor: start.toISOString() });
+  await saveOrgSettings({ financeBackfillCursor: start.toISOString(), financeProgressAt: new Date() });
   return { done: start.getTime() <= floor.getTime(), rows, cursor: start.toISOString() };
 }
 
@@ -388,7 +388,12 @@ export async function backfillAmazonFinancesStep(): Promise<{ done: boolean; row
  */
 export async function amazonFinanceRewalkStep(): Promise<{ active: boolean; done: boolean; rows: number }> {
   const s = await getOrgSettings();
-  if (importerVersion(s.importerVersions, "amazonFinance") >= IMPORTER_VERSIONS.amazonFinance) return { active: false, done: true, rows: 0 };
+  if (importerVersion(s.importerVersions, "amazonFinance") >= IMPORTER_VERSIONS.amazonFinance) {
+    // A cursor left behind (a stamp that landed while a window was still in flight) would read as
+    // a walk in progress forever — the ledger is current, so clear it.
+    if (s.financeRewalkCursor) await saveOrgSettings({ financeRewalkCursor: null });
+    return { active: false, done: true, rows: 0 };
+  }
   const floor = new Date(Date.now() - BACKFILL_FLOOR_DAYS * 86_400_000);
   if (!s.financeBackfillCursor || new Date(s.financeBackfillCursor) > floor) return { active: false, done: false, rows: 0 };
   const client = await amazonClient();
@@ -405,7 +410,7 @@ export async function amazonFinanceRewalkStep(): Promise<{ active: boolean; done
   } catch (e) {
     if (!/2 years/i.test((e as Error).message)) throw e;
   }
-  await saveOrgSettings({ financeRewalkCursor: start.toISOString() });
+  await saveOrgSettings({ financeRewalkCursor: start.toISOString(), financeProgressAt: new Date() });
   return { active: true, done: false, rows };
 }
 

@@ -32,7 +32,18 @@ export type Pnl = {
   unreported: { units: number; cogs: number };
   /** Listings sold on a channel that the company doesn't manage in consl — left out entirely. */
   ignored: { skus: string[]; units: number; sales: number };
+  /** Kept for callers that only ask yes/no: an Amazon ledger walk is running (`importProgress` says which and how far). */
   backfillInProgress: boolean;
+  /** The running Amazon ledger walk: the first history import, or a re-read with a newer importer. Null = none. */
+  importProgress: {
+    phase: "history" | "reread";
+    /** The day the walk has reached (it walks backwards from today), YYYY-MM-DD. */
+    reached: string;
+    /** 0–100 of the way from today back to Amazon's two-year floor. */
+    percent: number;
+    /** No window has completed for half an hour — the scheduler keeps retrying. */
+    stalled: boolean;
+  } | null;
   hasData: boolean;
 };
 
