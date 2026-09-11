@@ -15,7 +15,7 @@ import { inflectUnit } from "@/lib/format";
 import { PageHeader, Card, SectionTitle, SkuAvatar } from "@/components/ui";
 import { EmptyState } from "@/components/EmptyState";
 import { NewFacilityButton } from "@/components/NewFacilityButton";
-import { ArrowLeftRight } from "@/components/icons";
+import { MapTrifold } from "@/components/icons";
 import { NewMovementPanel, type OnHandRow } from "@/components/MovementForm";
 import { MovementsLedger } from "@/components/MovementsLedger";
 import { StockSection } from "@/components/StockSection";
@@ -144,19 +144,19 @@ export default async function FacilitiesPage() {
               availability={availability}
             />
           )}
+          {facilities.length > 0 && <NewFacilityButton />}
           {anyChannel > 0 && (
             <Link
               href="/facilities/mapping"
               className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-panel px-3 py-1.5 text-[12.5px] font-medium text-ink hover:bg-panel-2"
             >
-              <ArrowLeftRight size={13} />
+              <MapTrifold size={13} />
               Map facilities
               {unmappedShipFrom > 0 && (
                 <span className="pill-amber inline-flex items-center rounded-full border px-1.5 py-px text-[10.5px] font-medium">{unmappedShipFrom}</span>
               )}
             </Link>
           )}
-          {facilities.length > 0 && <NewFacilityButton />}
         </div>
       </PageHeader>
 

@@ -108,6 +108,7 @@ export const RefreshCw = regular(P.ArrowsClockwise);
 export const Mail = regular(P.Envelope);
 export const Phone = regular(P.Phone);
 export const MapPin = regular(P.MapPin);
+export const MapTrifold = regular(P.MapTrifold);
 
 /* ---- Status & data ---- */
 export const Bell = regular(P.Bell); // header chrome — outline weight
