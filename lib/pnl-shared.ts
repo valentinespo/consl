@@ -28,6 +28,8 @@ export type Pnl = {
   unplacedUnits: number;
   /** Amazon MCF orders counted here (Amazon is the only channel): their units and cost, part of `cogs`. */
   mcf: { units: number; cogs: number };
+  /** Amazon orders that shipped but Amazon posted no money for (free units, replacements): units from the Orders tab, part of `cogs`. */
+  unreported: { units: number; cogs: number };
   /** Listings sold on a channel that the company doesn't manage in consl — left out entirely. */
   ignored: { skus: string[]; units: number; sales: number };
   backfillInProgress: boolean;

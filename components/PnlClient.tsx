@@ -170,6 +170,15 @@ export function PnlClient({
                 <Amount value={pnl.mcf.cogs} money={money} />
               </div>
             )}
+            {pnl.unreported.units > 0 && (
+              <div className="flex items-center justify-between gap-3 px-4 py-1.5 pl-8 text-[12.5px] text-ink-soft">
+                <span className="min-w-0 truncate">
+                  of which free units &amp; replacements · {pnl.unreported.units.toLocaleString()} units
+                  <span className="ml-1.5 text-[11.5px] text-muted">shipped, but Amazon reported no money for them, so they come from the Orders tab</span>
+                </span>
+                <Amount value={pnl.unreported.cogs} money={money} />
+              </div>
+            )}
             {rest.map((g) => (
               <GroupRow key={g.group} block={g} money={money} />
             ))}

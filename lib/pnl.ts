@@ -102,7 +102,10 @@ async function loadScope(): Promise<Scope> {
  */
 type QueueKey = string;
 /** One sale to price: units of a product on a channel at an instant (null = not posted yet — goes last), from a queue. */
-type Sale = { productId: string; units: number; at: number | null; channel: PnlChannel; queue: QueueKey | null; mcf?: boolean };
+/** `mcf`: an MCF order counted while Amazon is the only channel. `unreported`: an Amazon order
+ *  that shipped but Amazon posted no money for (a free unit, a replacement) — units from the
+ *  Orders tab. Both are reported as their own lines under cost of goods. */
+type Sale = { productId: string; units: number; at: number | null; channel: PnlChannel; queue: QueueKey | null; mcf?: boolean; unreported?: boolean };
 type Cogs = {
   cogs: number;
   units: number;
@@ -111,6 +114,8 @@ type Cogs = {
   unplacedUnits: number;
   mcfUnits: number;
   mcfCogs: number;
+  unreportedUnits: number;
+  unreportedCogs: number;
   unmatchedSkus: Set<string>;
 };
 type Layer = { units: number; unitCost: number; date: number };
@@ -166,7 +171,7 @@ async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlCh
   draws.sort((a, b) => order(a) - order(b));
 
   const cursor = new Map<string, { idx: number; left: number }>(); // "queue|product"
-  const out: Cogs = { cogs: 0, units: 0, preHistoryUnits: 0, overflowUnits: 0, unplacedUnits: 0, mcfUnits: 0, mcfCogs: 0, unmatchedSkus: new Set() };
+  const out: Cogs = { cogs: 0, units: 0, preHistoryUnits: 0, overflowUnits: 0, unplacedUnits: 0, mcfUnits: 0, mcfCogs: 0, unreportedUnits: 0, unreportedCogs: 0, unmatchedSkus: new Set() };
   for (const d of draws) {
     const product = scope.byId.get(d.productId);
     if (!product) continue;
@@ -222,6 +227,10 @@ async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlCh
     if (sale?.mcf) {
       out.mcfUnits += qty;
       out.mcfCogs -= cost;
+    }
+    if (sale?.unreported) {
+      out.unreportedUnits += qty;
+      out.unreportedCogs -= cost;
     }
   }
   return out;
@@ -373,7 +382,7 @@ async function tiktokPendingBridge(orgId: string, from: Date, to: Date, baseCurr
 
 const EMPTY: Pnl = {
   groups: [], sales: 0, cogs: 0, unitsSold: 0, netProfit: 0, margin: null, roi: null, pending: [],
-  unmatchedSkus: [], preHistoryUnits: 0, overflowUnits: 0, unplacedUnits: 0, mcf: { units: 0, cogs: 0 }, ignored: { skus: [], units: 0, sales: 0 }, backfillInProgress: false, hasData: false,
+  unmatchedSkus: [], preHistoryUnits: 0, overflowUnits: 0, unplacedUnits: 0, mcf: { units: 0, cogs: 0 }, unreported: { units: 0, cogs: 0 }, ignored: { skus: [], units: 0, sales: 0 }, backfillInProgress: false, hasData: false,
 };
 
 /** The statement for a window, over the given channels (default: every channel with data). */
@@ -399,7 +408,9 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
   const lineChannels = selected.filter((c) => c !== "AMAZON");
 
   // The ledgers, by bucket. Amazon and TikTok rows are scoped by the SKU they name; Shopify rows
-  // exist only for managed lines. A Shopify order the Orders tab drops is dropped here too.
+  // exist only for managed lines. A voided order does not exist — on any channel, its money rows
+  // are skipped by their order number — and a Shopify order the Orders tab drops as another
+  // channel's mirror is dropped here too.
   const sums = await prisma.$queryRaw<{ group: string; type: string; amount: number }[]>`
     SELECT fe."group", fe."type", COALESCE(SUM(fe."baseAmount"), 0)::float8 AS amount
     FROM "FinanceEvent" fe
@@ -408,10 +419,10 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
       AND (fe.sku IS NULL OR fe.channel = 'SHOPIFY'
         OR (fe.channel = 'AMAZON' AND fe.sku = ANY(${amazonSkus}::text[]))
         OR (fe.channel = 'TIKTOK' AND fe.sku = ANY(${tiktokSkus}::text[])))
-      AND NOT (fe.channel = 'SHOPIFY' AND EXISTS (
+      AND NOT EXISTS (
         SELECT 1 FROM "SalesOrder" so
-        WHERE so."orgId" = fe."orgId" AND so.channel = 'SHOPIFY' AND so."externalId" = fe."orderId"
-          AND (so.voided OR so.source = ANY(${excludedSources}::text[]))))
+        WHERE so."orgId" = fe."orgId" AND so.channel = fe.channel AND so."externalId" = fe."orderId"
+          AND (so.voided OR (so.channel = 'SHOPIFY' AND so.source = ANY(${excludedSources}::text[]))))
     GROUP BY 1, 2`;
   const blocks = new Map<string, { type: string; amount: number }[]>();
   const add = (group: string, type: string, amount: number) => blocks.set(group, [...(blocks.get(group) ?? []), { type, amount }]);
@@ -497,8 +508,9 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
 
   // Every sale on record, from every channel — the FIFO walk needs all of history. Each carries
   // the queue of the facility its order shipped from; an order placed nowhere carries none.
-  // Amazon's sale rows don't say where they shipped from, so each is looked up on its order; a
-  // row with no order record on file is Amazon's when Amazon charged an FBA fee for that order.
+  // Amazon's sale rows don't say where they shipped from, so each is looked up on its order (a
+  // voided order's rows are skipped); a row with no order record on file is Amazon's when Amazon
+  // charged an FBA fee for that order.
   const amazonRows = await prisma.$queryRaw<{ sku: string; units: number; at: Date; facility: string | null; placed: boolean; fbaFee: boolean }[]>`
     SELECT fe.sku, fe.quantity::int AS units, fe."eventAt" AS at,
       COALESCE(so."fulfillmentOverrideFacilityId", so."fulfillmentFacilityId") AS facility,
@@ -511,6 +523,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
     LEFT JOIN "SalesOrder" so ON so."orgId" = fe."orgId" AND so.channel = 'AMAZON' AND so."externalId" = fe."orderId"
     WHERE fe."orgId" = ${orgId} AND fe.channel = 'AMAZON' AND fe."group" = 'sales' AND fe.type = 'Principal'
       AND fe.quantity IS NOT NULL AND fe.sku = ANY(${amazonSkus}::text[])
+      AND (so.id IS NULL OR so.voided = false)
     ORDER BY fe."eventAt" ASC, fe.id ASC`;
   const sales: Sale[] = [];
   for (const r of amazonRows) {
@@ -527,6 +540,22 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
       AND o.cancelled = false AND o.voided = false
       AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excludedSources}::text[]))`;
   for (const r of lineRows) sales.push({ productId: r.productId, units: r.units, at: r.at.getTime(), channel: r.channel as PnlChannel, queue: queueOf(r.facility) });
+  // Amazon orders that shipped but Amazon posted no money for — a free unit, a replacement: no
+  // sale row, so nothing above saw the unit leave. Their units come from the Orders tab instead,
+  // one source per order: an order with a sale row in the money report is never read here, and
+  // the moment Amazon posts one this copy drops on its own. (An order with money that hasn't
+  // posted yet is the pending bridge's, not this.)
+  const unreportedRows = await prisma.$queryRaw<{ productId: string; units: number; at: Date; facility: string | null }[]>`
+    SELECT l."productId", l.quantity::int AS units, o."orderedAt" AS at,
+      COALESCE(o."fulfillmentOverrideFacilityId", o."fulfillmentFacilityId") AS facility
+    FROM "SalesOrderLine" l JOIN "SalesOrder" o ON o.id = l."orderId"
+    WHERE o."orgId" = ${orgId} AND o.channel = 'AMAZON' AND o.mcf = false AND l."productId" IS NOT NULL
+      AND o.cancelled = false AND o.voided = false AND o.total = 0
+      AND o.status IN ('Shipped', 'PartiallyShipped')
+      AND NOT EXISTS (
+        SELECT 1 FROM "FinanceEvent" fe
+        WHERE fe."orgId" = o."orgId" AND fe.channel = 'AMAZON' AND fe."orderId" = o."externalId" AND fe.type = 'Principal')`;
+  for (const r of unreportedRows) sales.push({ productId: r.productId, units: r.units, at: r.at.getTime(), channel: "AMAZON", queue: queueOf(r.facility), unreported: true });
   // Amazon the only channel: the MCF orders' units count too, from the Orders tab, as their own line.
   if (!exclusions.mcf) {
     const mcfRows = await prisma.$queryRaw<{ productId: string; units: number; at: Date; facility: string | null }[]>`
@@ -568,6 +597,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
     overflowUnits: fifo.overflowUnits,
     unplacedUnits: fifo.unplacedUnits,
     mcf: { units: fifo.mcfUnits, cogs: fifo.mcfCogs },
+    unreported: { units: fifo.unreportedUnits, cogs: fifo.unreportedCogs },
     ignored,
     backfillInProgress,
     hasData: groups.length > 0 || fifo.units > 0,
