@@ -38,6 +38,9 @@ import type { PnlGroup } from "@/lib/finances";
  * to the order's dispute status, which lack the dispute fee.
  */
 
+/** How Shopify names a balance transaction — the txId of every row the payments ledger writes. */
+const LEDGER_TX_PREFIX = "gid://shopify/ShopifyPaymentsBalanceTransaction/";
+
 /** Whether a connection's granted scope lets consl read the Shopify Payments ledger. */
 export function hasShopifyPaymentsScope(scope: string | null | undefined): boolean {
   return (scope ?? "").split(",").map((s) => s.trim()).includes("read_shopify_payments_payouts");
@@ -212,7 +215,11 @@ export async function upsertShopifyFinanceEvents(
     await prisma.$transaction(
       [
         prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`finance:${orgId ?? ""}`}))`,
-        prisma.financeEvent.deleteMany({ where: { channel: "SHOPIFY", orderId: { in: ids } } }),
+        // Only the rows this order WRITES are replaced (sales, tax, refunds, disputes — keyed by
+        // the order's, refund's or dispute's own id). Rows the Shopify Payments ledger wrote for
+        // the same order (its fee, a chargeback) carry the balance transaction's id and belong to
+        // that import — re-reading the order must never wipe them.
+        prisma.financeEvent.deleteMany({ where: { channel: "SHOPIFY", orderId: { in: ids }, NOT: { txId: { startsWith: LEDGER_TX_PREFIX } } } }),
         ...(chunk.length ? [prisma.financeEvent.createMany({ data: chunk.map((r) => ({ channel: "SHOPIFY", ...r })) })] : []),
       ],
       { timeout: 120_000, maxWait: 15_000 },
