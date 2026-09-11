@@ -134,10 +134,11 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
       const s = await getOrgSettings();
       if (!s.syncEnabled) return;
       const conns = await prisma.integration.findMany({
-        where: { provider: { in: ["amazon", "shopify", "tiktok"] }, status: "connected" },
+        where: { provider: { in: ["amazon", "shopify", "tiktok", "amazon_ads"] }, status: "connected" },
         select: { provider: true },
       });
       for (const c of conns) {
+        if (c.provider === "amazon_ads") continue; // no stock — its pass runs below
         try {
           if (c.provider === "amazon") {
             await syncAmazonStockCore();
@@ -245,6 +246,22 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
           }
         }
       }
+
+      // Amazon Ads: daily spend for the P&L. Reports are asynchronous, so each pass first collects
+      // what Amazon finished generating, then asks for the days not yet on record.
+      if (conns.some((c) => c.provider === "amazon_ads")) {
+        const lastAds = lastAmazonAdsTick.get(orgId) ?? 0;
+        if (Date.now() - lastAds >= AMAZON_ADS_TICK_MS) {
+          lastAmazonAdsTick.set(orgId, Date.now());
+          try {
+            const { amazonAdsTick } = await import("@/lib/amazon-ads-spend");
+            const r = await amazonAdsTick();
+            if (r.collected || r.requested) console.log(`[scheduler] amazon ads for ${orgId}: ${r.collected} reports in (${r.rows} day rows), ${r.requested} requested, ${r.waiting} still generating`);
+          } catch (e) {
+            console.error(`[scheduler] amazon ads failed for org ${orgId}:`, (e as Error).message);
+          }
+        }
+      }
     });
   } catch (e) {
     console.error(`[scheduler] channel stock errored for org ${orgId}:`, (e as Error).message);
@@ -255,12 +272,14 @@ const ORDERS_REFRESH_MS = 15 * 60 * 1000;
 const AMAZON_POLL_MS = 3 * 60 * 1000; // getOrders allows ~1/min per seller; 3 min leaves room for two orgs
 const AMAZON_ORDER_REPORT_MS = 6 * 60 * 60 * 1000;
 const AMAZON_FINANCE_SWEEP_MS = 15 * 60 * 1000;
+const AMAZON_ADS_TICK_MS = 5 * 60 * 1000; // reports finish in minutes; a quick pass collects them
 // In-process per-org timestamps; a restart just refreshes once immediately, which is harmless.
 const lastOrdersRefresh = new Map<string, number>();
 const lastMfnShipFromStep = new Map<string, number>();
 const lastAmazonPoll = new Map<string, number>();
 const lastAmazonOrderReport = new Map<string, number>();
 const lastAmazonFinanceSweep = new Map<string, number>();
+const lastAmazonAdsTick = new Map<string, number>();
 
 let backfilling = false;
 

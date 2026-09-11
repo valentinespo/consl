@@ -78,7 +78,7 @@ export function IntegrationControls({
     }
     return (
       <a
-        href={`/api/integrations/${provider}/connect`}
+        href={`/api/integrations/${provider.replace("_", "-")}/connect`}
         className="rounded-lg bg-accent-strong px-3.5 py-2 text-[13px] font-medium text-white hover:opacity-90"
       >
         Connect

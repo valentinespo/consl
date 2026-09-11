@@ -8,7 +8,7 @@ import { getOrgSettings } from "@/lib/settings";
 import { getMaterialTypes, getLotOptions, getSupplierNames, getProductImageMap, getCategoriesInUse, getTransactionInvoices } from "@/lib/queries";
 import { buildCostChips } from "@/lib/lot-costs";
 import type { EditorLine } from "@/components/LotEditor";
-import { PROVIDERS, type Provider } from "@/lib/integrations";
+import { PROVIDERS, CHANNEL_PROVIDERS, type Provider } from "@/lib/integrations";
 import { amazonOAuthConfigured } from "@/lib/amazon-oauth";
 import { shopifyOAuthConfigured } from "@/lib/shopify-oauth";
 import { tiktokConfigured } from "@/lib/tiktok";
@@ -65,8 +65,9 @@ export default async function OnboardingPage({
     amazon: amazonOAuthConfigured(),
     shopify: shopifyOAuthConfigured(),
     tiktok: tiktokConfigured(),
+    amazon_ads: false, // not a sales channel — connected from Settings → Integrations, not the wizard
   };
-  const providers = (Object.keys(PROVIDERS) as Provider[]).map((p) => ({
+  const providers = CHANNEL_PROVIDERS.map((p) => ({
     key: p,
     label: PROVIDERS[p].label,
     blurb: PROVIDERS[p].blurb,

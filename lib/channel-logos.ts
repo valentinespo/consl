@@ -26,6 +26,7 @@ export const ROOT_LOGO: Record<string, string> = {
 /** Same marks keyed by the integration provider id, for connect tiles (settings + onboarding). */
 export const PROVIDER_LOGO: Record<string, string> = {
   amazon: "/integrations/amazon.png",
+  amazon_ads: "/integrations/amazon.png",
   shopify: "/integrations/shopify.png",
   tiktok: "/integrations/tiktok.png",
 };

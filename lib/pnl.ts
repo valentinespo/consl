@@ -442,7 +442,16 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
   const selected = (channels ?? present).filter((c) => present.includes(c));
   const selectedSet = new Set(selected);
   if (!orgId || selected.length === 0) return EMPTY;
-  const [scope, org, exclusions, facilities] = await Promise.all([loadScope(), getCurrentOrg(), activeExclusions(), prisma.facility.findMany({ select: { id: true, channel: true } })]);
+  const [scope, org, exclusions, facilities, adsSettings] = await Promise.all([
+    loadScope(),
+    getCurrentOrg(),
+    activeExclusions(),
+    prisma.facility.findMany({ select: { id: true, channel: true } }),
+    prisma.settings.findFirst({ select: { amazonAdsSince: true } }),
+  ]);
+  // From the first day the Amazon Ads import covers, ad spend is on the statement day by day —
+  // the ad invoice payments in Amazon's money report are the same money and step aside.
+  const adsSince = adsSettings?.amazonAdsSince ?? null;
   // The queue an order's facility prices from: a channel facility is that channel's stock
   // (Amazon FBA and AWD share Amazon's), one of the company's own places is its own queue.
   const facilityChannel = new Map(facilities.map((f) => [f.id, f.channel]));
@@ -473,6 +482,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
         SELECT 1 FROM "SalesOrder" so
         WHERE so."orgId" = fe."orgId" AND so.channel = fe.channel AND so."externalId" = fe."orderId"
           AND (so.voided OR (so.channel = 'SHOPIFY' AND so.source = ANY(${excludedSources}::text[]))))
+      AND NOT (fe.channel = 'AMAZON' AND fe.type = 'ProductAdsPayment' AND ${adsSince}::timestamp IS NOT NULL AND fe."eventAt" >= ${adsSince})
     GROUP BY 1, 2`;
   const blocks = new Map<string, { type: string; amount: number }[]>();
   const add = (group: string, type: string, amount: number) => blocks.set(group, [...(blocks.get(group) ?? []), { type, amount }]);

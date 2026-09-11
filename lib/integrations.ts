@@ -13,7 +13,10 @@ import { getRestock } from "@/lib/restock";
  * OAuth flow, when it lands on the Integrations page, calls the same ensureChannelFacilities()
  * on connect — everything downstream (guards, pickers, facility pages) is already channel-aware.
  */
-export type Provider = "amazon" | "shopify" | "tiktok";
+export type Provider = "amazon" | "shopify" | "tiktok" | "amazon_ads";
+
+/** Providers that are sales channels (stock, orders, facilities) — the onboarding wizard's list. */
+export const CHANNEL_PROVIDERS: Provider[] = ["amazon", "shopify", "tiktok"];
 
 export const PROVIDERS: Record<
   Provider,
@@ -54,6 +57,11 @@ export const PROVIDERS: Record<
     facilities: [],
     locationBased: true,
     channel: "TIKTOK",
+  },
+  amazon_ads: {
+    label: "Amazon Ads",
+    blurb: "Daily ad spend by ad type, straight from Amazon Ads — real advertising cost on the P&L instead of invoice payments.",
+    facilities: [],
   },
 };
 
