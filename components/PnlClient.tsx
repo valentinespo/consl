@@ -212,7 +212,7 @@ export function PnlClient({
             <span>{money(p.sales)} pending</span>
           </span>
           <span>
-            Orders placed that {PNL_CHANNEL_LABEL[p.channel]} hasn&apos;t posted the money for yet. They already count in this P&amp;L — the sale
+            Orders placed that {PNL_CHANNEL_LABEL[p.channel]}{" "}hasn&apos;t posted the money for yet. They already count in this P&amp;L — the sale
             at the order&apos;s price, the fees estimated from your past orders. When {PNL_CHANNEL_LABEL[p.channel]} posts the real money,
             that replaces the estimate.
           </span>

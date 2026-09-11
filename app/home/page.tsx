@@ -10,12 +10,12 @@ import { Check } from "@/components/icons";
  */
 
 export const metadata: Metadata = {
-  title: "consl — inventory, production & true landed cost for ecommerce operators",
+  title: "consl — inventory, production, ad spend & true profit for ecommerce operators",
   description:
-    "consl connects purchases, production runs and sales channels into one live view: the true landed cost of every unit, and restock alerts before you run out. Amazon, Shopify and TikTok Shop.",
+    "consl connects purchases, production runs, sales channels and ad accounts into one live view: the true landed cost of every unit, daily advertising spend on the same P&L as your sales and fees, and restock alerts before you run out. Amazon, Amazon Ads, Shopify and TikTok Shop.",
   openGraph: {
     title: "consl — the console for ecommerce operators",
-    description: "True landed cost per unit, production tracking and multichannel restocking in one place.",
+    description: "True landed cost per unit, advertising spend and profit on one P&L, production tracking and multichannel restocking in one place.",
     images: ["/marketing/dashboard.jpg"],
   },
 };
@@ -146,15 +146,15 @@ export default function HomePage() {
         />
         <div className="relative mx-auto max-w-6xl px-5 pb-16 pt-16 text-center sm:pt-24">
           <div className="mx-auto inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3.5 py-1.5 text-[12.5px] font-semibold text-violet-800">
-            Inventory · Production · True landed cost
+            Inventory · Production · Ad spend · True profit
           </div>
           <h1 className="mx-auto mt-5 max-w-3xl text-[40px] font-bold leading-[1.05] tracking-tight sm:text-[56px]">
             The console for ecommerce operators.
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-[16.5px] leading-relaxed text-neutral-600 sm:text-[18px]">
-            consl connects your purchases, production runs and sales channels into one live view — the{" "}
-            <span className="font-semibold text-neutral-900">true landed cost of every unit</span>, and restock alerts long
-            before you run out.
+            consl connects your purchases, production runs, sales channels and ad accounts into one live view — the{" "}
+            <span className="font-semibold text-neutral-900">true landed cost of every unit</span>, your advertising spend on
+            the same P&amp;L as your sales and fees, and restock alerts long before you run out.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Link href="/sign-up" className={CTA_PRIMARY}>Get started</Link>
@@ -172,17 +172,19 @@ export default function HomePage() {
       <section id="integrations" className="border-y border-neutral-200 bg-neutral-50/60">
         <div className="mx-auto max-w-6xl px-5 py-12">
           <div className="text-center text-[12.5px] font-bold uppercase tracking-wider text-neutral-500">
-            Connects to where you sell
+            Connects to where you sell — and where you advertise
           </div>
-          <div className="mx-auto mt-6 grid max-w-3xl grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="mx-auto mt-6 grid max-w-4xl grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             <PlatformTile img="/integrations/amazon-fba.png" label="Amazon FBA" />
             <PlatformTile img="/integrations/amazon-awd.png" label="Amazon AWD" />
             <PlatformTile img="/integrations/shopify.png" label="Shopify" />
-            <PlatformTile label="TikTok Shop" note="Coming soon" />
+            <PlatformTile img="/integrations/tiktok.png" label="TikTok Shop" />
+            <PlatformTile img="/integrations/amazon.png" label="Amazon Ads" />
+            <PlatformTile label="Meta Ads" note="Coming soon" />
           </div>
           <p className="mx-auto mt-6 max-w-2xl text-center text-[13.5px] leading-relaxed text-neutral-600">
             Channel stock becomes real facilities in your workspace — including Amazon MCF awareness, so inventory mirrored
-            into Shopify is never counted twice.
+            into Shopify is never counted twice. Ad accounts feed daily spend straight into your P&amp;L.
           </p>
         </div>
       </section>
@@ -190,6 +192,19 @@ export default function HomePage() {
       {/* ── Features ────────────────────────────────────────────────────────────────────── */}
       <section id="features" className="mx-auto max-w-6xl space-y-24 px-5 py-20 sm:space-y-28 sm:py-24">
         <Feature
+          eyebrow="Advertising & profit"
+          title="See the profit that's left after ads."
+          body="consl pulls your daily advertising spend straight from Amazon Ads — Sponsored Products, Sponsored Brands and Sponsored Display — and books it on the same P&L as your sales, marketplace fees, refunds and true cost of goods. No waiting for the ad invoice: each day's spend lands on that day, so you see what your advertising really returned, by channel and by period."
+          bullets={[
+            "Daily ad spend from the Amazon Ads API, broken down by ad type",
+            "Advertising next to fees, refunds and landed cost on one profit & loss statement",
+            "Profit after ads by channel and period — Meta Ads coming next",
+          ]}
+          shot="/marketing/pnl.jpg"
+          alt="consl P&L — sales, cost of goods, marketplace fees and daily advertising spend by ad type"
+        />
+        <Feature
+          flip
           eyebrow="Cost engine"
           title="Know your real cost — to the cent."
           body="Every production lot is costed from its actual inputs: raw materials consumed oldest-stock-first, plus the deposits, final payments, certifications and fees you assign to it. The result is a landed cost per unit, per batch — not a spreadsheet estimate."
@@ -202,7 +217,6 @@ export default function HomePage() {
           alt="Production lots with live FIFO-costed COG per batch"
         />
         <Feature
-          flip
           eyebrow="Restock autopilot"
           title="Never sell out. Never over-order."
           body="consl reads your sales velocity, projects months of cover for every SKU, and tells you when to order, when to ship stock you already own, and when a lot needs expediting — before the stockout, not after."
@@ -215,6 +229,7 @@ export default function HomePage() {
           alt="Reorder view — per-SKU cover, statuses and recommended actions"
         />
         <Feature
+          flip
           eyebrow="Multichannel"
           title="Every unit, everywhere."
           body="Co-packers, your own warehouses, 3PLs — and the channels themselves. Connecting Amazon or Shopify creates managed facilities for FBA, AWD and each store location, so channel stock has a real place in your operation instead of living in a report."
@@ -227,7 +242,6 @@ export default function HomePage() {
           alt="Facilities — co-packers, warehouses and connected sales channels"
         />
         <Feature
-          flip
           eyebrow="Production & materials"
           title="Production without the spreadsheet maze."
           body="Raw materials tracked per facility with low-stock alerts, bills of materials that carry forward from one run to the next, and per-SKU batch numbers, expiry dates and production status on every lot."
@@ -249,7 +263,7 @@ export default function HomePage() {
             className="pointer-events-none absolute inset-0"
             style={{ background: "radial-gradient(50% 80% at 50% 100%, rgba(124,58,237,0.35) 0%, transparent 70%)" }}
           />
-          <h2 className="relative text-[30px] font-bold tracking-tight text-white sm:text-[36px]">Stop guessing your margins.</h2>
+          <h2 className="relative text-[30px] font-bold tracking-tight text-white sm:text-[36px]">Stop guessing your margins — and your ad returns.</h2>
           <p className="relative mx-auto mt-3 max-w-xl text-[15px] leading-relaxed text-neutral-300">
             consl is in early access with operators who make and sell physical products. Tell us about your brand and
             we&apos;ll get you set up.
@@ -272,7 +286,7 @@ export default function HomePage() {
           <div className="flex items-center gap-3">
             <Wordmark size={20} />
             <span className="hidden text-neutral-300 sm:inline">·</span>
-            <span className="hidden sm:inline">the console for ecommerce operators</span>
+            <span className="hidden sm:inline">inventory, production, ad spend and true profit for ecommerce operators</span>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1">
             <a href="mailto:admin@consl.ai" className="hover:text-neutral-800">admin@consl.ai</a>
