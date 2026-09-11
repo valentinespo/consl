@@ -27,7 +27,7 @@ export const ROOT_LOGO: Record<string, string> = {
 export const PROVIDER_LOGO: Record<string, string> = {
   amazon: "/integrations/amazon.png",
   amazon_ads: "/integrations/amazon.png",
-  meta_ads: "/integrations/meta.png",
+  meta_ads: "/integrations/meta-mark.png",
   shopify: "/integrations/shopify.png",
   tiktok: "/integrations/tiktok.png",
 };
@@ -36,7 +36,7 @@ export const PROVIDER_LOGO: Record<string, string> = {
 export const SOURCE_LOGO: Record<string, string> = {
   AMAZON: "/integrations/amazon.png",
   AMAZON_ADS: "/integrations/amazon.png",
-  META: "/integrations/meta.png",
+  META: "/integrations/meta-mark.png",
   SHOPIFY: "/integrations/shopify.png",
   TIKTOK: "/integrations/tiktok.png",
   CONSL: "/brand/consl-mark.png",
