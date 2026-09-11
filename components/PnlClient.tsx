@@ -88,7 +88,8 @@ function GroupRow({ block, money }: { block: PnlGroupBlock; money: (n: number) =
         }`}
       >
         <span className="flex items-center gap-2 font-medium text-ink">
-          <SourceMarks sources={blockSources(block)} />
+          {/* A collapsible group is a subtotal — its lines carry the marks. A single-line group is the line. */}
+          {!expandable && <SourceMarks sources={blockSources(block)} />}
           {GROUP_LABEL[block.group] ?? block.group}
           {expandable && <ChevronDown size={13} className={`text-muted transition-transform ${open ? "rotate-180" : ""}`} />}
         </span>
