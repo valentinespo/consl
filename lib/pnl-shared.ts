@@ -3,7 +3,24 @@
  * and the client statement (components/PnlClient.tsx) speak. No server imports here.
  */
 
-export type PnlTypeRow = { type: string; amount: number };
+/**
+ * Where a line's money comes from: a channel's own ledger (Amazon's money report, Shopify's
+ * orders and Payments ledger, TikTok's settlements), an ad platform, a fee the operator set up
+ * in consl, or consl's own costing engine. A line that mixes sources carries all of them.
+ */
+export type PnlSource = "AMAZON" | "SHOPIFY" | "TIKTOK" | "AMAZON_ADS" | "META" | "CUSTOM" | "CONSL";
+export const PNL_SOURCE_ORDER: PnlSource[] = ["AMAZON", "SHOPIFY", "TIKTOK", "AMAZON_ADS", "META", "CUSTOM", "CONSL"];
+export const PNL_SOURCE_LABEL: Record<PnlSource, string> = {
+  AMAZON: "From Amazon's money report",
+  SHOPIFY: "From Shopify",
+  TIKTOK: "From TikTok Shop",
+  AMAZON_ADS: "From Amazon Ads",
+  META: "From Meta Ads",
+  CUSTOM: "A fee you set up in consl",
+  CONSL: "Computed by consl",
+};
+
+export type PnlTypeRow = { type: string; amount: number; sources: PnlSource[] };
 export type PnlGroupBlock = { group: string; total: number; types: PnlTypeRow[] };
 
 export type PnlChannel = "AMAZON" | "SHOPIFY" | "TIKTOK";

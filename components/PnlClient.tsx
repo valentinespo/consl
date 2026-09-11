@@ -3,11 +3,11 @@
 import Image from "next/image";
 import { useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { ChevronDown, PnlFilled, X } from "@/components/icons";
+import { ChevronDown, PnlFilled, Receipt, X } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
-import { GROUP_LABEL, PNL_CHANNEL_LABEL, type Pnl, type PnlChannel, type PnlGroupBlock } from "@/lib/pnl-shared";
-import { ROOT_LOGO } from "@/lib/channel-logos";
+import { GROUP_LABEL, PNL_CHANNEL_LABEL, PNL_SOURCE_LABEL, PNL_SOURCE_ORDER, type Pnl, type PnlChannel, type PnlGroupBlock, type PnlSource } from "@/lib/pnl-shared";
+import { ROOT_LOGO, SOURCE_LOGO } from "@/lib/channel-logos";
 import { EmptyState } from "@/components/EmptyState";
 import { SkuAvatar } from "@/components/ui";
 import { useCan } from "@/components/AccessProvider";
@@ -27,6 +27,43 @@ function humanize(raw: string): string {
   if (prefix && prefix !== "Refund" && prefix !== "TaxWithheld") label = `${spell(prefix)} · ${label}`;
   label = label.charAt(0).toUpperCase() + label.slice(1);
   return label.replace(/\bfba\b/gi, "FBA").replace(/\bmcf\b/gi, "MCF");
+}
+
+/** Where a line's money comes from, as the platform's mark — stacked when a line mixes sources. */
+function SourceMarks({ sources, size = 14 }: { sources: PnlSource[]; size?: number }) {
+  if (!sources.length) return null;
+  return (
+    <span className="inline-flex shrink-0 items-center -space-x-1" aria-label={sources.map((x) => PNL_SOURCE_LABEL[x]).join(", ")}>
+      {sources.map((x) =>
+        x === "CUSTOM" ? (
+          <span
+            key={x}
+            title={PNL_SOURCE_LABEL[x]}
+            className="inline-flex items-center justify-center rounded-[3px] bg-surface-2 text-ink-soft ring-1 ring-surface"
+            style={{ width: size, height: size }}
+          >
+            <Receipt size={size - 3} />
+          </span>
+        ) : (
+          <Image
+            key={x}
+            src={SOURCE_LOGO[x]}
+            alt=""
+            title={PNL_SOURCE_LABEL[x]}
+            width={size}
+            height={size}
+            className={`rounded-[3px] ring-1 ring-surface ${x === "CONSL" ? "iso-invert" : ""}`}
+          />
+        ),
+      )}
+    </span>
+  );
+}
+
+/** Every source the block's lines draw on, in the fixed platform order. */
+function blockSources(block: PnlGroupBlock): PnlSource[] {
+  const seen = new Set(block.types.flatMap((t) => t.sources));
+  return PNL_SOURCE_ORDER.filter((x) => seen.has(x));
 }
 
 function Amount({ value, money, bold = false }: { value: number; money: (n: number) => string; bold?: boolean }) {
@@ -50,7 +87,8 @@ function GroupRow({ block, money }: { block: PnlGroupBlock; money: (n: number) =
           expandable ? "hover:bg-surface-2/60" : "cursor-default"
         }`}
       >
-        <span className="flex items-center gap-1.5 font-medium text-ink">
+        <span className="flex items-center gap-2 font-medium text-ink">
+          <SourceMarks sources={blockSources(block)} />
           {GROUP_LABEL[block.group] ?? block.group}
           {expandable && <ChevronDown size={13} className={`text-muted transition-transform ${open ? "rotate-180" : ""}`} />}
         </span>
@@ -59,7 +97,10 @@ function GroupRow({ block, money }: { block: PnlGroupBlock; money: (n: number) =
       {open &&
         block.types.map((t) => (
           <div key={t.type} className="dropdown-in flex items-center justify-between gap-3 px-4 py-1.5 pl-8 text-[12.5px] text-ink-soft">
-            <span className="min-w-0 truncate">{humanize(t.type)}</span>
+            <span className="flex min-w-0 items-center gap-2">
+              <SourceMarks sources={t.sources} size={13} />
+              <span className="min-w-0 truncate">{humanize(t.type)}</span>
+            </span>
             <Amount value={t.amount} money={money} />
           </div>
         ))}
@@ -159,28 +200,37 @@ export function PnlClient({
           <div className="divide-y divide-line">
             {salesBlock && <GroupRow block={salesBlock} money={money} />}
             <div className="flex items-center justify-between gap-3 px-4 py-2.5 text-[13px]">
-              <span className="font-medium text-ink">
-                Cost of goods
-                <span className="ml-2 text-[11.5px] font-normal text-muted">
-                  {pnl.unitsSold.toLocaleString()} units at landed cost
+              <span className="flex items-center gap-2 font-medium text-ink">
+                <SourceMarks sources={["CONSL"]} />
+                <span>
+                  Cost of goods
+                  <span className="ml-2 text-[11.5px] font-normal text-muted">
+                    {pnl.unitsSold.toLocaleString()} units at landed cost
+                  </span>
                 </span>
               </span>
               <Amount value={pnl.cogs} money={money} />
             </div>
             {pnl.mcf.units > 0 && (
               <div className="flex items-center justify-between gap-3 px-4 py-1.5 pl-8 text-[12.5px] text-ink-soft">
-                <span className="min-w-0 truncate">
+                <span className="flex min-w-0 items-center gap-2">
+                  <SourceMarks sources={["CONSL"]} size={13} />
+                  <span className="min-w-0 truncate">
                   of which MCF orders · {pnl.mcf.units.toLocaleString()} units
                   <span className="ml-1.5 text-[11.5px] text-muted">shipped by Amazon for another channel, no sale reported</span>
+                  </span>
                 </span>
                 <Amount value={pnl.mcf.cogs} money={money} />
               </div>
             )}
             {pnl.unreported.units > 0 && (
               <div className="flex items-center justify-between gap-3 px-4 py-1.5 pl-8 text-[12.5px] text-ink-soft">
-                <span className="min-w-0 truncate">
-                  of which free units &amp; replacements · {pnl.unreported.units.toLocaleString()} units
-                  <span className="ml-1.5 text-[11.5px] text-muted">shipped, but Amazon reported no money for them</span>
+                <span className="flex min-w-0 items-center gap-2">
+                  <SourceMarks sources={["CONSL"]} size={13} />
+                  <span className="min-w-0 truncate">
+                    of which free units &amp; replacements · {pnl.unreported.units.toLocaleString()} units
+                    <span className="ml-1.5 text-[11.5px] text-muted">shipped, but Amazon reported no money for them</span>
+                  </span>
                 </span>
                 <Amount value={pnl.unreported.cogs} money={money} />
               </div>

@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrgId } from "@/lib/tenant";
-import { GROUP_ORDER, type Pnl, type PnlChannel, type PnlGroupBlock } from "@/lib/pnl-shared";
+import { GROUP_ORDER, PNL_SOURCE_ORDER, type Pnl, type PnlChannel, type PnlGroupBlock, type PnlSource } from "@/lib/pnl-shared";
 import { getCurrentOrg } from "@/lib/org";
 import { fxRate } from "@/lib/fx";
 import { computeFinishedGoods } from "@/lib/queries";
@@ -470,8 +470,12 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
   // exist only for managed lines. A voided order does not exist — on any channel, its money rows
   // are skipped by their order number — and a Shopify order the Orders tab drops as another
   // channel's mirror is dropped here too.
-  const sums = await prisma.$queryRaw<{ group: string; type: string; amount: number }[]>`
-    SELECT fe."group", fe."type", COALESCE(SUM(fe."baseAmount"), 0)::float8 AS amount
+  // Each row also says where its money came from: the channel's own ledger, or the ad platform
+  // whose spend was written onto that channel (Meta and Amazon Ads rows are told apart by txId).
+  const sums = await prisma.$queryRaw<{ group: string; type: string; source: string; amount: number }[]>`
+    SELECT fe."group", fe."type",
+      CASE WHEN fe."txId" LIKE 'meta:%' THEN 'META' WHEN fe."txId" LIKE 'ads:%' THEN 'AMAZON_ADS' ELSE fe.channel END AS source,
+      COALESCE(SUM(fe."baseAmount"), 0)::float8 AS amount
     FROM "FinanceEvent" fe
     WHERE fe."orgId" = ${orgId} AND fe.channel = ANY(${selected}::text[])
       AND fe."eventAt" >= ${from} AND fe."eventAt" <= ${to}
@@ -483,10 +487,18 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
         WHERE so."orgId" = fe."orgId" AND so.channel = fe.channel AND so."externalId" = fe."orderId"
           AND (so.voided OR (so.channel = 'SHOPIFY' AND so.source = ANY(${excludedSources}::text[]))))
       AND NOT (fe.channel = 'AMAZON' AND fe.type = 'ProductAdsPayment' AND ${adsSince}::timestamp IS NOT NULL AND fe."eventAt" >= ${adsSince})
-    GROUP BY 1, 2`;
-  const blocks = new Map<string, { type: string; amount: number }[]>();
-  const add = (group: string, type: string, amount: number) => blocks.set(group, [...(blocks.get(group) ?? []), { type, amount }]);
-  for (const s of sums) add(s.group, s.type, s.amount);
+    GROUP BY 1, 2, 3`;
+  // One line per type inside a bucket; a type two channels both post keeps both sources.
+  const blocks = new Map<string, Map<string, { amount: number; sources: Set<PnlSource> }>>();
+  const add = (group: string, type: string, amount: number, source: PnlSource) => {
+    const types = blocks.get(group) ?? new Map<string, { amount: number; sources: Set<PnlSource> }>();
+    const row = types.get(type) ?? { amount: 0, sources: new Set<PnlSource>() };
+    row.amount += amount;
+    row.sources.add(source);
+    types.set(type, row);
+    blocks.set(group, types);
+  };
+  for (const s of sums) add(s.group, s.type, s.amount, s.source as PnlSource);
 
   // Custom fees the operator attached (by rule or by hand): a cost on the order's own channel. A
   // fee counts whenever its order counts; on an MCF order it always counts (the fee is a real
@@ -508,7 +520,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
     const k = `${bucket}|${f.name}`;
     feeByName.set(k, { bucket, name: f.name, amount: (feeByName.get(k)?.amount ?? 0) - f.amount * fx });
   }
-  for (const f of feeByName.values()) add(f.bucket, f.name, f.amount);
+  for (const f of feeByName.values()) add(f.bucket, f.name, f.amount, "CUSTOM");
 
   // What the scope left out: listings sold that the company doesn't manage here.
   const ignored = { skus: [] as string[], units: 0, sales: 0 };
@@ -546,10 +558,10 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
   if (selectedSet.has("AMAZON")) {
     const bridge = await pendingBridge(from, to, new Set(amazonSkus), baseCurrency);
     if (bridge.sales.length) {
-      for (const s of bridge.sales) add("sales", s.type, s.amount);
-      if (bridge.taxes !== 0) add("taxes", "TaxWithheld (pending)", bridge.taxes);
-      if (bridge.fba !== 0) add("fba_fees", "FBAPerUnitFulfillmentFee (pending)", bridge.fba);
-      if (bridge.referral !== 0) add("referral_fees", "Commission (pending)", bridge.referral);
+      for (const s of bridge.sales) add("sales", s.type, s.amount, "AMAZON");
+      if (bridge.taxes !== 0) add("taxes", "TaxWithheld (pending)", bridge.taxes, "AMAZON");
+      if (bridge.fba !== 0) add("fba_fees", "FBAPerUnitFulfillmentFee (pending)", bridge.fba, "AMAZON");
+      if (bridge.referral !== 0) add("referral_fees", "Commission (pending)", bridge.referral, "AMAZON");
       pending.push({ channel: "AMAZON", sales: bridge.pendingSales });
     }
     for (const l of bridge.lines) {
@@ -560,8 +572,8 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
   if (selectedSet.has("TIKTOK")) {
     const bridge = await tiktokPendingBridge(orgId, from, to, baseCurrency);
     if (bridge.sales !== 0) {
-      add("sales", "Sales (pending)", bridge.sales);
-      if (bridge.fees !== 0) add("referral_fees", "Fees (pending)", bridge.fees);
+      add("sales", "Sales (pending)", bridge.sales, "TIKTOK");
+      if (bridge.fees !== 0) add("referral_fees", "Fees (pending)", bridge.fees, "TIKTOK");
       pending.push({ channel: "TIKTOK", sales: bridge.sales });
     }
   }
@@ -629,8 +641,11 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
 
   const fifo = await fifoCogs([...sales, ...pendingSales], from, to, selectedSet, scope);
 
+  const bySourceOrder = (a: PnlSource, b: PnlSource) => PNL_SOURCE_ORDER.indexOf(a) - PNL_SOURCE_ORDER.indexOf(b);
   const groups: PnlGroupBlock[] = GROUP_ORDER.map((g) => {
-    const types = (blocks.get(g) ?? []).sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+    const types = [...(blocks.get(g) ?? new Map()).entries()]
+      .map(([type, r]) => ({ type, amount: r.amount, sources: [...r.sources].sort(bySourceOrder) }))
+      .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
     return { group: g, total: types.reduce((t, r) => t + r.amount, 0), types };
   }).filter((b) => b.types.length > 0);
 

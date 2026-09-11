@@ -31,3 +31,13 @@ export const PROVIDER_LOGO: Record<string, string> = {
   shopify: "/integrations/shopify.png",
   tiktok: "/integrations/tiktok.png",
 };
+
+/** Marks for where a P&L line's money comes from — channel ledgers, ad platforms, consl itself. */
+export const SOURCE_LOGO: Record<string, string> = {
+  AMAZON: "/integrations/amazon.png",
+  AMAZON_ADS: "/integrations/amazon.png",
+  META: "/integrations/meta.png",
+  SHOPIFY: "/integrations/shopify.png",
+  TIKTOK: "/integrations/tiktok.png",
+  CONSL: "/brand/consl-mark.png",
+};
