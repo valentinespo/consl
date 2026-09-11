@@ -247,7 +247,7 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
         }
       }
 
-      // Meta Ads: daily spend for the P&L, a synchronous read every six hours (Meta finalises spend
+      // Meta Ads: daily spend for the P&L, a synchronous read every few minutes (Meta finalises spend
       // late, so the last days are re-read each time).
       if (conns.some((c) => c.provider === "meta_ads")) {
         const lastMeta = lastMetaAdsTick.get(orgId) ?? 0;
@@ -289,7 +289,10 @@ const AMAZON_POLL_MS = 3 * 60 * 1000; // getOrders allows ~1/min per seller; 3 m
 const AMAZON_ORDER_REPORT_MS = 6 * 60 * 60 * 1000;
 const AMAZON_FINANCE_SWEEP_MS = 15 * 60 * 1000;
 const AMAZON_ADS_TICK_MS = 5 * 60 * 1000; // reports finish in minutes; a quick pass collects them
-const META_ADS_TICK_MS = 6 * 60 * 60 * 1000;
+// One small Insights call per linked ad account per pass (the last three days, re-read because Meta
+// finalises spend late). Meta's floor even on the development tier is 600 calls/hour/ad account,
+// so a 5-minute pass uses ~2% of it — today's spend keeps moving on the P&L through the day.
+const META_ADS_TICK_MS = 5 * 60 * 1000;
 // In-process per-org timestamps; a restart just refreshes once immediately, which is harmless.
 const lastOrdersRefresh = new Map<string, number>();
 const lastMfnShipFromStep = new Map<string, number>();
