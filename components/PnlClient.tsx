@@ -229,10 +229,10 @@ export function PnlClient({
           {pnl.overflowUnits.toLocaleString()} units were sold beyond what was recorded as shipped, so they carry the newest cost on record.
         </p>
       )}
-      {pnl.unplacedUnits > 0 && (
+      {pnl.unplaced.units > 0 && (
         <p className="text-[12px] text-muted">
-          {pnl.unplacedUnits.toLocaleString()} unit{pnl.unplacedUnits === 1 ? "" : "s"} sold in this period come from orders not placed at any facility, so they
-          carry no cost here. Set &ldquo;Fulfilled at&rdquo; on those orders from the Orders tab and they will be priced from that facility&apos;s stock.
+          {pnl.unplaced.units.toLocaleString()} unit{pnl.unplaced.units === 1 ? "" : "s"} from orders with no facility {pnl.unplaced.units === 1 ? "is" : "are"} priced at
+          average cost ({money(Math.abs(pnl.unplaced.cogs))}). Set &ldquo;Fulfilled at&rdquo; on those orders from the Orders tab to price them from real stock.
         </p>
       )}
       {pnl.unmatchedSkus.length > 0 && (

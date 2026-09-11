@@ -24,8 +24,8 @@ export type Pnl = {
   preHistoryUnits: number;
   /** Units sold beyond everything recorded as shipped — priced at the newest cost on record. */
   overflowUnits: number;
-  /** Units sold from orders not placed at any facility — they carry no cost until they are. */
-  unplacedUnits: number;
+  /** Units sold from orders at no facility: priced at the product's average cost (part of `cogs`) until the order is placed. */
+  unplaced: { units: number; cogs: number };
   /** Amazon MCF orders counted here (Amazon is the only channel): their units and cost, part of `cogs`. */
   mcf: { units: number; cogs: number };
   /** Amazon orders that shipped but Amazon posted no money for (free units, replacements): units from the Orders tab, part of `cogs`. */

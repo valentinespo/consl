@@ -196,7 +196,7 @@ export function OrderDialog({ order, facilities, onClose }: { order: OrderRow; f
       router.refresh();
     });
   const locations = [
-    { value: "", label: detected ? `Keep detected (${detected.name})` : "Keep as detected (nowhere yet)" },
+    { value: "", label: detected ? `Keep detected (${detected.name})` : "Keep as detected (no facility yet)" },
     ...facilities.filter((f) => f.id !== detected?.id).map((f) => ({ value: f.id, label: f.name })),
   ];
 

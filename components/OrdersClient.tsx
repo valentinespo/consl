@@ -503,13 +503,13 @@ export function OrdersClient({
                     <td className="px-4 py-2.5 text-ink-soft">
                       <HoverHint
                         title="Fulfilled at"
-                        body={`${o.channelLabel} says "${o.fulfillmentLabel ?? "unknown"}"${o.fulfilledAt ? ` — consl places it at ${o.fulfilledAt.name}${o.viaMcf ? " (shipped by Amazon MCF)" : ""}` : " — consl has no record of that place, so it isn't placed at a facility; pick one from the order menu"}.`}
+                        body={`${o.channelLabel} says "${o.fulfillmentLabel ?? "unknown"}"${o.fulfilledAt ? ` — consl places it at ${o.fulfilledAt.name}${o.viaMcf ? " (shipped by Amazon MCF)" : ""}` : " — no facility yet: its units are priced at average cost on the P&L until it ships from a known place or you pick one from the order menu"}.`}
                         className="block"
                       >
                         <span className="flex flex-col leading-tight">
                           {o.fulfilledAtDetected && <span className="text-[11.5px] text-muted line-through">{o.fulfilledAtDetected.name}</span>}
                           <span>
-                            {o.fulfilledAt ? o.fulfilledAt.name : <span className="text-muted">Not placed</span>}
+                            {o.fulfilledAt ? o.fulfilledAt.name : <span className="text-muted">No facility</span>}
                             {o.viaMcf && <span className="ml-1 text-[11px] text-muted">via MCF</span>}
                           </span>
                         </span>

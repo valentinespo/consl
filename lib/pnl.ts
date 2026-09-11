@@ -25,8 +25,12 @@ export { GROUP_ORDER, GROUP_LABEL, PNL_CHANNEL_LABEL, type Pnl, type PnlChannel,
  * is everything that ever entered it — lots finished there, transfers in, its day-zero balance —
  * minus what left it for somewhere else. Each sale takes its units from the queue of the
  * facility its order was fulfilled from (the operator's correction winning), found on the order
- * record — an Amazon sale row is looked up by its order id. An order placed nowhere prices
- * nothing: its units are reported as unplaced, never guessed onto Amazon.
+ * record — an Amazon sale row is looked up by its order id. An order at no facility (not shipped
+ * yet, a place consl hasn't seen, a merchant-fulfilled Amazon order with no mapped address) is
+ * never guessed onto Amazon: its units are priced at the product's average cost — what the
+ * company holds of it today, across every place, weighted by units; the pre-consl average, then
+ * the newest cost on record, stand in when it holds none — take nothing from any queue, and are
+ * reported as their own count so the operator can place the order and get real FIFO.
  *
  * MCF: Amazon's MCF shipments post no sale, only their fulfilment fee. With another channel
  * present, the TikTok or Shopify order that sold the unit carries it, counted once, on its own
@@ -113,6 +117,7 @@ type Cogs = {
   preHistoryUnits: number;
   overflowUnits: number;
   unplacedUnits: number;
+  unplacedCogs: number;
   mcfUnits: number;
   mcfCogs: number;
   unreportedUnits: number;
@@ -121,9 +126,15 @@ type Cogs = {
 };
 type Layer = { units: number; unitCost: number; date: number };
 
-/** The queues: every place a unit can leave from, each holding its products' layers oldest first. */
-async function loadQueues(): Promise<Map<QueueKey, Map<string, Layer[]>>> {
-  const { shipped, entries } = await computeFinishedGoods();
+/** What a unit costs when no queue can price it: the product's on-hand average across every place
+ *  (units-weighted), else the newest cost on record anywhere. Null when it holds nothing and
+ *  nothing ever entered. */
+type Fallback = { average: number | null; newest: number | null };
+
+/** The queues: every place a unit can leave from, each holding its products' layers oldest first —
+ *  plus each product's fallback cost for a sale no queue can price. */
+async function loadQueues(): Promise<{ queues: Map<QueueKey, Map<string, Layer[]>>; fallback: Map<string, Fallback> }> {
+  const { pools, shipped, entries } = await computeFinishedGoods();
   const queues = new Map<QueueKey, Map<string, Layer[]>>();
   const push = (queue: QueueKey, productId: string, l: Layer) => {
     if (l.units <= 0) return;
@@ -137,7 +148,27 @@ async function loadQueues(): Promise<Map<QueueKey, Map<string, Layer[]>>> {
   for (const l of shipped) push(l.destination, l.sku, { units: l.units, unitCost: l.unitCost, date: l.date });
   for (const e of entries) push(e.facilityId, e.sku, { units: e.units, unitCost: e.unitCost, date: e.date });
   for (const q of queues.values()) for (const list of q.values()) list.sort((a, b) => a.date - b.date);
-  return queues;
+
+  // On hand today = what is left at the company's own places plus what is still at each channel.
+  const held = new Map<string, { units: number; value: number }>();
+  const hold = (productId: string, units: number, value: number) => {
+    if (units <= 0) return;
+    const h = held.get(productId) ?? { units: 0, value: 0 };
+    held.set(productId, { units: h.units + units, value: h.value + value });
+  };
+  for (const p of pools) hold(p.sku, p.units, p.value);
+  for (const l of shipped) hold(l.sku, l.units, l.units * l.unitCost);
+  const newest = new Map<string, { date: number; unitCost: number }>();
+  for (const l of [...shipped, ...entries]) {
+    const n = newest.get(l.sku);
+    if (!n || l.date > n.date) newest.set(l.sku, { date: l.date, unitCost: l.unitCost });
+  }
+  const fallback = new Map<string, Fallback>();
+  for (const id of new Set([...held.keys(), ...newest.keys()])) {
+    const h = held.get(id);
+    fallback.set(id, { average: h && h.units > 0 ? h.value / h.units : null, newest: newest.get(id)?.unitCost ?? null });
+  }
+  return { queues, fallback };
 }
 
 /**
@@ -154,11 +185,12 @@ async function loadQueues(): Promise<Map<QueueKey, Map<string, Layer[]>>> {
  * sales that predate it): they're priced at the product's pre-consl average cost (set from the
  * P&L; the starting cost, then the oldest layer, stand in until then) and counted in
  * `preHistoryUnits`. Sales beyond everything recorded take the newest layer's cost and count in
- * `overflowUnits` — never silently zero. Sales from an order placed nowhere count in
- * `unplacedUnits` and carry no cost.
+ * `overflowUnits` — never silently zero. Sales from an order at no facility are priced at the
+ * product's fallback cost (on-hand average, else the pre-consl average, else the newest cost on
+ * record), take nothing from any queue, and count in `unplacedUnits` / `unplacedCogs`.
  */
 async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlChannel>, scope: Scope): Promise<Cogs> {
-  const queues = await loadQueues();
+  const { queues, fallback } = await loadQueues();
   const exits = await prisma.stockMovement.findMany({
     where: { itemType: "FINISHED", kind: "STANDARD", fromFacilityId: { not: null }, productId: { not: null } },
     select: { productId: true, fromFacilityId: true, quantity: true, date: true },
@@ -172,7 +204,7 @@ async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlCh
   draws.sort((a, b) => order(a) - order(b));
 
   const cursor = new Map<string, { idx: number; left: number }>(); // "queue|product"
-  const out: Cogs = { cogs: 0, units: 0, preHistoryUnits: 0, overflowUnits: 0, unplacedUnits: 0, mcfUnits: 0, mcfCogs: 0, unreportedUnits: 0, unreportedCogs: 0, unmatchedSkus: new Set() };
+  const out: Cogs = { cogs: 0, units: 0, preHistoryUnits: 0, overflowUnits: 0, unplacedUnits: 0, unplacedCogs: 0, mcfUnits: 0, mcfCogs: 0, unreportedUnits: 0, unreportedCogs: 0, unmatchedSkus: new Set() };
   for (const d of draws) {
     const product = scope.byId.get(d.productId);
     if (!product) continue;
@@ -181,7 +213,24 @@ async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlCh
     const sale = d.sale;
     const inWindow = !!sale && selected.has(sale.channel) && (at == null || (at >= from.getTime() && at <= to.getTime()));
     if (d.queue == null) {
-      if (inWindow) out.unplacedUnits += qty;
+      if (!inWindow) continue;
+      const fb = fallback.get(product.id);
+      const unitCost = fb?.average ?? product.preConslUnitCost ?? product.openingUnitCost ?? fb?.newest ?? null;
+      out.units += qty;
+      out.unplacedUnits += qty;
+      if (unitCost == null) out.unmatchedSkus.add(product.code);
+      else {
+        out.cogs -= qty * unitCost;
+        out.unplacedCogs -= qty * unitCost;
+      }
+      if (sale?.mcf) {
+        out.mcfUnits += qty;
+        out.mcfCogs -= qty * (unitCost ?? 0);
+      }
+      if (sale?.unreported) {
+        out.unreportedUnits += qty;
+        out.unreportedCogs -= qty * (unitCost ?? 0);
+      }
       continue;
     }
     const layers = queues.get(d.queue)?.get(product.id) ?? [];
@@ -383,7 +432,7 @@ async function tiktokPendingBridge(orgId: string, from: Date, to: Date, baseCurr
 
 const EMPTY: Pnl = {
   groups: [], sales: 0, cogs: 0, unitsSold: 0, netProfit: 0, margin: null, roi: null, pending: [],
-  unmatchedSkus: [], preHistoryUnits: 0, overflowUnits: 0, unplacedUnits: 0, mcf: { units: 0, cogs: 0 }, unreported: { units: 0, cogs: 0 }, ignored: { skus: [], units: 0, sales: 0 }, backfillInProgress: false, importProgress: null, hasData: false,
+  unmatchedSkus: [], preHistoryUnits: 0, overflowUnits: 0, unplaced: { units: 0, cogs: 0 }, mcf: { units: 0, cogs: 0 }, unreported: { units: 0, cogs: 0 }, ignored: { skus: [], units: 0, sales: 0 }, backfillInProgress: false, importProgress: null, hasData: false,
 };
 
 /** The statement for a window, over the given channels (default: every channel with data). */
@@ -597,7 +646,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
     unmatchedSkus: [...fifo.unmatchedSkus],
     preHistoryUnits: fifo.preHistoryUnits,
     overflowUnits: fifo.overflowUnits,
-    unplacedUnits: fifo.unplacedUnits,
+    unplaced: { units: fifo.unplacedUnits, cogs: fifo.unplacedCogs },
     mcf: { units: fifo.mcfUnits, cogs: fifo.mcfCogs },
     unreported: { units: fifo.unreportedUnits, cogs: fifo.unreportedCogs },
     ignored,
