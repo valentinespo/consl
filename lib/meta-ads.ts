@@ -108,16 +108,27 @@ export async function getMetaAccessToken(i: MetaIntegration): Promise<string> {
 }
 
 export type MetaAdAccount = { id: string; account_id: string; name: string; currency: string; timezone_name: string; account_status: number; business?: { id: string; name: string } };
-const ACCOUNT_FIELDS = "id,account_id,name,currency,timezone_name,account_status,business{id,name}";
+const ACCOUNT_FIELDS = "id,account_id,name,currency,timezone_name,account_status";
+// The owning portfolio is a bonus for the card: not every token may read it, so a refusal falls
+// back to the plain fields instead of failing the connection.
+const ACCOUNT_FIELDS_WITH_BUSINESS = `${ACCOUNT_FIELDS},business{id,name}`;
 
 /** The ad accounts this token may read — with a system-user token, exactly the ones ticked in Meta's dialog. */
 export async function listMetaAdAccounts(token: string): Promise<MetaAdAccount[]> {
-  const j = await graph<{ data: MetaAdAccount[] }>("/me/adaccounts", { access_token: token, fields: ACCOUNT_FIELDS, limit: "100" });
-  return j.data ?? [];
+  const load = async (fields: string) => (await graph<{ data: MetaAdAccount[] }>("/me/adaccounts", { access_token: token, fields, limit: "100" })).data ?? [];
+  try {
+    return await load(ACCOUNT_FIELDS_WITH_BUSINESS);
+  } catch {
+    return load(ACCOUNT_FIELDS);
+  }
 }
 
 export async function describeAdAccount(token: string, accountId: string): Promise<MetaAdAccount> {
-  return graph<MetaAdAccount>(`/${accountId}`, { access_token: token, fields: ACCOUNT_FIELDS });
+  try {
+    return await graph<MetaAdAccount>(`/${accountId}`, { access_token: token, fields: ACCOUNT_FIELDS_WITH_BUSINESS });
+  } catch {
+    return graph<MetaAdAccount>(`/${accountId}`, { access_token: token, fields: ACCOUNT_FIELDS });
+  }
 }
 
 type AccountRow = { id: string; accessTokenEnc: string | null; accessTokenExpiresAt: Date | null };

@@ -55,6 +55,16 @@ async function adoptLegacyAccount(hub: Hub): Promise<Account | null> {
 
 async function readAccount(hub: Hub, a: Account, orgId: string, baseCurrency: string): Promise<{ rows: number; since: Date; through: string }> {
   const token = await getMetaAccountToken(a);
+  if (a.name === a.accountId) {
+    // Adopted without its details (Meta refused them at the time) — fill the card in when it answers.
+    const info = await describeAdAccount(token, a.accountId).catch(() => null);
+    if (info) {
+      await prisma.metaAdAccount.update({
+        where: { id: a.id },
+        data: { name: info.name || a.name, accountNumber: info.account_id ?? a.accountNumber, currency: info.currency ?? a.currency, timezone: info.timezone_name ?? a.timezone, businessId: info.business?.id ?? a.businessId, businessName: info.business?.name ?? a.businessName },
+      });
+    }
+  }
   const tz = a.timezone ?? hub.timezone ?? "America/Los_Angeles";
   const today = todayIn(tz);
   const synced = a.syncedThrough ? day(a.syncedThrough) : null;
