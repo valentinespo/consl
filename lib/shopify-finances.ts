@@ -295,8 +295,10 @@ function balanceRows(t: BalanceTx): Row[] {
  * Pull the balance ledger (all of it, or the last `sinceDays` with a little overlap) and upsert
  * its rows by Shopify's own transaction id. Returns the kinds it skipped, for the log.
  */
-export async function importShopifyPaymentsLedger(shop: string, accessToken: string, sinceDays?: number): Promise<{ rows: number; skipped: Record<string, number> }> {
-  const since = sinceDays ? new Date(Date.now() - (sinceDays + 2) * 86_400_000).toISOString().slice(0, 10) : null;
+export async function importShopifyPaymentsLedger(shop: string, accessToken: string, sinceArg?: number | Date): Promise<{ rows: number; skipped: Record<string, number> }> {
+  // Two days of overlap: a balance row can post a little after the charge it belongs to.
+  const sinceAt = typeof sinceArg === "number" ? new Date(Date.now() - sinceArg * 86_400_000) : sinceArg ?? null;
+  const since = sinceAt ? new Date(sinceAt.getTime() - 2 * 86_400_000).toISOString().slice(0, 10) : null;
   const txs: BalanceTx[] = [];
   let cursor: string | null = null;
   for (let page = 0; page < 400; page++) {

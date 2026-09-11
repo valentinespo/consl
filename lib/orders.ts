@@ -19,7 +19,15 @@ import { paymentMethodKey, paymentMethodLabel, walletLabel } from "@/lib/payment
  * Shopify totals. Storing everything keeps the toggle reversible.
  */
 
-export type OrderImportResult = { channel: string; orders: number; lines: number; error?: string };
+export type OrderImportResult = {
+  channel: string;
+  orders: number;
+  lines: number;
+  error?: string;
+  /** When a windowed pull hit its page cap: the instant it is complete up to (the caller resumes
+   *  from here next time). Absent = the whole window was read. */
+  coveredThrough?: Date;
+};
 
 type FetchedLine = {
   sku: string | null;
@@ -372,16 +380,24 @@ const shopifyResolver = (map: Awaited<ReturnType<typeof productMap>>) => (l: { s
  * channel created each order ("web", "tiktok", …); we keep it so mirrored orders (TikTok selling
  * through Shopify) can be excluded from Shopify totals without re-importing.
  */
-export async function importShopifyOrders(sinceDays?: number): Promise<OrderImportResult> {
+/** A refresh window: days back, or the instant to read from. `updated_at` is the filter, so an
+ *  old order that was edited, refunded or cancelled in the window is re-read too. */
+function sinceInstant(since: number | Date | undefined): Date | null {
+  return typeof since === "number" ? new Date(Date.now() - since * 86_400_000) : since ?? null;
+}
+
+export async function importShopifyOrders(since?: number | Date): Promise<OrderImportResult> {
   const conn = await prisma.integration.findFirst({ where: { provider: "shopify", status: "connected" } });
   if (!conn?.refreshTokenEnc || !conn.sellerId) return { channel: "SHOPIFY", orders: 0, lines: 0 };
   const token = decryptSecret(conn.refreshTokenEnc);
   const map = await productMap("SHOPIFY");
 
-  const filter = sinceDays ? `created_at:>=${new Date(Date.now() - sinceDays * 86_400_000).toISOString()}` : "";
+  const sinceAt = sinceInstant(since);
+  const filter = sinceAt ? `updated_at:>=${sinceAt.toISOString()}` : "";
   const fetched: Fetched[] = [];
   const nodes: ShopifyOrderNode[] = [];
   let cursor: string | null = null;
+  let truncated = false;
 
   for (let page = 0; page < 60; page++) {
     const data: {
@@ -390,7 +406,7 @@ export async function importShopifyOrders(sinceDays?: number): Promise<OrderImpo
       conn.sellerId,
       token,
       `query($cursor: String, $q: String) {
-        orders(first: 100, after: $cursor, sortKey: CREATED_AT, query: $q) {
+        orders(first: 100, after: $cursor, sortKey: ${sinceAt ? "UPDATED_AT" : "CREATED_AT"}, query: $q) {
           pageInfo { hasNextPage endCursor }
           nodes { ${SHOPIFY_ORDER_FIELDS} }
         }
@@ -400,16 +416,20 @@ export async function importShopifyOrders(sinceDays?: number): Promise<OrderImpo
     fetched.push(...data.orders.nodes.map(mapShopifyOrder));
     nodes.push(...data.orders.nodes);
     if (!data.orders.pageInfo.hasNextPage) break;
+    truncated = page === 59;
     cursor = data.orders.pageInfo.endCursor;
   }
 
   const result = await persist("SHOPIFY", fetched, shopifyResolver(map));
+  // A windowed pull walks oldest change first; when it stops at the page cap, it is complete only
+  // up to the last change it read — the caller resumes from there.
+  if (sinceAt && truncated && nodes.length) result.coveredThrough = new Date(nodes[nodes.length - 1].updatedAt ?? nodes[nodes.length - 1].createdAt);
   // The money side: sales/tax/refunds from the orders; fees and chargebacks from Shopify Payments'
   // own ledger when the connection can read it (else from the orders, minus the dispute fee).
   const ledger = hasShopifyPaymentsScope(conn.scope);
   await upsertShopifyFinanceEvents(nodes, shopifyResolver(map), ledger);
   if (ledger) {
-    const r = await importShopifyPaymentsLedger(conn.sellerId, token, sinceDays);
+    const r = await importShopifyPaymentsLedger(conn.sellerId, token, sinceAt ?? undefined);
     if (Object.keys(r.skipped).length) console.log("[shopify] balance ledger kinds not modelled:", r.skipped);
   }
   return result;
@@ -502,7 +522,8 @@ export type TikTokOrder = {
 /** TikTok Shop orders. Today this is the sandbox test store (a couple of orders); when the real
  *  shop is connected it replaces the sandbox by the same (channel, externalId) upsert.
  *  `sinceDays` bounds the pull for the recurring refresh; omit for a full-history import. */
-export async function importTikTokOrders(sinceDays?: number): Promise<OrderImportResult> {
+export async function importTikTokOrders(since?: number | Date): Promise<OrderImportResult> {
+  const sinceAt = sinceInstant(since);
   const conn = await prisma.integration.findFirst({ where: { provider: "tiktok", status: "connected" } });
   if (!conn?.marketplaceId) return { channel: "TIKTOK", orders: 0, lines: 0 };
   const { getTikTokAccessToken } = await import("@/lib/tiktok-oauth");
@@ -511,6 +532,7 @@ export async function importTikTokOrders(sinceDays?: number): Promise<OrderImpor
 
   const fetched: TikTokOrder[] = [];
   let pageToken: string | null = null;
+  let truncated = false;
   for (let page = 0; page < 200; page++) {
     const query: Record<string, string> = {
       shop_cipher: conn.marketplaceId,
@@ -522,14 +544,18 @@ export async function importTikTokOrders(sinceDays?: number): Promise<OrderImpor
       path: `/order/${TIKTOK_API_VERSION}/orders/search`,
       accessToken: token,
       query,
-      body: sinceDays ? { create_time_ge: Math.floor(Date.now() / 1000) - sinceDays * 86_400 } : {},
+      body: sinceAt ? { update_time_ge: Math.floor(sinceAt.getTime() / 1000), sort_field: "UPDATE_TIME", sort_order: "ASC" } : {},
     });
     fetched.push(...(data.orders ?? []));
     pageToken = data.next_page_token || null;
     if (!pageToken) break;
+    truncated = page === 199;
   }
 
-  return persistTikTokOrders(fetched);
+  const result = await persistTikTokOrders(fetched);
+  const lastUpdate = fetched[fetched.length - 1]?.update_time;
+  if (sinceAt && truncated && lastUpdate) result.coveredThrough = new Date(lastUpdate * 1000);
+  return result;
 }
 
 /** Upsert TikTok orders already in hand — the API's own order objects. The shared tail of every
@@ -894,9 +920,12 @@ export async function pollAmazonOrders(): Promise<OrderImportResult & { cursor?:
     : new Date(Date.now() - 6 * 60 * 60_000);
   const sweepStart = new Date();
   const changed = await getOrdersUpdatedSince(client, since.toISOString());
+  // Oldest change first, and the cursor only moves past what this sweep actually processed — a
+  // long gap (a reconnect after days away) drains over several sweeps with nothing skipped.
+  const plan = planPollBatch(changed, sweepStart);
 
   const fetched: Fetched[] = [];
-  for (const o of changed.slice(0, 60)) {
+  for (const o of plan.batch) {
     let lines: FetchedLine[] = [];
     try {
       const items = await getOrderItems(client, o.orderId);
@@ -938,6 +967,36 @@ export async function pollAmazonOrders(): Promise<OrderImportResult & { cursor?:
   }
 
   const result = await persist("AMAZON", fetched, (l) => (l.sku ? map.bySku.get(l.sku) ?? null : null));
-  await saveOrgSettings({ ordersPollCursor: sweepStart.toISOString() });
-  return { ...result, cursor: sweepStart.toISOString() };
+  await saveOrgSettings({ ordersPollCursor: plan.cursor.toISOString() });
+  return { ...result, cursor: plan.cursor.toISOString() };
+}
+
+const POLL_BATCH = 60;
+
+/** Which of the changed orders this sweep takes (oldest change first, at most POLL_BATCH — the
+ *  per-order items call is rate-limited) and where the cursor lands: at the sweep start when every
+ *  change was taken, else at the last change taken so the next sweep continues from there. */
+export function planPollBatch<T extends { lastUpdateDate: string }>(changed: T[], sweepStart: Date, max = POLL_BATCH): { batch: T[]; cursor: Date } {
+  const at = (o: T) => (o.lastUpdateDate ? new Date(o.lastUpdateDate).getTime() : sweepStart.getTime());
+  const sorted = [...changed].sort((a, b) => at(a) - at(b));
+  const batch = sorted.slice(0, max);
+  if (sorted.length <= max) return { batch, cursor: sweepStart };
+  const last = batch[batch.length - 1];
+  return { batch, cursor: new Date(Math.min(at(last), sweepStart.getTime())) };
+}
+
+/**
+ * The report-based order refresh, from where the last one read up to. The All Orders report lags
+ * its source by hours and rewrites orders as they settle, so the window reaches back two days
+ * before the last cutoff — and after a pause of any length it reaches back to that cutoff, so a
+ * reconnect re-reads everything the pause covered.
+ */
+export async function refreshAmazonOrderReport(): Promise<OrderImportResult> {
+  const { getOrgSettings, saveOrgSettings } = await import("@/lib/settings");
+  const s = await getOrgSettings();
+  const end = new Date();
+  const start = new Date((s.amazonReportSyncedThrough ? s.amazonReportSyncedThrough.getTime() - 2 * 86_400_000 : end.getTime() - 3 * 86_400_000));
+  const r = await importAmazonOrders({ start, end });
+  if (!r.error) await saveOrgSettings({ amazonReportSyncedThrough: end });
+  return r;
 }

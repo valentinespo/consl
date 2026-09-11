@@ -415,17 +415,24 @@ export async function amazonFinanceRewalkStep(): Promise<{ active: boolean; done
 }
 
 /** The live leg: sweep [cursor − overlap, now − 2 min) forward. Upserts make the overlap free,
- *  and the 2-minute stand-off is the Finances API's own postedBefore requirement. */
+ *  and the 2-minute stand-off is the Finances API's own postedBefore requirement. A long stretch
+ *  (a reconnect after days away) is read a week at a time, the cursor moving after each week, so
+ *  nothing is skipped and an interruption resumes where it stopped. */
 export async function sweepAmazonFinances(): Promise<{ rows: number } | null> {
   const client = await amazonClient();
   if (!client) return null;
   const s = await getOrgSettings();
   const end = new Date(Date.now() - 2 * 60_000);
-  const from = s.financeEventsCursor ? new Date(new Date(s.financeEventsCursor).getTime() - 60 * 60_000) : new Date(Date.now() - 3 * 86_400_000);
+  let from = s.financeEventsCursor ? new Date(new Date(s.financeEventsCursor).getTime() - 60 * 60_000) : new Date(Date.now() - 3 * 86_400_000);
   if (end.getTime() - from.getTime() < 10 * 60_000) return { rows: 0 };
-  const r = await importAmazonFinances(from, end);
-  await saveOrgSettings({ financeEventsCursor: end.toISOString() });
-  return { rows: r.rows };
+  let rows = 0;
+  while (from < end) {
+    const to = new Date(Math.min(end.getTime(), from.getTime() + BACKFILL_WINDOW_DAYS * 86_400_000));
+    rows += (await importAmazonFinances(from, to)).rows;
+    await saveOrgSettings({ financeEventsCursor: to.toISOString() });
+    from = to;
+  }
+  return { rows };
 }
 
 const RECONCILE_DAYS = 14;

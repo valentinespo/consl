@@ -162,23 +162,31 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
         lastOrdersRefresh.set(orgId, Date.now());
         const { importShopifyOrders, importTikTokOrders } = await import("@/lib/orders");
         const { IMPORTER_VERSIONS, importerVersion, stampImporterVersion } = await import("@/lib/import-versions");
-        for (const [provider, channel, recent, full] of [
-          ["shopify", "SHOPIFY", () => importShopifyOrders(3), () => importShopifyOrders()],
-          ["tiktok", "TIKTOK", () => importTikTokOrders(3), () => importTikTokOrders()],
+        for (const [provider, channel, recent, full, syncedKey] of [
+          ["shopify", "SHOPIFY", (since: Date) => importShopifyOrders(since), () => importShopifyOrders(), "shopifySyncedThrough"],
+          ["tiktok", "TIKTOK", (since: Date) => importTikTokOrders(since), () => importTikTokOrders(), "tiktokSyncedThrough"],
         ] as const) {
           if (!conns.some((c) => c.provider === provider)) continue;
           try {
             // A connected channel with zero orders means its history was never pulled (connected
-            // outside onboarding, or a fresh database) — self-heal with one full import; every
-            // later pass is the cheap 3-day window. A Shopify ledger written by an older importer
-            // generation gets one full re-read too, then carries the current generation.
+            // outside onboarding, or a fresh database) — self-heal with one full import. Every
+            // later pass reads from where the last one read up to (an hour of overlap), never a
+            // fixed window: a pause of any length — a disconnect, downtime — is closed by the next
+            // pass. A Shopify ledger written by an older importer generation gets one full re-read
+            // too, then carries the current generation.
             const existing = await prisma.salesOrder.count({ where: { channel } });
             const settingsNow = await getOrgSettings();
             const behind =
               provider === "shopify" &&
               (importerVersion(settingsNow.importerVersions, "shopifyFinance") < IMPORTER_VERSIONS.shopifyFinance ||
                 importerVersion(settingsNow.importerVersions, "shopifyOrders") < IMPORTER_VERSIONS.shopifyOrders);
-            await (existing === 0 || behind ? full() : recent());
+            const sweepStart = new Date();
+            const syncedThrough = settingsNow[syncedKey];
+            const since = syncedThrough ? new Date(syncedThrough.getTime() - 60 * 60_000) : new Date(Date.now() - 3 * 86_400_000);
+            const r = await (existing === 0 || behind ? full() : recent(since));
+            if (r.error) throw new Error(r.error);
+            // A pull that stopped at its page cap is complete only up to the last change it read.
+            await saveOrgSettings({ [syncedKey]: r.coveredThrough ?? sweepStart });
             if (existing === 0) console.log(`[scheduler] ${provider} full order history imported for org ${orgId}`);
             if (behind) {
               await saveOrgSettings({ importerVersions: stampImporterVersion(stampImporterVersion(settingsNow.importerVersions, "shopifyFinance"), "shopifyOrders") });
@@ -214,8 +222,8 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
         if (Date.now() - lastReport >= AMAZON_ORDER_REPORT_MS) {
           lastAmazonOrderReport.set(orgId, Date.now());
           try {
-            const { importAmazonOrders } = await import("@/lib/orders");
-            const r = await importAmazonOrders(3);
+            const { refreshAmazonOrderReport } = await import("@/lib/orders");
+            const r = await refreshAmazonOrderReport();
             console.log(`[scheduler] amazon order report refresh for ${orgId}: ${r.orders} orders`);
           } catch (e) {
             console.error(`[scheduler] amazon order report failed for org ${orgId}:`, (e as Error).message);
