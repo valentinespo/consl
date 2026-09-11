@@ -283,7 +283,59 @@ export type LiveAmazonOrder = {
   salesChannel: string; // "Amazon.com" | "Non-Amazon" (an MCF order for another channel)
   isReplacement: boolean;
   lastUpdateDate: string;
+  /** Merchant-fulfilled only: the ship-from place — a stable key and a human label. Null for FBA. */
+  shipFromKey: string | null;
+  shipFromLabel: string | null;
 };
+
+type ApiAddress = { Name?: string; AddressLine1?: string; AddressLine2?: string; City?: string; StateOrRegion?: string; PostalCode?: string; CountryCode?: string };
+type ApiOrder = {
+  AmazonOrderId: string;
+  PurchaseDate?: string;
+  OrderStatus?: string;
+  FulfillmentChannel?: string;
+  OrderTotal?: { Amount?: string; CurrencyCode?: string };
+  SalesChannel?: string;
+  IsReplacementOrder?: boolean | string;
+  LastUpdateDate?: string;
+  DefaultShipFromLocationAddress?: ApiAddress | null;
+  FulfillmentInstruction?: { FulfillmentSupplySourceId?: string | null } | null;
+};
+
+/** The ship-from place of a merchant-fulfilled order: the supply source Amazon assigned when the
+ *  seller runs several ship-from locations, else the seller's ship-from address. Key = stable id
+ *  for mapping; label = what a person reads. Null for FBA orders, or when Amazon sent neither. */
+function shipFromOf(o: ApiOrder): { key: string | null; label: string | null } {
+  if (o.FulfillmentChannel !== "MFN") return { key: null, label: null };
+  const a = o.DefaultShipFromLocationAddress ?? undefined;
+  const clean = (s?: string | null) => (s ?? "").trim();
+  const line = [clean(a?.AddressLine1), [clean(a?.City), clean(a?.StateOrRegion), clean(a?.PostalCode)].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  const label = [clean(a?.Name), line].filter(Boolean).join(" · ") || null;
+  const ss = clean(o.FulfillmentInstruction?.FulfillmentSupplySourceId);
+  if (ss) return { key: `ss:${ss}`, label: label ?? `Ship-from location ${ss}` };
+  if (!a || !(clean(a.AddressLine1) || clean(a.PostalCode))) return { key: null, label: null };
+  const key = ["addr", clean(a.AddressLine1), clean(a.City), clean(a.StateOrRegion), clean(a.PostalCode), clean(a.CountryCode)]
+    .map((s) => s.toLowerCase().replace(/\s+/g, " "))
+    .join("|");
+  return { key, label };
+}
+
+function liveOrderOf(o: ApiOrder): LiveAmazonOrder {
+  const from = shipFromOf(o);
+  return {
+    orderId: o.AmazonOrderId,
+    purchaseDate: o.PurchaseDate ?? "",
+    status: o.OrderStatus ?? "",
+    fulfillment: o.FulfillmentChannel ?? "",
+    total: Number(o.OrderTotal?.Amount) || 0,
+    currency: o.OrderTotal?.CurrencyCode ?? "USD",
+    salesChannel: o.SalesChannel ?? "",
+    isReplacement: o.IsReplacementOrder === true || o.IsReplacementOrder === "true",
+    lastUpdateDate: o.LastUpdateDate ?? "",
+    shipFromKey: from.key,
+    shipFromLabel: from.label,
+  };
+}
 
 export type LiveAmazonOrderItem = { sku: string; quantity: number; itemPrice: number; promotionDiscount: number; itemTax: number };
 
@@ -304,29 +356,32 @@ export async function getOrdersUpdatedSince(client: SpApiClient, sinceISO: strin
     const r = await sp(client, `/orders/v0/orders?${params.toString()}`);
     const j = await r.json();
     if (!r.ok) throw new Error(`orders poll: ${JSON.stringify(j).slice(0, 160)}`);
-    type ApiOrder = {
-      AmazonOrderId: string;
-      PurchaseDate?: string;
-      OrderStatus?: string;
-      FulfillmentChannel?: string;
-      OrderTotal?: { Amount?: string; CurrencyCode?: string };
-      SalesChannel?: string;
-      IsReplacementOrder?: boolean | string;
-      LastUpdateDate?: string;
-    };
-    for (const o of (j.payload?.Orders ?? []) as ApiOrder[]) {
-      out.push({
-        orderId: o.AmazonOrderId,
-        purchaseDate: o.PurchaseDate ?? "",
-        status: o.OrderStatus ?? "",
-        fulfillment: o.FulfillmentChannel ?? "",
-        total: Number(o.OrderTotal?.Amount) || 0,
-        currency: o.OrderTotal?.CurrencyCode ?? "USD",
-        salesChannel: o.SalesChannel ?? "",
-        isReplacement: o.IsReplacementOrder === true || o.IsReplacementOrder === "true",
-        lastUpdateDate: o.LastUpdateDate ?? "",
-      });
-    }
+    for (const o of (j.payload?.Orders ?? []) as ApiOrder[]) out.push(liveOrderOf(o));
+    next = j.payload?.NextToken ?? null;
+    if (!next) break;
+  }
+  return out;
+}
+
+/**
+ * Merchant-fulfilled orders placed in a window, from the live Orders API — the only place Amazon
+ * names where such an order ships from (the orders report says just "Merchant"). Pages are spaced
+ * out: getOrders allows about one call a minute with a burst of twenty, shared with the live poll.
+ */
+export async function getMfnOrdersCreatedBetween(client: SpApiClient, fromISO: string, toISO: string, maxPages = 5): Promise<LiveAmazonOrder[]> {
+  const out: LiveAmazonOrder[] = [];
+  let next: string | null = null;
+  for (let page = 0; page < maxPages; page++) {
+    if (page > 0) await new Promise((res) => setTimeout(res, 2500));
+    const params = new URLSearchParams(
+      next
+        ? { NextToken: next, MarketplaceIds: client.marketplaceId }
+        : { MarketplaceIds: client.marketplaceId, CreatedAfter: fromISO, CreatedBefore: toISO, FulfillmentChannels: "MFN", MaxResultsPerPage: "100" },
+    );
+    const r = await sp(client, `/orders/v0/orders?${params.toString()}`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(`mfn orders: ${JSON.stringify(j).slice(0, 160)}`);
+    for (const o of (j.payload?.Orders ?? []) as ApiOrder[]) out.push(liveOrderOf(o));
     next = j.payload?.NextToken ?? null;
     if (!next) break;
   }

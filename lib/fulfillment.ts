@@ -39,7 +39,7 @@ async function loadContext(): Promise<Ctx> {
   return ctx;
 }
 
-type OrderLite = { id: string; channel: string; fulfillment: string | null; fulfillmentLabel: string | null; sourceData: unknown };
+type OrderLite = { id: string; channel: string; fulfillment: string | null; fulfillmentLabel: string | null; shipFromKey?: string | null; sourceData: unknown };
 type ShopifyLoc = { id?: string | null; name?: string | null; isFulfillmentService?: boolean | null; fulfillmentService?: { handle?: string | null; serviceName?: string | null } | null };
 
 const placeFacility = (ctx: Ctx, p: { facilityId: string | null; amazonMirror: boolean } | undefined) =>
@@ -47,7 +47,13 @@ const placeFacility = (ctx: Ctx, p: { facilityId: string | null; amazonMirror: b
 
 /** The facility one order resolves to, null when unplaced; `unknown` names a place consl has no record of. */
 export function detectFacility(o: OrderLite, ctx: Ctx): { facilityId: string | null; unknown?: string } {
-  if (o.channel === "AMAZON") return { facilityId: o.fulfillment === "Amazon" ? ctx.fba : null };
+  if (o.channel === "AMAZON") {
+    if (o.fulfillment === "Amazon") return { facilityId: ctx.fba };
+    // Merchant-fulfilled: the ship-from place Amazon's live record named, once the operator has
+    // mapped it to a facility (Facilities → Map facilities). Unmapped, or not read yet: no facility.
+    if (o.shipFromKey) return { facilityId: ctx.places.get(`AMAZON|${o.shipFromKey}`)?.facilityId ?? null };
+    return { facilityId: null };
+  }
   if (o.channel === "SHOPIFY") {
     const sd = o.sourceData as { fulfillments?: Array<{ location?: ShopifyLoc | null }> } | null;
     const loc = sd?.fulfillments?.map((x) => x.location).find((l) => l?.id || l?.name);
@@ -107,7 +113,7 @@ export async function resolveFulfillmentFacilities(orderIds: string[], opts: { s
   let ctx = await loadContext();
   const orders = await prisma.salesOrder.findMany({
     where: { id: { in: orderIds } },
-    select: { id: true, channel: true, fulfillment: true, fulfillmentLabel: true, sourceData: true, fulfillmentFacilityId: true },
+    select: { id: true, channel: true, fulfillment: true, fulfillmentLabel: true, shipFromKey: true, sourceData: true, fulfillmentFacilityId: true },
   });
   let results = orders.map((o) => ({ o, r: detectFacility(o, ctx) }));
 
@@ -133,6 +139,30 @@ export async function resolveFulfillmentFacilities(orderIds: string[], opts: { s
     const r = await prisma.salesOrder.updateMany({ where: { id: { in: ids } }, data: { fulfillmentFacilityId: facilityId } });
     changed += r.count;
   }
+  return changed;
+}
+
+/** Put merchant-fulfilled ship-from places on record the first time they are seen, unmapped, so
+ *  they show up on Facilities → Map facilities for the operator. A label that changed on Amazon's
+ *  side (a renamed ship-from location) is refreshed; the mapping is never touched here. */
+export async function ensureAmazonShipFromPlaces(places: { key: string; label: string }[]): Promise<void> {
+  if (places.length === 0) return;
+  const existing = await prisma.channelLocation.findMany({ where: { channel: "AMAZON", externalId: { in: places.map((p) => p.key) } }, select: { id: true, externalId: true, name: true } });
+  const byKey = new Map(existing.map((e) => [e.externalId, e]));
+  for (const p of places) {
+    const e = byKey.get(p.key);
+    if (!e) await prisma.channelLocation.create({ data: { channel: "AMAZON", externalId: p.key, name: p.label, amazonMirror: false, active: true } });
+    else if (e.name !== p.label) await prisma.channelLocation.update({ where: { id: e.id }, data: { name: p.label } });
+  }
+}
+
+/** Re-resolve every order that shipped from one merchant-fulfilled place — after it is mapped. */
+export async function resolveAmazonShipFrom(key: string): Promise<number> {
+  const orders = await prisma.salesOrder.findMany({ where: { channel: "AMAZON", shipFromKey: key }, select: { id: true } });
+  let changed = 0;
+  for (let i = 0; i < orders.length; i += 1000) changed += await resolveFulfillmentFacilities(orders.slice(i, i + 1000).map((o) => o.id), { sync: false });
+  const { applyFeeRulesToOrders } = await import("@/lib/order-fees");
+  for (let i = 0; i < orders.length; i += 500) await applyFeeRulesToOrders(orders.slice(i, i + 500).map((o) => o.id));
   return changed;
 }
 

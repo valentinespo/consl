@@ -15,6 +15,7 @@ import { inflectUnit } from "@/lib/format";
 import { PageHeader, Card, SectionTitle, SkuAvatar } from "@/components/ui";
 import { EmptyState } from "@/components/EmptyState";
 import { NewFacilityButton } from "@/components/NewFacilityButton";
+import { ArrowLeftRight } from "@/components/icons";
 import { NewMovementPanel, type OnHandRow } from "@/components/MovementForm";
 import { MovementsLedger } from "@/components/MovementsLedger";
 import { StockSection } from "@/components/StockSection";
@@ -28,7 +29,7 @@ export const dynamic = "force-dynamic";
 
 export default async function FacilitiesPage() {
   await requireView("facilities");
-  const [facilities, stock, rawByFacilityCode, movements, products, materials, facilityOptions, channelStock, { money, qty, date }, availability, finishedLines, latestPurchases, latestRawLayers] = await Promise.all([
+  const [facilities, stock, rawByFacilityCode, movements, products, materials, facilityOptions, channelStock, { money, qty, date }, availability, finishedLines, latestPurchases, latestRawLayers, anyChannel, unmappedShipFrom] = await Promise.all([
     getFacilitiesDetailed(),
     getFinishedStock(),
     getRawStockByFacility(),
@@ -55,6 +56,9 @@ export default async function FacilitiesPage() {
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       select: { materialTypeId: true, unitCost: true },
     }),
+    prisma.integration.count({ where: { status: "connected", provider: { in: ["amazon", "shopify", "tiktok"] } } }),
+    // Merchant-fulfilled Amazon ship-from addresses still waiting for a facility — the badge on Map facilities.
+    prisma.channelLocation.count({ where: { channel: "AMAZON", facilityId: null } }),
   ]);
 
   // Newest known cost per item, for prefilling "Cost per unit" on found stock / returns. Newest
@@ -139,6 +143,18 @@ export default async function FacilitiesPage() {
               costHints={{ products: productCost, materials: materialCost }}
               availability={availability}
             />
+          )}
+          {anyChannel > 0 && (
+            <Link
+              href="/facilities/mapping"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-panel px-3 py-1.5 text-[12.5px] font-medium text-ink hover:bg-panel-2"
+            >
+              <ArrowLeftRight size={13} />
+              Map facilities
+              {unmappedShipFrom > 0 && (
+                <span className="pill-amber inline-flex items-center rounded-full border px-1.5 py-px text-[10.5px] font-medium">{unmappedShipFrom}</span>
+              )}
+            </Link>
           )}
           {facilities.length > 0 && <NewFacilityButton />}
         </div>

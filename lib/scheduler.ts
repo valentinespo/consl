@@ -249,6 +249,7 @@ const AMAZON_ORDER_REPORT_MS = 6 * 60 * 60 * 1000;
 const AMAZON_FINANCE_SWEEP_MS = 15 * 60 * 1000;
 // In-process per-org timestamps; a restart just refreshes once immediately, which is harmless.
 const lastOrdersRefresh = new Map<string, number>();
+const lastMfnShipFromStep = new Map<string, number>();
 const lastAmazonPoll = new Map<string, number>();
 const lastAmazonOrderReport = new Map<string, number>();
 const lastAmazonFinanceSweep = new Map<string, number>();
@@ -274,9 +275,17 @@ async function backfillTick(): Promise<void> {
           if (!s.syncEnabled) return;
           const conn = await prisma.integration.findFirst({ where: { provider: "amazon", status: "connected" }, select: { id: true } });
           if (!conn) return;
-          const { backfillAmazonOrdersStep } = await import("@/lib/orders");
+          const { backfillAmazonOrdersStep, backfillAmazonShipFromStep } = await import("@/lib/orders");
           const r = await backfillAmazonOrdersStep();
           if (r.imported > 0) console.log(`[scheduler] amazon order backfill for ${orgId}: +${r.imported} (cursor ${r.cursor}${r.done ? ", done" : ""})`);
+          // Merchant-fulfilled ship-from places, from the live Orders API — paced at one window every
+          // other tick, since that API's small burst is shared with the live order poll.
+          const lastMfn = lastMfnShipFromStep.get(orgId) ?? 0;
+          if (Date.now() - lastMfn >= 100_000) {
+            lastMfnShipFromStep.set(orgId, Date.now());
+            const m = await backfillAmazonShipFromStep();
+            if (m.orders > 0 || m.done) console.log(`[scheduler] amazon ship-from walk for ${orgId}: +${m.orders} merchant orders (cursor ${m.cursor}${m.done ? ", done" : ""})`);
+          }
           // The finance ledger walks back alongside the orders — different rate pool, so the two
           // steps in one tick never contend.
           const { backfillAmazonFinancesStep, amazonFinanceRewalkStep } = await import("@/lib/finances");

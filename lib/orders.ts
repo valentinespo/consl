@@ -5,7 +5,7 @@ import { shopifyGraphQL } from "@/lib/shopify";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { upsertShopifyFinanceEvents, importShopifyPaymentsLedger, hasShopifyPaymentsScope } from "@/lib/shopify-finances";
 import { applyFeeRulesToOrders } from "@/lib/order-fees";
-import { resolveFulfillmentFacilities } from "@/lib/fulfillment";
+import { resolveFulfillmentFacilities, ensureAmazonShipFromPlaces } from "@/lib/fulfillment";
 import { paymentMethodKey, paymentMethodLabel, walletLabel } from "@/lib/payment-methods";
 
 /**
@@ -49,6 +49,10 @@ type Fetched = {
   // say (Amazon), so an existing value is left alone.
   paymentMethod?: string | null;
   paymentDetail?: string | null;
+  // Merchant-fulfilled Amazon only: the ship-from place (see SalesOrder). Undefined = this source
+  // (the orders report) doesn't carry it, so what the live record wrote is left alone.
+  shipFromKey?: string | null;
+  shipFromLabel?: string | null;
   total: number;
   currency: string;
   /** Keep an existing non-zero total when this fetch carries $0 — the live Orders API hides a
@@ -122,6 +126,8 @@ async function persist(
         fulfillmentLabel: o.fulfillmentLabel,
         ...(o.paymentMethod !== undefined ? { paymentMethod: o.paymentMethod } : {}),
         ...(o.paymentDetail !== undefined ? { paymentDetail: o.paymentDetail } : {}),
+        ...(o.shipFromKey !== undefined ? { shipFromKey: o.shipFromKey } : {}),
+        ...(o.shipFromLabel !== undefined ? { shipFromLabel: o.shipFromLabel } : {}),
         ...(keepTotal ? {} : { total: o.total }),
         currency: o.currency,
         // `voided` is the operator's alone (row menu) — imports never touch it.
@@ -170,6 +176,13 @@ async function persist(
     } catch {
       // skip the one bad order; the rest of the batch still lands
     }
+  }
+  // A merchant-fulfilled ship-from place seen for the first time becomes a place on record, for
+  // the operator to map to a facility (lib/fulfillment resolves through those records).
+  if (channel === "AMAZON") {
+    const seen = new Map<string, string>();
+    for (const o of fetched) if (o.shipFromKey) seen.set(o.shipFromKey, o.shipFromLabel ?? o.shipFromKey);
+    if (seen.size) await ensureAmazonShipFromPlaces([...seen].map(([key, label]) => ({ key, label })));
   }
   // Where each order shipped from, as a facility; then the fee rules (some key on that place).
   for (let i = 0; i < touched.length; i += 500) {
@@ -800,6 +813,58 @@ export async function importAllOrders(amazonSinceDays = 90): Promise<OrderImport
   return out;
 }
 
+const MFN_WALK_WINDOW_DAYS = 30;
+
+/**
+ * One backward step of the merchant-fulfilled ship-from walk. The orders report (the history
+ * import) never says where a merchant-fulfilled order shipped from; Amazon's live order record
+ * does. So the whole history is re-read through the live API, merchant-fulfilled orders only, a
+ * month per step back to the report's floor, and each order gets its ship-from place (created
+ * here if the report hasn't reached it yet — the report later fills its lines). An FBA-only
+ * seller's walk finds nothing and simply finishes. New orders arrive with their place through the
+ * live poll, so the walk runs once.
+ */
+export async function backfillAmazonShipFromStep(): Promise<{ done: boolean; orders: number; cursor: string }> {
+  const conn = await prisma.integration.findFirst({ where: { provider: "amazon", status: "connected" } });
+  if (!conn?.refreshTokenEnc) return { done: true, orders: 0, cursor: "" };
+  const { getOrgSettings, saveOrgSettings } = await import("@/lib/settings");
+  const s = await getOrgSettings();
+  const floor = new Date(Date.now() - AMAZON_BACKFILL_FLOOR_DAYS * 86_400_000);
+  const cursorEnd = s.mfnShipFromCursor ? new Date(s.mfnShipFromCursor) : new Date(Date.now() - 2 * 60_000);
+  if (cursorEnd <= floor) return { done: true, orders: 0, cursor: s.mfnShipFromCursor ?? "" };
+  const start = new Date(Math.max(floor.getTime(), cursorEnd.getTime() - MFN_WALK_WINDOW_DAYS * 86_400_000));
+  const { makeClient, getMfnOrdersCreatedBetween } = await import("@/lib/spapi");
+  const client = makeClient({ refreshToken: decryptSecret(conn.refreshTokenEnc), marketplaceId: conn.marketplaceId ?? "ATVPDKIKX0DER", region: conn.region ?? "na" });
+  const found = await getMfnOrdersCreatedBetween(client, start.toISOString(), cursorEnd.toISOString());
+  let orders = 0;
+  if (found.length) {
+    const map = await productMap("AMAZON");
+    const fetched: Fetched[] = found.map((o) => ({
+      externalId: o.orderId,
+      orderNumber: o.orderId,
+      orderedAt: o.purchaseDate ? new Date(o.purchaseDate) : new Date(0),
+      source: null,
+      sourceLabel: null,
+      status: o.status,
+      cancelled: o.status === "Canceled",
+      mcf: /^non.?amazon/i.test(o.salesChannel),
+      replacement: o.isReplacement,
+      platformUpdatedAt: o.lastUpdateDate ? new Date(o.lastUpdateDate) : undefined,
+      fulfillment: "Merchant",
+      fulfillmentLabel: "Merchant",
+      shipFromKey: o.shipFromKey,
+      shipFromLabel: o.shipFromLabel,
+      total: o.total,
+      currency: o.currency,
+      preserveNonzeroTotal: true,
+      lines: [], // the report supplies the lines; an order it hasn't reached yet gets them then
+    }));
+    orders = (await persist("AMAZON", fetched, (l) => (l.sku ? map.bySku.get(l.sku) ?? null : null))).orders;
+  }
+  await saveOrgSettings({ mfnShipFromCursor: start.toISOString() });
+  return { done: start.getTime() <= floor.getTime(), orders, cursor: start.toISOString() };
+}
+
 /**
  * Near-real-time Amazon orders: a cursored sweep of the live Orders API (orders updated since the
  * last sweep). Amazon offers no plain-HTTPS webhooks — their push needs AWS queues — so a
@@ -861,6 +926,8 @@ export async function pollAmazonOrders(): Promise<OrderImportResult & { cursor?:
       platformUpdatedAt: o.lastUpdateDate ? new Date(o.lastUpdateDate) : undefined,
       fulfillment: o.fulfillment === "AFN" ? "Amazon" : "Merchant",
       fulfillmentLabel: o.fulfillment === "AFN" ? "Amazon FBA" : "Merchant",
+      // The live record is the one source of a merchant-fulfilled order's ship-from place.
+      ...(o.fulfillment === "MFN" ? { shipFromKey: o.shipFromKey, shipFromLabel: o.shipFromLabel } : {}),
       total: o.total,
       currency: o.currency,
       // The live API hides a Pending order's total until the charge settles — a $0 here must not

@@ -431,3 +431,42 @@ export async function saveRawOpenings(
   revalidatePath("/", "layout");
   return { ok: true as const, saved: clean.length };
 }
+
+/* ------------------------------ Map facilities (channel places) ------------------------------
+ * Shopify locations, TikTok warehouses and Amazon's own service become facilities on their own.
+ * The one place that needs a person is a merchant-fulfilled Amazon ship-from address: Amazon
+ * names it, consl can't know which of your facilities it is. Mapping it re-resolves every order
+ * that shipped from there, past and future; unmapping sends them back to "No facility". */
+
+export async function mapAmazonShipFrom(placeId: string, facilityId: string | null) {
+  const gate = await requirePermission("facilities", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  const place = await prisma.channelLocation.findFirst({ where: { id: placeId, channel: "AMAZON" } });
+  if (!place) return { ok: false as const, error: "That ship-from place is no longer on record." };
+  if (facilityId) {
+    const f = await prisma.facility.findFirst({ where: { id: facilityId }, select: { channel: true, inactive: true } });
+    if (!f || f.inactive) return { ok: false as const, error: "Pick a facility." };
+    if (f.channel?.startsWith("AMAZON")) return { ok: false as const, error: "A merchant-fulfilled order can't ship from Amazon's own warehouse." };
+  }
+  await prisma.channelLocation.update({ where: { id: placeId }, data: { facilityId } });
+  const { resolveAmazonShipFrom } = await import("@/lib/fulfillment");
+  const changed = await resolveAmazonShipFrom(place.externalId);
+  revalidatePath("/", "layout");
+  return { ok: true as const, changed };
+}
+
+/** Create a facility for a ship-from address and map it in one go. */
+export async function createFacilityForShipFrom(placeId: string, input: { name: string; type: string }) {
+  const gate = await requirePermission("facilities", "create");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  const place = await prisma.channelLocation.findFirst({ where: { id: placeId, channel: "AMAZON" } });
+  if (!place) return { ok: false as const, error: "That ship-from place is no longer on record." };
+  const name = input.name.trim();
+  if (!name) return { ok: false as const, error: "Name required" };
+  if (input.type === "channel") return { ok: false as const, error: "Pick a facility type." };
+  const base = (name.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 6) || "SHIP") as string;
+  let code = base;
+  for (let n = 2; await prisma.facility.findFirst({ where: { code }, select: { id: true } }); n++) code = `${base}${n}`.slice(0, 8);
+  const f = await prisma.facility.create({ data: { code, name, type: input.type || "warehouse", address: place.name } });
+  return mapAmazonShipFrom(placeId, f.id);
+}

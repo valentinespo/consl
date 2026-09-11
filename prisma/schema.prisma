@@ -439,6 +439,9 @@ model Settings {
   // When either Amazon ledger walk (history backfill, re-read) last completed a window — the P&L
   // shows the walk's progress and calls it stalled when this stops moving.
   financeProgressAt DateTime?
+  // The merchant-fulfilled ship-from walk: ISO instant it has reached, walking back from now to
+  // the orders floor. Null = not started; at/below the floor = done.
+  mfnShipFromCursor String?
   // When the onboarding wizard last pulled channel data (stock + catalogs). A connection newer
   // than this makes step 1's button "Pull my data & continue" again; otherwise it's just Continue.
   onboardingPulledAt DateTime?
@@ -825,6 +828,12 @@ model SalesOrder {
   // Human label of WHERE it shipped from, for the "Fulfilled at" column: a Shopify location name
   // ("638 Alton Place", "Amazon Fulfillment"), "Amazon FBA"/"Merchant", or a TikTok warehouse name.
   fulfillmentLabel String?
+  // Merchant-fulfilled Amazon orders only: the ship-from place from Amazon's live order record —
+  // the supply-source id Amazon assigned, else the seller's ship-from address, as a stable key
+  // (matches ChannelLocation channel AMAZON) — and its human label. Read by the background
+  // ship-from walk and the live poll; the orders report never carries it.
+  shipFromKey  String?
+  shipFromLabel String?
   // How the buyer paid, in the platform's own key ("shopify_payments", "paypal", "shop_cash",
   // "manual"…) — the gateway that took the most when several were combined — plus the wallet or
   // card behind it ("Shop Pay · Visa"). Amazon never says; TikTok names the method when its API
@@ -873,6 +882,7 @@ model SalesOrder {
   @@index([orgId, source])
   @@index([orgId, fulfillmentFacilityId])
   @@index([orgId, paymentMethod])
+  @@index([orgId, shipFromKey])
 }
 
 /// A cost the operator attaches to every order a rule matches — a marketplace commission consl

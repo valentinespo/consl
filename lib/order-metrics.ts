@@ -65,6 +65,8 @@ export type OrderRow = {
   fulfilledAtDetected: { id: string; name: string } | null;
   /** A non-Amazon order that shipped from Amazon FBA — through MCF. */
   viaMcf: boolean;
+  /** Merchant-fulfilled Amazon only: the ship-from place Amazon's live record named (its label), null until read. */
+  shipFromLabel: string | null;
   /** How the buyer paid: the platform's gateway key, and the wallet/card behind it. Null when the platform never says (Amazon). */
   paymentMethod: string | null;
   paymentDetail: string | null;
@@ -377,6 +379,7 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
       source: true,
       sourceLabel: true,
       fulfillmentLabel: true,
+      shipFromLabel: true,
       paymentMethod: true,
       paymentDetail: true,
       fulfillmentFacility: { select: { id: true, name: true, channel: true } },
@@ -418,6 +421,7 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
     fulfilledAt: (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility) ? { id: (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility)!.id, name: (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility)!.name } : null,
     fulfilledAtDetected: o.fulfillmentOverrideFacility && o.fulfillmentFacility ? { id: o.fulfillmentFacility.id, name: o.fulfillmentFacility.name } : null,
     viaMcf: o.channel !== "AMAZON" && (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility)?.channel === "AMAZON_FBA",
+    shipFromLabel: o.shipFromLabel,
     paymentMethod: o.paymentMethod,
     paymentDetail: o.paymentDetail,
     platformFees: platformFees.get(`${o.channel}|${o.externalId}`) ?? [],
