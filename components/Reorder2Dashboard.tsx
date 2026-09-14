@@ -373,7 +373,7 @@ function PlaceLine({ p, n, last }: { p: PlaceResult; n: (v: number) => string; l
       <div className="tabular text-ink">{kind === "none" ? "—" : n(units)}</div>
       <div className="text-[11px] tabular leading-snug text-muted">
         {kind === "none"
-          ? "counted in the run size; set “Fulfilled at” on these orders (Orders tab, filter “No facility”)"
+          ? "These orders have no place yet. Their sales count; their stock can't be checked. To place them: Orders tab, filter “No facility”, set “Fulfilled at”."
           : [
               p.inbound > 0 && `${n(p.inbound)} inbound`,
               p.reserve > 0 && `${n(p.reserve)} reachable from ${p.reserveFrom.map((d) => `${n(d.units)} ${d.code}`).join(" + ")}`,

@@ -55,9 +55,19 @@ export function detectFacility(o: OrderLite, ctx: Ctx): { facilityId: string | n
     return { facilityId: null };
   }
   if (o.channel === "SHOPIFY") {
-    const sd = o.sourceData as { fulfillments?: Array<{ location?: ShopifyLoc | null }> } | null;
+    const sd = o.sourceData as { fulfillments?: Array<{ location?: ShopifyLoc | null }>; displayFulfillmentStatus?: string | null } | null;
     const loc = sd?.fulfillments?.map((x) => x.location).find((l) => l?.id || l?.name);
-    if (!loc) return { facilityId: null };
+    if (!loc) {
+      // Not fulfilled yet. "In progress" is Shopify's word for "handed to a fulfillment service"
+      // — when the shop's only such service is Amazon (an MCF location), the order is on its way
+      // out of FBA and counts there meanwhile. The real fulfillment replaces this when it lands,
+      // and the Amazon twin then voids the Shopify copy as usual.
+      if (sd?.displayFulfillmentStatus === "IN_PROGRESS" && ctx.fba) {
+        const amazonService = [...ctx.placesByName.keys()].some((k) => k.startsWith("SHOPIFY|") && k.includes("amazon"));
+        if (amazonService) return { facilityId: ctx.fba };
+      }
+      return { facilityId: null };
+    }
     // Shopify's own flag: this fulfilment was done by the Amazon fulfilment service.
     const hay = `${loc.fulfillmentService?.handle ?? ""} ${loc.fulfillmentService?.serviceName ?? ""} ${loc.name ?? ""}`.toLowerCase();
     if (loc.isFulfillmentService && hay.includes("amazon")) return { facilityId: ctx.fba };
