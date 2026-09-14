@@ -108,6 +108,12 @@ export function computeReorder2(row: Reorder2Row, places: Place[], routes: Stock
   // Pass 3 — the original engine, per place, with its reserve = reachable surplus and its
   // production = lots at facilities that can reach it.
   const results: PlaceResult[] = cells.map((c) => {
+    // Orders with no facility: their velocity counts toward the company's run size, but there is
+    // no stock to judge — never a status, never an outage.
+    if (c.place.kind === "none") {
+      const neutral: ReorderResult = { monthly: c.monthly, win, excl, override: false, onHandCover: 0, awdCover: 0, locCover: 0, prodCover: 0, status: "nosales", statusLabel: "Not placed", recommendedQty: 0, ship: false, expedite: false, order: false, shipWithinDays: 0, dryDays: 0, belowFloor: false };
+      return { ...neutral, place: c.place, sellable: 0, inbound: 0, reserve: 0, production: 0, selling: c.monthly > 0, moveUnits: 0, moveFrom: [] };
+    }
     const froms = feeds.get(c.placeId) ?? new Set<string>();
     let reserve = 0;
     for (const f of froms) if (f !== c.placeId) reserve += surplus.get(f) ?? 0;
@@ -141,7 +147,9 @@ export function computeReorder2(row: Reorder2Row, places: Place[], routes: Stock
       res.note = c.sellable + c.inbound > 0 ? "holds stock other places can draw on" : undefined;
     }
     return { ...res, place: c.place, sellable: c.sellable, inbound: c.inbound, reserve, production, selling, moveUnits: 0, moveFrom: [] };
-  });
+  })
+    // A place with nothing there, nothing coming and no sales in the window says nothing.
+    .filter((r) => r.selling || r.sellable + r.inbound > 0 || r.production > 0);
 
   // Pass 4 — moves. The most urgent place drains donors first; a donor gives what its surplus
   // allows and not a unit more, so two places never get the same stock suggested.
@@ -172,7 +180,7 @@ export function computeReorder2(row: Reorder2Row, places: Place[], routes: Stock
 
   // Pass 5 — the company. Worst place names the product; a run is sized on every place's
   // velocity together and split by share.
-  const selling = results.filter((r) => r.selling);
+  const selling = results.filter((r) => r.selling && r.place.kind !== "none");
   const worst = selling.reduce<PlaceResult | null>((w, r) => (!w || SEVERITY[r.status] > SEVERITY[w.status] ? r : w), null);
   const totalUnits = cells.reduce((t, c) => t + c.sellable + c.inbound, 0) + row.inProductionBy.reduce((t, p) => t + p.units, 0);
   const coverMonths = monthly > 0 ? totalUnits / monthly : totalUnits > 0 ? Infinity : 0;
@@ -182,13 +190,17 @@ export function computeReorder2(row: Reorder2Row, places: Place[], routes: Stock
     const raw = Math.ceil(row.reorderToMonths * monthly);
     recommendedQty = row.batchSize > 0 && raw > 0 ? Math.ceil(raw / row.batchSize) * row.batchSize : raw;
   }
-  const split = recommendedQty > 0
-    ? selling
-        .filter((r) => r.place.kind !== "none")
-        .map((r) => ({ code: r.place.code, units: Math.round((recommendedQty * (cells.find((c) => c.placeId === r.place.id)?.monthly ?? 0)) / monthly) }))
-        .filter((s) => s.units > 0)
-        .sort((a, b) => b.units - a.units)
-    : [];
+  // Where the run should go: each selling place's share of the company's velocity, rounded so
+  // the pieces add up to the run.
+  let split: { code: string; units: number }[] = [];
+  if (recommendedQty > 0 && selling.length) {
+    const share = selling.map((r) => ({ code: r.place.code, monthly: cells.find((c) => c.placeId === r.place.id)?.monthly ?? 0 }));
+    const sum = share.reduce((t, x) => t + x.monthly, 0) || 1;
+    split = share.map((x) => ({ code: x.code, units: Math.floor((recommendedQty * x.monthly) / sum) })).sort((a, b) => b.units - a.units);
+    const rest = recommendedQty - split.reduce((t, x) => t + x.units, 0);
+    if (split.length) split[0].units += rest;
+    split = split.filter((x) => x.units > 0);
+  }
   const status: ReorderStatus = monthly > 0 ? (worst?.status ?? "ok") : "nosales";
   const statusLabel = monthly > 0 ? (worst?.statusLabel ?? "Healthy") : "No sales";
   const note = worst?.note;
