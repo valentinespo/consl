@@ -70,7 +70,7 @@ export const GROUP_ORDER = ["sales", "taxes", "fba_fees", "referral_fees", "paym
 export const GROUP_LABEL: Record<string, string> = {
   sales: "Sales",
   taxes: "Taxes",
-  fba_fees: "FBA fees",
+  fba_fees: "Fulfillment fees",
   referral_fees: "Referral fees",
   payment_fees: "Payment processing",
   custom_fees: "Custom fees",

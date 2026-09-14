@@ -494,6 +494,7 @@ model Settings {
   // any length (a disconnect, downtime) is closed by the next refresh, nothing skipped.
   shopifySyncedThrough DateTime?
   tiktokSyncedThrough  DateTime?
+  tiktokFinanceSyncedThrough DateTime? // last TikTok settlement-ledger pass (statements re-read from 30 days before it)
   amazonReportSyncedThrough DateTime?
   // Amazon Ads daily spend: the last day read (walks forward; the refresh re-reads a few days of
   // overlap) and the first day covered — from that day on, the P&L shows real daily spend instead

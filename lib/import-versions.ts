@@ -13,8 +13,10 @@
  *  tiktokOrders   1 — first API generation: a company whose TikTok orders were loaded from a
  *                    Seller Center export (before the shop could authorize) gets one full re-read
  *                    from the API once connected, so every order carries TikTok's own version.
+ *  tiktokFinance  1 — first API generation of the settlement ledger (statements, per-order SKU
+ *                    split, unsettled money).
  */
-export const IMPORTER_VERSIONS = { amazonFinance: 3, shopifyFinance: 3, shopifyOrders: 2, tiktokOrders: 1 } as const;
+export const IMPORTER_VERSIONS = { amazonFinance: 3, shopifyFinance: 3, shopifyOrders: 2, tiktokOrders: 1, tiktokFinance: 1 } as const;
 export type ImporterKey = keyof typeof IMPORTER_VERSIONS;
 
 /** The generation a company's ledger was written with (0 = before generations were tracked). */

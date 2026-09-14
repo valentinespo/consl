@@ -225,6 +225,21 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
         }
       }
 
+      // TikTok's settlement ledger (statements, SKU splits, unsettled money), every quarter hour.
+      if (conns.some((c) => c.provider === "tiktok")) {
+        const lastFin = lastTikTokFinance.get(orgId) ?? 0;
+        if (Date.now() - lastFin >= ORDERS_REFRESH_MS) {
+          lastTikTokFinance.set(orgId, Date.now());
+          try {
+            const { importTikTokFinance } = await import("@/lib/tiktok-finance-import");
+            const r = await importTikTokFinance();
+            if (r.rows > 0 || r.full) console.log(`[scheduler] tiktok finance for ${orgId}: ${r.statements} statements, ${r.booked} booked, ${r.unsettled} unsettled, ${r.rows} rows${r.full ? " (full)" : ""}`);
+          } catch (e) {
+            console.error(`[scheduler] tiktok finance failed for org ${orgId}:`, (e as Error).message);
+          }
+        }
+      }
+
       // Amazon's near-real-time leg: a cursored sweep of the live Orders API every few minutes.
       // Amazon has no plain webhooks (their push needs AWS queues), so this poll IS the instant
       // path for Amazon; Shopify and TikTok get true webhooks and use this loop only as backstop.
@@ -340,6 +355,7 @@ const META_ADS_TICK_MS = 5 * 60 * 1000;
 const lastDailyAttempt = new Map<string, number>();
 const lastPlacesRefresh = new Map<string, number>();
 const lastOrdersRefresh = new Map<string, number>();
+const lastTikTokFinance = new Map<string, number>();
 const lastMfnShipFromStep = new Map<string, number>();
 const lastAmazonPoll = new Map<string, number>();
 const lastAmazonOrderHeal = new Map<string, number>();

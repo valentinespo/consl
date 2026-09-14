@@ -24,7 +24,9 @@ import type { PnlGroup } from "@/lib/finances";
  * affiliate commission, … — which map onto these labels one for one).
  */
 
-export type TikTokStatementLine = { type?: string | null; name?: string | null; amount: string };
+/** One money line. `group` is set by the API importer (it knows TikTok's field names); the
+ *  name-based guess below serves lines loaded without one. */
+export type TikTokStatementLine = { type?: string | null; name?: string | null; amount: string; group?: PnlGroup };
 
 export type TikTokStatementTransaction = {
   /** TikTok's statement transaction id — the upsert key. */
@@ -68,6 +70,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 /** P&L bucket + label for one settlement line. */
 function bucket(section: "revenue" | "fee" | "shipping", line: TikTokStatementLine): { group: PnlGroup; type: string } {
   const name = (line.name ?? line.type ?? "").trim() || "Other";
+  if (line.group) return { group: line.group, type: line.group === "refunds" ? `Refund:${name.replace(/\s*refund\s*$/i, "")}` : name };
   if (/refund/i.test(name) || /refund/i.test(line.type ?? "")) return { group: "refunds", type: `Refund:${name.replace(/\s*refund\s*$/i, "")}` };
   if (section !== "fee") return { group: "sales", type: name };
   if (/affiliate|promotion|\bads?\b|advertis/i.test(name)) return { group: "advertising", type: name };
