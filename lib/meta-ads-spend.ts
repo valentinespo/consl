@@ -17,7 +17,9 @@ import { zonedDayStart } from "@/lib/pnl";
  */
 
 const BACKFILL_DAYS = 730;
-const OVERLAP_DAYS = 3;
+// Meta keeps correcting recent days (invalid-click credits land late); a week is re-read each pass,
+// still one call per account since the range comes back a day per row.
+const OVERLAP_DAYS = 7;
 const CHUNK_DAYS = 90;
 
 const day = (d: Date) => d.toISOString().slice(0, 10);
