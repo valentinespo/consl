@@ -46,6 +46,12 @@ type StatementTx = {
   adjustment_id?: string | null;
   adjustment_order_id?: string | null;
   adjustment_amount?: string | null;
+  // RESERVE: money TikTok holds back from a payout (COLLECTED, negative) and hands back in a
+  // later statement (RELEASED, positive) — payout timing, not a fee; it nets to zero.
+  reserve_id?: string | null;
+  reserve_status?: string | null;
+  reserve_amount?: string | null;
+  associated_order_id?: string | null;
   settlement_amount?: string | null;
   revenue_amount?: string | null;
   revenue_breakdown?: Breakdown | null;
@@ -235,7 +241,11 @@ export function moneyLines(t: StatementTx, totals: { revenue: unknown; shipping:
   const shipping = balanced(linesOf("shipping", t.shipping_cost_breakdown), totals.shipping, { name: "Shipping not itemised", group: "fba_fees" });
   const fees = balanced([...linesOf("fee", t.fee_tax_breakdown?.fee), ...linesOf("tax", t.fee_tax_breakdown?.tax)], totals.feeTax, { name: "Fees not itemised", group: "other" });
   const adj = num(totals.adjustment);
-  if (adj !== 0) fees.push({ type: "adjustment", name: (t.type ?? "").toUpperCase() === "RESERVE" ? "Reserve" : "Adjustment", amount: String(adj), group: "other" });
+  if (adj !== 0) fees.push({ type: "adjustment", name: "Adjustment", amount: String(adj), group: "other" });
+  if ((t.type ?? "").toUpperCase() === "RESERVE") {
+    const reserve = num(t.reserve_amount ?? totals.settlement);
+    if (reserve !== 0) fees.push({ type: "reserve", name: (t.reserve_status ?? "").toUpperCase() === "RELEASED" || reserve > 0 ? "Reserve released" : "Reserve held", amount: String(reserve), group: "other" });
+  }
   // The whole transaction must equal what TikTok settled for it.
   const all = [...revenue, ...shipping, ...fees].reduce((s, l) => s + num(l.amount), 0);
   const diff = r2(num(totals.settlement) - all);
@@ -333,7 +343,7 @@ export async function importTikTokFinance(): Promise<TikTokFinanceResult> {
 
   // 2. SKU split for the order transactions to book: TikTok's own per-order split, else the
   //    stored order's lines.
-  const orderIds = [...new Set(pending.map((p) => p.t.order_id ?? p.t.adjustment_order_id).filter((x): x is string => !!x))];
+  const orderIds = [...new Set(pending.map((p) => p.t.order_id ?? p.t.associated_order_id ?? p.t.adjustment_order_id).filter((x): x is string => !!x))];
   const stored = await storedOrderLines(orderIds);
   const skuSplit = new Map<string, SkuTx[]>(); // order id → TikTok's split (all statements)
   for (const orderId of orderIds) {
@@ -354,13 +364,15 @@ export async function importTikTokFinance(): Promise<TikTokFinanceResult> {
   const settled: TikTokStatementTransaction[] = [];
   for (const { st, t } of pending) {
     const paid = (st.payment_status ?? "").toUpperCase() === "PAID";
-    const orderId = t.order_id ?? t.adjustment_order_id ?? `statement:${st.id}:${t.id}`;
+    const orderId = t.order_id ?? t.associated_order_id ?? t.adjustment_order_id ?? `statement:${st.id}:${t.id}`;
     const lines = moneyLines(t, { revenue: t.revenue_amount, shipping: t.shipping_cost_amount, feeTax: t.fee_tax_amount, adjustment: t.adjustment_amount, settlement: t.settlement_amount });
     const own = stored.get(orderId) ?? [];
     const sellerSkuById = new Map(own.map((l) => [l.sku_id, l.seller_sku]));
-    const fromTikTok = (skuSplit.get(orderId) ?? []).filter((s) => !s.statement_id || s.statement_id === st.id);
-    const skus =
-      fromTikTok.length > 0
+    const isOrderTx = (t.type ?? "ORDER").toUpperCase() === "ORDER";
+    const fromTikTok = isOrderTx ? (skuSplit.get(orderId) ?? []).filter((s) => !s.statement_id || s.statement_id === st.id) : [];
+    const skus = !isOrderTx
+      ? []
+      : fromTikTok.length > 0
         ? fromTikTok.map((s) => ({ sku_id: s.sku_id, seller_sku: sellerSkuById.get(s.sku_id) ?? null, quantity: Math.max(0, Math.round(num(s.quantity))), revenue_amount: String(num(s.revenue_amount)) }))
         : own.map((l) => ({ sku_id: l.sku_id, seller_sku: l.seller_sku, quantity: l.quantity, revenue_amount: String(l.revenue) }));
     settled.push({
