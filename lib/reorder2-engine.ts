@@ -134,14 +134,14 @@ export function computeReorder2(row: Reorder2Row, places: Place[], routes: Stock
       units90d: 0,
       fbaTotal: c.sellable + c.inbound,
       awdTotal: 0,
-      atLocations: c.place.kind === "none" ? 0 : reserve,
+      atLocations: reserve,
       atLocationsBy: [],
-      inProduction: c.place.kind === "none" ? 0 : production,
+      inProduction: production,
       soonestPoISO: soonest,
     };
     const res = computeReorder(synthetic, globalWin, nowMs);
     const selling = c.monthly > 0;
-    if (!selling && c.place.kind !== "none") {
+    if (!selling) {
       res.status = "nosales";
       res.statusLabel = "No sales here";
       res.note = c.sellable + c.inbound > 0 ? "holds stock other places can draw on" : undefined;
