@@ -1008,9 +1008,13 @@ const healAsked = new Map<string, number>();
 export async function healAmazonOrdersFromLedger(limit = 50): Promise<{ missing: number; healed: number }> {
   const orgId = await getCurrentOrgId();
   if (!orgId) return { missing: 0, healed: 0 };
+  // Any money row that names an order counts — a sale, but also an MCF order that only ever
+  // posts fees. Refunds are left out (they can name orders older than any order history), and so
+  // is anything beyond the two years Amazon keeps orders for.
   const rows = await prisma.$queryRaw<{ orderId: string }[]>`
     SELECT DISTINCT fe."orderId" FROM "FinanceEvent" fe
-    WHERE fe."orgId" = ${orgId} AND fe.channel = 'AMAZON' AND fe."group" = 'sales' AND fe."orderId" IS NOT NULL
+    WHERE fe."orgId" = ${orgId} AND fe.channel = 'AMAZON' AND fe."orderId" IS NOT NULL AND fe."group" <> 'refunds'
+      AND fe."eventAt" >= NOW() - INTERVAL '730 days'
       AND NOT EXISTS (SELECT 1 FROM "SalesOrder" so WHERE so."orgId" = fe."orgId" AND so.channel = 'AMAZON' AND so."externalId" = fe."orderId")
     ORDER BY 1`;
   const now = Date.now();
