@@ -36,6 +36,7 @@ const PRODUCTION_NAV: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboardFilled, exact: true, resource: "dashboard" },
   { href: "/inventory", label: "Inventory", icon: BoxesFilled, resource: "inventory" },
   { href: "/reorder", label: "Reorder", icon: ReorderFilled, resource: "inventory" },
+  { href: "/reorder2", label: "Reorder 2.0", icon: ReorderFilled, resource: "inventory" },
   { href: "/lots", label: "Production Lots", icon: FlaskConicalFilled, resource: "lots" },
   { href: "/transactions", label: "Transactions", icon: ArrowLeftRightFilled, resource: "transactions" },
   { href: "/purchases", label: "Purchases", icon: ShoppingCartFilled, resource: "purchases" },

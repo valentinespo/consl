@@ -32,7 +32,7 @@ export type Defaults = {
 /** Where the SKU stands. Five situations and no instructions — what to do about it lives in the
  *  Action column, because a row can need shipping, expediting and a PO at once. A green pill
  *  guarantees the action column is empty. */
-type Status = "nosales" | "ok" | "reordered" | "channelLow" | "belowFloor" | "oos";
+export type Status = "nosales" | "ok" | "reordered" | "channelLow" | "belowFloor" | "oos";
 /** The unified frosted pill recipe (see .pill-* in globals.css): translucent wash of the signal
  *  colour, faint same-hue border, the hue as text. Built from one colour so every status stays
  *  consistent — and token-driven where a token exists, so both themes follow. */
@@ -42,7 +42,7 @@ const frost = (c: string) => ({
   fg: c,
   dot: c,
 });
-const STATUS: Record<Status, { bg: string; fg: string; dot: string; bd: string }> = {
+export const STATUS: Record<Status, { bg: string; fg: string; dot: string; bd: string }> = {
   nosales: frost("var(--color-muted)"),
   ok: frost("var(--color-positive)"),
   reordered: frost("var(--color-positive)"),
@@ -53,7 +53,7 @@ const STATUS: Record<Status, { bg: string; fg: string; dot: string; bd: string }
 
 /** What each status means, in the terms the person reading it thinks in. Kept next to the colours
  *  so the two can't drift apart, and kept short — it's a tooltip, not a manual. */
-const STATUS_HELP: Record<Status, { title: string; body: string }> = {
+export const STATUS_HELP: Record<Status, { title: string; body: string }> = {
   nosales: {
     title: "No sales",
     body: "Nothing has sold in the chosen window, so there's no rate to project cover from. New products sit here until sales come in — or until the first Amazon sync. Not a problem, just no signal yet.",
@@ -455,7 +455,7 @@ export function RestockDashboard({
 
 
 /** Org-wide restock defaults every SKU falls back to when it has no override of its own. */
-function GlobalDefaultsEditor({
+export function GlobalDefaultsEditor({
   defaults,
   pending,
   onSave,
@@ -513,7 +513,7 @@ export type SkuPolicy = {
 /** Per-SKU overrides. Blank means "use the default", which is why every box shows the default it
  *  would fall back to — including reorder-to and batch size, which until now could be seen on the
  *  catalog page but changed nowhere at all. */
-function SkuPolicyEditor({
+export function SkuPolicyEditor({
   row,
   defaults,
   pending,
@@ -567,7 +567,7 @@ function SkuPolicyEditor({
   );
 }
 
-function WindowOverrideEditor({
+export function WindowOverrideEditor({
   row,
   globalWin,
   pending,
@@ -630,7 +630,7 @@ function NumField({ label, value, onChange, placeholder, help }: { label: string
   );
 }
 
-function Kpi({ label, value, tone }: { label: string; value: string; tone?: string }) {
+export function Kpi({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
     <div className="rounded-[var(--radius-card)] border border-border bg-surface px-4 py-3">
       <div className="text-[12px] text-muted">{label}</div>
@@ -639,7 +639,7 @@ function Kpi({ label, value, tone }: { label: string; value: string; tone?: stri
   );
 }
 
-function Legend({ color, label }: { color: string; label: string }) {
+export function Legend({ color, label }: { color: string; label: string }) {
   return (
     <span className="inline-flex items-center gap-1.5">
       <span className="h-2.5 w-2.5 rounded-sm" style={{ background: color }} /> {label}

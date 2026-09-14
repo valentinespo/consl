@@ -84,11 +84,18 @@ export type RestockTotals = {
   coverMonths: number; // total inventory value ÷ monthlyCOGS = months of cover
 };
 
+/** Finished units at one of your own facilities, per product — the per-place view Reorder 2.0 plans from. */
+export type OwnStockCell = { productId: string; facilityId: string; units: number };
+/** Units in production per product and the facility making them, with the soonest PO date. */
+export type InProductionCell = { productId: string; facilityId: string; units: number; soonestPoISO: string | null };
+
 export async function getRestock(): Promise<{
   rows: RestockRow[];
   lastSync: Date | null;
   totals: RestockTotals;
   channelStock: ChannelStockValued[]; // Shopify/TikTok stock per facility × SKU, layer-valued
+  ownStock: OwnStockCell[]; // every product, every own facility with units
+  inProductionBy: InProductionCell[]; // every product, per producing facility
   defaults: {
     minMonths: number;
     leadMonths: number;
@@ -120,6 +127,7 @@ export async function getRestock(): Promise<{
   // Finished lot lines double as the finished-goods FIFO supply, at the facility that made them.
   const inProdUnits = new Map<string, number>();
   const soonestPo = new Map<string, Date>();
+  const inProdBy = new Map<string, { units: number; soonest: Date }>(); // productId|facilityId
   let inProductionValue = 0;
   const finishedLots = new Map<string, { units: number; cog: number }[]>();
   const supply: FinishedSupply[] = [];
@@ -136,6 +144,11 @@ export async function getRestock(): Promise<{
         inProductionValue += ln.units * ln.cogPerUnit;
         const cur = soonestPo.get(ln.productId);
         if (!cur || poDate < cur) soonestPo.set(ln.productId, poDate);
+        const k = `${ln.productId}|${lot.facilityId}`;
+        const by = inProdBy.get(k) ?? { units: 0, soonest: poDate };
+        by.units += ln.units;
+        if (poDate < by.soonest) by.soonest = poDate;
+        inProdBy.set(k, by);
       } else {
         finishedLines.push({ lot, ln, at: appearedAt(ln, lot).getTime() });
       }
@@ -230,12 +243,18 @@ export async function getRestock(): Promise<{
   // Per-SKU: how many finished units are sitting at your own locations, and where.
   const facilityCode = new Map(allFacilities.map((f) => [f.id, f.code]));
   const heldBySku = new Map<string, { units: number; by: { code: string; units: number }[] }>();
+  const ownStock: OwnStockCell[] = [];
   for (const p of finished.pools) {
     const cur = heldBySku.get(p.sku) ?? { units: 0, by: [] };
     cur.units += p.units;
     cur.by.push({ code: facilityCode.get(p.facilityId) ?? "?", units: p.units });
     heldBySku.set(p.sku, cur);
+    if (p.units > 0) ownStock.push({ productId: p.sku, facilityId: p.facilityId, units: p.units });
   }
+  const inProductionBy: InProductionCell[] = [...inProdBy].map(([k, v]) => {
+    const [productId, facilityId] = k.split("|");
+    return { productId, facilityId, units: v.units, soonestPoISO: v.soonest.toISOString() };
+  });
   for (const h of heldBySku.values()) h.by.sort((a, b) => b.units - a.units);
 
   let fbaValue = 0;
@@ -373,6 +392,8 @@ export async function getRestock(): Promise<{
     rows,
     lastSync,
     channelStock,
+    ownStock,
+    inProductionBy,
     sortMode: settings.sortMode,
     defaults: {
       minMonths: settings.defaultMinMonths,
