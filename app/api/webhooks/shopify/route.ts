@@ -5,9 +5,11 @@ import { runWithOrg } from "@/lib/tenant";
 import { importShopifyOrderById } from "@/lib/orders";
 
 /**
- * Shopify order webhooks — the push half of the orders feed. Subscribed to orders/create,
- * orders/updated, orders/cancelled and refunds/create (see lib/shopify-webhooks.ts), so a sale,
- * edit, cancellation or refund lands in consl seconds after it happens.
+ * Shopify webhooks — the push half of the orders feed, and of the shop's places. Subscribed to
+ * orders/create, orders/updated, orders/cancelled and refunds/create (see lib/shopify-webhooks.ts),
+ * so a sale, edit, cancellation or refund lands in consl seconds after it happens; and to the
+ * locations/* topics, so a location added, renamed, retired or revived becomes or updates its
+ * facility (and its stock is read) before any order can name it.
  *
  * The payload is a DOORBELL, not data: after verifying Shopify's HMAC we only take the order id,
  * answer 200 immediately, and refetch that order from the API in the background (`after`). That
@@ -39,6 +41,31 @@ export async function POST(request: Request) {
     payload = JSON.parse(raw.toString("utf8"));
   } catch {
     return NextResponse.json({}); // signed but unparseable — acknowledge, nothing to do
+  }
+
+  // Location topics: a doorbell for the shop's PLACES — re-read them and their stock. The payload
+  // is ignored (which location changed doesn't matter; the re-read is one cheap query).
+  if (shopDomain && topic.startsWith("locations/")) {
+    const conn = await prismaBase.integration.findFirst({
+      where: { provider: "shopify", sellerId: shopDomain, status: "connected" },
+      select: { orgId: true },
+    });
+    if (conn?.orgId) {
+      const orgId = conn.orgId;
+      after(async () => {
+        try {
+          await runWithOrg(orgId, async () => {
+            const { refreshChannelPlaces } = await import("@/lib/fulfillment");
+            const { syncShopifyStock } = await import("@/lib/channel-stock");
+            await refreshChannelPlaces("SHOPIFY");
+            await syncShopifyStock();
+          });
+        } catch (e) {
+          console.error("[webhook shopify] places refresh failed:", (e as Error).message);
+        }
+      });
+    }
+    return NextResponse.json({});
   }
 
   // Order topics carry the order's own id; refunds/create carries order_id instead.

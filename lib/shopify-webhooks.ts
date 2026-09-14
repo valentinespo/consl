@@ -4,7 +4,7 @@ import { decryptSecret } from "@/lib/secret-box";
 import { shopifyGraphQL } from "@/lib/shopify";
 
 /**
- * Keep this environment's Shopify order-webhook subscriptions registered for the current org's
+ * Keep this environment's Shopify order and location webhook subscriptions registered for the current org's
  * shop. Idempotent by (topic, callback URL) — safe on every connect and on the daily sync, which
  * makes the setup self-healing: an environment registers its own URL the first day it runs with a
  * connection (that's also how production picks itself up after a promote, with no manual step).
@@ -14,7 +14,19 @@ import { shopifyGraphQL } from "@/lib/shopify";
  * environment doesn't have the route deployed yet.
  */
 
-const TOPICS = ["ORDERS_CREATE", "ORDERS_UPDATED", "ORDERS_CANCELLED", "REFUNDS_CREATE"] as const;
+// Orders (the feed) and locations: a place added, renamed, retired or revived over there becomes
+// or updates its facility the moment it happens — before any order can name it.
+const TOPICS = [
+  "ORDERS_CREATE",
+  "ORDERS_UPDATED",
+  "ORDERS_CANCELLED",
+  "REFUNDS_CREATE",
+  "LOCATIONS_CREATE",
+  "LOCATIONS_UPDATE",
+  "LOCATIONS_DELETE",
+  "LOCATIONS_ACTIVATE",
+  "LOCATIONS_DEACTIVATE",
+] as const;
 
 export async function ensureShopifyWebhooks(): Promise<{ created: number; present: number }> {
   const conn = await prisma.integration.findFirst({ where: { provider: "shopify", status: "connected" } });

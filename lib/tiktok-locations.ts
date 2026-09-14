@@ -111,8 +111,10 @@ export async function syncTikTokWarehouses(accessToken: string, shopCipher: stri
   // one always resolves from TikTok's own list (see lib/fulfillment.ts).
   const facilities = await prisma.facility.findMany({ where: { channel: "TIKTOK", externalId: { not: null } }, select: { id: true, externalId: true } });
   const facilityByExternal = new Map(facilities.map((f) => [f.externalId as string, f.id]));
-  for (const w of all.filter((x) => x.type === "SALES_WAREHOUSE")) {
-    const data = { name: w.name, facilityId: facilityByExternal.get(w.id) ?? null, amazonMirror: /amazon/i.test(w.name), active: w.effect_status === "ENABLED" };
+  // A return warehouse is on record too, with no facility: stock reported there is known and
+  // deliberately uncounted — not a "new place" for the stock sync to chase.
+  for (const w of all) {
+    const data = { name: w.name, facilityId: facilityByExternal.get(w.id) ?? null, amazonMirror: /amazon/i.test(w.name), active: w.type === "SALES_WAREHOUSE" && w.effect_status === "ENABLED" };
     const row = await prisma.channelLocation.findFirst({ where: { channel: "TIKTOK", externalId: w.id }, select: { id: true } });
     if (row) await prisma.channelLocation.update({ where: { id: row.id }, data });
     else await prisma.channelLocation.create({ data: { channel: "TIKTOK", externalId: w.id, ...data } });

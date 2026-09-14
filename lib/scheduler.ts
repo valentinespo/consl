@@ -6,6 +6,7 @@ import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
 import { syncAmazonCore, syncAmazonStockCore } from "@/lib/sync";
 import { syncShopifyStock, syncTikTokStock } from "@/lib/channel-stock";
 import { getRestock } from "@/lib/restock";
+import { refreshChannelPlaces } from "@/lib/fulfillment";
 import { deleteStored } from "@/lib/storage";
 import { DELETE_GRACE_DAYS } from "@/lib/constants";
 
@@ -53,7 +54,10 @@ let running = false;
  */
 async function claimDay(orgId: string, day: string): Promise<boolean> {
   const { count } = await prismaBase.settings.updateMany({
-    where: { orgId, NOT: { lastSyncRun: day } },
+    // An EMPTY marker must claim too: a brand-new company has none, and a failed night releases
+    // it. Prisma's `NOT { field: value }` never matches NULL, which silently skipped both cases —
+    // the nightly sync then never ran again for that company.
+    where: { orgId, OR: [{ lastSyncRun: null }, { lastSyncRun: { not: day } }] },
     data: { lastSyncRun: day },
   });
   return count === 1;
@@ -70,6 +74,10 @@ async function runOrgDaily(orgId: string): Promise<void> {
       const { day, minutes } = nowInTz(s.syncTz);
       if (minutes < nightlySlotMinutes(orgId)) return; // not yet this org's slot today
       if (s.lastSyncRun === day) return; // already ran today (cheap pre-check)
+      // A failed attempt is tried again through the day — spaced out, not every minute: Amazon's
+      // report quota is small, and a hard failure would otherwise be hammered.
+      if (Date.now() - (lastDailyAttempt.get(orgId) ?? 0) < DAILY_RETRY_MS) return;
+      lastDailyAttempt.set(orgId, Date.now());
       if (!(await claimDay(orgId, day))) return; // another replica got there first
 
       // Self-healing webhook registration: (re)subscribe this environment's URL for the org's
@@ -95,9 +103,14 @@ async function runOrgDaily(orgId: string): Promise<void> {
         console.error(`[scheduler] amazon finance reconcile failed for org ${orgId}:`, (e as Error).message);
       }
 
-      if (r.ok) {
+      if (r.ok && r.salesOk) {
         await saveOrgSettings({ lastSyncAt: new Date() });
         console.log(`[scheduler] daily sync completed for org ${orgId} (${day})`);
+      } else if (r.ok) {
+        // Stock landed but the sales report didn't: release the day so it is asked again (at the
+        // retry spacing above) instead of showing stale velocity until tomorrow night.
+        await prismaBase.settings.updateMany({ where: { orgId }, data: { lastSyncRun: null } });
+        console.error(`[scheduler] daily sync for org ${orgId}: sales report failed, retrying later`);
       } else if (r.nothingToSync) {
         // No Amazon connection or no mapped SKUs — the day is genuinely done, not failed.
         console.log(`[scheduler] nothing to sync for org ${orgId} (${day}): ${r.error}`);
@@ -137,6 +150,11 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
         where: { provider: { in: ["amazon", "shopify", "tiktok", "amazon_ads", "meta_ads"] }, status: "connected" },
         select: { provider: true },
       });
+      // The platforms' PLACES first, every quarter hour: a location or warehouse added, renamed or
+      // retired over there becomes (or updates) its facility before any order or stock names it.
+      // Shopify also pushes these the moment they happen (location webhooks); TikTok has no push.
+      const placesDue = Date.now() - (lastPlacesRefresh.get(orgId) ?? 0) >= PLACES_REFRESH_MS;
+      if (placesDue) lastPlacesRefresh.set(orgId, Date.now());
       for (const c of conns) {
         if (c.provider === "amazon_ads" || c.provider === "meta_ads") continue; // no stock — their passes run below
         try {
@@ -144,6 +162,7 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
             await syncAmazonStockCore();
             continue;
           }
+          if (placesDue) await refreshChannelPlaces(c.provider === "shopify" ? "SHOPIFY" : "TIKTOK");
           const r = c.provider === "shopify" ? await syncShopifyStock() : await syncTikTokStock();
           if (r.skipped > 0) {
             console.log(`[scheduler] ${c.provider} stock for org ${orgId}: ${r.skipped} quantities skipped (unmapped SKU or warehouse)`);
@@ -299,6 +318,8 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
   }
 }
 
+const DAILY_RETRY_MS = 30 * 60 * 1000; // a failed nightly sync is tried again through the day at this spacing
+const PLACES_REFRESH_MS = 15 * 60 * 1000; // Shopify locations / TikTok warehouses re-read
 const ORDERS_REFRESH_MS = 15 * 60 * 1000;
 const AMAZON_POLL_MS = 3 * 60 * 1000; // getOrders allows ~1/min per seller; 3 min leaves room for two orgs
 const AMAZON_ORDER_REPORT_MS = 6 * 60 * 60 * 1000;
@@ -309,6 +330,8 @@ const AMAZON_ADS_TICK_MS = 5 * 60 * 1000; // reports finish in minutes; a quick 
 // so a 5-minute pass uses ~2% of it — today's spend keeps moving on the P&L through the day.
 const META_ADS_TICK_MS = 5 * 60 * 1000;
 // In-process per-org timestamps; a restart just refreshes once immediately, which is harmless.
+const lastDailyAttempt = new Map<string, number>();
+const lastPlacesRefresh = new Map<string, number>();
 const lastOrdersRefresh = new Map<string, number>();
 const lastMfnShipFromStep = new Map<string, number>();
 const lastAmazonPoll = new Map<string, number>();

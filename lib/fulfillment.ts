@@ -94,8 +94,10 @@ export function detectFacility(o: OrderLite, ctx: Ctx): { facilityId: string | n
   return { facilityId: null };
 }
 
-/** Refresh a channel's record of places from the platform, when it is connected. */
-async function refreshPlaces(channel: "SHOPIFY" | "TIKTOK"): Promise<boolean> {
+/** Re-read a channel's places from the platform (its locations / warehouses become or update their
+ *  facilities), when it is connected. Shared by the scheduler's quarter-hour pass, Shopify's location
+ *  webhooks, the stock sync's "new place" catch and the order resolver below. Never throws. */
+export async function refreshChannelPlaces(channel: "SHOPIFY" | "TIKTOK"): Promise<boolean> {
   try {
     if (channel === "SHOPIFY") {
       const conn = await prisma.integration.findFirst({ where: { provider: "shopify", status: "connected" } });
@@ -131,7 +133,7 @@ export async function resolveFulfillmentFacilities(orderIds: string[], opts: { s
   const unknownChannels = new Set(results.filter((x) => x.r.unknown).map((x) => x.o.channel as "SHOPIFY" | "TIKTOK"));
   if (opts.sync !== false && unknownChannels.size > 0) {
     let refreshed = false;
-    for (const ch of unknownChannels) refreshed = (await refreshPlaces(ch)) || refreshed;
+    for (const ch of unknownChannels) refreshed = (await refreshChannelPlaces(ch)) || refreshed;
     if (refreshed) {
       ctx = await loadContext();
       results = orders.map((o) => ({ o, r: detectFacility(o, ctx) }));

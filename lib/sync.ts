@@ -21,6 +21,12 @@ function windowStats(days: Record<string, number> | undefined, end: Date, n: num
   return { units, salesDays };
 }
 
+/** The refresh token itself is dead (revoked, expired, the app removed) — the one failure only a
+ *  reconnect fixes. Everything else Amazon throws (a throttle, a timeout, an outage) is transient. */
+export function isAmazonAuthFailure(message: string): boolean {
+  return /invalid_grant|invalid_client|Unauthorized|access to requested resource is denied/i.test(message);
+}
+
 /**
  * Sync every connected channel on demand: Amazon's full pull (stock AND the sales report) plus
  * the other channels' stock. This is what both manual buttons run, so "Sync channels" in Reorder
@@ -183,7 +189,13 @@ export async function syncAmazonCore(): Promise<
     awd = await getAwdInventory(client);
   } catch (e) {
     const msg = (e as Error).message;
-    await prismaBase.integration.update({ where: { id: conn.id }, data: { status: "error", lastError: msg.slice(0, 300) } });
+    // Only a dead token takes the connection out of service (the operator must reconnect). Any
+    // other failure is noted and retried by the scheduler — flipping the status on a throttle or
+    // an outage used to freeze every Amazon pass until a human noticed and reconnected.
+    await prismaBase.integration.update({
+      where: { id: conn.id },
+      data: { lastError: msg.slice(0, 300), ...(isAmazonAuthFailure(msg) ? { status: "error" } : {}) },
+    });
     return { ok: false, error: `Amazon inventory pull failed: ${msg}` };
   }
 

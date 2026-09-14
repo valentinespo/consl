@@ -26,8 +26,10 @@ export default async function FacilityMappingPage() {
     shipFrom: places
       .filter((p) => p.channel === "AMAZON")
       .map((p) => ({ id: p.id, key: p.externalId, label: p.name, facility: p.facility, orders: orders.get(p.externalId) ?? 0, active: p.active })),
+    // A place that is inactive, has no facility and isn't Amazon's mirror (a TikTok return
+    // warehouse, a location deactivated before it ever had a facility) has nothing to show.
     channelPlaces: places
-      .filter((p) => p.channel !== "AMAZON")
+      .filter((p) => p.channel !== "AMAZON" && (p.facility || p.amazonMirror || p.active))
       .map((p) => ({ id: p.id, channel: p.channel, label: p.name, active: p.active, facility: p.amazonMirror && !p.facility ? fba : p.facility })),
     candidates: facilities.filter((f) => !f.channel?.startsWith("AMAZON")).map((f) => ({ id: f.id, name: f.name, code: f.code, type: f.type })),
   };

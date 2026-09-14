@@ -2,6 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { decryptSecret } from "@/lib/secret-box";
 import { shopifyGraphQL } from "@/lib/shopify";
+import { refreshChannelPlaces } from "@/lib/fulfillment";
 
 /**
  * Pull the stock a sales channel says it is holding and file it against the facility that actually
@@ -60,7 +61,7 @@ type TikTokStockProduct = {
  * TikTok reports stock inline on the product search response — the same call the mapping screen
  * already makes — as `skus[].inventory[] = { quantity, warehouse_id }`. No extra request needed.
  */
-export async function syncTikTokStock(): Promise<ChannelStockSyncResult> {
+export async function syncTikTokStock(opts: { retried?: boolean } = {}): Promise<ChannelStockSyncResult> {
   const conn = await prisma.integration.findFirst({ where: { provider: "tiktok", status: "connected" } });
   if (!conn?.marketplaceId) return EMPTY;
 
@@ -70,6 +71,11 @@ export async function syncTikTokStock(): Promise<ChannelStockSyncResult> {
 
   const facilities = await prisma.facility.findMany({ where: { channel: "TIKTOK", externalId: { not: null } } });
   const byWarehouse = new Map(facilities.map((f) => [f.externalId!, f.id]));
+  // Every warehouse consl has on record, facility or not (Amazon's MCF one, a return warehouse).
+  // Stock in a warehouse on NO record means a new place: re-read the shop's warehouses once and go
+  // again, so it counts from its first pass instead of being skipped until an order names it.
+  const known = new Set((await prisma.channelLocation.findMany({ where: { channel: "TIKTOK" }, select: { externalId: true } })).map((l) => l.externalId));
+  const unknown = new Set<string>();
   const products = await prisma.product.findMany({ where: { tiktokSku: { not: null } }, select: { id: true, tiktokSku: true } });
   const bySku = new Map(products.map((p) => [p.tiktokSku!, p.id]));
 
@@ -100,6 +106,7 @@ export async function syncTikTokStock(): Promise<ChannelStockSyncResult> {
           const facilityId = inv.warehouse_id ? byWarehouse.get(inv.warehouse_id) : undefined;
           if (!productId || !facilityId) {
             if (units > 0) skipped++;
+            if (units > 0 && inv.warehouse_id && !facilityId && !known.has(inv.warehouse_id)) unknown.add(inv.warehouse_id);
             continue;
           }
           const perFacility = totals.get(facilityId) ?? new Map<string, number>();
@@ -112,6 +119,7 @@ export async function syncTikTokStock(): Promise<ChannelStockSyncResult> {
     if (!pageToken) break;
   }
 
+  if (unknown.size > 0 && !opts.retried && (await refreshChannelPlaces("TIKTOK"))) return syncTikTokStock({ retried: true });
   return persist(facilities.map((f) => f.id), totals, skipped);
 }
 
@@ -119,13 +127,18 @@ export async function syncTikTokStock(): Promise<ChannelStockSyncResult> {
  * Shopify reports stock per inventory level: one row per variant × location. Only locations we
  * mirrored as facilities are kept — which is what excludes MCF (see the module note).
  */
-export async function syncShopifyStock(): Promise<ChannelStockSyncResult> {
+export async function syncShopifyStock(opts: { retried?: boolean } = {}): Promise<ChannelStockSyncResult> {
   const conn = await prisma.integration.findFirst({ where: { provider: "shopify", status: "connected" } });
   if (!conn?.refreshTokenEnc || !conn.sellerId) return EMPTY;
   const token = decryptSecret(conn.refreshTokenEnc);
 
   const facilities = await prisma.facility.findMany({ where: { channel: "SHOPIFY", externalId: { not: null } } });
   const byLocation = new Map(facilities.map((f) => [f.externalId!, f.id]));
+  // Every location consl has on record, facility or not (the MCF mirror, a deactivated one). Stock
+  // at a location on NO record means a new place: re-read the shop's locations once and go again,
+  // so it counts from its first pass instead of being skipped until an order names it.
+  const known = new Set((await prisma.channelLocation.findMany({ where: { channel: "SHOPIFY" }, select: { externalId: true } })).map((l) => l.externalId));
+  const unknown = new Set<string>();
   const products = await prisma.product.findMany({
     where: { shopifyVariantId: { not: null } },
     select: { id: true, shopifyVariantId: true },
@@ -175,6 +188,7 @@ export async function syncShopifyStock(): Promise<ChannelStockSyncResult> {
         const facilityId = byLocation.get(lvl.location.id);
         if (!productId || !facilityId) {
           if (units > 0) skipped++;
+          if (units > 0 && !facilityId && !known.has(lvl.location.id)) unknown.add(lvl.location.id);
           continue;
         }
         const perFacility = totals.get(facilityId) ?? new Map<string, number>();
@@ -186,6 +200,7 @@ export async function syncShopifyStock(): Promise<ChannelStockSyncResult> {
     cursor = data.productVariants.pageInfo.endCursor;
   }
 
+  if (unknown.size > 0 && !opts.retried && (await refreshChannelPlaces("SHOPIFY"))) return syncShopifyStock({ retried: true });
   return persist(facilities.map((f) => f.id), totals, skipped);
 }
 
