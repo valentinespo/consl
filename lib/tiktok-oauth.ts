@@ -125,6 +125,14 @@ export async function completeTikTokConnection(orgId: string, authCode: string):
   } catch {
     // the Refresh button on the mapping screen retries
   }
+
+  // Point TikTok's pushes at consl (idempotent; the nightly sync re-checks it) — no manual step.
+  try {
+    const { ensureTikTokWebhooks } = await import("@/lib/tiktok-webhooks");
+    await runWithOrg(orgId, () => ensureTikTokWebhooks());
+  } catch {
+    // never throws, but keep the connection regardless
+  }
 }
 
 // Refresh when the cached access token is within 10 minutes of expiry — comfortably wider than

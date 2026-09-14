@@ -15,6 +15,9 @@ export async function GET() {
   if (!gate.ok) return back("Only an owner can connect a sales channel.");
   if (!tiktokConfigured()) return back("TikTok Shop connection isn't configured yet.");
 
+  // A US-region app authorizes on TikTok's US service host — the same link Partner Center hands
+  // out under "Copy authorization link". Override for another region's app.
   const serviceId = process.env.TIKTOK_SERVICE_ID ?? "7671534619103135501";
-  return NextResponse.redirect(`https://services.tiktokshop.com/open/authorize?service_id=${serviceId}`);
+  const authOrigin = process.env.TIKTOK_AUTH_ORIGIN || "https://services.tiktokshops.us";
+  return NextResponse.redirect(`${authOrigin}/open/authorize?service_id=${serviceId}`);
 }

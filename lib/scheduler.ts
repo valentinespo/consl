@@ -90,6 +90,9 @@ async function runOrgDaily(orgId: string): Promise<void> {
       } catch (e) {
         console.error(`[scheduler] shopify webhook ensure failed for org ${orgId}:`, (e as Error).message);
       }
+      // Same self-healing for TikTok's push address (never throws).
+      const { ensureTikTokWebhooks } = await import("@/lib/tiktok-webhooks");
+      await ensureTikTokWebhooks();
 
       const r = await syncAmazonCore(); // no-op for orgs with no Amazon-mapped SKUs
       await getRestock(); // records today's inventory-value snapshot with fresh numbers
