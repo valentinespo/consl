@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/ui";
 import { requireView } from "@/lib/membership";
-import { getOrdersSummary, getOrdersPage, fulfilledAtOptions, feeRuleOptions, type OrdersFilter } from "@/lib/order-metrics";
+import { getOrdersSummary, getOrdersPage, fulfilledAtOptions, feeRuleOptions, tagOptions, unplacedOrderCount, isOrderTag, type OrdersFilter } from "@/lib/order-metrics";
 import { prisma } from "@/lib/prisma";
 import { OrdersClient } from "@/components/OrdersClient";
 import { rangeBounds, RANGES, type RangeKey } from "@/lib/chart";
@@ -19,6 +19,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const str = (v: string | string[] | undefined) => (typeof v === "string" && v ? v : undefined);
 
   const channel = ["AMAZON", "SHOPIFY", "TIKTOK"].includes(str(sp.channel) ?? "") ? str(sp.channel) : undefined;
+  const tag = isOrderTag(str(sp.tag)) ? str(sp.tag) : undefined;
 
   // The same range vocabulary as the dashboard chart: a preset key, or "custom" + from/to days.
   const isKey = (v: string | undefined): v is RangeKey => !!v && RANGES.some((r) => r.key === v);
@@ -34,6 +35,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     to: rangeKey === "all" ? undefined : (b.to ?? undefined),
     q: str(sp.q),
     fulfilledAt: str(sp.fulfilled),
+    tag,
   };
 
   const conns = await prisma.integration.findMany({
@@ -42,12 +44,14 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   });
   const connectedChannels = conns.map((c) => c.provider.toUpperCase());
 
-  const [summary, orders, orgSettings, fees, fulfilledOptions] = await Promise.all([
+  const [summary, orders, orgSettings, fees, fulfilledOptions, tags, unplaced] = await Promise.all([
     getOrdersSummary(connectedChannels, { channel: filter.channel, from: filter.from, to: filter.to }),
     getOrdersPage(page, 50, filter),
     prisma.settings.findFirst({ select: { ordersBackfillCursor: true, ordersBackfillPass: true } }),
     feeRuleOptions(),
     fulfilledAtOptions(),
+    tagOptions(),
+    unplacedOrderCount(),
   ]);
 
   // The Amazon history walk is "done" once the verification pass has also reached the ~2-year
@@ -69,11 +73,14 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         historyImporting={historyImporting}
         fees={fees}
         fulfilledOptions={fulfilledOptions}
+        tagOptions={tags}
+        unplaced={unplaced}
         filter={{
           channel: channel ?? "",
           range: { key: rangeKey, from: b.from ?? oldest, to: b.to ?? newest },
           q: str(sp.q) ?? "",
           fulfilledAt: str(sp.fulfilled) ?? "",
+          tag: tag ?? "",
         }}
         dataBounds={{ newest, oldest }}
       />

@@ -43,6 +43,7 @@ export type OrdersFilter = {
   to?: string; // ISO day (inclusive); undefined = today
   q?: string; // free-text search — order #, amount, SKU, or words like "mcf" / "pending" / "free"
   fulfilledAt?: string; // a facility id, or "none" for orders with no facility yet
+  tag?: string; // one of ORDER_TAGS — the pill an order wears (mcf, voided, …)
 };
 
 /** The facilities orders are currently fulfilled from (the correction wins over the detected one),
@@ -312,6 +313,62 @@ const FREE_UNIT_WHERE = {
 /** A TikTok order the buyer paid $0 for — a creator or promo sample. */
 const FREE_SAMPLE_WHERE = { channel: "TIKTOK", total: 0, cancelled: false };
 
+/** The tags an order can wear — the pills beside its number — as the values of the Orders tag filter. */
+export const ORDER_TAGS = ["mcf", "replacement", "free_unit", "free_sample", "voided"] as const;
+export type OrderTag = (typeof ORDER_TAGS)[number];
+export const isOrderTag = (v: string | undefined): v is OrderTag => !!v && (ORDER_TAGS as readonly string[]).includes(v);
+const TAG_LABEL: Record<OrderTag, string> = { mcf: "MCF", replacement: "Replacement", free_unit: "Free unit", free_sample: "Free sample", voided: "Voided" };
+
+/** The orders wearing a tag. "Voided" is what the row shows for a manual void AND for an order
+ *  the double-count rule drops, so the tag finds both — everything wearing the pill. */
+function tagWhere(tag: OrderTag, ex: Exclusions): Record<string, unknown> {
+  switch (tag) {
+    case "mcf":
+      return { mcf: true };
+    case "replacement":
+      return { replacement: true };
+    case "free_unit":
+      return FREE_UNIT_WHERE;
+    case "free_sample":
+      return FREE_SAMPLE_WHERE;
+    case "voided":
+      return {
+        OR: [
+          { voided: true },
+          ...(ex.sources.length ? [{ channel: "SHOPIFY", source: { in: ex.sources } }] : []),
+          ...(ex.mcf ? [{ channel: "AMAZON", mcf: true }] : []),
+        ],
+      };
+  }
+}
+
+/** Each tag with how many orders wear it — the choices of the Orders tag filter (a tag nobody wears is left out). */
+export async function tagOptions(): Promise<{ id: string; name: string; orders: number }[]> {
+  const ex = await activeExclusions();
+  const counts = await Promise.all(ORDER_TAGS.map((t) => prisma.salesOrder.count({ where: tagWhere(t, ex) })));
+  return ORDER_TAGS.map((t, i) => ({ id: t, name: TAG_LABEL[t], orders: counts[i] })).filter((o) => o.orders > 0);
+}
+
+/** Orders that count (not cancelled, not voided, not dropped by the double-count rule) and still
+ *  have no facility — the ones a person has to place. Until then Reorder 2.0 counts them nowhere
+ *  and the P&L prices their units at average cost. */
+export async function unplacedOrderCount(): Promise<number> {
+  const ex = await activeExclusions();
+  const dropped = [
+    ...(ex.sources.length ? [{ channel: "SHOPIFY", source: { in: ex.sources } }] : []),
+    ...(ex.mcf ? [{ channel: "AMAZON", mcf: true }] : []),
+  ];
+  return prisma.salesOrder.count({
+    where: {
+      fulfillmentOverrideFacilityId: null,
+      fulfillmentFacilityId: null,
+      cancelled: false,
+      voided: false,
+      ...(dropped.length ? { NOT: dropped } : {}),
+    },
+  });
+}
+
 /**
  * Free-text search → a where clause. Words people would actually type match what they mean:
  * "mcf" finds MCF orders, "pending"/"shipped"/"cancelled" match status, "free"/"vine" find
@@ -323,22 +380,12 @@ function searchWhere(raw: string, ex: Exclusions): Record<string, unknown> {
   const s = q.toLowerCase();
   const contains = (v: string) => ({ contains: v, mode: "insensitive" as const });
 
-  if (["mcf", "multichannel", "multi-channel"].includes(s)) return { mcf: true };
-  if (["replacement", "replacements"].includes(s)) return { replacement: true };
-  if (["free", "free unit", "free units", "vine"].includes(s)) return FREE_UNIT_WHERE;
-  if (["sample", "samples", "free sample", "free samples"].includes(s)) return FREE_SAMPLE_WHERE;
+  if (["mcf", "multichannel", "multi-channel"].includes(s)) return tagWhere("mcf", ex);
+  if (["replacement", "replacements"].includes(s)) return tagWhere("replacement", ex);
+  if (["free", "free unit", "free units", "vine"].includes(s)) return tagWhere("free_unit", ex);
+  if (["sample", "samples", "free sample", "free samples"].includes(s)) return tagWhere("free_sample", ex);
   if (["cancelled", "canceled"].includes(s)) return { cancelled: true };
-  // "Voided" is what the row shows for a manual void AND for an order a double-count toggle drops,
-  // so the word finds both — everything wearing the pill.
-  if (["voided", "void", "excluded"].includes(s)) {
-    return {
-      OR: [
-        { voided: true },
-        ...(ex.sources.length ? [{ channel: "SHOPIFY", source: { in: ex.sources } }] : []),
-        ...(ex.mcf ? [{ channel: "AMAZON", mcf: true }] : []),
-      ],
-    };
-  }
+  if (["voided", "void", "excluded"].includes(s)) return tagWhere("voided", ex);
   if (s === "pending") return { status: contains("pending") };
   if (s === "unshipped") return { status: contains("unshipped") };
   if (["shipped", "partially shipped"].includes(s)) return { OR: [{ status: "Shipped" }, { status: "PartiallyShipped" }] };
@@ -371,6 +418,9 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
   const { since, until } = bounds(filter);
 
   const q = filter.q?.trim();
+  const ex: Exclusions = { sources: excluded, mcf: excludeMcf };
+  // The tag filter and the search both narrow the list; each is one clause of the AND.
+  const narrow = [...(isOrderTag(filter.tag) ? [tagWhere(filter.tag, ex)] : []), ...(q ? [searchWhere(q, ex)] : [])];
   const where = {
     ...(filter.channel ? { channel: filter.channel } : {}),
     ...(since || until ? { orderedAt: { ...(since ? { gte: since } : {}), ...(until ? { lte: until } : {}) } } : {}),
@@ -380,7 +430,7 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
       : filter.fulfilledAt
         ? { OR: [{ fulfillmentOverrideFacilityId: filter.fulfilledAt }, { fulfillmentOverrideFacilityId: null, fulfillmentFacilityId: filter.fulfilledAt }] }
         : {}),
-    ...(q ? { AND: [searchWhere(q, { sources: excluded, mcf: excludeMcf })] } : {}),
+    ...(narrow.length ? { AND: narrow } : {}),
   };
 
   const total = await prisma.salesOrder.count({ where });

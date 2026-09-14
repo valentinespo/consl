@@ -124,6 +124,7 @@ export const PieChart = regular(P.ChartDonut);
 export const Layers = regular(P.Stack);
 export const Package = regular(P.Package);
 export const PackageSearch = regular(P.ListMagnifyingGlass);
+export const Tag = regular(P.Tag);
 
 /* ---- Layout & movement ---- */
 export const GripVertical = regular(P.DotsSixVertical);

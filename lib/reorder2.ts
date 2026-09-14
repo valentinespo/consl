@@ -4,6 +4,7 @@ import { getCurrentOrgId } from "@/lib/tenant";
 import { getOrgSettings } from "@/lib/settings";
 import { getRestock, type RestockRow } from "@/lib/restock";
 import { getStockRoutes, type StockRoute } from "@/lib/stock-routes";
+import { activeExclusions } from "@/lib/order-metrics";
 import type { Place, PlaceKind, PlaceStock, Reorder2Row } from "@/lib/reorder2-engine";
 
 /**
@@ -25,29 +26,36 @@ export type Reorder2Data = {
   nowMs: number;
 };
 
-const UNPLACED: Place = { id: "none", code: "No facility", name: "Orders with no facility yet", kind: "none" };
-
 export async function getReorder2(): Promise<Reorder2Data> {
   const orgId = await getCurrentOrgId();
-  const [restock, settings, routing, products] = await Promise.all([
+  const [restock, settings, routing, products, ex] = await Promise.all([
     getRestock(),
     getOrgSettings(),
     getStockRoutes(),
     prisma.product.findMany({ orderBy: { code: "asc" } }),
+    activeExclusions(),
   ]);
   const tz = settings.syncTz;
 
   // Units shipped per product, per place, per company-calendar day — the velocity of every place.
+  // Exactly the orders the Orders tab and the P&L count: never cancelled or voided ones, never a
+  // mirrored copy or an Amazon MCF twin of another channel's sale (activeExclusions), and never an
+  // order with no facility — consl can't tell which place sold it, so it counts nowhere until
+  // someone places it (the Orders tab flags them).
   const since = new Date(Date.now() - VELOCITY_DAYS * 86_400_000);
-  const sold = await prisma.$queryRaw<{ productId: string; facility: string | null; d: string; units: number }[]>`
+  const sold = await prisma.$queryRaw<{ productId: string; facility: string; d: string; units: number }[]>`
     SELECT l."productId", COALESCE(o."fulfillmentOverrideFacilityId", o."fulfillmentFacilityId") AS facility,
       to_char(o."orderedAt" AT TIME ZONE ${tz}, 'YYYY-MM-DD') AS d, SUM(l.quantity)::int AS units
     FROM "SalesOrderLine" l JOIN "SalesOrder" o ON o.id = l."orderId"
-    WHERE o."orgId" = ${orgId} AND l."productId" IS NOT NULL AND o.cancelled = false AND o.voided = false AND o."orderedAt" >= ${since}
+    WHERE o."orgId" = ${orgId} AND l."productId" IS NOT NULL AND o.cancelled = false AND o.voided = false
+      AND COALESCE(o."fulfillmentOverrideFacilityId", o."fulfillmentFacilityId") IS NOT NULL
+      AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${ex.sources}))
+      AND NOT (${ex.mcf}::boolean AND o.mcf)
+      AND o."orderedAt" >= ${since}
     GROUP BY 1, 2, 3`;
   const daily = new Map<string, Record<string, number>>(); // productId|placeId → day → units
   for (const r of sold) {
-    const k = `${r.productId}|${r.facility ?? "none"}`;
+    const k = `${r.productId}|${r.facility}`;
     const cur = daily.get(k) ?? {};
     cur[r.d] = (cur[r.d] ?? 0) + r.units;
     daily.set(k, cur);
@@ -116,16 +124,15 @@ export async function getReorder2(): Promise<Reorder2Data> {
     // Places with sales but no stock at all (a location Shopify reports empty, a warehouse sold out).
     for (const k of daily.keys()) {
       const [productId, placeId] = k.split("|");
-      if (productId !== p.id || seen.has(placeId) || placeId === "none") continue;
+      if (productId !== p.id || seen.has(placeId)) continue;
       if (places.some((pl) => pl.id === placeId)) push(placeId, 0, 0);
     }
-    if (daily.has(`${p.id}|none`)) push("none", 0, 0);
     return { ...base, places: cells, inProductionBy: prodBy.get(p.id) ?? [] };
   });
 
   return {
     rows,
-    places: [...places, UNPLACED],
+    places,
     routes: routing.routes,
     routesSaved: routing.saved,
     lastSync: restock.lastSync,

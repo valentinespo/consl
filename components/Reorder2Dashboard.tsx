@@ -22,8 +22,8 @@ const PLACE_GRID = "grid-cols-[minmax(180px,1.4fr)_84px_minmax(0,1.7fr)_112px_12
 
 const mo = (x: number) => (x === Infinity ? "∞" : x.toFixed(1));
 
-const KIND_LABEL: Record<Place["kind"], string> = { own: "Your facility", AMAZON_FBA: "Amazon FBA", AMAZON_AWD: "Amazon AWD", SHOPIFY: "Shopify", TIKTOK: "TikTok", none: "orders with no place yet" };
-const KIND_COLOR: Record<Place["kind"], string> = { own: SEG.locations, AMAZON_FBA: SEG.available, AMAZON_AWD: SEG.awd, SHOPIFY: SEG.shopify, TIKTOK: SEG.tiktok, none: "var(--color-muted)" };
+const KIND_LABEL: Record<Place["kind"], string> = { own: "Your facility", AMAZON_FBA: "Amazon FBA", AMAZON_AWD: "Amazon AWD", SHOPIFY: "Shopify", TIKTOK: "TikTok" };
+const KIND_COLOR: Record<Place["kind"], string> = { own: SEG.locations, AMAZON_FBA: SEG.available, AMAZON_AWD: SEG.awd, SHOPIFY: SEG.shopify, TIKTOK: SEG.tiktok };
 
 /** A row with its stock cells kept apart from the engine's per-place results (both were called `places`). */
 type Computed = Omit<Reorder2Row, "places"> & Reorder2Result & { cells: PlaceStock[] };
@@ -87,7 +87,6 @@ export function Reorder2Dashboard({
   const healthy = computed.filter((r) => r.status === "ok" || r.status === "reordered").length;
   const unitsToOrder = computed.reduce((s, r) => s + r.recommendedQty, 0);
   const actionTone = (flag: "order" | "ship") => (computed.some((r) => r[flag] && r.status === "oos") ? "var(--color-negative)" : "var(--color-warn)");
-  const realPlaces = places.filter((p) => p.kind !== "none");
 
   function pickSort(m: SortMode) {
     setSort(m);
@@ -215,7 +214,6 @@ export function Reorder2Dashboard({
           const hasPolicyOverride = r.rawMinMonths != null || r.rawLeadMonths != null || r.rawShipDays != null || r.rawReorderToMonths != null || r.rawBatchSize != null;
           const production = r.inProductionBy.reduce((t, p) => t + p.units, 0);
           const segs = r.cells
-            .filter((c) => c.placeId !== "none")
             .map((c) => ({ place: places.find((p) => p.id === c.placeId)!, units: c.sellable + c.inbound }))
             .filter((x) => x.place && x.units > 0)
             .sort((a, b) => KIND_ORDER[a.place.kind] - KIND_ORDER[b.place.kind] || b.units - a.units);
@@ -345,12 +343,12 @@ export function Reorder2Dashboard({
         })}
        </div>
       </div>
-      {realPlaces.length === 0 && <p className="mt-3 text-[12px] text-muted">No facilities yet — connect a channel or add a facility and the places appear here.</p>}
+      {places.length === 0 && <p className="mt-3 text-[12px] text-muted">No facilities yet — connect a channel or add a facility and the places appear here.</p>}
     </div>
   );
 }
 
-const KIND_ORDER: Record<Place["kind"], number> = { AMAZON_FBA: 0, AMAZON_AWD: 1, own: 2, SHOPIFY: 3, TIKTOK: 4, none: 5 };
+const KIND_ORDER: Record<Place["kind"], number> = { AMAZON_FBA: 0, AMAZON_AWD: 1, own: 2, SHOPIFY: 3, TIKTOK: 4 };
 
 function PlaceLine({ p, n, last }: { p: PlaceResult; n: (v: number) => string; last: boolean }) {
   const st = STATUS[p.status];
@@ -360,7 +358,7 @@ function PlaceLine({ p, n, last }: { p: PlaceResult; n: (v: number) => string; l
   if (p.moveUnits > 0) acts.push({ label: `Move ${n(p.moveUnits)} here`, sub: `from ${p.moveFrom.map((f) => `${n(f.units)} ${f.code}`).join(" + ")}${p.shipWithinDays > 0 ? ` · within ${p.shipWithinDays}d` : ""}` });
   else if (p.ship) acts.push({ label: "Stock needed", sub: p.reserve > 0 ? "donors already spoken for" : "no route brings any" });
   if (p.expedite) acts.push({ label: "Expedite", sub: "Incoming lot" });
-  if (p.order && !p.expedite && acts.length === 0 && kind !== "none") acts.push({ label: "Needs the run", sub: "counts toward the order above" });
+  if (p.order && !p.expedite && acts.length === 0) acts.push({ label: "Needs the run", sub: "counts toward the order above" });
   return (
     <div className={`grid ${PLACE_GRID} items-center gap-4 px-4 py-1.5 pl-[58px] text-[12px] ${last ? "" : "border-b border-line"}`}>
       <div className="flex min-w-0 items-start gap-2">
@@ -370,17 +368,15 @@ function PlaceLine({ p, n, last }: { p: PlaceResult; n: (v: number) => string; l
           <span className="ml-1.5 text-[11px] text-muted">{KIND_LABEL[kind]}</span>
         </span>
       </div>
-      <div className="tabular text-ink">{kind === "none" ? "—" : n(units)}</div>
+      <div className="tabular text-ink">{n(units)}</div>
       <div className="text-[11px] tabular leading-snug text-muted">
-        {kind === "none"
-          ? "These orders have no place yet. Their sales count; their stock can't be checked. To place them: Orders tab, filter “No facility”, set “Fulfilled at”."
-          : [
-              p.inbound > 0 && `${n(p.inbound)} inbound`,
-              p.reserve > 0 && `${n(p.reserve)} reachable from ${p.reserveFrom.map((d) => `${n(d.units)} ${d.code}`).join(" + ")}`,
-              p.production > 0 && `${n(p.production)} in production that can reach here`,
-            ]
-              .filter(Boolean)
-              .join(" · ") || "nothing on the way"}
+        {[
+          p.inbound > 0 && `${n(p.inbound)} inbound`,
+          p.reserve > 0 && `${n(p.reserve)} reachable from ${p.reserveFrom.map((d) => `${n(d.units)} ${d.code}`).join(" + ")}`,
+          p.production > 0 && `${n(p.production)} in production that can reach here`,
+        ]
+          .filter(Boolean)
+          .join(" · ") || "nothing on the way"}
       </div>
       <div className="tabular text-ink">
         {p.selling ? (<>{mo(p.onHandCover)}<span className="text-[10.5px] text-muted"> mo</span> <span className="text-[10.5px] text-muted">· {n(p.monthly)}/mo</span></>) : <span className="text-muted">—</span>}

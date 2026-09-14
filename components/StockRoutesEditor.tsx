@@ -28,7 +28,7 @@ export function StockRoutesEditor({
   const [pending, start] = useTransition();
   const [set, setSet] = useState<Set<string>>(new Set(routes.map((r) => `${r.from}>${r.to}`)));
   const [error, setError] = useState<string | null>(null);
-  const real = places.filter((p) => p.kind !== "none");
+  const real = places;
   const key = (from: string, to: string) => `${from}>${to}`;
   const toggle = (from: string, to: string) =>
     setSet((prev) => {

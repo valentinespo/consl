@@ -1,10 +1,10 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { type ReactNode, useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronRight, DotsVertical, Layers, Search, Settings, WarehouseFilled } from "@/components/icons";
+import { AlertTriangle, ChevronDown, ChevronRight, DotsVertical, Layers, Search, Settings, Tag, WarehouseFilled } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { setOrderVoided } from "@/app/orders/actions";
 import type { OrdersSummary, OrdersPage, OrderRow } from "@/lib/order-metrics";
@@ -236,9 +236,26 @@ function ChannelSelect({ value, channels, onChange }: { value: string; channels:
   );
 }
 
-/** The "Fulfilled at" filter — every facility orders are currently fulfilled from, plus "No
- *  facility" when some orders have none. Same popover as the channel filter, no logos. */
-function PlaceSelect({ value, options, onChange }: { value: string; options: { id: string; name: string; orders: number }[]; onChange: (v: string) => void }) {
+/** A one-of filter as a dropdown — the same popover as the channel filter, no logos: the
+ *  "anything" choice on top, then each option with how many orders it holds. Used for "Fulfilled
+ *  at" (every facility orders ship from, plus "No facility" when some have none) and for "Tag". */
+function OptionSelect({
+  value,
+  options,
+  placeholder,
+  ariaLabel,
+  icon,
+  width = 240,
+  onChange,
+}: {
+  value: string;
+  options: { id: string; name: string; orders: number }[];
+  placeholder: string;
+  ariaLabel: string;
+  icon: ReactNode;
+  width?: number;
+  onChange: (v: string) => void;
+}) {
   const btn = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState<{ top: number; left: number } | null>(null);
@@ -290,8 +307,8 @@ function PlaceSelect({ value, options, onChange }: { value: string; options: { i
         aria-expanded={open}
         className="inline-flex h-9 items-center gap-2 rounded-[10px] border border-border bg-surface px-3 text-[12.5px] font-medium text-ink outline-none transition-colors hover:border-ink/25 focus-visible:border-ink/40"
       >
-        <WarehouseFilled size={15} className="text-ink-soft" />
-        {current ? current.name : "Fulfilled anywhere"}
+        {icon}
+        {current ? current.name : placeholder}
         <ChevronDown size={13} className="text-muted" />
       </button>
       {exit.mounted &&
@@ -300,11 +317,11 @@ function PlaceSelect({ value, options, onChange }: { value: string; options: { i
           <div
             ref={panel}
             role="listbox"
-            aria-label="Fulfilled at"
-            style={{ position: "fixed", top: lastBox.current.top, left: lastBox.current.left, width: 240 }}
+            aria-label={ariaLabel}
+            style={{ position: "fixed", top: lastBox.current.top, left: lastBox.current.left, width }}
             className={`${exit.closing ? "dropdown-out" : "dropdown-in"} z-[300] rounded-xl border border-border bg-surface p-1 shadow-xl`}
           >
-            {[{ id: "", name: "Fulfilled anywhere", orders: 0 }, ...options].map((o) => {
+            {[{ id: "", name: placeholder, orders: 0 }, ...options].map((o) => {
               const active = value === o.id;
               return (
                 <button
@@ -336,6 +353,8 @@ export function OrdersClient({
   historyImporting = false,
   fees,
   fulfilledOptions,
+  tagOptions,
+  unplaced,
   filter,
   dataBounds,
 }: {
@@ -349,7 +368,11 @@ export function OrdersClient({
   fees: FeeOptions;
   /** Facilities orders are fulfilled from, for the "Fulfilled at" filter. */
   fulfilledOptions: { id: string; name: string; orders: number }[];
-  filter: { channel: string; range: Range; q: string; fulfilledAt: string };
+  /** The tags orders wear (MCF, Voided, …) with counts, for the "Tag" filter. */
+  tagOptions: { id: string; name: string; orders: number }[];
+  /** Orders that count but have no facility yet — the ones a person must place. */
+  unplaced: number;
+  filter: { channel: string; range: Range; q: string; fulfilledAt: string; tag: string };
   dataBounds: { newest: string; oldest: string };
 }) {
   const connected = connectedChannels.length > 0;
@@ -405,6 +428,7 @@ export function OrdersClient({
     router.push(`${pathname}?${q.toString()}`);
   }
 
+  const filtering = !!(filter.channel || filter.fulfilledAt || filter.tag || filter.range.key !== "all" || filter.q);
   const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
   const { page, pageCount, total, pageSize } = orders;
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
@@ -420,12 +444,29 @@ export function OrdersClient({
           <Stat label="Units sold" value={summary.totalUnits.toLocaleString()} />
           <Stat label="Revenue" value={money(summary.totalRevenue)} />
         </div>
-        {historyImporting && (
-          <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />
-            Importing your order history in the background — new sales stay live while it fills.
-          </span>
-        )}
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          {historyImporting && (
+            <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />
+              Importing your order history in the background — new sales stay live while it fills.
+            </span>
+          )}
+          {/* Orders consl can't place count in no place: Reorder 2.0 leaves them out and the P&L
+              prices their units at average cost. One click lists them so they can be selected and
+              given a "Fulfilled at". */}
+          {unplaced > 0 && (
+            <button
+              type="button"
+              onClick={() => setParam("fulfilled", "none")}
+              aria-pressed={filter.fulfilledAt === "none"}
+              title="consl can't tell where these orders shipped from, so they count in no place: Reorder 2.0 leaves them out and the P&L prices their units at average cost. Click to list them, select them, then use “Fulfilled at…” to place them."
+              className="pill-amber inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[11.5px] font-medium transition-opacity hover:opacity-80"
+            >
+              <AlertTriangle size={13} />
+              {unplaced.toLocaleString()} {unplaced === 1 ? "order has" : "orders have"} no facility · click to fix
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Per-channel split */}
@@ -446,19 +487,62 @@ export function OrdersClient({
         </div>
       )}
 
-      {/* Filter bar */}
-      <div className="flex flex-wrap items-center gap-2">
-        <DateRangePicker
-          value={filter.range}
-          onChange={setRange}
-          newest={dataBounds.newest}
-          oldest={dataBounds.oldest}
-          locale={locale}
-        />
-        <ChannelSelect value={filter.channel} channels={connectedChannels} onChange={(v) => setParam("channel", v)} />
-        {fulfilledOptions.length > 0 && <PlaceSelect value={filter.fulfilledAt} options={fulfilledOptions} onChange={(v) => setParam("fulfilled", v)} />}
+      {/* Filters: the one-of pickers on one row, the search on its own row under them. */}
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <DateRangePicker
+            value={filter.range}
+            onChange={setRange}
+            newest={dataBounds.newest}
+            oldest={dataBounds.oldest}
+            locale={locale}
+          />
+          <ChannelSelect value={filter.channel} channels={connectedChannels} onChange={(v) => setParam("channel", v)} />
+          {fulfilledOptions.length > 0 && (
+            <OptionSelect
+              value={filter.fulfilledAt}
+              options={fulfilledOptions}
+              placeholder="Fulfilled anywhere"
+              ariaLabel="Fulfilled at"
+              icon={<WarehouseFilled size={15} className="text-ink-soft" />}
+              onChange={(v) => setParam("fulfilled", v)}
+            />
+          )}
+          {tagOptions.length > 0 && (
+            <OptionSelect
+              value={filter.tag}
+              options={tagOptions}
+              placeholder="Any tag"
+              ariaLabel="Tag"
+              icon={<Tag size={15} className="text-ink-soft" />}
+              width={200}
+              onChange={(v) => setParam("tag", v)}
+            />
+          )}
+          {filtering && (
+            <button
+              onClick={() => router.push(pathname)}
+              className="text-[12.5px] font-medium text-muted underline-offset-2 hover:text-ink-soft hover:underline"
+            >
+              Clear
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setRulesOpen((o) => !o)}
+            aria-pressed={rulesOpen}
+            title="Fee rules"
+            className={`ml-auto inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[12.5px] font-medium transition-colors ${
+              rulesOpen ? "bg-surface-2 text-ink" : "bg-surface text-ink-soft hover:text-ink"
+            }`}
+          >
+            <Settings size={15} />
+            Fee rules
+            {fees.rules.length > 0 && <span className="pill-neutral inline-flex items-center rounded-full border px-1.5 py-px text-[10.5px] font-medium">{fees.rules.length}</span>}
+          </button>
+        </div>
         <form
-          className="relative min-w-[220px] flex-1 sm:max-w-[280px]"
+          className="relative w-full sm:max-w-[360px]"
           onSubmit={(e) => {
             e.preventDefault();
             setParam("q", search.trim());
@@ -473,27 +557,6 @@ export function OrdersClient({
             className={`${inputCls} pl-8`}
           />
         </form>
-        {(filter.channel || filter.fulfilledAt || filter.range.key !== "all" || filter.q) && (
-          <button
-            onClick={() => router.push(pathname)}
-            className="text-[12.5px] font-medium text-muted underline-offset-2 hover:text-ink-soft hover:underline"
-          >
-            Clear
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={() => setRulesOpen((o) => !o)}
-          aria-pressed={rulesOpen}
-          title="Fee rules"
-          className={`ml-auto inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[12.5px] font-medium transition-colors ${
-            rulesOpen ? "bg-surface-2 text-ink" : "bg-surface text-ink-soft hover:text-ink"
-          }`}
-        >
-          <Settings size={15} />
-          Fee rules
-          {fees.rules.length > 0 && <span className="pill-neutral inline-flex items-center rounded-full border px-1.5 py-px text-[10.5px] font-medium">{fees.rules.length}</span>}
-        </button>
       </div>
 
       {rulesOpen && <FeeRulesPanel options={fees} onClose={() => setRulesOpen(false)} />}
@@ -504,7 +567,7 @@ export function OrdersClient({
         <div className="rounded-[var(--radius-card)] border border-dashed border-border bg-surface-2/40 px-6 py-10 text-center">
           <div className="text-[14px] font-semibold text-ink">No orders found</div>
           <p className="mt-1 text-[12.5px] text-muted">
-            {filter.channel || filter.fulfilledAt || filter.range.key !== "all" || filter.q
+            {filtering
               ? "Nothing matches these filters."
               : connected
                 ? "Your order history is importing itself — check back in a few minutes."

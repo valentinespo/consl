@@ -21,13 +21,13 @@ import { computeReorder, MONTH, type ReorderResult, type ReorderStatus, type Win
  *  - a place short with no route to help it: the run is the only answer (Order / Expedite).
  *  - production lands at the facility that makes it; it counts for a place only when that facility
  *    has a route to the place. Overdue lots count as landing now, like the original.
- *  - orders with no facility ("unplaced") keep their velocity in the company total so the run
- *    size is right, and show as their own line so the gap is visible.
+ *  - orders with no facility count nowhere: consl can't tell which place sold them, so they would
+ *    only distort a place's velocity. The Orders tab flags them until someone places them.
  *  - the product's status is the worst of its places; a run is sized on the whole company's
  *    velocity and split by each selling place's share.
  */
 
-export type PlaceKind = "own" | "AMAZON_FBA" | "AMAZON_AWD" | "SHOPIFY" | "TIKTOK" | "none";
+export type PlaceKind = "own" | "AMAZON_FBA" | "AMAZON_AWD" | "SHOPIFY" | "TIKTOK";
 export type Place = { id: string; code: string; name: string; kind: PlaceKind };
 export type StockRoute = { from: string; to: string };
 
@@ -98,10 +98,9 @@ export function computeReorder2(row: Reorder2Row, places: Place[], routes: Stock
   const monthly = cells.reduce((t, c) => t + c.monthly, 0);
 
   // Pass 2 — what each facility could give away: everything, or what is beyond its own floor
-  // when it sells too. Unplaced demand and inbound units are never a donor.
+  // when it sells too. Inbound units are never a donor.
   const surplus = new Map<string, number>();
   for (const c of cells) {
-    if (c.place.kind === "none") continue;
     const keep = c.monthly > 0 ? Math.ceil(row.minMonths * c.monthly) : 0;
     surplus.set(c.placeId, Math.max(0, c.sellable - keep));
   }
@@ -109,12 +108,6 @@ export function computeReorder2(row: Reorder2Row, places: Place[], routes: Stock
   // Pass 3 — the original engine, per place, with its reserve = reachable surplus and its
   // production = lots at facilities that can reach it.
   const results: PlaceResult[] = cells.map((c) => {
-    // Orders with no facility: their velocity counts toward the company's run size, but there is
-    // no stock to judge — never a status, never an outage.
-    if (c.place.kind === "none") {
-      const neutral: ReorderResult = { monthly: c.monthly, win, excl, override: false, onHandCover: 0, awdCover: 0, locCover: 0, prodCover: 0, status: "nosales", statusLabel: "Not placed", recommendedQty: 0, ship: false, expedite: false, order: false, shipWithinDays: 0, dryDays: 0, belowFloor: false };
-      return { ...neutral, place: c.place, sellable: 0, inbound: 0, reserve: 0, reserveFrom: [], production: 0, selling: c.monthly > 0, moveUnits: 0, moveFrom: [] };
-    }
     const froms = feeds.get(c.placeId) ?? new Set<string>();
     let reserve = 0;
     const reserveFrom: { code: string; units: number }[] = [];
@@ -169,7 +162,7 @@ export function computeReorder2(row: Reorder2Row, places: Place[], routes: Stock
     const sells = cells.find((c) => c.placeId === id)?.monthly ?? 0;
     return (sells > 0 ? 10 : 0) + (p?.kind === "AMAZON_AWD" ? 1 : p?.kind === "own" ? 0 : 2);
   };
-  const urgent = results.filter((r) => r.ship && r.place.kind !== "none").sort((a, b) => b.dryDays - a.dryDays || a.onHandCover - b.onHandCover);
+  const urgent = results.filter((r) => r.ship).sort((a, b) => b.dryDays - a.dryDays || a.onHandCover - b.onHandCover);
   for (const r of urgent) {
     const c = cells.find((x) => x.placeId === r.place.id)!;
     // Bring the place to its floor; if it is above the floor but inside the shipping buffer, a
@@ -190,7 +183,7 @@ export function computeReorder2(row: Reorder2Row, places: Place[], routes: Stock
 
   // Pass 5 — the company. Worst place names the product; a run is sized on every place's
   // velocity together and split by share.
-  const selling = results.filter((r) => r.selling && r.place.kind !== "none");
+  const selling = results; // already only the places that sell
   const worst = selling.reduce<PlaceResult | null>((w, r) => (!w || SEVERITY[r.status] > SEVERITY[w.status] ? r : w), null);
   const totalUnits = cells.reduce((t, c) => t + c.sellable + c.inbound, 0) + row.inProductionBy.reduce((t, p) => t + p.units, 0);
   const coverMonths = monthly > 0 ? totalUnits / monthly : totalUnits > 0 ? Infinity : 0;
