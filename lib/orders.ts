@@ -1044,14 +1044,101 @@ export async function healAmazonOrdersFromLedger(limit = 50): Promise<{ missing:
   }
   if (!fetched.length) return { missing: rows.length, healed: 0 };
   await persist("AMAZON", fetched, (l) => (l.sku ? map.bySku.get(l.sku) ?? null : null));
-  const healed = fetched.map((f) => f.externalId);
+  await redateShipmentMoney(orgId, fetched.map((f) => f.externalId));
+  return { missing: rows.length, healed: fetched.length };
+}
+
+/** Shipment money of orders that were unknown when their ledger rows were written sits on Amazon's
+ *  posting day; now that the purchase instant is known, move it there — the importer's own rule. */
+async function redateShipmentMoney(orgId: string, orderIds: string[]): Promise<void> {
+  if (!orderIds.length) return;
   await prisma.$executeRaw`
     UPDATE "FinanceEvent" fe SET "eventAt" = so."orderedAt"
     FROM "SalesOrder" so
-    WHERE fe."orgId" = ${orgId} AND fe.channel = 'AMAZON' AND fe."orderId" = ANY(${healed}::text[])
+    WHERE fe."orgId" = ${orgId} AND fe.channel = 'AMAZON' AND fe."orderId" = ANY(${orderIds}::text[])
       AND so."orgId" = fe."orgId" AND so.channel = 'AMAZON' AND so."externalId" = fe."orderId"
       AND fe."group" IN ('sales', 'taxes', 'fba_fees', 'referral_fees') AND fe.type NOT LIKE 'Refund:%'`;
-  return { missing: rows.length, healed: fetched.length };
+}
+
+// The live Orders API keeps about two years; the audit never asks beyond it. A day per pass; a
+// window that fills three pages is re-read in quarters so no order hides past the page cap.
+const AMAZON_AUDIT_FLOOR_DAYS = 725;
+const AUDIT_WINDOW_MS = 24 * 3600_000;
+const AUDIT_PAGES = 3;
+
+/**
+ * The exhaustive check behind the ledger heal. Once the report history is in (both passes), the
+ * live Orders API is walked backward a day at a time and every order it lists that the history
+ * lacks is added — money or no money: a cancelled order, a free replacement — so a slice a report
+ * dropped is closed even when no fee ever named the order. One window per call, paced by the
+ * scheduler under getOrders' one-call-a-minute allowance. Runs once per connection, then rests.
+ */
+export async function auditAmazonOrdersStep(): Promise<{ done: boolean; checked: number; recovered: number; cursor: string }> {
+  const { getOrgSettings, saveOrgSettings } = await import("@/lib/settings");
+  const s = await getOrgSettings();
+  const cursor = s.ordersAuditCursor ?? "";
+  if ((s.ordersAuditPass ?? 0) >= 1) return { done: true, checked: 0, recovered: 0, cursor };
+  // The audit fills holes in the history; it is not the history — wait for the report walk.
+  const reportFloor = new Date(Date.now() - AMAZON_BACKFILL_FLOOR_DAYS * 86_400_000);
+  const historyIn = (s.ordersBackfillPass ?? 0) >= 1 && !!s.ordersBackfillCursor && new Date(s.ordersBackfillCursor) <= reportFloor;
+  if (!historyIn) return { done: false, checked: 0, recovered: 0, cursor };
+  const conn = await prisma.integration.findFirst({ where: { provider: "amazon", status: "connected" } });
+  if (!conn?.refreshTokenEnc) return { done: false, checked: 0, recovered: 0, cursor };
+  const orgId = await getCurrentOrgId();
+  if (!orgId) return { done: false, checked: 0, recovered: 0, cursor };
+
+  const floor = new Date(Date.now() - AMAZON_AUDIT_FLOOR_DAYS * 86_400_000);
+  // The live poll owns the last two days; the audit starts behind it and walks to the floor.
+  const end = s.ordersAuditCursor ? new Date(s.ordersAuditCursor) : new Date(Date.now() - 2 * 86_400_000);
+  if (end <= floor) {
+    await saveOrgSettings({ ordersAuditPass: 1 });
+    return { done: true, checked: 0, recovered: 0, cursor };
+  }
+  const start = new Date(Math.max(floor.getTime(), end.getTime() - AUDIT_WINDOW_MS));
+  const { makeClient, getOrdersCreatedBetween, getOrderItems } = await import("@/lib/spapi");
+  const client = makeClient({
+    refreshToken: decryptSecret(conn.refreshTokenEnc),
+    marketplaceId: conn.marketplaceId ?? "ATVPDKIKX0DER",
+    region: conn.region ?? "na",
+  });
+  const iso = (d: Date) => d.toISOString().slice(0, 19) + "Z";
+  let live = await getOrdersCreatedBetween(client, iso(start), iso(end), { maxPages: AUDIT_PAGES });
+  if (live.length >= AUDIT_PAGES * 100) {
+    // A very busy day: read it again in quarters so the page cap can't hide an order.
+    live = [];
+    const step = (end.getTime() - start.getTime()) / 4;
+    for (let k = 0; k < 4; k++) {
+      const a = new Date(start.getTime() + k * step), b = new Date(k === 3 ? end.getTime() : start.getTime() + (k + 1) * step);
+      live.push(...(await getOrdersCreatedBetween(client, iso(a), iso(b), { maxPages: AUDIT_PAGES })));
+      await new Promise((r) => setTimeout(r, 2500));
+    }
+  }
+  const ids = [...new Set(live.map((o) => o.orderId))];
+  const known = new Set<string>();
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = await prisma.salesOrder.findMany({ where: { channel: "AMAZON", externalId: { in: ids.slice(i, i + 500) } }, select: { externalId: true } });
+    for (const k of chunk) known.add(k.externalId);
+  }
+  const missing = live.filter((o) => !known.has(o.orderId));
+  if (missing.length) {
+    const map = await productMap("AMAZON");
+    const fetched: Fetched[] = [];
+    for (const o of missing) {
+      let lines: FetchedLine[] = [];
+      try {
+        lines = liveLines(await getOrderItems(client, o.orderId));
+        await new Promise((r) => setTimeout(r, 2100)); // getOrderItems: ~0.5 req/s
+      } catch {
+        // lines arrive on a later pass
+      }
+      fetched.push(liveFetched(o, lines));
+    }
+    await persist("AMAZON", fetched, (l) => (l.sku ? map.bySku.get(l.sku) ?? null : null));
+    await redateShipmentMoney(orgId, fetched.map((f) => f.externalId));
+    console.log(`[orders] audit recovered ${fetched.length} orders between ${iso(start)} and ${iso(end)}`);
+  }
+  await saveOrgSettings({ ordersAuditCursor: start.toISOString() });
+  return { done: start.getTime() <= floor.getTime(), checked: live.length, recovered: missing.length, cursor: start.toISOString().slice(0, 10) };
 }
 
 const POLL_BATCH = 60;

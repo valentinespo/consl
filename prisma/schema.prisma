@@ -461,6 +461,11 @@ model Settings {
   // re-walk (pass 1). Upserts make the second pass free; a thin report window on the first pass
   // gets filled by the second, so history converges without any manual re-pull.
   ordersBackfillPass Int @default(0)
+  // The exhaustive order audit: once the report history is in, the live Orders API is walked
+  // backward a day at a time (ISO instant reached) and any order the history lacks is added —
+  // money or no money. Pass 1 = done for this connection.
+  ordersAuditCursor String?
+  ordersAuditPass   Int     @default(0)
   // Forward cursor for the near-real-time Amazon Orders API poll (ISO datetime of the last
   // LastUpdatedAfter sweep). Null = start from a few hours back on first poll.
   ordersPollCursor String?

@@ -313,6 +313,7 @@ const lastOrdersRefresh = new Map<string, number>();
 const lastMfnShipFromStep = new Map<string, number>();
 const lastAmazonPoll = new Map<string, number>();
 const lastAmazonOrderHeal = new Map<string, number>();
+const lastAmazonOrderAudit = new Map<string, number>();
 const lastAmazonOrderReport = new Map<string, number>();
 const lastAmazonFinanceSweep = new Map<string, number>();
 const lastAmazonAdsTick = new Map<string, number>();
@@ -349,6 +350,16 @@ async function backfillTick(): Promise<void> {
             lastMfnShipFromStep.set(orgId, Date.now());
             const m = await backfillAmazonShipFromStep();
             if (m.orders > 0 || m.done) console.log(`[scheduler] amazon ship-from walk for ${orgId}: +${m.orders} merchant orders (cursor ${m.cursor}${m.done ? ", done" : ""})`);
+          }
+          // The exhaustive order audit, one day every ten minutes once the report history is in —
+          // the live Orders API lists what a thin report left out, money or no money. Paced well
+          // under getOrders' one-call-a-minute allowance, which the poll and ship-from walk share.
+          const lastAudit = lastAmazonOrderAudit.get(orgId) ?? 0;
+          if (Date.now() - lastAudit >= 10 * 60_000) {
+            lastAmazonOrderAudit.set(orgId, Date.now());
+            const { auditAmazonOrdersStep } = await import("@/lib/orders");
+            const a = await auditAmazonOrdersStep();
+            if (a.recovered > 0 || a.done) console.log(`[scheduler] amazon order audit for ${orgId}: ${a.checked} checked, +${a.recovered} recovered (cursor ${a.cursor}${a.done ? ", done" : ""})`);
           }
           // The finance ledger walks back alongside the orders — different rate pool, so the two
           // steps in one tick never contend.

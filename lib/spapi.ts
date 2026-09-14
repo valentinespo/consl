@@ -378,11 +378,18 @@ export async function getOrdersByIds(client: SpApiClient, ids: string[]): Promis
 }
 
 /**
- * Merchant-fulfilled orders placed in a window, from the live Orders API — the only place Amazon
- * names where such an order ships from (the orders report says just "Merchant"). Pages are spaced
- * out: getOrders allows about one call a minute with a burst of twenty, shared with the live poll.
+ * Orders placed in a window, from the live Orders API — every fulfillment channel, or one of them.
+ * Pages are spaced out: getOrders allows about one call a minute with a burst of twenty, shared
+ * with the live poll, the ship-from walk and the order audit.
  */
-export async function getMfnOrdersCreatedBetween(client: SpApiClient, fromISO: string, toISO: string, maxPages = 5): Promise<LiveAmazonOrder[]> {
+export async function getOrdersCreatedBetween(
+  client: SpApiClient,
+  fromISO: string,
+  toISO: string,
+  opts: { fulfillment?: "MFN" | "AFN"; maxPages?: number } = {},
+): Promise<LiveAmazonOrder[]> {
+  const fulfillment = opts.fulfillment;
+  const maxPages = opts.maxPages ?? 5;
   const out: LiveAmazonOrder[] = [];
   let next: string | null = null;
   for (let page = 0; page < maxPages; page++) {
@@ -390,7 +397,7 @@ export async function getMfnOrdersCreatedBetween(client: SpApiClient, fromISO: s
     const params = new URLSearchParams(
       next
         ? { NextToken: next, MarketplaceIds: client.marketplaceId }
-        : { MarketplaceIds: client.marketplaceId, CreatedAfter: fromISO, CreatedBefore: toISO, FulfillmentChannels: "MFN", MaxResultsPerPage: "100" },
+        : { MarketplaceIds: client.marketplaceId, CreatedAfter: fromISO, CreatedBefore: toISO, ...(fulfillment ? { FulfillmentChannels: fulfillment } : {}), MaxResultsPerPage: "100" },
     );
     const r = await sp(client, `/orders/v0/orders?${params.toString()}`);
     const j = await r.json();
@@ -400,6 +407,12 @@ export async function getMfnOrdersCreatedBetween(client: SpApiClient, fromISO: s
     if (!next) break;
   }
   return out;
+}
+
+/** Merchant-fulfilled orders placed in a window — the only place Amazon names where such an order
+ *  ships from (the orders report says just "Merchant"). */
+export async function getMfnOrdersCreatedBetween(client: SpApiClient, fromISO: string, toISO: string, maxPages = 5): Promise<LiveAmazonOrder[]> {
+  return getOrdersCreatedBetween(client, fromISO, toISO, { fulfillment: "MFN", maxPages });
 }
 
 /** Line items for one live order. Rate-limited hard by Amazon (0.5 rps) — the caller paces. */
