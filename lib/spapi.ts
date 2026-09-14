@@ -363,6 +363,20 @@ export async function getOrdersUpdatedSince(client: SpApiClient, sinceISO: strin
   return out;
 }
 
+/** Specific orders by id from the live Orders API (fifty per call) — the repair path for an order
+ *  the money ledger names but the order history missed. */
+export async function getOrdersByIds(client: SpApiClient, ids: string[]): Promise<LiveAmazonOrder[]> {
+  const out: LiveAmazonOrder[] = [];
+  for (let i = 0; i < ids.length; i += 50) {
+    const params = new URLSearchParams({ MarketplaceIds: client.marketplaceId, AmazonOrderIds: ids.slice(i, i + 50).join(",") });
+    const r = await sp(client, `/orders/v0/orders?${params.toString()}`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(`orders by id: ${JSON.stringify(j).slice(0, 160)}`);
+    for (const o of (j.payload?.Orders ?? []) as ApiOrder[]) out.push(liveOrderOf(o));
+  }
+  return out;
+}
+
 /**
  * Merchant-fulfilled orders placed in a window, from the live Orders API — the only place Amazon
  * names where such an order ships from (the orders report says just "Merchant"). Pages are spaced

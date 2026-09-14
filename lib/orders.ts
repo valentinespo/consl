@@ -774,6 +774,16 @@ export async function importAmazonOrders(window: { start: Date; end: Date } | nu
         throw new Error(`orders report thin: ${maxGap} consecutive empty days in an active window (${fetched.length} orders/${windowDays}d)`);
       }
     }
+    //  3. A seller doing 50+ orders a day never goes twelve hours without one — such a hole inside
+    //     the window is a slice the report dropped (seen live: a 20-hour hole in a 30-day file).
+    if (fetched.length / windowDays > 50 && fetched.length > 1) {
+      const times = fetched.map((o) => o.orderedAt.getTime()).filter((t) => t > 0).sort((a, b) => a - b);
+      let widest = 0;
+      for (let i = 1; i < times.length; i++) widest = Math.max(widest, times[i] - times[i - 1]);
+      if (widest >= 12 * 3600_000) {
+        throw new Error(`orders report thin: ${(widest / 3600_000).toFixed(1)}h without an order in an active window (${fetched.length} orders/${windowDays}d)`);
+      }
+    }
   }
 
   return persist("AMAZON", fetched, (l) => (l.sku ? map.bySku.get(l.sku) ?? null : null));
@@ -928,47 +938,116 @@ export async function pollAmazonOrders(): Promise<OrderImportResult & { cursor?:
   for (const o of plan.batch) {
     let lines: FetchedLine[] = [];
     try {
-      const items = await getOrderItems(client, o.orderId);
-      lines = items.map((i) => ({
-        sku: i.sku,
-        quantity: i.quantity,
-        unitPrice: i.quantity > 0 ? Math.max(0, i.itemPrice - i.promotionDiscount) / i.quantity : 0,
-        gross: i.itemPrice,
-        tax: i.itemTax,
-        promoDiscount: i.promotionDiscount,
-      }));
+      lines = liveLines(await getOrderItems(client, o.orderId));
       // getOrderItems is hard-limited to ~0.5 req/s — pace bursts so a busy sweep can't 429.
       if (changed.length > 10) await new Promise((r) => setTimeout(r, 2100));
     } catch {
       // items unavailable (fresh Pending order) — keep the order, lines arrive on a later sweep
     }
-    fetched.push({
-      externalId: o.orderId,
-      orderNumber: o.orderId,
-      orderedAt: o.purchaseDate ? new Date(o.purchaseDate) : new Date(0),
-      source: null,
-      sourceLabel: null,
-      status: o.status,
-      cancelled: o.status === "Canceled",
-      mcf: /^non.?amazon/i.test(o.salesChannel),
-      replacement: o.isReplacement,
-      platformUpdatedAt: o.lastUpdateDate ? new Date(o.lastUpdateDate) : undefined,
-      fulfillment: o.fulfillment === "AFN" ? "Amazon" : "Merchant",
-      fulfillmentLabel: o.fulfillment === "AFN" ? "Amazon FBA" : "Merchant",
-      // The live record is the one source of a merchant-fulfilled order's ship-from place.
-      ...(o.fulfillment === "MFN" ? { shipFromKey: o.shipFromKey, shipFromLabel: o.shipFromLabel } : {}),
-      total: o.total,
-      currency: o.currency,
-      // The live API hides a Pending order's total until the charge settles — a $0 here must not
-      // wipe a real total the report already filled in.
-      preserveNonzeroTotal: true,
-      lines,
-    });
+    fetched.push(liveFetched(o, lines));
   }
 
   const result = await persist("AMAZON", fetched, (l) => (l.sku ? map.bySku.get(l.sku) ?? null : null));
   await saveOrgSettings({ ordersPollCursor: plan.cursor.toISOString() });
   return { ...result, cursor: plan.cursor.toISOString() };
+}
+
+type LiveOrder = Awaited<ReturnType<typeof import("@/lib/spapi").getOrdersUpdatedSince>>[number];
+type LiveItem = Awaited<ReturnType<typeof import("@/lib/spapi").getOrderItems>>[number];
+
+function liveLines(items: LiveItem[]): FetchedLine[] {
+  return items.map((i) => ({
+    sku: i.sku,
+    quantity: i.quantity,
+    unitPrice: i.quantity > 0 ? Math.max(0, i.itemPrice - i.promotionDiscount) / i.quantity : 0,
+    gross: i.itemPrice,
+    tax: i.itemTax,
+    promoDiscount: i.promotionDiscount,
+  }));
+}
+
+/** An order as the live Orders API tells it, in the shape the store takes. */
+function liveFetched(o: LiveOrder, lines: FetchedLine[]): Fetched {
+  return {
+    externalId: o.orderId,
+    orderNumber: o.orderId,
+    orderedAt: o.purchaseDate ? new Date(o.purchaseDate) : new Date(0),
+    source: null,
+    sourceLabel: null,
+    status: o.status,
+    cancelled: o.status === "Canceled",
+    mcf: /^non.?amazon/i.test(o.salesChannel),
+    replacement: o.isReplacement,
+    platformUpdatedAt: o.lastUpdateDate ? new Date(o.lastUpdateDate) : undefined,
+    fulfillment: o.fulfillment === "AFN" ? "Amazon" : "Merchant",
+    fulfillmentLabel: o.fulfillment === "AFN" ? "Amazon FBA" : "Merchant",
+    // The live record is the one source of a merchant-fulfilled order's ship-from place.
+    ...(o.fulfillment === "MFN" ? { shipFromKey: o.shipFromKey, shipFromLabel: o.shipFromLabel } : {}),
+    total: o.total,
+    currency: o.currency,
+    // The live API hides a Pending order's total until the charge settles — a $0 here must not
+    // wipe a real total the report already filled in.
+    preserveNonzeroTotal: true,
+    lines,
+  };
+}
+
+// Orders the heal asked Amazon for and didn't get back (too old for the API, or not this
+// marketplace's) — asked again a day later at most, not every pass.
+const HEAL_RETRY_MS = 24 * 60 * 60 * 1000;
+const healAsked = new Map<string, number>();
+
+/**
+ * Self-check against the money ledger. Amazon's finance feed names the order behind every sale,
+ * so an order the ledger knows but the Orders table doesn't is a hole in the order history — a
+ * report window Amazon returned thin, a lost page. Each pass fetches up to fifty such orders by id
+ * from the live Orders API (one call, inside the poll's quota), stores them like the poll does,
+ * and moves their shipment money onto the purchase day, where the P&L reads it — the rule the
+ * ledger importer applies when the order is already known. A no-op when nothing is missing.
+ */
+export async function healAmazonOrdersFromLedger(limit = 50): Promise<{ missing: number; healed: number }> {
+  const orgId = await getCurrentOrgId();
+  if (!orgId) return { missing: 0, healed: 0 };
+  const rows = await prisma.$queryRaw<{ orderId: string }[]>`
+    SELECT DISTINCT fe."orderId" FROM "FinanceEvent" fe
+    WHERE fe."orgId" = ${orgId} AND fe.channel = 'AMAZON' AND fe."group" = 'sales' AND fe."orderId" IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM "SalesOrder" so WHERE so."orgId" = fe."orgId" AND so.channel = 'AMAZON' AND so."externalId" = fe."orderId")
+    ORDER BY 1`;
+  const now = Date.now();
+  const ids = rows.map((r) => r.orderId).filter((id) => now - (healAsked.get(`${orgId}:${id}`) ?? 0) > HEAL_RETRY_MS).slice(0, limit);
+  if (!ids.length) return { missing: rows.length, healed: 0 };
+  const conn = await prisma.integration.findFirst({ where: { provider: "amazon", status: "connected" } });
+  if (!conn?.refreshTokenEnc) return { missing: rows.length, healed: 0 };
+  const { makeClient, getOrdersByIds, getOrderItems } = await import("@/lib/spapi");
+  const client = makeClient({
+    refreshToken: decryptSecret(conn.refreshTokenEnc),
+    marketplaceId: conn.marketplaceId ?? "ATVPDKIKX0DER",
+    region: conn.region ?? "na",
+  });
+  const map = await productMap("AMAZON");
+  for (const id of ids) healAsked.set(`${orgId}:${id}`, now);
+  const live = await getOrdersByIds(client, ids);
+  const fetched: Fetched[] = [];
+  for (const o of live) {
+    let lines: FetchedLine[] = [];
+    try {
+      lines = liveLines(await getOrderItems(client, o.orderId));
+      await new Promise((r) => setTimeout(r, 2100)); // getOrderItems: ~0.5 req/s
+    } catch {
+      // lines arrive on a later pass; the order itself is what the ledger needed
+    }
+    fetched.push(liveFetched(o, lines));
+  }
+  if (!fetched.length) return { missing: rows.length, healed: 0 };
+  await persist("AMAZON", fetched, (l) => (l.sku ? map.bySku.get(l.sku) ?? null : null));
+  const healed = fetched.map((f) => f.externalId);
+  await prisma.$executeRaw`
+    UPDATE "FinanceEvent" fe SET "eventAt" = so."orderedAt"
+    FROM "SalesOrder" so
+    WHERE fe."orgId" = ${orgId} AND fe.channel = 'AMAZON' AND fe."orderId" = ANY(${healed}::text[])
+      AND so."orgId" = fe."orgId" AND so.channel = 'AMAZON' AND so."externalId" = fe."orderId"
+      AND fe."group" IN ('sales', 'taxes', 'fba_fees', 'referral_fees') AND fe.type NOT LIKE 'Refund:%'`;
+  return { missing: rows.length, healed: fetched.length };
 }
 
 const POLL_BATCH = 60;

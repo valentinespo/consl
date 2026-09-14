@@ -231,6 +231,21 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
           }
         }
       
+        // Self-heal from the money ledger: an order the ledger names but the order history lacks
+        // (a report window returned thin, a lost page) is fetched by id, so no hole outlives the
+        // next pass — the ledger is what the P&L reads, the order is what dates and counts it.
+        const lastHeal = lastAmazonOrderHeal.get(orgId) ?? 0;
+        if (Date.now() - lastHeal >= ORDERS_REFRESH_MS) {
+          lastAmazonOrderHeal.set(orgId, Date.now());
+          try {
+            const { healAmazonOrdersFromLedger } = await import("@/lib/orders");
+            const r = await healAmazonOrdersFromLedger();
+            if (r.missing > 0) console.log(`[scheduler] amazon order heal for ${orgId}: ${r.healed} of ${r.missing} missing orders recovered from the ledger`);
+          } catch (e) {
+            console.error(`[scheduler] amazon order heal failed for org ${orgId}:`, (e as Error).message);
+          }
+        }
+
         // The money ledger's live leg: sweep newly posted transactions every quarter hour. A sale
         // shows up here the moment it ships (held for payout, exact fees), so this is what keeps
         // the P&L within minutes of Amazon without burning the rate limit.
@@ -297,6 +312,7 @@ const META_ADS_TICK_MS = 5 * 60 * 1000;
 const lastOrdersRefresh = new Map<string, number>();
 const lastMfnShipFromStep = new Map<string, number>();
 const lastAmazonPoll = new Map<string, number>();
+const lastAmazonOrderHeal = new Map<string, number>();
 const lastAmazonOrderReport = new Map<string, number>();
 const lastAmazonFinanceSweep = new Map<string, number>();
 const lastAmazonAdsTick = new Map<string, number>();
