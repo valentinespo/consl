@@ -44,7 +44,22 @@ export type OrdersFilter = {
   q?: string; // free-text search — order #, amount, SKU, or words like "mcf" / "pending" / "free"
   fulfilledAt?: string; // a facility id, or "none" for orders with no facility yet
   tag?: string; // one of ORDER_TAGS — the pill an order wears (mcf, voided, …)
+  source?: string; // the platform's sales-channel key (Shopify "web", "shop_app", "tiktok", "faire"…)
 };
+
+/** The sales channels orders come through — Shopify's Online Store, the Shop app, TikTok, Faire,
+ *  subscriptions… — with counts: the choices of the Orders "Sales channel" filter, keyed by the
+ *  platform's own source key. Amazon and TikTok orders carry none; they show "—" in the table. */
+export async function salesChannelOptions(): Promise<{ id: string; name: string; orders: number }[]> {
+  const rows = await prisma.salesOrder.groupBy({ by: ["source", "sourceLabel"], where: { source: { not: null } }, _count: true });
+  const byKey = new Map<string, { name: string; orders: number }>();
+  for (const r of rows) {
+    const key = r.source as string;
+    const cur = byKey.get(key);
+    byKey.set(key, { name: cur?.name ?? r.sourceLabel ?? key, orders: (cur?.orders ?? 0) + r._count });
+  }
+  return [...byKey.entries()].map(([id, v]) => ({ id, ...v })).sort((a, b) => b.orders - a.orders);
+}
 
 /** The facilities orders are currently fulfilled from (the correction wins over the detected one),
  *  with a "No facility" entry when some orders have none — the choices of the Orders filter. */
@@ -66,6 +81,8 @@ function bounds(f: OrdersFilter): { since: Date | null; until: Date | null } {
     until: f.to ? new Date(`${f.to}T23:59:59.999Z`) : null,
   };
 }
+
+export type OrderLineRow = { code: string | null; name: string | null; imageUrl: string | null; sku: string | null; quantity: number; unitPrice: number };
 
 export type OrderRow = {
   id: string;
@@ -90,6 +107,8 @@ export type OrderRow = {
   platformFees: { name: string; amount: number }[];
   orderedAt: string;
   units: number;
+  /** Every unit on the order: the consl product it maps to (code/name/picture null when the SKU isn't mapped), the SKU as sold, qty, net unit price. */
+  lines: OrderLineRow[];
   total: number;
   currency: string;
   status: string | null;
@@ -423,6 +442,7 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
   const narrow = [...(isOrderTag(filter.tag) ? [tagWhere(filter.tag, ex)] : []), ...(q ? [searchWhere(q, ex)] : [])];
   const where = {
     ...(filter.channel ? { channel: filter.channel } : {}),
+    ...(filter.source ? { source: filter.source } : {}),
     ...(since || until ? { orderedAt: { ...(since ? { gte: since } : {}), ...(until ? { lte: until } : {}) } } : {}),
     // Fulfilled at: the correction when there is one, else the detected facility.
     ...(filter.fulfilledAt === "none"
@@ -463,7 +483,7 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
       mcf: true,
       replacement: true,
       voided: true,
-      lines: { select: { quantity: true } },
+      lines: { select: { quantity: true, sku: true, unitPrice: true, product: { select: { code: true, name: true, imageUrl: true } } } },
       fees: { select: { id: true, name: true, amount: true, ruleId: true }, orderBy: { createdAt: "asc" } },
     },
   });
@@ -498,6 +518,7 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
     platformFees: platformFees.get(`${o.channel}|${o.externalId}`) ?? [],
     orderedAt: o.orderedAt.toISOString(),
     units: o.lines.reduce((s, l) => s + l.quantity, 0),
+    lines: o.lines.map((l) => ({ code: l.product?.code ?? null, name: l.product?.name ?? null, imageUrl: l.product?.imageUrl ?? null, sku: l.sku, quantity: l.quantity, unitPrice: l.unitPrice })),
     total: o.total,
     currency: o.currency,
     status: o.status,

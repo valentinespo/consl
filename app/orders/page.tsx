@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/ui";
 import { requireView } from "@/lib/membership";
-import { getOrdersSummary, getOrdersPage, fulfilledAtOptions, feeRuleOptions, tagOptions, unplacedOrderCount, isOrderTag, type OrdersFilter } from "@/lib/order-metrics";
+import { getOrdersSummary, getOrdersPage, fulfilledAtOptions, feeRuleOptions, tagOptions, salesChannelOptions, unplacedOrderCount, isOrderTag, type OrdersFilter } from "@/lib/order-metrics";
 import { prisma } from "@/lib/prisma";
 import { OrdersClient } from "@/components/OrdersClient";
 import { rangeBounds, RANGES, type RangeKey } from "@/lib/chart";
@@ -36,6 +36,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     q: str(sp.q),
     fulfilledAt: str(sp.fulfilled),
     tag,
+    source: str(sp.source),
   };
 
   const conns = await prisma.integration.findMany({
@@ -44,13 +45,14 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   });
   const connectedChannels = conns.map((c) => c.provider.toUpperCase());
 
-  const [summary, orders, orgSettings, fees, fulfilledOptions, tags, unplaced] = await Promise.all([
+  const [summary, orders, orgSettings, fees, fulfilledOptions, tags, sources, unplaced] = await Promise.all([
     getOrdersSummary(connectedChannels, { channel: filter.channel, from: filter.from, to: filter.to }),
     getOrdersPage(page, 50, filter),
     prisma.settings.findFirst({ select: { ordersBackfillCursor: true, ordersBackfillPass: true } }),
     feeRuleOptions(),
     fulfilledAtOptions(),
     tagOptions(),
+    salesChannelOptions(),
     unplacedOrderCount(),
   ]);
 
@@ -74,6 +76,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         fees={fees}
         fulfilledOptions={fulfilledOptions}
         tagOptions={tags}
+        sourceOptions={sources}
         unplaced={unplaced}
         filter={{
           channel: channel ?? "",
@@ -81,6 +84,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           q: str(sp.q) ?? "",
           fulfilledAt: str(sp.fulfilled) ?? "",
           tag: tag ?? "",
+          source: str(sp.source) ?? "",
         }}
         dataBounds={{ newest, oldest }}
       />

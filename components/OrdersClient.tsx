@@ -1,10 +1,11 @@
 "use client";
 
 import Image from "next/image";
-import { type ReactNode, useEffect, useRef, useState, useTransition } from "react";
+import { Fragment, type ReactNode, useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { AlertTriangle, ChevronDown, ChevronRight, DotsVertical, Layers, Search, Settings, Tag, WarehouseFilled } from "@/components/icons";
+import { AlertTriangle, Building2, ChevronDown, ChevronRight, DotsVertical, Layers, Search, Settings, Tag, WarehouseFilled } from "@/components/icons";
+import { SkuAvatar } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
 import { setOrderVoided } from "@/app/orders/actions";
 import type { OrdersSummary, OrdersPage, OrderRow } from "@/lib/order-metrics";
@@ -129,9 +130,9 @@ function RowMenu({ id, voided, onManage }: { id: string; voided: boolean; onMana
 const CHANNEL_ORDER = ["AMAZON", "SHOPIFY", "TIKTOK"];
 const CHANNEL_NAME: Record<string, string> = { AMAZON: "Amazon", SHOPIFY: "Shopify", TIKTOK: "TikTok" };
 
-/** The channel filter as a custom dropdown — each connected channel with its logo, "All channels"
- *  on top. Portalled and exit-animated like the app's other popovers; only channels actually
- *  connected are offered. */
+/** The Source filter — the platform an order came from (the table's "Source" column) — as a custom
+ *  dropdown: each connected platform with its logo, "All sources" on top. Portalled and
+ *  exit-animated like the app's other popovers; only platforms actually connected are offered. */
 function ChannelSelect({ value, channels, onChange }: { value: string; channels: string[]; onChange: (v: string) => void }) {
   const btn = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -194,7 +195,7 @@ function ChannelSelect({ value, channels, onChange }: { value: string; channels:
         ) : (
           <Layers size={15} className="text-ink-soft" />
         )}
-        {value ? (CHANNEL_NAME[value] ?? value) : "All channels"}
+        {value ? (CHANNEL_NAME[value] ?? value) : "All sources"}
         <ChevronDown size={13} className="text-muted" />
       </button>
       {exit.mounted &&
@@ -203,11 +204,11 @@ function ChannelSelect({ value, channels, onChange }: { value: string; channels:
           <div
             ref={panel}
             role="listbox"
-            aria-label="Sales channel"
+            aria-label="Source"
             style={{ position: "fixed", top: lastBox.current.top, left: lastBox.current.left, width: 190 }}
             className={`${exit.closing ? "dropdown-out" : "dropdown-in"} z-[300] rounded-xl border border-border bg-surface p-1 shadow-xl`}
           >
-            {[{ v: "", label: "All channels" }, ...options.map((c) => ({ v: c, label: CHANNEL_NAME[c] ?? c }))].map((o) => {
+            {[{ v: "", label: "All sources" }, ...options.map((c) => ({ v: c, label: CHANNEL_NAME[c] ?? c }))].map((o) => {
               const active = value === o.v;
               return (
                 <button
@@ -354,6 +355,7 @@ export function OrdersClient({
   fees,
   fulfilledOptions,
   tagOptions,
+  sourceOptions,
   unplaced,
   filter,
   dataBounds,
@@ -370,9 +372,11 @@ export function OrdersClient({
   fulfilledOptions: { id: string; name: string; orders: number }[];
   /** The tags orders wear (MCF, Voided, …) with counts, for the "Tag" filter. */
   tagOptions: { id: string; name: string; orders: number }[];
+  /** The sales channels orders come through (Online Store, Shop app, TikTok, Faire…) with counts, for the "Sales channel" filter. */
+  sourceOptions: { id: string; name: string; orders: number }[];
   /** Orders that count but have no facility yet — the ones a person must place. */
   unplaced: number;
-  filter: { channel: string; range: Range; q: string; fulfilledAt: string; tag: string };
+  filter: { channel: string; range: Range; q: string; fulfilledAt: string; tag: string; source: string };
   dataBounds: { newest: string; oldest: string };
 }) {
   const connected = connectedChannels.length > 0;
@@ -384,6 +388,15 @@ export function OrdersClient({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [dialogId, setDialogId] = useState<string | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
+  // Rows opened to show their units (per page; a page change starts closed).
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleOpen = (id: string) =>
+    setExpanded((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   // Only rows on this page count as selected — a page change or filter silently drops the rest.
   const selectedIds = orders.rows.filter((r) => selected.has(r.id)).map((r) => r.id);
   const allSelected = orders.rows.length > 0 && selectedIds.length === orders.rows.length;
@@ -428,7 +441,7 @@ export function OrdersClient({
     router.push(`${pathname}?${q.toString()}`);
   }
 
-  const filtering = !!(filter.channel || filter.fulfilledAt || filter.tag || filter.range.key !== "all" || filter.q);
+  const filtering = !!(filter.channel || filter.source || filter.fulfilledAt || filter.tag || filter.range.key !== "all" || filter.q);
   const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
   const { page, pageCount, total, pageSize } = orders;
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
@@ -498,6 +511,16 @@ export function OrdersClient({
             locale={locale}
           />
           <ChannelSelect value={filter.channel} channels={connectedChannels} onChange={(v) => setParam("channel", v)} />
+          {sourceOptions.length > 0 && (
+            <OptionSelect
+              value={filter.source}
+              options={sourceOptions}
+              placeholder="Any sales channel"
+              ariaLabel="Sales channel"
+              icon={<Building2 size={15} className="text-ink-soft" />}
+              onChange={(v) => setParam("source", v)}
+            />
+          )}
           {fulfilledOptions.length > 0 && (
             <OptionSelect
               value={filter.fulfilledAt}
@@ -542,7 +565,7 @@ export function OrdersClient({
           </button>
         </div>
         <form
-          className="relative w-full sm:max-w-[360px]"
+          className="relative w-full"
           onSubmit={(e) => {
             e.preventDefault();
             setParam("q", search.trim());
@@ -577,14 +600,15 @@ export function OrdersClient({
       ) : (
         <div>
           <div className="overflow-x-auto rounded-[var(--radius-card)] border border-border">
-            <table className="w-full min-w-[1000px] border-collapse text-[13px]">
+            <table className="w-full min-w-[1100px] border-collapse text-[13px]">
               <thead>
                 <tr className="border-b border-border bg-surface-2/50 text-[11px] font-medium uppercase tracking-wide text-muted">
                   <th className="w-9 px-3 py-2.5">
                     <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Select all on this page" className="h-4 w-4 accent-accent-strong" />
                   </th>
-                  <th className="px-4 py-2.5 text-left font-medium">Date</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Order #</th>
+                  <th className="w-8 px-1 py-2.5" />
+                  <th className="px-3 py-2.5 text-left font-medium">Order</th>
+                  <th className="px-4 py-2.5 text-left font-medium">Items</th>
                   <th className="px-4 py-2.5 text-left font-medium">Source</th>
                   <th className="px-4 py-2.5 text-left font-medium">Sales channel</th>
                   <th className="px-4 py-2.5 text-left font-medium">Fulfilled at</th>
@@ -598,60 +622,59 @@ export function OrdersClient({
               <tbody>
                 {orders.rows.map((o) => {
                   const st = statusPill(o);
+                  const open = expanded.has(o.id);
+                  const dim = o.cancelled || o.voided || o.excluded ? "opacity-45" : "";
                   return (
-                  <tr key={o.id} className={`border-b border-line last:border-0 ${o.cancelled || o.voided || o.excluded ? "opacity-45" : ""} ${selected.has(o.id) ? "bg-accent-soft/40" : ""}`}>
+                  <Fragment key={o.id}>
+                  <tr className={`${open ? "" : "border-b border-line last:border-0"} ${dim} ${selected.has(o.id) ? "bg-accent-soft/40" : ""}`}>
                     <td className="px-3 py-2.5">
                       <input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleOne(o.id)} aria-label="Select order" className="h-4 w-4 accent-accent-strong" />
                     </td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-[12px] text-muted">{fmtDate(o.orderedAt)}</td>
+                    <td className="px-1 py-2.5">
+                      <button
+                        type="button"
+                        onClick={() => toggleOpen(o.id)}
+                        aria-expanded={open}
+                        aria-label={open ? "Hide the units in this order" : "Show the units in this order"}
+                        title={open ? "Hide units" : "Show units"}
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-surface-2 hover:text-ink"
+                      >
+                        <ChevronRight size={14} className={`transition-transform ${open ? "rotate-90" : ""}`} />
+                      </button>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="font-medium text-ink">{o.orderNumber ?? "—"}</span>
+                        {o.mcf && (
+                          <HoverHint title="MCF order" body="Amazon shipped this for another channel (e.g. a Shopify order). The money lives on that channel's own order, so $0 here is correct." className="align-middle">
+                            <span className={`${PILL} pill-chart`}>MCF</span>
+                          </HoverHint>
+                        )}
+                        {o.replacement && (
+                          <HoverHint title="Replacement" body="A free re-ship of an earlier order — the original order carries the revenue." className="align-middle">
+                            <span className={`${PILL} pill-neutral`}>Replacement</span>
+                          </HoverHint>
+                        )}
+                        {o.freeUnit && (
+                          <HoverHint title="Free unit" body="A shipped $0 order that isn't MCF or a replacement — could be Vine or another freebie." className="align-middle">
+                            <span className={`${PILL} pill-neutral`}>Free unit</span>
+                          </HoverHint>
+                        )}
+                        {o.freeSample && (
+                          <HoverHint title="Free sample" body="A TikTok order the buyer paid $0 for — a creator or promo sample." className="align-middle">
+                            <span className={`${PILL} pill-neutral`}>Free sample</span>
+                          </HoverHint>
+                        )}
+                        {(o.voided || o.excluded) && (
+                          <HoverHint title="Voided" body="Out of every total — a double-count removed by an exclusion toggle, or voided by hand from the row menu." className="align-middle">
+                            <span className={`${PILL} pill-neutral`}>Voided</span>
+                          </HoverHint>
+                        )}
+                      </div>
+                      <div className="mt-0.5 whitespace-nowrap text-[11.5px] text-muted">{fmtDate(o.orderedAt)}</div>
+                    </td>
                     <td className="px-4 py-2.5">
-                      <span className="font-medium text-ink">{o.orderNumber ?? "—"}</span>
-
-                      {o.mcf && (
-                        <HoverHint
-                          title="MCF order"
-                          body="Amazon shipped this for another channel (e.g. a Shopify order). The money lives on that channel's own order, so $0 here is correct."
-                          className="ml-2 align-middle"
-                        >
-                          <span className={`${PILL} pill-chart`}>MCF</span>
-                        </HoverHint>
-                      )}
-                      {o.replacement && (
-                        <HoverHint
-                          title="Replacement"
-                          body="A free re-ship of an earlier order — the original order carries the revenue."
-                          className="ml-2 align-middle"
-                        >
-                          <span className={`${PILL} pill-neutral`}>Replacement</span>
-                        </HoverHint>
-                      )}
-                      {o.freeUnit && (
-                        <HoverHint
-                          title="Free unit"
-                          body="A shipped $0 order that isn't MCF or a replacement — could be Vine or another freebie."
-                          className="ml-2 align-middle"
-                        >
-                          <span className={`${PILL} pill-neutral`}>Free unit</span>
-                        </HoverHint>
-                      )}
-                      {o.freeSample && (
-                        <HoverHint
-                          title="Free sample"
-                          body="A TikTok order the buyer paid $0 for — a creator or promo sample."
-                          className="ml-2 align-middle"
-                        >
-                          <span className={`${PILL} pill-neutral`}>Free sample</span>
-                        </HoverHint>
-                      )}
-                      {(o.voided || o.excluded) && (
-                        <HoverHint
-                          title="Voided"
-                          body="Out of every total — a double-count removed by an exclusion toggle, or voided by hand from the row menu."
-                          className="ml-2 align-middle"
-                        >
-                          <span className={`${PILL} pill-neutral`}>Voided</span>
-                        </HoverHint>
-                      )}
+                      <ItemChips lines={o.lines} />
                     </td>
                     <td className="px-4 py-2.5">
                       <span className="flex items-center gap-2">
@@ -703,6 +726,15 @@ export function OrdersClient({
                       <RowMenu id={o.id} voided={o.voided} onManage={() => setDialogId(o.id)} />
                     </td>
                   </tr>
+                  {open && (
+                    <tr className={`border-b border-line last:border-0 ${dim}`}>
+                      <td colSpan={2} />
+                      <td colSpan={10} className="px-3 pb-3 pt-0.5">
+                        <OrderLines lines={o.lines} money={money} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                   );
                 })}
               </tbody>
@@ -738,6 +770,69 @@ export function OrdersClient({
       )}
 
       {dialogOrder && <OrderDialog order={dialogOrder} facilities={fees.facilities} onClose={() => setDialogId(null)} />}
+    </div>
+  );
+}
+
+/** The units in an order at a glance — each product's picture and code, ×qty when more than one
+ *  (the first four; the rest is a count). An unmapped SKU shows as sold, in grey. */
+function ItemChips({ lines }: { lines: OrderRow["lines"] }) {
+  if (lines.length === 0) return <span className="text-muted">—</span>;
+  const shown = lines.slice(0, 4);
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {shown.map((l, i) => {
+        const code = l.code ?? l.sku ?? "?";
+        return (
+          <span key={i} className="inline-flex items-center gap-1 rounded-md border border-border bg-surface py-0.5 pl-0.5 pr-1.5" title={`${l.name ?? l.sku ?? code} × ${l.quantity}`}>
+            <SkuAvatar code={code} imageUrl={l.imageUrl} size={20} />
+            <span className={`max-w-[96px] truncate text-[11px] font-medium ${l.code ? "text-ink" : "text-muted"}`}>{code}</span>
+            {l.quantity > 1 && <span className="text-[10.5px] tabular text-muted">×{l.quantity}</span>}
+          </span>
+        );
+      })}
+      {lines.length > shown.length && <span className="text-[11px] text-muted">+{lines.length - shown.length}</span>}
+    </div>
+  );
+}
+
+/** The opened row: every unit on the order with the product it maps to (or the SKU as sold, when
+ *  unmapped), its quantity and its net price. */
+function OrderLines({ lines, money }: { lines: OrderRow["lines"]; money: (v: number) => string }) {
+  if (lines.length === 0) return <div className="text-[12px] text-muted">No line items on this order.</div>;
+  return (
+    <div className="inline-block min-w-[560px] max-w-full overflow-hidden rounded-lg border border-border bg-surface">
+      <table className="w-full border-collapse text-[12.5px]">
+        <thead>
+          <tr className="border-b border-line bg-surface-2/50 text-[10.5px] font-medium uppercase tracking-wide text-muted">
+            <th className="px-3 py-1.5 text-left font-medium">Item</th>
+            <th className="px-3 py-1.5 text-left font-medium">SKU as sold</th>
+            <th className="px-3 py-1.5 text-right font-medium">Units</th>
+            <th className="px-3 py-1.5 text-right font-medium">Unit price</th>
+            <th className="px-3 py-1.5 text-right font-medium">Line total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map((l, i) => (
+            <tr key={i} className="border-b border-line last:border-0">
+              <td className="px-3 py-1.5">
+                <span className="flex items-center gap-2">
+                  <SkuAvatar code={l.code ?? l.sku ?? "?"} imageUrl={l.imageUrl} size={24} />
+                  <span className="flex flex-col leading-tight">
+                    <span className="font-medium text-ink">{l.code ?? <span className="font-normal text-muted">Not mapped to a product</span>}</span>
+                    {l.name && <span className="text-[11px] text-muted">{l.name}</span>}
+                  </span>
+                </span>
+              </td>
+              <td className="px-3 py-1.5 text-ink-soft">{l.sku ?? "—"}</td>
+              <td className="px-3 py-1.5 text-right tabular text-ink-soft">{l.quantity.toLocaleString()}</td>
+              <td className="px-3 py-1.5 text-right tabular text-ink-soft">{money(l.unitPrice)}</td>
+              <td className="px-3 py-1.5 text-right tabular text-ink">{money(l.unitPrice * l.quantity)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="border-t border-line px-3 py-1.5 text-[11px] text-muted">Product prices are net of promotions. Shipping, tax and order-level discounts sit in the order total.</div>
     </div>
   );
 }
