@@ -797,37 +797,43 @@ function ItemChips({ lines }: { lines: OrderRow["lines"] }) {
 }
 
 /** The opened row: every unit on the order with the product it maps to (or the SKU as sold, when
- *  unmapped), its quantity and its net price. */
+ *  unmapped), its quantity and its net price.
+ *
+ *  Sized to its content and capped, never to the row: a long product name is cut to one line (the
+ *  full name is the tooltip) and the number columns never wrap, so the block stays compact instead
+ *  of shoving every column to the right edge. Sticky on the left: the orders table is wider than
+ *  the screen and scrolls sideways, and a block anchored at the table's left edge would sit
+ *  off-screen for anyone looking at the Total column — this one follows the scroll. */
 function OrderLines({ lines, money }: { lines: OrderRow["lines"]; money: (v: number) => string }) {
   if (lines.length === 0) return <div className="text-[12px] text-muted">No line items on this order.</div>;
   return (
-    <div className="inline-block min-w-[560px] max-w-full overflow-hidden rounded-lg border border-border bg-surface">
+    <div className="sticky left-3 w-max max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-surface md:max-w-[min(880px,calc(100vw-300px))]">
       <table className="w-full border-collapse text-[12.5px]">
         <thead>
           <tr className="border-b border-line bg-surface-2/50 text-[10.5px] font-medium uppercase tracking-wide text-muted">
-            <th className="px-3 py-1.5 text-left font-medium">Item</th>
-            <th className="px-3 py-1.5 text-left font-medium">SKU as sold</th>
-            <th className="px-3 py-1.5 text-right font-medium">Units</th>
-            <th className="px-3 py-1.5 text-right font-medium">Unit price</th>
-            <th className="px-3 py-1.5 text-right font-medium">Line total</th>
+            <th className="whitespace-nowrap px-3 py-1.5 text-left font-medium">Item</th>
+            <th className="whitespace-nowrap px-3 py-1.5 text-left font-medium">SKU as sold</th>
+            <th className="whitespace-nowrap px-3 py-1.5 text-right font-medium">Units</th>
+            <th className="whitespace-nowrap px-3 py-1.5 text-right font-medium">Unit price</th>
+            <th className="whitespace-nowrap px-3 py-1.5 text-right font-medium">Line total</th>
           </tr>
         </thead>
         <tbody>
           {lines.map((l, i) => (
             <tr key={i} className="border-b border-line last:border-0">
               <td className="px-3 py-1.5">
-                <span className="flex items-center gap-2">
+                <span className="flex min-w-0 items-center gap-2">
                   <SkuAvatar code={l.code ?? l.sku ?? "?"} imageUrl={l.imageUrl} size={24} />
-                  <span className="flex flex-col leading-tight">
-                    <span className="font-medium text-ink">{l.code ?? <span className="font-normal text-muted">Not mapped to a product</span>}</span>
-                    {l.name && <span className="text-[11px] text-muted">{l.name}</span>}
+                  <span className="flex min-w-0 flex-col leading-tight">
+                    <span className="whitespace-nowrap font-medium text-ink">{l.code ?? <span className="font-normal text-muted">Not mapped to a product</span>}</span>
+                    {l.name && <span className="block max-w-[360px] truncate text-[11px] text-muted" title={l.name}>{l.name}</span>}
                   </span>
                 </span>
               </td>
-              <td className="px-3 py-1.5 text-ink-soft">{l.sku ?? "—"}</td>
-              <td className="px-3 py-1.5 text-right tabular text-ink-soft">{l.quantity.toLocaleString()}</td>
-              <td className="px-3 py-1.5 text-right tabular text-ink-soft">{money(l.unitPrice)}</td>
-              <td className="px-3 py-1.5 text-right tabular text-ink">{money(l.unitPrice * l.quantity)}</td>
+              <td className="whitespace-nowrap px-3 py-1.5 text-ink-soft">{l.sku ?? "—"}</td>
+              <td className="whitespace-nowrap px-3 py-1.5 text-right tabular text-ink-soft">{l.quantity.toLocaleString()}</td>
+              <td className="whitespace-nowrap px-3 py-1.5 text-right tabular text-ink-soft">{money(l.unitPrice)}</td>
+              <td className="whitespace-nowrap px-3 py-1.5 text-right tabular text-ink">{money(l.unitPrice * l.quantity)}</td>
             </tr>
           ))}
         </tbody>
