@@ -390,6 +390,18 @@ export function OrdersClient({
   const [rulesOpen, setRulesOpen] = useState(false);
   // Rows opened to show their units (per page; a page change starts closed).
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // The visible width of the scrolling table area: an open order's units table is sized to it, so
+  // it spans exactly what is on screen and follows the sideways scroll (see OrderLines).
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
+  const [viewW, setViewW] = useState(0);
+  useEffect(() => {
+    if (!scroller) return;
+    const measure = () => setViewW(scroller.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(scroller);
+    return () => ro.disconnect();
+  }, [scroller]);
   const toggleOpen = (id: string) =>
     setExpanded((cur) => {
       const next = new Set(cur);
@@ -599,7 +611,7 @@ export function OrdersClient({
         </div>
       ) : (
         <div>
-          <div className="overflow-x-auto rounded-[var(--radius-card)] border border-border">
+          <div ref={setScroller} className="overflow-x-auto rounded-[var(--radius-card)] border border-border">
             <table className="w-full min-w-[1100px] border-collapse text-[13px]">
               <thead>
                 <tr className="border-b border-border bg-surface-2/50 text-[11px] font-medium uppercase tracking-wide text-muted">
@@ -728,9 +740,10 @@ export function OrdersClient({
                   </tr>
                   {open && (
                     <tr className={`border-b border-line last:border-0 ${dim}`}>
-                      <td colSpan={2} />
-                      <td colSpan={10} className="px-3 pb-3 pt-0.5">
-                        <OrderLines lines={o.lines} money={money} />
+                      {/* One cell across the whole row: the block inside is sized to the visible width and
+                          sticks to the left, so it never pushes the table wider. */}
+                      <td colSpan={12} className="px-3 pb-3 pt-0.5">
+                        <OrderLines lines={o.lines} money={money} width={viewW} />
                       </td>
                     </tr>
                   )}
@@ -799,16 +812,24 @@ function ItemChips({ lines }: { lines: OrderRow["lines"] }) {
 /** The opened row: every unit on the order with the product it maps to (or the SKU as sold, when
  *  unmapped), its quantity and its net price.
  *
- *  Sized to its content and capped, never to the row: a long product name is cut to one line (the
- *  full name is the tooltip) and the number columns never wrap, so the block stays compact instead
- *  of shoving every column to the right edge. Sticky on the left: the orders table is wider than
- *  the screen and scrolls sideways, and a block anchored at the table's left edge would sit
- *  off-screen for anyone looking at the Total column — this one follows the scroll. */
-function OrderLines({ lines, money }: { lines: OrderRow["lines"]; money: (v: number) => string }) {
+ *  Spans the full VISIBLE width of the orders table (measured by the parent) and is sticky on the
+ *  left: the table is wider than the screen and scrolls sideways, so a block anchored at the
+ *  table's left edge would sit off-screen for anyone looking at the Total column — this one is
+ *  always exactly what is on screen, wherever the table is scrolled. Fixed column widths for the
+ *  SKU and the numbers; the Item column takes the rest, a long product name cut to one line (the
+ *  full name is the tooltip). */
+function OrderLines({ lines, money, width }: { lines: OrderRow["lines"]; money: (v: number) => string; width: number }) {
   if (lines.length === 0) return <div className="text-[12px] text-muted">No line items on this order.</div>;
   return (
-    <div className="sticky left-3 w-max max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-surface md:max-w-[min(880px,calc(100vw-300px))]">
-      <table className="w-full border-collapse text-[12.5px]">
+    <div className="sticky left-3 min-w-[640px] overflow-hidden rounded-lg border border-border bg-surface" style={width > 0 ? { width: width - 24 } : undefined}>
+      <table className="w-full table-fixed border-collapse text-[12.5px]">
+        <colgroup>
+          <col />
+          <col className="w-[200px]" />
+          <col className="w-[76px]" />
+          <col className="w-[110px]" />
+          <col className="w-[116px]" />
+        </colgroup>
         <thead>
           <tr className="border-b border-line bg-surface-2/50 text-[10.5px] font-medium uppercase tracking-wide text-muted">
             <th className="whitespace-nowrap px-3 py-1.5 text-left font-medium">Item</th>
@@ -821,16 +842,16 @@ function OrderLines({ lines, money }: { lines: OrderRow["lines"]; money: (v: num
         <tbody>
           {lines.map((l, i) => (
             <tr key={i} className="border-b border-line last:border-0">
-              <td className="px-3 py-1.5">
+              <td className="overflow-hidden px-3 py-1.5">
                 <span className="flex min-w-0 items-center gap-2">
                   <SkuAvatar code={l.code ?? l.sku ?? "?"} imageUrl={l.imageUrl} size={24} />
                   <span className="flex min-w-0 flex-col leading-tight">
-                    <span className="whitespace-nowrap font-medium text-ink">{l.code ?? <span className="font-normal text-muted">Not mapped to a product</span>}</span>
-                    {l.name && <span className="block max-w-[360px] truncate text-[11px] text-muted" title={l.name}>{l.name}</span>}
+                    <span className="truncate font-medium text-ink">{l.code ?? <span className="font-normal text-muted">Not mapped to a product</span>}</span>
+                    {l.name && <span className="truncate text-[11px] text-muted" title={l.name}>{l.name}</span>}
                   </span>
                 </span>
               </td>
-              <td className="whitespace-nowrap px-3 py-1.5 text-ink-soft">{l.sku ?? "—"}</td>
+              <td className="truncate px-3 py-1.5 text-ink-soft" title={l.sku ?? undefined}>{l.sku ?? "—"}</td>
               <td className="whitespace-nowrap px-3 py-1.5 text-right tabular text-ink-soft">{l.quantity.toLocaleString()}</td>
               <td className="whitespace-nowrap px-3 py-1.5 text-right tabular text-ink-soft">{money(l.unitPrice)}</td>
               <td className="whitespace-nowrap px-3 py-1.5 text-right tabular text-ink">{money(l.unitPrice * l.quantity)}</td>
