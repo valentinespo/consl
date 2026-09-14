@@ -59,6 +59,7 @@ export default async function MappingPage({ searchParams }: { searchParams: Prom
       sku: l.sku,
       imageUrl: l.imageUrl,
       price: l.price,
+      status: l.status,
       ignored: l.ignored,
       mapped: mapped ? { id: mapped.id, code: mapped.code, name: mapped.name, imageUrl: mapped.imageUrl } : null,
       suggestion,

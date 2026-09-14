@@ -15,6 +15,8 @@ type Row = {
   sku: string | null;
   imageUrl: string | null;
   price: number | null;
+  /** The platform's listing state (TikTok: DRAFT until published) — absent/null when it has none. */
+  status?: string | null;
   ignored: boolean;
   mapped: { id: string; code: string; name: string; imageUrl: string | null } | null;
   suggestion: { productId: string; confidence: "exact" | "similar" } | null;
@@ -256,6 +258,7 @@ export function ChannelMappingClient({
                     <div className="truncate text-[13px] font-medium text-ink">{r.title}</div>
                     <div className="mt-0.5 flex items-center gap-2 text-[11.5px] text-ink-soft">
                       {r.sku ? <span className={`pill-neutral ${PILL}`}>{r.sku}</span> : <span className="italic">no SKU</span>}
+                      {r.status === "DRAFT" && <span className={`pill-neutral ${PILL}`} title="A draft on the channel — not published yet">Draft</span>}
                       {r.price != null && <span>${r.price.toFixed(2)}</span>}
                       {r.suggestion && stage?.action === "map" && (
                         <span className={`pill-chart ${PILL}`}>{r.suggestion.confidence === "exact" ? "Exact match" : "Suggested"}</span>
@@ -339,6 +342,7 @@ export function ChannelMappingClient({
                     </div>
                     <div className="mt-0.5 flex items-center gap-2 text-[11.5px] text-ink-soft">
                       {r.sku && <span className={`pill-neutral ${PILL}`}>{r.sku}</span>}
+                      {r.status === "DRAFT" && <span className={`pill-neutral ${PILL}`} title="A draft on the channel — not published yet">Draft</span>}
                       {staged ? <span className={`pill-amber ${PILL}`}>Will unmap on save</span> : <span className={`pill-green ${PILL}`}>Mapped</span>}
                     </div>
                   </div>

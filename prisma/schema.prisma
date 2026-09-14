@@ -814,6 +814,9 @@ model ChannelListing {
   title             String
   imageUrl          String? // platform CDN url — display only, downloaded on import
   price             Float?
+  // The platform's own listing state when it reports one (TikTok: DRAFT, ACTIVATE, FREEZE, …).
+  // A draft can be mapped, but wears a "Draft" pill until it is published; deleted ones never land.
+  status            String?
   ignored           Boolean       @default(false)
   lastSeenAt        DateTime      @default(now())
   createdAt         DateTime      @default(now())

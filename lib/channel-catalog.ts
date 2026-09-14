@@ -81,6 +81,7 @@ type FetchedListing = {
   title: string;
   imageUrl: string | null;
   price: number | null;
+  status?: string | null; // the platform's listing state, when it reports one (TikTok)
 };
 
 async function upsertListings(channel: ChannelKey, fetched: FetchedListing[]): Promise<{ seen: number }> {
@@ -95,7 +96,7 @@ async function upsertListings(channel: ChannelKey, fetched: FetchedListing[]): P
         where: { id: row.id },
         // Images are decoration: keep the last known one when a refresh couldn't fetch any
         // (a throttled catalog call must not blank the screen).
-        data: { sku: f.sku, title: f.title, imageUrl: f.imageUrl ?? row.imageUrl, price: f.price, externalProductId: f.externalProductId, lastSeenAt: now },
+        data: { sku: f.sku, title: f.title, imageUrl: f.imageUrl ?? row.imageUrl, price: f.price, externalProductId: f.externalProductId, status: f.status ?? null, lastSeenAt: now },
       });
     } else {
       await prisma.channelListing.create({
@@ -198,6 +199,7 @@ export async function refreshAmazonListings(): Promise<{ seen: number }> {
 }
 
 type TikTokSearchProduct = {
+  status?: string | null; // DRAFT | PENDING | FAILED | ACTIVATE | SELLER_DEACTIVATED | PLATFORM_DEACTIVATED | FREEZE | DELETED
   id: string;
   title?: string | null;
   main_images?: Array<{ urls?: string[] | null; thumb_urls?: string[] | null }> | null;
@@ -237,7 +239,13 @@ export async function refreshTikTokListings(): Promise<{ seen: number }> {
       if (!(e instanceof TikTokError && e.status === 404)) throw e;
       data = await tiktokApi({ method: "GET", path: `/product/${TIKTOK_API_VERSION}/products/search`, accessToken: token, query });
     }
-    for (const p of data.products ?? []) {
+    const live = (p: TikTokSearchProduct) => ((p.status ?? "").toUpperCase() === "ACTIVATE" ? 0 : 1);
+    for (const p of [...(data.products ?? [])].sort((a, b) => live(a) - live(b))) {
+      // TikTok returns its whole catalog, deleted listings included (old copies keep their seller
+      // SKUs). Those never land. Drafts do — they can be mapped ahead of publishing — and carry
+      // their state so the screen can say so. Live listings are read first so a live SKU always
+      // wins over a draft or a frozen copy of the same SKU.
+      if ((p.status ?? "").toUpperCase() === "DELETED") continue;
       const title = p.title?.trim() || p.id;
       const image = p.main_images?.[0]?.thumb_urls?.[0] ?? p.main_images?.[0]?.urls?.[0] ?? null;
       const skus = p.skus ?? [];
@@ -253,6 +261,7 @@ export async function refreshTikTokListings(): Promise<{ seen: number }> {
           title: skus.length > 1 ? `${title} — ${sellerSku}` : title,
           imageUrl: image,
           price: rawPrice != null && rawPrice !== "" && !Number.isNaN(Number(rawPrice)) ? Number(rawPrice) : null,
+          status: p.status ?? null,
         });
       }
     }
