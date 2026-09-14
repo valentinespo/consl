@@ -10,8 +10,11 @@
  *                    duties and additional fees as pass-throughs, tax-inclusive prices unpacked.
  *  shopifyOrders  2 — the payment method (gateway + wallet/card) captured on every order; PayPal
  *                    Wallet inside Shopify Payments named as such.
+ *  tiktokOrders   1 — first API generation: a company whose TikTok orders were loaded from a
+ *                    Seller Center export (before the shop could authorize) gets one full re-read
+ *                    from the API once connected, so every order carries TikTok's own version.
  */
-export const IMPORTER_VERSIONS = { amazonFinance: 3, shopifyFinance: 3, shopifyOrders: 2 } as const;
+export const IMPORTER_VERSIONS = { amazonFinance: 3, shopifyFinance: 3, shopifyOrders: 2, tiktokOrders: 1 } as const;
 export type ImporterKey = keyof typeof IMPORTER_VERSIONS;
 
 /** The generation a company's ledger was written with (0 = before generations were tracked). */

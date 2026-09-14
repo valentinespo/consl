@@ -200,9 +200,10 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
             const existing = await prisma.salesOrder.count({ where: { channel } });
             const settingsNow = await getOrgSettings();
             const behind =
-              provider === "shopify" &&
-              (importerVersion(settingsNow.importerVersions, "shopifyFinance") < IMPORTER_VERSIONS.shopifyFinance ||
-                importerVersion(settingsNow.importerVersions, "shopifyOrders") < IMPORTER_VERSIONS.shopifyOrders);
+              provider === "shopify"
+                ? importerVersion(settingsNow.importerVersions, "shopifyFinance") < IMPORTER_VERSIONS.shopifyFinance ||
+                  importerVersion(settingsNow.importerVersions, "shopifyOrders") < IMPORTER_VERSIONS.shopifyOrders
+                : importerVersion(settingsNow.importerVersions, "tiktokOrders") < IMPORTER_VERSIONS.tiktokOrders;
             const sweepStart = new Date();
             const syncedThrough = settingsNow[syncedKey];
             const since = syncedThrough ? new Date(syncedThrough.getTime() - 60 * 60_000) : new Date(Date.now() - 3 * 86_400_000);
@@ -211,9 +212,12 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
             // A pull that stopped at its page cap is complete only up to the last change it read.
             await saveOrgSettings({ [syncedKey]: r.coveredThrough ?? sweepStart });
             if (existing === 0) console.log(`[scheduler] ${provider} full order history imported for org ${orgId}`);
-            if (behind) {
+            if (behind && provider === "shopify") {
               await saveOrgSettings({ importerVersions: stampImporterVersion(stampImporterVersion(settingsNow.importerVersions, "shopifyFinance"), "shopifyOrders") });
               console.log(`[scheduler] shopify ledger re-read for ${orgId}: on the current importer`);
+            } else if (behind) {
+              await saveOrgSettings({ importerVersions: stampImporterVersion(settingsNow.importerVersions, "tiktokOrders") });
+              console.log(`[scheduler] tiktok orders re-read for ${orgId}: on the current importer (${r.orders} orders)`);
             }
           } catch (e) {
             console.error(`[scheduler] ${provider} orders failed for org ${orgId}:`, (e as Error).message);
