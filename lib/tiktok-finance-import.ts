@@ -224,7 +224,9 @@ function balanced(lines: TikTokStatementLine[], total: unknown, fallback: { name
   const want = num(total);
   const have = lines.reduce((t, l) => t + num(l.amount), 0);
   const diff = r2(want - have);
-  if (Math.abs(diff) >= 0.005) lines.push({ type: "unlisted", name: fallback.name, amount: String(diff), group: fallback.group });
+  // A cent or two is TikTok's own rounding between its lines and its total; anything bigger is a
+  // line we did not receive.
+  if (Math.abs(diff) >= 0.005) lines.push({ type: "unlisted", name: Math.abs(diff) < 0.05 ? "Rounding" : fallback.name, amount: String(diff), group: Math.abs(diff) < 0.05 ? "other" : fallback.group });
   return lines;
 }
 
@@ -237,7 +239,7 @@ export function moneyLines(t: StatementTx, totals: { revenue: unknown; shipping:
   // The whole transaction must equal what TikTok settled for it.
   const all = [...revenue, ...shipping, ...fees].reduce((s, l) => s + num(l.amount), 0);
   const diff = r2(num(totals.settlement) - all);
-  if (Math.abs(diff) >= 0.005) fees.push({ type: "unlisted", name: "Settlement not itemised", amount: String(diff), group: "other" });
+  if (Math.abs(diff) >= 0.005) fees.push({ type: "unlisted", name: Math.abs(diff) < 0.05 ? "Rounding" : "Settlement not itemised", amount: String(diff), group: "other" });
   return { revenue, shipping, fees };
 }
 
