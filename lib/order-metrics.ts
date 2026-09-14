@@ -42,7 +42,22 @@ export type OrdersFilter = {
   from?: string; // ISO day (inclusive); undefined = beginning of time
   to?: string; // ISO day (inclusive); undefined = today
   q?: string; // free-text search — order #, amount, SKU, or words like "mcf" / "pending" / "free"
+  fulfilledAt?: string; // a facility id, or "none" for orders with no facility yet
 };
+
+/** The facilities orders are currently fulfilled from (the correction wins over the detected one),
+ *  with a "No facility" entry when some orders have none — the choices of the Orders filter. */
+export async function fulfilledAtOptions(): Promise<{ id: string; name: string; orders: number }[]> {
+  const orgId = await getCurrentOrgId();
+  const rows = await prisma.$queryRaw<{ id: string | null; name: string | null; orders: number }[]>`
+    SELECT f.id, f.name, COUNT(*)::int AS orders
+    FROM "SalesOrder" o LEFT JOIN "Facility" f ON f.id = COALESCE(o."fulfillmentOverrideFacilityId", o."fulfillmentFacilityId")
+    WHERE o."orgId" = ${orgId} GROUP BY 1, 2 ORDER BY 3 DESC`;
+  const out = rows.filter((r) => r.id).map((r) => ({ id: r.id as string, name: r.name ?? "?", orders: r.orders }));
+  const none = rows.find((r) => !r.id);
+  if (none) out.push({ id: "none", name: "No facility", orders: none.orders });
+  return out;
+}
 
 function bounds(f: OrdersFilter): { since: Date | null; until: Date | null } {
   return {
@@ -359,6 +374,12 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
   const where = {
     ...(filter.channel ? { channel: filter.channel } : {}),
     ...(since || until ? { orderedAt: { ...(since ? { gte: since } : {}), ...(until ? { lte: until } : {}) } } : {}),
+    // Fulfilled at: the correction when there is one, else the detected facility.
+    ...(filter.fulfilledAt === "none"
+      ? { fulfillmentOverrideFacilityId: null, fulfillmentFacilityId: null }
+      : filter.fulfilledAt
+        ? { OR: [{ fulfillmentOverrideFacilityId: filter.fulfilledAt }, { fulfillmentOverrideFacilityId: null, fulfillmentFacilityId: filter.fulfilledAt }] }
+        : {}),
     ...(q ? { AND: [searchWhere(q, { sources: excluded, mcf: excludeMcf })] } : {}),
   };
 

@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronRight, DotsVertical, Layers, Search, Settings } from "@/components/icons";
+import { ChevronDown, ChevronRight, DotsVertical, Layers, Search, Settings, WarehouseFilled } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { setOrderVoided } from "@/app/orders/actions";
 import type { OrdersSummary, OrdersPage, OrderRow } from "@/lib/order-metrics";
@@ -236,12 +236,106 @@ function ChannelSelect({ value, channels, onChange }: { value: string; channels:
   );
 }
 
+/** The "Fulfilled at" filter — every facility orders are currently fulfilled from, plus "No
+ *  facility" when some orders have none. Same popover as the channel filter, no logos. */
+function PlaceSelect({ value, options, onChange }: { value: string; options: { id: string; name: string; orders: number }[]; onChange: (v: string) => void }) {
+  const btn = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState<{ top: number; left: number } | null>(null);
+  const lastBox = useRef(box);
+  if (box) lastBox.current = box;
+  const open = box !== null;
+  const exit = useExitAnimation(open);
+
+  useEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const r = btn.current?.getBoundingClientRect();
+      if (r) setBox({ top: r.bottom + 6, left: r.left });
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setBox(null);
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!btn.current?.contains(t) && !panel.current?.contains(t)) setBox(null);
+    };
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    window.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDown);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDown);
+    };
+  }, [open]);
+
+  function toggle() {
+    if (open) return setBox(null);
+    const r = btn.current!.getBoundingClientRect();
+    setBox({ top: r.bottom + 6, left: r.left });
+  }
+  function choose(v: string) {
+    setBox(null);
+    if (v !== value) onChange(v);
+  }
+  const current = options.find((o) => o.id === value);
+  return (
+    <>
+      <button
+        ref={btn}
+        type="button"
+        onClick={toggle}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="inline-flex h-9 items-center gap-2 rounded-[10px] border border-border bg-surface px-3 text-[12.5px] font-medium text-ink outline-none transition-colors hover:border-ink/25 focus-visible:border-ink/40"
+      >
+        <WarehouseFilled size={15} className="text-ink-soft" />
+        {current ? current.name : "Fulfilled anywhere"}
+        <ChevronDown size={13} className="text-muted" />
+      </button>
+      {exit.mounted &&
+        lastBox.current &&
+        createPortal(
+          <div
+            ref={panel}
+            role="listbox"
+            aria-label="Fulfilled at"
+            style={{ position: "fixed", top: lastBox.current.top, left: lastBox.current.left, width: 240 }}
+            className={`${exit.closing ? "dropdown-out" : "dropdown-in"} z-[300] rounded-xl border border-border bg-surface p-1 shadow-xl`}
+          >
+            {[{ id: "", name: "Fulfilled anywhere", orders: 0 }, ...options].map((o) => {
+              const active = value === o.id;
+              return (
+                <button
+                  key={o.id || "all"}
+                  type="button"
+                  role="option"
+                  aria-selected={active}
+                  onClick={() => choose(o.id)}
+                  className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] transition-colors ${
+                    active ? "bg-chart-soft font-medium text-chart" : "text-ink-soft hover:bg-surface-2 hover:text-ink"
+                  }`}
+                >
+                  <span className="truncate">{o.name}</span>
+                  {o.id && <span className="shrink-0 text-[11px] tabular text-muted">{o.orders}</span>}
+                </button>
+              );
+            })}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
 export function OrdersClient({
   summary,
   orders,
   connectedChannels,
   historyImporting = false,
   fees,
+  fulfilledOptions,
   filter,
   dataBounds,
 }: {
@@ -253,7 +347,9 @@ export function OrdersClient({
   historyImporting?: boolean;
   /** Fee rules and the vocab the rule form offers. */
   fees: FeeOptions;
-  filter: { channel: string; range: Range; q: string };
+  /** Facilities orders are fulfilled from, for the "Fulfilled at" filter. */
+  fulfilledOptions: { id: string; name: string; orders: number }[];
+  filter: { channel: string; range: Range; q: string; fulfilledAt: string };
   dataBounds: { newest: string; oldest: string };
 }) {
   const connected = connectedChannels.length > 0;
@@ -360,6 +456,7 @@ export function OrdersClient({
           locale={locale}
         />
         <ChannelSelect value={filter.channel} channels={connectedChannels} onChange={(v) => setParam("channel", v)} />
+        {fulfilledOptions.length > 0 && <PlaceSelect value={filter.fulfilledAt} options={fulfilledOptions} onChange={(v) => setParam("fulfilled", v)} />}
         <form
           className="relative min-w-[220px] flex-1 sm:max-w-[280px]"
           onSubmit={(e) => {
@@ -376,7 +473,7 @@ export function OrdersClient({
             className={`${inputCls} pl-8`}
           />
         </form>
-        {(filter.channel || filter.range.key !== "all" || filter.q) && (
+        {(filter.channel || filter.fulfilledAt || filter.range.key !== "all" || filter.q) && (
           <button
             onClick={() => router.push(pathname)}
             className="text-[12.5px] font-medium text-muted underline-offset-2 hover:text-ink-soft hover:underline"
@@ -407,7 +504,7 @@ export function OrdersClient({
         <div className="rounded-[var(--radius-card)] border border-dashed border-border bg-surface-2/40 px-6 py-10 text-center">
           <div className="text-[14px] font-semibold text-ink">No orders found</div>
           <p className="mt-1 text-[12.5px] text-muted">
-            {filter.channel || filter.range.key !== "all" || filter.q
+            {filter.channel || filter.fulfilledAt || filter.range.key !== "all" || filter.q
               ? "Nothing matches these filters."
               : connected
                 ? "Your order history is importing itself — check back in a few minutes."

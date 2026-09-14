@@ -25,7 +25,7 @@ export type Reorder2Data = {
   nowMs: number;
 };
 
-const UNPLACED: Place = { id: "none", code: "Not placed", name: "Orders with no facility", kind: "none" };
+const UNPLACED: Place = { id: "none", code: "No facility", name: "Orders with no facility yet", kind: "none" };
 
 export async function getReorder2(): Promise<Reorder2Data> {
   const orgId = await getCurrentOrgId();

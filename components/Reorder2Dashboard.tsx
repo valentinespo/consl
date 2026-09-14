@@ -22,7 +22,7 @@ const PLACE_GRID = "grid-cols-[minmax(180px,1.4fr)_84px_minmax(0,1.7fr)_112px_12
 
 const mo = (x: number) => (x === Infinity ? "∞" : x.toFixed(1));
 
-const KIND_LABEL: Record<Place["kind"], string> = { own: "Your facility", AMAZON_FBA: "Amazon FBA", AMAZON_AWD: "Amazon AWD", SHOPIFY: "Shopify", TIKTOK: "TikTok", none: "No facility" };
+const KIND_LABEL: Record<Place["kind"], string> = { own: "Your facility", AMAZON_FBA: "Amazon FBA", AMAZON_AWD: "Amazon AWD", SHOPIFY: "Shopify", TIKTOK: "TikTok", none: "orders with no place yet" };
 const KIND_COLOR: Record<Place["kind"], string> = { own: SEG.locations, AMAZON_FBA: SEG.available, AMAZON_AWD: SEG.awd, SHOPIFY: SEG.shopify, TIKTOK: SEG.tiktok, none: "var(--color-muted)" };
 
 /** A row with its stock cells kept apart from the engine's per-place results (both were called `places`). */
@@ -81,6 +81,9 @@ export function Reorder2Dashboard({
   const needsPO = computed.filter((r) => r.order).length;
   const toMove = computed.filter((r) => r.ship).length;
   const expedite = computed.filter((r) => r.expedite).length;
+  // Products that don't sell yet (still in production, not launched) are neither healthy nor
+  // unhealthy — they sit outside the count.
+  const sellingProducts = computed.filter((r) => r.status !== "nosales").length;
   const healthy = computed.filter((r) => r.status === "ok" || r.status === "reordered").length;
   const unitsToOrder = computed.reduce((s, r) => s + r.recommendedQty, 0);
   const actionTone = (flag: "order" | "ship") => (computed.some((r) => r[flag] && r.status === "oos") ? "var(--color-negative)" : "var(--color-warn)");
@@ -120,7 +123,7 @@ export function Reorder2Dashboard({
         <Kpi label="Needs a PO" value={String(needsPO)} tone={needsPO > 0 ? actionTone("order") : undefined} />
         <Kpi label="To move" value={String(toMove)} tone={toMove > 0 ? actionTone("ship") : undefined} />
         <Kpi label="Expedite" value={String(expedite)} tone={expedite > 0 ? "var(--color-negative)" : undefined} />
-        <Kpi label="Healthy" value={`${healthy} / ${computed.length}`} tone={computed.length > 0 && healthy === computed.length ? "#16a34a" : undefined} />
+        <Kpi label="Healthy" value={`${healthy} / ${sellingProducts}`} tone={sellingProducts > 0 && healthy === sellingProducts ? "#16a34a" : undefined} />
         <Kpi label="Units to order" value={n(unitsToOrder)} />
       </div>
 
@@ -360,16 +363,24 @@ function PlaceLine({ p, n, last }: { p: PlaceResult; n: (v: number) => string; l
   if (p.order && !p.expedite && acts.length === 0 && kind !== "none") acts.push({ label: "Needs the run", sub: "counts toward the order above" });
   return (
     <div className={`grid ${PLACE_GRID} items-center gap-4 px-4 py-1.5 pl-[58px] text-[12px] ${last ? "" : "border-b border-line"}`}>
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: KIND_COLOR[kind] }} />
-        <span className="truncate font-medium text-ink">{p.place.code}</span>
-        <span className="truncate text-[11px] text-muted">{kind === "none" ? "Set “Fulfilled at” on these orders" : KIND_LABEL[kind]}</span>
+      <div className="flex min-w-0 items-start gap-2">
+        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-sm" style={{ background: KIND_COLOR[kind] }} />
+        <span className="min-w-0 leading-snug">
+          <span className="font-medium text-ink">{p.place.code}</span>
+          <span className="ml-1.5 text-[11px] text-muted">{KIND_LABEL[kind]}</span>
+        </span>
       </div>
       <div className="tabular text-ink">{kind === "none" ? "—" : n(units)}</div>
-      <div className="tabular text-[11px] text-muted">
+      <div className="text-[11px] tabular leading-snug text-muted">
         {kind === "none"
-          ? `${n(p.monthly)}/mo with no place — velocity counted, stock unknown`
-          : [p.inbound > 0 && `${n(p.inbound)} inbound`, p.reserve > 0 && `${n(p.reserve)} reachable elsewhere`, p.production > 0 && `${n(p.production)} in production for here`].filter(Boolean).join(" · ") || (p.selling ? `${n(p.monthly)}/mo` : "no sales, no inbound")}
+          ? "counted in the run size; set “Fulfilled at” on these orders (Orders tab, filter “No facility”)"
+          : [
+              p.inbound > 0 && `${n(p.inbound)} inbound`,
+              p.reserve > 0 && `${n(p.reserve)} reachable from ${p.reserveFrom.map((d) => `${n(d.units)} ${d.code}`).join(" + ")}`,
+              p.production > 0 && `${n(p.production)} in production that can reach here`,
+            ]
+              .filter(Boolean)
+              .join(" · ") || "nothing on the way"}
       </div>
       <div className="tabular text-ink">
         {p.selling ? (<>{mo(p.onHandCover)}<span className="text-[10.5px] text-muted"> mo</span> <span className="text-[10.5px] text-muted">· {n(p.monthly)}/mo</span></>) : <span className="text-muted">—</span>}

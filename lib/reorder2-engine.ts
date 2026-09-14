@@ -49,6 +49,7 @@ export type PlaceResult = ReorderResult & {
   sellable: number;
   inbound: number;
   reserve: number; // surplus reachable over routes
+  reserveFrom: { code: string; units: number }[]; // where that surplus sits, biggest first
   production: number; // units in production that can reach this place
   selling: boolean;
   moveUnits: number; // suggested units to send here
@@ -112,11 +113,19 @@ export function computeReorder2(row: Reorder2Row, places: Place[], routes: Stock
     // no stock to judge — never a status, never an outage.
     if (c.place.kind === "none") {
       const neutral: ReorderResult = { monthly: c.monthly, win, excl, override: false, onHandCover: 0, awdCover: 0, locCover: 0, prodCover: 0, status: "nosales", statusLabel: "Not placed", recommendedQty: 0, ship: false, expedite: false, order: false, shipWithinDays: 0, dryDays: 0, belowFloor: false };
-      return { ...neutral, place: c.place, sellable: 0, inbound: 0, reserve: 0, production: 0, selling: c.monthly > 0, moveUnits: 0, moveFrom: [] };
+      return { ...neutral, place: c.place, sellable: 0, inbound: 0, reserve: 0, reserveFrom: [], production: 0, selling: c.monthly > 0, moveUnits: 0, moveFrom: [] };
     }
     const froms = feeds.get(c.placeId) ?? new Set<string>();
     let reserve = 0;
-    for (const f of froms) if (f !== c.placeId) reserve += surplus.get(f) ?? 0;
+    const reserveFrom: { code: string; units: number }[] = [];
+    for (const f of froms) {
+      const u = f !== c.placeId ? surplus.get(f) ?? 0 : 0;
+      if (u > 0) {
+        reserve += u;
+        reserveFrom.push({ code: placeById.get(f)?.code ?? "?", units: u });
+      }
+    }
+    reserveFrom.sort((a, b) => b.units - a.units);
     let production = 0;
     let soonest: string | null = null;
     for (const ip of row.inProductionBy) {
@@ -146,10 +155,11 @@ export function computeReorder2(row: Reorder2Row, places: Place[], routes: Stock
       res.statusLabel = "No sales here";
       res.note = c.sellable + c.inbound > 0 ? "holds stock other places can draw on" : undefined;
     }
-    return { ...res, place: c.place, sellable: c.sellable, inbound: c.inbound, reserve, production, selling, moveUnits: 0, moveFrom: [] };
+    return { ...res, place: c.place, sellable: c.sellable, inbound: c.inbound, reserve, reserveFrom, production, selling, moveUnits: 0, moveFrom: [] };
   })
-    // A place with nothing there, nothing coming and no sales in the window says nothing.
-    .filter((r) => r.selling || r.sellable + r.inbound > 0 || r.production > 0);
+    // Only places that SELL get a line. A warehouse or AWD that just holds stock is a donor: it
+    // shows in the product's stock bar and in the "reachable" note of the places it can feed.
+    .filter((r) => r.selling);
 
   // Pass 4 — moves. The most urgent place drains donors first; a donor gives what its surplus
   // allows and not a unit more, so two places never get the same stock suggested.
