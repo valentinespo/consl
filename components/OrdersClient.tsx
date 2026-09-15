@@ -351,7 +351,7 @@ export function OrdersClient({
   summary,
   orders,
   connectedChannels,
-  historyImporting = false,
+  importing = [],
   fees,
   fulfilledOptions,
   tagOptions,
@@ -364,8 +364,8 @@ export function OrdersClient({
   orders: OrdersPage;
   /** Connected channels (AMAZON/SHOPIFY/TIKTOK) — the filter offers exactly these; empty = none. */
   connectedChannels: string[];
-  /** The background history walk hasn't finished its verification pass yet. */
-  historyImporting?: boolean;
+  /** Channels whose first history pull hasn't finished yet (labels), shown while they fill. */
+  importing?: string[];
   /** Fee rules and the vocab the rule form offers. */
   fees: FeeOptions;
   /** Facilities orders are fulfilled from, for the "Fulfilled at" filter. */
@@ -470,10 +470,10 @@ export function OrdersClient({
           <Stat label="Revenue" value={money(summary.totalRevenue)} />
         </div>
         <div className="flex flex-wrap items-center justify-end gap-3">
-          {historyImporting && (
+          {importing.length > 0 && (
             <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />
-              Importing your order history in the background — new sales stay live while it fills.
+              Importing your {listOf(importing)} order history in the background — new sales stay live while it fills.
             </span>
           )}
           {/* Orders consl can't place count in no place: Reorder 2.0 leaves them out and the P&L
@@ -862,6 +862,11 @@ function OrderLines({ lines, money, width }: { lines: OrderRow["lines"]; money: 
       <div className="border-t border-line px-3 py-1.5 text-[11px] text-muted">Product prices are net of promotions. Shipping, tax and order-level discounts sit in the order total.</div>
     </div>
   );
+}
+
+/** "Shopify", "Shopify and TikTok", "Amazon, Shopify and TikTok". */
+function listOf(xs: string[]): string {
+  return xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {

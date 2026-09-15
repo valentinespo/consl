@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { disconnectIntegration } from "@/app/settings/integrations/actions";
+import { disconnectIntegration, disconnectIntegrationAndWipe } from "@/app/settings/integrations/actions";
 import type { Provider } from "@/lib/integrations";
 
 /** Connect (link to the OAuth start route) / Disconnect (two-step, server action) for one provider. */
@@ -33,10 +33,11 @@ export function IntegrationControls({
       </a>
     );
     return confirm ? (
-      <span className="inline-flex items-center gap-1.5">
+      <span className="inline-flex flex-wrap items-center gap-1.5">
         <button
           type="button"
           disabled={pending}
+          title={provider === "meta_ads" ? "Stops importing; every day of spend already on the P&L stays, and a reconnect resumes where it stopped" : "Stops importing; everything already imported stays, and a reconnect resumes where it stopped"}
           onClick={() =>
             start(async () => {
               await disconnectIntegration(provider);
@@ -46,8 +47,25 @@ export function IntegrationControls({
           }
           className="rounded-lg bg-negative px-3 py-2 text-[12.5px] font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
-          {pending ? "Disconnecting…" : "Confirm disconnect"}
+          {pending ? "Disconnecting…" : provider === "meta_ads" ? "Disconnect, keep the spend" : "Confirm disconnect"}
         </button>
+        {provider === "meta_ads" && (
+          <button
+            type="button"
+            disabled={pending}
+            title="Removes the linked ad accounts and every day of spend they brought into the P&L"
+            onClick={() =>
+              start(async () => {
+                await disconnectIntegrationAndWipe(provider);
+                setConfirm(false);
+                router.refresh();
+              })
+            }
+            className="rounded-lg border border-negative bg-surface px-3 py-2 text-[12.5px] font-medium text-negative hover:bg-negative hover:text-white disabled:opacity-50"
+          >
+            Disconnect and wipe all Meta data
+          </button>
+        )}
         <button type="button" onClick={() => setConfirm(false)} className="text-[12.5px] text-muted hover:text-ink-soft">
           Cancel
         </button>

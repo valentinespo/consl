@@ -48,7 +48,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const [summary, orders, orgSettings, fees, fulfilledOptions, tags, sources, unplaced] = await Promise.all([
     getOrdersSummary(connectedChannels, { channel: filter.channel, from: filter.from, to: filter.to }),
     getOrdersPage(page, 50, filter),
-    prisma.settings.findFirst({ select: { ordersBackfillCursor: true, ordersBackfillPass: true } }),
+    prisma.settings.findFirst({ select: { ordersBackfillCursor: true, ordersBackfillPass: true, shopifySyncedThrough: true, tiktokSyncedThrough: true } }),
     feeRuleOptions(),
     fulfilledAtOptions(),
     tagOptions(),
@@ -65,6 +65,12 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     !!orgSettings?.ordersBackfillCursor &&
     orgSettings.ordersBackfillCursor <= floorISO;
   const historyImporting = connectedChannels.includes("AMAZON") && !walkDone;
+  // Channels whose first history pull hasn't finished yet — the tab says so while it fills.
+  const importing = [
+    ...(historyImporting ? ["Amazon"] : []),
+    ...(connectedChannels.includes("SHOPIFY") && !orgSettings?.shopifySyncedThrough ? ["Shopify"] : []),
+    ...(connectedChannels.includes("TIKTOK") && !orgSettings?.tiktokSyncedThrough ? ["TikTok"] : []),
+  ];
   return (
     <>
       <PageHeader title="Orders" subtitle="Every sale across your connected channels." />
@@ -72,7 +78,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         summary={summary}
         orders={orders}
         connectedChannels={connectedChannels}
-        historyImporting={historyImporting}
+        importing={importing}
         fees={fees}
         fulfilledOptions={fulfilledOptions}
         tagOptions={tags}

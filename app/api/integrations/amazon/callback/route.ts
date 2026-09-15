@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { nudgeOrgImports } from "@/lib/scheduler-gates";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { requireOwner } from "@/lib/membership";
 import { verifyState, exchangeCode, completeAmazonConnection, APP_ORIGIN } from "@/lib/amazon-oauth";
@@ -34,6 +35,7 @@ export async function GET(request: Request) {
   try {
     const refreshToken = await exchangeCode(code);
     await completeAmazonConnection(stateOrg, refreshToken, sellerId);
+    nudgeOrgImports(stateOrg); // history starts loading on the next tick, not after the cadence
     return back("connected=amazon");
   } catch (e) {
     return back(`error=${encodeURIComponent(e instanceof Error ? e.message : "Connection failed.")}`);

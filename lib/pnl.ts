@@ -432,7 +432,7 @@ async function tiktokPendingBridge(orgId: string, from: Date, to: Date, baseCurr
 
 const EMPTY: Pnl = {
   groups: [], sales: 0, cogs: 0, unitsSold: 0, netProfit: 0, margin: null, roi: null, pending: [],
-  unmatchedSkus: [], preHistoryUnits: 0, overflowUnits: 0, unplaced: { units: 0, cogs: 0 }, mcf: { units: 0, cogs: 0 }, unreported: { units: 0, cogs: 0 }, ignored: { skus: [], units: 0, sales: 0 }, backfillInProgress: false, importProgress: null, hasData: false,
+  unmatchedSkus: [], preHistoryUnits: 0, overflowUnits: 0, unplaced: { units: 0, cogs: 0 }, mcf: { units: 0, cogs: 0 }, unreported: { units: 0, cogs: 0 }, ignored: { skus: [], units: 0, sales: 0 }, backfillInProgress: false, importProgress: null, importing: [], hasData: false,
 };
 
 /** The statement for a window, over the given channels (default: every channel with data). */
@@ -653,11 +653,17 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
   const ledgerTotal = groups.reduce((t, g) => t + g.total, 0);
   const netProfit = ledgerTotal + fifo.cogs;
 
-  const [settings, amazonConnected] = await Promise.all([
-    prisma.settings.findFirst({ select: { financeBackfillCursor: true, financeRewalkCursor: true, financeProgressAt: true, importerVersions: true } }),
-    prisma.integration.findFirst({ where: { provider: "amazon", status: "connected" }, select: { id: true } }),
+  const [settings, connections] = await Promise.all([
+    prisma.settings.findFirst({ select: { financeBackfillCursor: true, financeRewalkCursor: true, financeProgressAt: true, importerVersions: true, shopifySyncedThrough: true, tiktokSyncedThrough: true, tiktokFinanceSyncedThrough: true } }),
+    prisma.integration.findMany({ where: { status: "connected" }, select: { provider: true } }),
   ]);
-  const importProgress = selectedSet.has("AMAZON") && amazonConnected ? amazonImportProgress(settings) : null;
+  const connected = new Set(connections.map((c) => c.provider));
+  const importProgress = selectedSet.has("AMAZON") && connected.has("amazon") ? amazonImportProgress(settings) : null;
+  // Channels whose first history pull (orders, and for TikTok the settlements) hasn't finished.
+  const importing = [
+    ...(selectedSet.has("SHOPIFY") && connected.has("shopify") && !settings?.shopifySyncedThrough ? ["Shopify"] : []),
+    ...(selectedSet.has("TIKTOK") && connected.has("tiktok") && !(settings?.tiktokSyncedThrough && settings?.tiktokFinanceSyncedThrough) ? ["TikTok"] : []),
+  ];
 
   return {
     groups,
@@ -677,6 +683,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
     ignored,
     backfillInProgress: importProgress !== null,
     importProgress,
+    importing,
     hasData: groups.length > 0 || fifo.units > 0,
   };
 }

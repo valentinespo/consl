@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { nudgeOrgImports } from "@/lib/scheduler-gates";
 import { requireOwner } from "@/lib/membership";
 import { tiktokConfigured } from "@/lib/tiktok";
 import { completeTikTokConnection, APP_ORIGIN } from "@/lib/tiktok-oauth";
@@ -25,6 +26,7 @@ export async function GET(request: Request) {
 
   try {
     await completeTikTokConnection(gate.orgId, code);
+    nudgeOrgImports(gate.orgId); // history starts loading on the next tick, not after the cadence
     // Land on the mapping screen: a fresh channel's catalog is waiting to be reviewed.
     return NextResponse.redirect(`${APP_ORIGIN}/catalog/mapping?channel=TIKTOK&connected=1`);
   } catch (e) {

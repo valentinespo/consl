@@ -61,6 +61,8 @@ export type Pnl = {
     /** No window has completed for half an hour — the scheduler keeps retrying. */
     stalled: boolean;
   } | null;
+  /** Channels (labels) whose first history pull hasn't finished — figures fill in as it lands. */
+  importing: string[];
   hasData: boolean;
 };
 

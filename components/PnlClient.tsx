@@ -188,6 +188,12 @@ export function PnlClient({
             {pnl.importProgress.stalled && <span className="pill-amber inline-flex items-center rounded-full border px-2 py-px text-[11px] font-medium">paused — consl keeps retrying</span>}
           </span>
         )}
+        {pnl.importing.length > 0 && (
+          <span className="inline-flex items-center gap-1.5 text-[12px] text-muted" title="A freshly connected channel: its orders and money are being read from the platform. Figures fill in as they land.">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />
+            Importing your {pnl.importing.length > 1 ? `${pnl.importing.slice(0, -1).join(", ")} and ${pnl.importing[pnl.importing.length - 1]}` : pnl.importing[0]} history — figures fill in as it lands.
+          </span>
+        )}
       </div>
 
       {!pnl.hasData ? (

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { nudgeOrgImports } from "@/lib/scheduler-gates";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { requireOwner } from "@/lib/membership";
 import { verifyState } from "@/lib/oauth-state";
@@ -34,6 +35,7 @@ export async function GET(request: Request) {
   try {
     const { accessToken, scope } = await exchangeShopifyCode(shop, code);
     await completeShopifyConnection(stateOrg, shop, accessToken, scope);
+    nudgeOrgImports(stateOrg); // history starts loading on the next tick, not after the cadence
     // Land on the mapping screen: a fresh channel's catalog is waiting to be reviewed.
     return NextResponse.redirect(`${APP_ORIGIN}/catalog/mapping?channel=SHOPIFY&connected=1`);
   } catch (e) {

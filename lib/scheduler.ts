@@ -7,6 +7,20 @@ import { syncAmazonCore, syncAmazonStockCore } from "@/lib/sync";
 import { syncShopifyStock, syncTikTokStock } from "@/lib/channel-stock";
 import { getRestock } from "@/lib/restock";
 import { refreshChannelPlaces } from "@/lib/fulfillment";
+import {
+  lastDailyAttempt,
+  lastPlacesRefresh,
+  lastOrdersRefresh,
+  lastTikTokFinance,
+  lastMfnShipFromStep,
+  lastAmazonPoll,
+  lastAmazonOrderHeal,
+  lastAmazonOrderAudit,
+  lastAmazonOrderReport,
+  lastAmazonFinanceSweep,
+  lastAmazonAdsTick,
+  lastMetaAdsTick,
+} from "@/lib/scheduler-gates";
 import { deleteStored } from "@/lib/storage";
 import { DELETE_GRACE_DAYS } from "@/lib/constants";
 
@@ -352,18 +366,6 @@ const AMAZON_ADS_TICK_MS = 5 * 60 * 1000; // reports finish in minutes; a quick 
 // so a 5-minute pass uses ~2% of it — today's spend keeps moving on the P&L through the day.
 const META_ADS_TICK_MS = 5 * 60 * 1000;
 // In-process per-org timestamps; a restart just refreshes once immediately, which is harmless.
-const lastDailyAttempt = new Map<string, number>();
-const lastPlacesRefresh = new Map<string, number>();
-const lastOrdersRefresh = new Map<string, number>();
-const lastTikTokFinance = new Map<string, number>();
-const lastMfnShipFromStep = new Map<string, number>();
-const lastAmazonPoll = new Map<string, number>();
-const lastAmazonOrderHeal = new Map<string, number>();
-const lastAmazonOrderAudit = new Map<string, number>();
-const lastAmazonOrderReport = new Map<string, number>();
-const lastAmazonFinanceSweep = new Map<string, number>();
-const lastAmazonAdsTick = new Map<string, number>();
-const lastMetaAdsTick = new Map<string, number>();
 
 let backfilling = false;
 
