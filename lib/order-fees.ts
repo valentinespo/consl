@@ -23,18 +23,20 @@ export type FeeBucket = "custom_fees" | "payment_fees";
 export const FEE_BUCKETS: FeeBucket[] = ["custom_fees", "payment_fees"];
 
 type Rule = {
-  id: string; name: string; kind: string; value: number; extraFixed: number | null; bucket: string;
+  id: string; name: string; action: string; kind: string; value: number; extraFixed: number | null; bucket: string;
   channel: string | null; source: string | null; paymentMethod: string | null; facilityId: string | null; tag: string | null;
   appliesToPast: boolean; periodFrom: Date | null; periodTo: Date | null; active: boolean; createdAt: Date;
 };
 type Order = {
   id: string; channel: string; source: string | null; paymentMethod: string | null; fulfillmentFacilityId: string | null; fulfillmentOverrideFacilityId: string | null;
   mcf: boolean; replacement: boolean; total: number; cancelled: boolean; status: string | null; orderedAt: Date;
+  voided: boolean; voidedManual: boolean; voidRuleId: string | null;
 };
 
 const ORDER_SELECT = {
   id: true, channel: true, source: true, paymentMethod: true, fulfillmentFacilityId: true, fulfillmentOverrideFacilityId: true,
   mcf: true, replacement: true, total: true, cancelled: true, status: true, orderedAt: true,
+  voided: true, voidedManual: true, voidRuleId: true,
 } as const;
 
 export const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -75,16 +77,37 @@ export function feeAmount(kind: string, value: number, orderTotal: number, extra
 
 const bucketOf = (b: string | null | undefined): FeeBucket => (b === "payment_fees" ? "payment_fees" : "custom_fees");
 
-/** Recompute the rule-written fees on these orders from today's rules; hand-written fees stay. */
+/** Recompute the rule-written fees on these orders from today's rules (hand-written fees stay), and
+ *  the rule voids: an order a void rule matches is voided under that rule; one no rule matches any
+ *  more is un-voided — unless a person decided it from the row menu, which rules never touch. */
 export async function applyFeeRulesToOrders(orderIds: string[]): Promise<number> {
   if (orderIds.length === 0) return 0;
-  const rules = await prisma.orderFeeRule.findMany({ where: { active: true } });
+  const allRules = await prisma.orderFeeRule.findMany({ where: { active: true } });
+  const rules = allRules.filter((r) => r.action !== "void");
+  const voidRules = allRules.filter((r) => r.action === "void");
   const existing = await prisma.orderFee.findMany({
     where: { orderId: { in: orderIds }, ruleId: { not: null } },
     select: { id: true, orderId: true, ruleId: true, amount: true, name: true, bucket: true },
   });
-  if (rules.length === 0 && existing.length === 0) return 0;
+  const ruleVoided = await prisma.salesOrder.count({ where: { id: { in: orderIds }, voidRuleId: { not: null } } });
+  if (allRules.length === 0 && existing.length === 0 && ruleVoided === 0) return 0;
   const orders = await prisma.salesOrder.findMany({ where: { id: { in: orderIds } }, select: ORDER_SELECT });
+  const voidChanges = new Map<string, string[]>(); // "voided|ruleId" → order ids
+  for (const o of orders) {
+    if (o.voidedManual) continue;
+    const match = voidRules.find((r) => ruleMatches(r, o)) ?? null;
+    // Only a rule's own voids are ever undone here; a legacy void with no rule behind it is left alone.
+    if (!match && !o.voidRuleId) continue;
+    const wantVoided = !!match;
+    const wantRule = match?.id ?? null;
+    if (o.voided === wantVoided && o.voidRuleId === wantRule) continue;
+    const k = `${wantVoided ? 1 : 0}|${wantRule ?? ""}`;
+    voidChanges.set(k, [...(voidChanges.get(k) ?? []), o.id]);
+  }
+  for (const [k, ids] of voidChanges) {
+    const [v, ruleId] = k.split("|");
+    await prisma.salesOrder.updateMany({ where: { id: { in: ids } }, data: { voided: v === "1", voidRuleId: ruleId || null } });
+  }
   const toDelete: string[] = [];
   const toCreate: { orderId: string; ruleId: string; name: string; amount: number; bucket: FeeBucket }[] = [];
   for (const o of orders) {
@@ -102,18 +125,65 @@ export async function applyFeeRulesToOrders(orderIds: string[]): Promise<number>
   }
   if (toDelete.length) await prisma.orderFee.deleteMany({ where: { id: { in: toDelete } } });
   if (toCreate.length) await prisma.orderFee.createMany({ data: toCreate });
-  return toDelete.length + toCreate.length;
+  return toDelete.length + toCreate.length + [...voidChanges.values()].reduce((t, ids) => t + ids.length, 0);
 }
 
-/** Rewrite one rule's fees across every order it covers (the whole past, or its period, when it says so). */
+/** Undo one void rule's voids (never a person's), and hand those orders back to the other rules. */
+export async function releaseVoidRule(ruleId: string): Promise<string[]> {
+  const held = await prisma.salesOrder.findMany({ where: { voidRuleId: ruleId, voidedManual: false }, select: { id: true } });
+  const ids = held.map((o) => o.id);
+  if (ids.length) await prisma.salesOrder.updateMany({ where: { id: { in: ids } }, data: { voided: false, voidRuleId: null } });
+  return ids;
+}
+
+/** Rewrite one rule across every order it covers (the whole past, or its period, when it says so):
+ *  a fee rule's fees, or a void rule's voids. */
 export async function applyFeeRule(ruleId: string): Promise<number> {
   const rule = await prisma.orderFeeRule.findFirst({ where: { id: ruleId } });
   if (!rule) return 0;
+  if (rule.action === "void") {
+    // Start from a clean slate for this rule, then void what it matches now — skipping orders a
+    // person decided and orders another rule already voided (that rule keeps them).
+    const released = await releaseVoidRule(ruleId);
+    if (!rule.active) {
+      await applyFeeRulesToOrders(released);
+      return 0;
+    }
+    let voided = 0;
+    for (let skip = 0; ; skip += 2000) {
+      const batch = await prisma.salesOrder.findMany({ where: ruleWhere(rule), select: ORDER_SELECT, orderBy: { id: "asc" }, skip, take: 2000 });
+      const ids = batch.filter((o) => ruleMatches(rule, o) && !o.voidedManual && !o.voidRuleId).map((o) => o.id);
+      if (ids.length) {
+        await prisma.salesOrder.updateMany({ where: { id: { in: ids } }, data: { voided: true, voidRuleId: rule.id } });
+        voided += ids.length;
+      }
+      if (batch.length < 2000) break;
+    }
+    return voided;
+  }
   await prisma.orderFee.deleteMany({ where: { ruleId } });
   if (!rule.active) return 0;
-  // Narrow the walk to what the rule can match; ruleMatches() still has the final say per order.
+  const where = ruleWhere(rule);
+  const bucket = bucketOf(rule.bucket);
+  let created = 0;
+  for (let skip = 0; ; skip += 2000) {
+    const batch = await prisma.salesOrder.findMany({ where, select: ORDER_SELECT, orderBy: { id: "asc" }, skip, take: 2000 });
+    const data = batch
+      .filter((o) => ruleMatches(rule, o))
+      .map((o) => ({ orderId: o.id, ruleId, name: rule.name, amount: feeAmount(rule.kind, rule.value, o.total, rule.extraFixed), bucket }));
+    if (data.length) {
+      await prisma.orderFee.createMany({ data });
+      created += data.length;
+    }
+    if (batch.length < 2000) break;
+  }
+  return created;
+}
+
+/** Narrow a rule's walk to what it can match; ruleMatches() still has the final say per order. */
+function ruleWhere(rule: Rule) {
   const period = rule.periodFrom || rule.periodTo;
-  const where = {
+  return {
     ...(rule.channel ? { channel: rule.channel } : {}),
     ...(rule.source ? { source: { equals: rule.source, mode: "insensitive" as const } } : {}),
     ...(rule.paymentMethod ? { paymentMethod: rule.paymentMethod } : {}),
@@ -130,18 +200,4 @@ export async function applyFeeRule(ruleId: string): Promise<number> {
         ? {}
         : { orderedAt: { gte: rule.createdAt } }),
   };
-  const bucket = bucketOf(rule.bucket);
-  let created = 0;
-  for (let skip = 0; ; skip += 2000) {
-    const batch = await prisma.salesOrder.findMany({ where, select: ORDER_SELECT, orderBy: { id: "asc" }, skip, take: 2000 });
-    const data = batch
-      .filter((o) => ruleMatches(rule, o))
-      .map((o) => ({ orderId: o.id, ruleId, name: rule.name, amount: feeAmount(rule.kind, rule.value, o.total, rule.extraFixed), bucket }));
-    if (data.length) {
-      await prisma.orderFee.createMany({ data });
-      created += data.length;
-    }
-    if (batch.length < 2000) break;
-  }
-  return created;
 }

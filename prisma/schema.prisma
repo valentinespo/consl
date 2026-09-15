@@ -890,6 +890,9 @@ model SalesOrder {
   voided       Boolean         @default(false)
   // True once the operator has decided the row from the menu (kept for audit; voided is the switch).
   voidedManual Boolean         @default(false)
+  // The automatic void rule that voided it (null when voided by hand or not voided). Rules never
+  // touch an order decided by hand.
+  voidRuleId   String?
   // How it was fulfilled, when the platform tells us — drives which stock pool drains later.
   // Amazon: "Amazon" (FBA) | "Merchant". TikTok: "TIKTOK" | "SELLER". Shopify: null (seller-fulfilled).
   fulfillment  String?
@@ -945,6 +948,7 @@ model SalesOrder {
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
 
+  @@index([orgId, voidRuleId])
   @@unique([orgId, channel, externalId])
   @@index([orgId, channel, orderedAt])
   @@index([orgId, source])
@@ -962,6 +966,9 @@ model OrderFeeRule {
   orgId        String?
   organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
   name         String
+  // What the rule does to a matching order: "fee" adds a cost; "void" takes the order out of
+  // every total (same `voided` switch as a manual void; `SalesOrder.voidRuleId` remembers which rule).
+  action       String        @default("fee")
   kind         String // "fixed" (per order) | "percent" (of what the customer paid)
   value        Float
   // percent rules only: a flat amount added per order on top of the percentage (PayPal's

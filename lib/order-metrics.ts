@@ -131,6 +131,8 @@ export type OrderRow = {
 export type FeeRuleRow = {
   id: string;
   name: string;
+  /** "fee" adds a cost to matching orders; "void" takes them out of every total. */
+  action: string;
   kind: string;
   value: number;
   extraFixed: number | null;
@@ -168,7 +170,7 @@ const dayIn = (d: Date, tz: string) => new Intl.DateTimeFormat("en-CA", { timeZo
 /** The fee rules plus the vocab the rule form offers: known Shopify sources, payment methods and the facilities. */
 export async function feeRuleOptions(): Promise<FeeRuleOptions> {
   const orgId = await getCurrentOrgId();
-  const [rules, sources, facilities, settings, oldestRow, methods] = await Promise.all([
+  const [rules, sources, facilities, settings, oldestRow, methods, voidedByRule] = await Promise.all([
     prisma.orderFeeRule.findMany({ orderBy: { createdAt: "asc" }, include: { _count: { select: { fees: true } }, facility: { select: { id: true, name: true } } } }),
     prisma.salesOrder.groupBy({ by: ["source", "sourceLabel"], where: { channel: "SHOPIFY", source: { not: null } } }),
     prisma.facility.findMany({ where: { inactive: false }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
@@ -186,7 +188,9 @@ export async function feeRuleOptions(): Promise<FeeRuleOptions> {
           WHERE o."orgId" = ${orgId} AND o."paymentMethod" IS NOT NULL
           GROUP BY 1, 2`
       : Promise.resolve([]),
+    prisma.salesOrder.groupBy({ by: ["voidRuleId"], where: { voidRuleId: { not: null } }, _count: true }),
   ]);
+  const voidedCount = new Map(voidedByRule.map((r) => [r.voidRuleId as string, r._count]));
   const tz = settings.syncTz;
   const seen = new Set<string>();
   const src = sources
@@ -207,10 +211,10 @@ export async function feeRuleOptions(): Promise<FeeRuleOptions> {
     });
   return {
     rules: rules.map((r) => ({
-      id: r.id, name: r.name, kind: r.kind, value: r.value, extraFixed: r.extraFixed, bucket: r.bucket, channel: r.channel, source: r.source,
+      id: r.id, name: r.name, action: r.action, kind: r.kind, value: r.value, extraFixed: r.extraFixed, bucket: r.bucket, channel: r.channel, source: r.source,
       paymentMethod: r.paymentMethod, facility: r.facility, tag: r.tag, appliesToPast: r.appliesToPast,
       period: r.periodFrom ? { from: dayIn(r.periodFrom, tz), to: r.periodTo ? dayIn(r.periodTo, tz) : null } : null,
-      active: r.active, orders: r._count.fees,
+      active: r.active, orders: r.action === "void" ? voidedCount.get(r.id) ?? 0 : r._count.fees,
     })),
     sources: src,
     paymentMethods,

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requirePermission, requireView } from "@/lib/membership";
 import { importAllOrders } from "@/lib/orders";
 import { prisma } from "@/lib/prisma";
-import { applyFeeRule, applyFeeRulesToOrders, feeAmount, FEE_TAGS, FEE_BUCKETS, type FeeKind, type FeeBucket } from "@/lib/order-fees";
+import { applyFeeRule, applyFeeRulesToOrders, releaseVoidRule, feeAmount, FEE_TAGS, FEE_BUCKETS, type FeeKind, type FeeBucket } from "@/lib/order-fees";
 import { getOrgSettings } from "@/lib/settings";
 import { zonedDayBounds } from "@/lib/pnl";
 
@@ -34,11 +34,12 @@ const touched = () => {
   revalidatePath("/pnl");
 };
 
-/** Void/unvoid orders from the row menu or the bulk bar — the only writer of `voided`; imports never touch it. */
+/** Void/unvoid orders from the row menu or the bulk bar. A decision made here is final for the
+ *  automatic void rules: they never touch an order a person decided. */
 export async function setOrdersVoided(ids: string[], voided: boolean) {
   const gate = await requirePermission("inventory", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };
-  await prisma.salesOrder.updateMany({ where: { id: { in: ids } }, data: { voided, voidedManual: true } });
+  await prisma.salesOrder.updateMany({ where: { id: { in: ids } }, data: { voided, voidedManual: true, voidRuleId: null } });
   touched();
   return { ok: true as const };
 }
@@ -106,6 +107,8 @@ export async function setFulfillmentOverride(orderId: string, facilityId: string
 }
 
 type RuleInput = FeeInput & {
+  /** "fee" adds the fee to matching orders; "void" takes them out of every total. */
+  action?: "fee" | "void";
   channel: string | null;
   source: string | null;
   paymentMethod: string | null;
@@ -122,7 +125,8 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 export async function createFeeRule(input: RuleInput) {
   const gate = await requirePermission("inventory", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };
-  const bad = checkFee(input);
+  const action = input.action === "void" ? "void" : "fee";
+  const bad = action === "void" ? (input.name.trim() ? (input.name.trim().length > 60 ? "Keep the name under 60 characters." : null) : "Give the rule a name.") : checkFee(input);
   if (bad) return { ok: false as const, error: bad };
   if (input.channel && !["AMAZON", "SHOPIFY", "TIKTOK"].includes(input.channel)) return { ok: false as const, error: "Unknown channel." };
   if (input.tag && !FEE_TAGS[input.tag]) return { ok: false as const, error: "Unknown tag." };
@@ -141,9 +145,10 @@ export async function createFeeRule(input: RuleInput) {
   const rule = await prisma.orderFeeRule.create({
     data: {
       name: input.name.trim(),
-      kind: input.kind,
-      value: input.value,
-      extraFixed: extraOf(input),
+      action,
+      kind: action === "void" ? "fixed" : input.kind,
+      value: action === "void" ? 0 : input.value,
+      extraFixed: action === "void" ? null : extraOf(input),
       bucket: bucketOf(input),
       channel: input.channel || null,
       source: input.source?.trim() || null,
@@ -163,12 +168,16 @@ export async function createFeeRule(input: RuleInput) {
 export async function deleteFeeRule(id: string) {
   const gate = await requirePermission("inventory", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };
-  await prisma.orderFeeRule.deleteMany({ where: { id } }); // its fees go with it (cascade)
+  // A void rule's voids are undone first (a person's stay), and those orders are offered to the
+  // other void rules; a fee rule's fees go with it (cascade).
+  const released = await releaseVoidRule(id);
+  await prisma.orderFeeRule.deleteMany({ where: { id } });
+  if (released.length) await applyFeeRulesToOrders(released);
   touched();
   return { ok: true as const };
 }
 
-/** Pause or resume a rule — its fees are removed, or written again, at once. */
+/** Pause or resume a rule — its fees (or voids) are removed, or written again, at once. */
 export async function setFeeRuleActive(id: string, active: boolean) {
   const gate = await requirePermission("inventory", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };

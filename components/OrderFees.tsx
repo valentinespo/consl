@@ -321,11 +321,17 @@ const SCOPES: { value: Scope; label: string }[] = [
   { value: "period", label: "Only a date range" },
 ];
 
-/** The rules: every order that matches carries the fee, in the P&L under the bucket it chose. */
-export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClose: () => void }) {
+type RuleAction = "fee" | "void";
+
+/** The automatic rules, in a pop-up over the Orders tab: every order that matches a FEE rule carries
+ *  the fee, in the P&L under the bucket it chose; every order that matches a VOID rule is taken out
+ *  of every total, as if voided by hand. */
+export function RulesDialog({ options, onClose }: { options: FeeOptions; onClose: () => void }) {
   const router = useRouter();
   const { money, locale } = useMoney();
   const [pending, start] = useTransition();
+  const [action, setAction] = useState<RuleAction>("fee");
+  const [voidName, setVoidName] = useState("");
   const [draft, setDraft] = useState<FeeDraft>(emptyFee);
   const [bucketTouched, setBucketTouched] = useState(false);
   const [channel, setChannel] = useState("");
@@ -379,14 +385,33 @@ export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClo
     if (!bucketTouched) setDraft((d) => ({ ...d, bucket: v ? "payment_fees" : "custom_fees" }));
   }
 
+  const reset = () => {
+    setDraft(emptyFee);
+    setVoidName("");
+    setBucketTouched(false);
+    setChannel("");
+    setSource("");
+    setMethod("");
+    setWhere("");
+    setTag("");
+    setScope("from");
+    setFromDay(options.days.today);
+  };
+
   return (
-    <div className="dropdown-in rounded-[var(--radius-card)] border border-border bg-surface-2/40 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Automatic rules"
+      className="org-pop max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-xl"
+      onClick={(e) => e.stopPropagation()}
+     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-[12px] font-medium uppercase tracking-wide text-muted">Fee rules</div>
+          <div className="text-[15px] font-semibold text-ink">Automatic rules</div>
           <p className="mt-1 max-w-[72ch] text-[12.5px] text-muted">
-            A cost added to every order that matches — a marketplace commission consl can&apos;t see on its own, a handling charge per MCF
-            shipment, what a payment processor keeps. Each rule shows in the P&amp;L under its own name, in the bucket it picks.
+            Rules run on every order that matches them, past ones too if you say so. A <span className="font-medium text-ink-soft">fee rule</span> adds a cost to the order — a marketplace commission consl can&apos;t see, a handling charge per MCF shipment, what a processor keeps. A <span className="font-medium text-ink-soft">void rule</span> takes the order out of every total, exactly like voiding it by hand.
           </p>
         </div>
         <button onClick={onClose} className={iconBtn} aria-label="Close">
@@ -398,10 +423,11 @@ export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClo
         <ul className="mt-3 divide-y divide-line rounded-lg border border-border bg-bg">
           {options.rules.map((r) => (
             <li key={r.id} className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-[13px] ${r.active ? "" : "opacity-60"}`}>
+              <span className={`${r.action === "void" ? "pill-neutral" : "pill-chart"} inline-flex items-center rounded-full border px-2 py-px text-[10.5px] font-medium`}>{r.action === "void" ? "Void" : "Fee"}</span>
               <span className="font-medium text-ink">{r.name}</span>
               <span className="text-muted">
-                {amount(r)} · {describe(r)} · {when(r)}
-                {r.bucket === "payment_fees" ? " · under Payment processing" : ""}
+                {r.action === "void" ? "voided" : amount(r)} · {describe(r)} · {when(r)}
+                {r.action !== "void" && r.bucket === "payment_fees" ? " · under Payment processing" : ""}
               </span>
               <span className="text-[12px] text-muted">{r.orders.toLocaleString()} orders</span>
               <span className="ml-auto flex items-center gap-1">
@@ -417,15 +443,40 @@ export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClo
         </ul>
       )}
 
-      <div className="mt-3 flex flex-col gap-2 rounded-lg border border-border bg-surface p-3">
-        <div className="text-[12.5px] font-medium text-ink">New rule</div>
-        <FeeFields
-          draft={draft}
-          onChange={(d) => {
-            if (d.bucket !== draft.bucket) setBucketTouched(true);
-            setDraft(d);
-          }}
-        />
+      <div className="mt-3 flex flex-col gap-2 rounded-lg border border-border bg-surface-2/40 p-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="text-[12.5px] font-medium text-ink">New rule</div>
+          <div role="tablist" aria-label="Rule type" className="flex h-9 items-center gap-0.5 rounded-lg border border-border bg-surface p-0.5">
+            {([["fee", "Fee rule"], ["void", "Void rule"]] as const).map(([v, label]) => (
+              <button
+                key={v}
+                type="button"
+                role="tab"
+                aria-selected={action === v}
+                onClick={() => setAction(v)}
+                className={`flex h-full items-center rounded-md px-3 text-[12px] transition-colors ${action === v ? "bg-surface-2 font-medium text-ink" : "text-muted hover:text-ink-soft"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {action === "fee" ? (
+          <FeeFields
+            draft={draft}
+            onChange={(d) => {
+              if (d.bucket !== draft.bucket) setBucketTouched(true);
+              setDraft(d);
+            }}
+          />
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            <input value={voidName} onChange={(e) => setVoidName(e.target.value)} placeholder="Rule name, e.g. Wholesale samples" className={inputCls} maxLength={60} />
+            <p className="text-[12px] text-muted">
+              Matching orders are voided: out of sales, units, velocity and the P&amp;L, with the Voided pill on the row. Unvoid one by hand from its row menu and the rule leaves it alone from then on.
+            </p>
+          </div>
+        )}
         <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-5">
           <SelectMenu
             value={channel}
@@ -441,7 +492,7 @@ export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClo
           <SelectMenu value={where} onChange={setWhere} options={[{ value: "", label: "Fulfilled anywhere" }, ...options.facilities.map((f) => ({ value: f.id, label: f.name }))]} />
           <SelectMenu value={tag} onChange={setTag} options={[{ value: "", label: "Any tag" }, ...Object.entries(FEE_TAGS).map(([v, l]) => ({ value: v, label: l }))]} />
         </div>
-        {methodOpt && (
+        {methodOpt && action === "fee" && (
           <p className={`rounded-lg border px-3 py-2 text-[12px] ${methodOpt.feesRead ? "pill-amber" : "border-border text-muted"}`}>
             {methodOpt.mirror
               ? `These are ${CHANNEL_NAME[methodOpt.mirror] ?? methodOpt.mirror} sales mirrored into Shopify. consl counts them on ${CHANNEL_NAME[methodOpt.mirror] ?? methodOpt.mirror}, with ${CHANNEL_NAME[methodOpt.mirror] ?? methodOpt.mirror}'s own fees from its statements, and leaves the Shopify copy out — no rule needed here.`
@@ -478,7 +529,7 @@ export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClo
             onClick={() =>
               act(async () => {
                 const r = await createFeeRule({
-                  ...parseFee(draft),
+                  ...(action === "void" ? { ...parseFee(emptyFee), name: voidName.trim(), action: "void" as const } : { ...parseFee(draft), action: "fee" as const }),
                   channel: channel || null,
                   source: source || null,
                   paymentMethod: method || null,
@@ -487,26 +538,17 @@ export function FeeRulesPanel({ options, onClose }: { options: FeeOptions; onClo
                   scope,
                   period: scope === "period" ? { from: period.from, to: period.to } : scope === "from" ? { from: fromDay, to: null } : null,
                 });
-                if (r.ok) {
-                  setDraft(emptyFee);
-                  setBucketTouched(false);
-                  setChannel("");
-                  setSource("");
-                  setMethod("");
-                  setWhere("");
-                  setTag("");
-                  setScope("from");
-                  setFromDay(options.days.today);
-                }
+                if (r.ok) reset();
                 return r;
               })
             }
           >
-            <Plus size={13} /> {pending ? "Saving…" : "Create rule"}
+            <Plus size={13} /> {pending ? "Saving…" : action === "void" ? "Create void rule" : "Create fee rule"}
           </button>
           {error && <span className="text-[12px] text-negative">{error}</span>}
         </div>
       </div>
+     </div>
     </div>
   );
 }

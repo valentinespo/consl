@@ -14,7 +14,7 @@ import { DateRangePicker, type Range } from "@/components/DateRangePicker";
 import { HoverHint } from "@/components/HoverHint";
 import { useExitAnimation } from "@/components/animate";
 import { ROOT_LOGO } from "@/lib/channel-logos";
-import { BulkBar, OrderDialog, FeeRulesPanel, type FeeOptions } from "@/components/OrderFees";
+import { BulkBar, OrderDialog, RulesDialog, type FeeOptions } from "@/components/OrderFees";
 import { paymentMethodLabel } from "@/lib/payment-methods";
 
 // Channel marks come from the shared map — Orders always talks about a whole channel.
@@ -566,13 +566,13 @@ export function OrdersClient({
             type="button"
             onClick={() => setRulesOpen((o) => !o)}
             aria-pressed={rulesOpen}
-            title="Fee rules"
+            title="Automatic rules: fees added and orders voided when they match"
             className={`ml-auto inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[12.5px] font-medium transition-colors ${
               rulesOpen ? "bg-surface-2 text-ink" : "bg-surface text-ink-soft hover:text-ink"
             }`}
           >
             <Settings size={15} />
-            Fee rules
+            Automatic rules
             {fees.rules.length > 0 && <span className="pill-neutral inline-flex items-center rounded-full border px-1.5 py-px text-[10.5px] font-medium">{fees.rules.length}</span>}
           </button>
         </div>
@@ -594,7 +594,7 @@ export function OrdersClient({
         </form>
       </div>
 
-      {rulesOpen && <FeeRulesPanel options={fees} onClose={() => setRulesOpen(false)} />}
+      {rulesOpen && <RulesDialog options={fees} onClose={() => setRulesOpen(false)} />}
       {selectedIds.length > 0 && <BulkBar ids={selectedIds} facilities={fees.facilities} onClear={() => setSelected(new Set())} />}
 
       {/* Orders table */}
@@ -678,7 +678,7 @@ export function OrdersClient({
                           </HoverHint>
                         )}
                         {(o.voided || o.excluded) && (
-                          <HoverHint title="Voided" body="Out of every total — a double-count removed by an exclusion toggle, or voided by hand from the row menu." className="align-middle">
+                          <HoverHint title="Voided" body="Out of every total — a mirrored copy of another channel's sale, an automatic void rule, or voided by hand from the row menu." className="align-middle">
                             <span className={`${PILL} pill-neutral`}>Voided</span>
                           </HoverHint>
                         )}
