@@ -145,6 +145,8 @@ export type FeeRuleRow = {
   appliesToPast: boolean;
   /** Company-calendar days the rule covers: from a day on (`to` null), or a closed period. */
   period: { from: string; to: string | null } | null;
+  /** The company-calendar day the rule was created — what "from its creation on" means. */
+  createdDay: string;
   active: boolean;
   orders: number;
 };
@@ -214,6 +216,7 @@ export async function feeRuleOptions(): Promise<FeeRuleOptions> {
       id: r.id, name: r.name, action: r.action, kind: r.kind, value: r.value, extraFixed: r.extraFixed, bucket: r.bucket, channel: r.channel, source: r.source,
       paymentMethod: r.paymentMethod, facility: r.facility, tag: r.tag, appliesToPast: r.appliesToPast,
       period: r.periodFrom ? { from: dayIn(r.periodFrom, tz), to: r.periodTo ? dayIn(r.periodTo, tz) : null } : null,
+      createdDay: dayIn(r.createdAt, tz),
       active: r.active, orders: r.action === "void" ? voidedCount.get(r.id) ?? 0 : r._count.fees,
     })),
     sources: src,

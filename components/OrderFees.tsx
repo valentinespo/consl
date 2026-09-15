@@ -339,7 +339,7 @@ export function RulesDialog({ options, onClose }: { options: FeeOptions; onClose
   const [method, setMethod] = useState("");
   const [where, setWhere] = useState("");
   const [tag, setTag] = useState("");
-  const [scope, setScope] = useState<Scope>("from");
+  const [scope, setScope] = useState<Scope>("all"); // past and future — the usual intent
   const [fromDay, setFromDay] = useState(options.days.today); // "From a date on" starts today
   // The picker's trigger shows the preset's dates, so the draft must hold those same concrete
   // days from the start — a rule created without opening the picker covers what it displays.
@@ -394,7 +394,7 @@ export function RulesDialog({ options, onClose }: { options: FeeOptions; onClose
     setMethod("");
     setWhere("");
     setTag("");
-    setScope("from");
+    setScope("all");
     setFromDay(options.days.today);
   };
 
@@ -410,8 +410,8 @@ export function RulesDialog({ options, onClose }: { options: FeeOptions; onClose
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-[15px] font-semibold text-ink">Automatic rules</div>
-          <p className="mt-1 max-w-[72ch] text-[12.5px] text-muted">
-            Rules run on every order that matches them, past ones too if you say so. A <span className="font-medium text-ink-soft">fee rule</span> adds a cost to the order — a marketplace commission consl can&apos;t see, a handling charge per MCF shipment, what a processor keeps. A <span className="font-medium text-ink-soft">void rule</span> takes the order out of every total, exactly like voiding it by hand.
+          <p className="mt-1 text-[12.5px] leading-relaxed text-muted">
+            A rule applies to every order that matches it. A <span className="font-medium text-ink-soft">fee rule</span> adds a cost consl can&apos;t read from the channel: a 3PL handling charge per order, a wholesale marketplace&apos;s commission, what a payment processor keeps. A <span className="font-medium text-ink-soft">void rule</span> takes the matching orders out of every total, the same as voiding them by hand.
           </p>
         </div>
         <button onClick={onClose} className={iconBtn} aria-label="Close">
@@ -421,25 +421,56 @@ export function RulesDialog({ options, onClose }: { options: FeeOptions; onClose
 
       {options.rules.length > 0 && (
         <ul className="mt-3 divide-y divide-line rounded-lg border border-border bg-bg">
-          {options.rules.map((r) => (
-            <li key={r.id} className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-[13px] ${r.active ? "" : "opacity-60"}`}>
-              <span className={`${r.action === "void" ? "pill-neutral" : "pill-chart"} inline-flex items-center rounded-full border px-2 py-px text-[10.5px] font-medium`}>{r.action === "void" ? "Void" : "Fee"}</span>
-              <span className="font-medium text-ink">{r.name}</span>
-              <span className="text-muted">
-                {r.action === "void" ? "voided" : amount(r)} · {describe(r)} · {when(r)}
-                {r.action !== "void" && r.bucket === "payment_fees" ? " · under Payment processing" : ""}
-              </span>
-              <span className="text-[12px] text-muted">{r.orders.toLocaleString()} orders</span>
-              <span className="ml-auto flex items-center gap-1">
-                <button className={btnSecondary} disabled={pending} onClick={() => act(() => setFeeRuleActive(r.id, !r.active))}>
-                  {r.active ? "Pause" : "Resume"}
-                </button>
-                <button className={btnSecondary} disabled={pending} onClick={() => act(() => deleteFeeRule(r.id))}>
-                  Delete
-                </button>
-              </span>
-            </li>
-          ))}
+          {options.rules.map((r) => {
+            const conditions = [
+              r.channel && CHANNEL_NAME[r.channel],
+              r.source && `Source: ${options.sources.find((s) => s.value === r.source)?.label ?? r.source}`,
+              r.paymentMethod && `Paid with ${paymentMethodLabel(r.paymentMethod)}`,
+              r.facility && `Fulfilled at ${r.facility.name}`,
+              r.tag && `Tag: ${FEE_TAGS[r.tag]}`,
+            ].filter((x): x is string => !!x);
+            const whenChip = r.period
+              ? r.period.to
+                ? `${day(r.period.from)} – ${day(r.period.to)}`
+                : `From ${day(r.period.from)}`
+              : r.appliesToPast
+                ? "All orders, past and future"
+                : `From ${day(r.createdDay)}`;
+            const does =
+              r.action === "void"
+                ? "Voids every matching order"
+                : `Adds ${amount(r)} · under ${r.bucket === "payment_fees" ? "Payment processing" : "Custom fees"}`;
+            return (
+              <li key={r.id} className={`grid grid-cols-[1fr_auto] items-start gap-x-4 gap-y-1 px-3 py-2.5 text-[13px] ${r.active ? "" : "opacity-60"}`}>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`${r.action === "void" ? "pill-neutral" : "pill-chart"} inline-flex items-center rounded-full border px-2 py-px text-[10.5px] font-medium`}>{r.action === "void" ? "Void" : "Fee"}</span>
+                    <span className="font-medium text-ink">{r.name}</span>
+                    {!r.active && <span className="pill-amber inline-flex items-center rounded-full border px-2 py-px text-[10.5px] font-medium">Paused</span>}
+                  </div>
+                  <div className="mt-1 text-[12.5px] text-ink-soft">{does}</div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    {(conditions.length ? conditions : ["Every order"]).map((c) => (
+                      <span key={c} className="inline-flex items-center rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink-soft">{c}</span>
+                    ))}
+                    <span className="inline-flex items-center rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted">{whenChip}</span>
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-1.5">
+                  <span className="text-[12px] tabular text-muted">{r.orders.toLocaleString()} {r.orders === 1 ? "order" : "orders"}</span>
+                  <div className="flex items-center gap-2 text-[12px]">
+                    <button className="text-muted hover:text-ink disabled:opacity-50" disabled={pending} onClick={() => act(() => setFeeRuleActive(r.id, !r.active))}>
+                      {r.active ? "Pause" : "Resume"}
+                    </button>
+                    <span className="text-line">·</span>
+                    <button className="text-muted hover:text-negative disabled:opacity-50" disabled={pending} onClick={() => act(() => deleteFeeRule(r.id))}>
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
 
