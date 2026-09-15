@@ -312,8 +312,9 @@ export async function computeFinishedGoods() {
       orderBy: [{ poDate: "desc" }, { createdAt: "desc" }],
     }),
     prisma.stockMovement.findMany({ where: { itemType: "FINISHED" }, orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
-    prisma.product.findMany({ select: { id: true, openingUnitCost: true } }),
+    prisma.product.findMany({ select: { id: true, code: true, openingUnitCost: true, preConslUnitCost: true } }),
   ]);
+  const productById = new Map(products.map((p) => [p.id, p]));
   const supply: FinishedSupply[] = [];
   // Finished lines dated by when their units APPEARED (the line's finish date, see
   // lib/lot-status appearedAt), oldest first — so the pools consume in true chronological order
@@ -321,20 +322,30 @@ export async function computeFinishedGoods() {
   const finished = lots
     .flatMap((lot) => lot.lines.filter((ln) => ln.status === "FINISHED").map((ln) => ({ lot, ln, at: appearedAt(ln, lot).getTime() })))
     .sort((a, b) => a.at - b.at || a.lot.lotNr - b.lot.lotNr || a.ln.seq - b.ln.seq);
-  finished.forEach((f, i) =>
+  // A finished line whose supplier isn't fully paid has an incomplete cost on its books. Its units
+  // carry an ESTIMATE instead — the cost of the product's latest fully paid lot, else the
+  // onboarding cost — and a tag naming the lot, so the P&L can say which periods still rest on
+  // estimates. The line's real cost takes over the moment it is marked paid.
+  const latestPaidCost = new Map<string, number>();
+  for (const f of finished) if (f.ln.paymentStatus === "PAID") latestPaidCost.set(f.ln.productId, f.ln.cogPerUnit); // ascending → last wins
+  finished.forEach((f, i) => {
+    const p = productById.get(f.ln.productId);
+    const unpaid = f.ln.paymentStatus !== "PAID";
+    const estimate = unpaid ? (latestPaidCost.get(f.ln.productId) ?? p?.preConslUnitCost ?? p?.openingUnitCost ?? null) : null;
     supply.push({
       sku: f.ln.productId,
       facilityId: f.lot.facilityId,
       units: f.ln.units,
-      unitCost: f.ln.cogPerUnit,
+      unitCost: estimate ?? f.ln.cogPerUnit,
       date: f.at,
       seq: i,
-    }),
-  );
+      ...(unpaid ? { tag: `${f.lot.id}|${f.lot.poNumber?.trim() || `Lot ${f.lot.lotNr}`}${p?.code ? ` · ${p.code}` : ""}` } : {}),
+    });
+  });
   // Newest-FINISHED cost per product, falling back to the onboarding COG — what a channel
   // pull-back beyond recorded layers is costed at, mirroring lib/restock.ts.
   const fallbackCostBySku = new Map<string, number>(products.map((p) => [p.id, p.openingUnitCost ?? 0]));
-  for (let i = finished.length - 1; i >= 0; i--) fallbackCostBySku.set(finished[i].ln.productId, finished[i].ln.cogPerUnit);
+  for (let i = supply.length - 1; i >= 0; i--) if (i < finished.length) fallbackCostBySku.set(supply[i].sku, supply[i].unitCost);
   let seq = finished.length;
   // Opening balances are day-zero layers: at your own facilities they're supply; at a channel
   // they seed that channel's ledger so a pull-back can consume them (see lib/restock.ts).

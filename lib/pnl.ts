@@ -114,6 +114,10 @@ type Sale = { productId: string; units: number; at: number | null; channel: PnlC
 type Cogs = {
   cogs: number;
   units: number;
+  /** Units (and their cost) priced from lots not fully costed yet, and which lots ("<lotId>|<label>"). */
+  estimatedUnits: number;
+  estimatedCogs: number;
+  estimatedLots: Set<string>;
   preHistoryUnits: number;
   overflowUnits: number;
   unplacedUnits: number;
@@ -124,7 +128,7 @@ type Cogs = {
   unreportedCogs: number;
   unmatchedSkus: Set<string>;
 };
-type Layer = { units: number; unitCost: number; date: number };
+type Layer = { units: number; unitCost: number; date: number; tag?: string };
 
 /** What a unit costs when no queue can price it: the product's on-hand average across every place
  *  (units-weighted), else the newest cost on record anywhere. Null when it holds nothing and
@@ -145,8 +149,8 @@ async function loadQueues(): Promise<{ queues: Map<QueueKey, Map<string, Layer[]
     queues.set(queue, q);
   };
   // `sku` on both is the product id.
-  for (const l of shipped) push(l.destination, l.sku, { units: l.units, unitCost: l.unitCost, date: l.date });
-  for (const e of entries) push(e.facilityId, e.sku, { units: e.units, unitCost: e.unitCost, date: e.date });
+  for (const l of shipped) push(l.destination, l.sku, { units: l.units, unitCost: l.unitCost, date: l.date, tag: l.tag });
+  for (const e of entries) push(e.facilityId, e.sku, { units: e.units, unitCost: e.unitCost, date: e.date, tag: e.tag });
   for (const q of queues.values()) for (const list of q.values()) list.sort((a, b) => a.date - b.date);
 
   // On hand today = what is left at the company's own places plus what is still at each channel.
@@ -204,7 +208,7 @@ async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlCh
   draws.sort((a, b) => order(a) - order(b));
 
   const cursor = new Map<string, { idx: number; left: number }>(); // "queue|product"
-  const out: Cogs = { cogs: 0, units: 0, preHistoryUnits: 0, overflowUnits: 0, unplacedUnits: 0, unplacedCogs: 0, mcfUnits: 0, mcfCogs: 0, unreportedUnits: 0, unreportedCogs: 0, unmatchedSkus: new Set() };
+  const out: Cogs = { cogs: 0, units: 0, estimatedUnits: 0, estimatedCogs: 0, estimatedLots: new Set(), preHistoryUnits: 0, overflowUnits: 0, unplacedUnits: 0, unplacedCogs: 0, mcfUnits: 0, mcfCogs: 0, unreportedUnits: 0, unreportedCogs: 0, unmatchedSkus: new Set() };
   for (const d of draws) {
     const product = scope.byId.get(d.productId);
     if (!product) continue;
@@ -251,7 +255,15 @@ async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlCh
       let want = qty;
       while (want > 1e-9 && c.idx < layers.length) {
         const take = Math.min(c.left, want);
-        if (inWindow) cost += take * layers[c.idx].unitCost;
+        if (inWindow) {
+          cost += take * layers[c.idx].unitCost;
+          const tag = layers[c.idx].tag;
+          if (tag) {
+            out.estimatedUnits += take;
+            out.estimatedCogs += take * layers[c.idx].unitCost;
+            out.estimatedLots.add(tag);
+          }
+        }
         c.left -= take;
         want -= take;
         if (c.left <= 1e-9) {
@@ -432,7 +444,7 @@ async function tiktokPendingBridge(orgId: string, from: Date, to: Date, baseCurr
 
 const EMPTY: Pnl = {
   groups: [], sales: 0, cogs: 0, unitsSold: 0, netProfit: 0, margin: null, roi: null, pending: [],
-  unmatchedSkus: [], preHistoryUnits: 0, overflowUnits: 0, unplaced: { units: 0, cogs: 0 }, mcf: { units: 0, cogs: 0 }, unreported: { units: 0, cogs: 0 }, ignored: { skus: [], units: 0, sales: 0 }, backfillInProgress: false, importProgress: null, importing: [], hasData: false,
+  unmatchedSkus: [], preHistoryUnits: 0, overflowUnits: 0, unplaced: { units: 0, cogs: 0 }, mcf: { units: 0, cogs: 0 }, unreported: { units: 0, cogs: 0 }, ignored: { skus: [], units: 0, sales: 0 }, backfillInProgress: false, importProgress: null, importing: [], estimated: { units: 0, cogs: 0, lots: [] }, hasData: false,
 };
 
 /** The statement for a window, over the given channels (default: every channel with data). */
@@ -678,6 +690,11 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
     preHistoryUnits: fifo.preHistoryUnits,
     overflowUnits: fifo.overflowUnits,
     unplaced: { units: fifo.unplacedUnits, cogs: fifo.unplacedCogs },
+    estimated: {
+      units: fifo.estimatedUnits,
+      cogs: -fifo.estimatedCogs,
+      lots: [...fifo.estimatedLots].map((t) => { const i = t.indexOf("|"); return { id: t.slice(0, i), label: t.slice(i + 1) }; }),
+    },
     mcf: { units: fifo.mcfUnits, cogs: fifo.mcfCogs },
     unreported: { units: fifo.unreportedUnits, cogs: fifo.unreportedCogs },
     ignored,

@@ -43,6 +43,8 @@ export type Pnl = {
   overflowUnits: number;
   /** Units sold from orders at no facility: priced at the product's average cost (part of `cogs`) until the order is placed. */
   unplaced: { units: number; cogs: number };
+  /** Units sold from lots not fully costed yet (part of `cogs`, at the latest paid lot's cost or the onboarding cost), and those lots. */
+  estimated: { units: number; cogs: number; lots: { id: string; label: string }[] };
   /** Amazon MCF orders counted here (Amazon is the only channel): their units and cost, part of `cogs`. */
   mcf: { units: number; cogs: number };
   /** Amazon orders that shipped but Amazon posted no money for (free units, replacements): units from the Orders tab, part of `cogs`. */

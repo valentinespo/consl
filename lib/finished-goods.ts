@@ -19,9 +19,11 @@ export interface FinishedSupply {
   sku: string;
   facilityId: string;
   units: number;
-  unitCost: number; // the lot line's cogPerUnit
+  unitCost: number; // the lot line's cogPerUnit — or an estimate while the lot isn't fully costed
   date: number; // epoch ms — orders the FIFO stack
   seq: number; // stable tie-breaker
+  /** Set when `unitCost` is an estimate: "<lotId>|<label>". Travels with the units wherever they go. */
+  tag?: string;
 }
 
 /** Units moving between places. Exactly one SOURCE (fromFacilityId | fromDestination) and one
@@ -55,6 +57,7 @@ export interface ShippedLayer {
   units: number;
   unitCost: number;
   date: number;
+  tag?: string; // the estimate tag the units carry, if any
 }
 
 /** A layer as it ENTERED one of your facilities — produced there, transferred in, or pulled back
@@ -67,6 +70,7 @@ export interface FacilityEntry {
   units: number;
   unitCost: number;
   date: number;
+  tag?: string; // the estimate tag the units carry, if any
 }
 
 /** A movement that asked for more units than the location actually held. */
@@ -89,22 +93,24 @@ export interface FinishedResult {
 const key = (sku: string, facilityId: string) => `${sku}|${facilityId}`;
 
 /** A FIFO stack of finished-unit layers for one (SKU, facility) pool. */
-class FinishedPoolStack {
-  private layers: { units: number; unitCost: number; date: number; seq: number }[] = [];
+type StackLayer = { units: number; unitCost: number; date: number; seq: number; tag?: string };
 
-  add(units: number, unitCost: number, date: number, seq: number) {
-    if (units > 0) this.layers.push({ units, unitCost, date, seq });
+class FinishedPoolStack {
+  private layers: StackLayer[] = [];
+
+  add(units: number, unitCost: number, date: number, seq: number, tag?: string) {
+    if (units > 0) this.layers.push({ units, unitCost, date, seq, tag });
   }
 
-  /** Consume oldest-first. Returns the layers actually drawn (so cost can travel with them). */
-  take(demand: number): { drawn: { units: number; unitCost: number }[]; consumed: number } {
+  /** Consume oldest-first. Returns the layers actually drawn (so cost — and its tag — travel with them). */
+  take(demand: number): { drawn: { units: number; unitCost: number; tag?: string }[]; consumed: number } {
     this.layers.sort((a, b) => a.date - b.date || a.seq - b.seq);
-    const drawn: { units: number; unitCost: number }[] = [];
+    const drawn: { units: number; unitCost: number; tag?: string }[] = [];
     let remaining = demand;
     while (remaining > 1e-9 && this.layers.length > 0) {
       const layer = this.layers[0];
       const take = Math.min(layer.units, remaining);
-      drawn.push({ units: take, unitCost: layer.unitCost });
+      drawn.push({ units: take, unitCost: layer.unitCost, tag: layer.tag });
       layer.units -= take;
       remaining -= take;
       if (layer.units <= 1e-9) this.layers.shift();
@@ -123,7 +129,7 @@ class FinishedPoolStack {
   }
 
   /** The remaining layers themselves, oldest-first — channel ledgers read these back out. */
-  layers_(): { units: number; unitCost: number; date: number; seq: number }[] {
+  layers_(): StackLayer[] {
     this.layers.sort((a, b) => a.date - b.date || a.seq - b.seq);
     return this.layers.filter((l) => l.units > 1e-9);
   }
@@ -146,13 +152,13 @@ export function runFinishedGoodsEngine(
   };
   // Every layer landing at a facility is also kept as its intake history.
   const entries: FacilityEntry[] = [];
-  const landAt = (sku: string, facilityId: string, units: number, unitCost: number, date: number, seq: number) => {
-    stackFor(sku, facilityId).add(units, unitCost, date, seq);
-    if (units > 0) entries.push({ sku, facilityId, units, unitCost, date });
+  const landAt = (sku: string, facilityId: string, units: number, unitCost: number, date: number, seq: number, tag?: string) => {
+    stackFor(sku, facilityId).add(units, unitCost, date, seq, tag);
+    if (units > 0) entries.push({ sku, facilityId, units, unitCost, date, tag });
   };
 
   // Seed every pool with what its facility produced.
-  for (const s of supply) landAt(s.sku, s.facilityId, s.units, s.unitCost, s.date, s.seq);
+  for (const s of supply) landAt(s.sku, s.facilityId, s.units, s.unitCost, s.date, s.seq, s.tag);
 
   // Per (channel, SKU) ledger of everything that entered that channel — starting balances plus
   // recorded shipments. Valuation covers the channel's reported count from the NEWEST of these;
@@ -195,10 +201,10 @@ export function runFinishedGoodsEngine(
         });
       }
       if (m.toFacilityId) {
-        for (const d of drawn) landAt(m.sku, m.toFacilityId, d.units, d.unitCost, m.date, m.seq);
+        for (const d of drawn) landAt(m.sku, m.toFacilityId, d.units, d.unitCost, m.date, m.seq, d.tag);
       } else if (m.toDestination && m.toDestination !== "CUSTOMER" && m.toDestination !== "LOSS") {
         const to = ledgerFor(m.toDestination, m.sku);
-        for (const d of drawn) to.add(d.units, d.unitCost, m.date, m.seq);
+        for (const d of drawn) to.add(d.units, d.unitCost, m.date, m.seq, d.tag);
       }
       // CUSTOMER / LOSS: the layers simply leave — consumed above, landed nowhere.
       continue;
@@ -221,11 +227,11 @@ export function runFinishedGoodsEngine(
 
     if (m.toFacilityId) {
       // Transfer: the same units, at the same cost, now live at the destination.
-      for (const d of drawn) landAt(m.sku, m.toFacilityId, d.units, d.unitCost, m.date, m.seq);
+      for (const d of drawn) landAt(m.sku, m.toFacilityId, d.units, d.unitCost, m.date, m.seq, d.tag);
     } else if (m.toDestination) {
       // Left the network — its channel ledger records what those units cost us.
       const ledger = ledgerFor(m.toDestination, m.sku);
-      for (const d of drawn) ledger.add(d.units, d.unitCost, m.date, m.seq);
+      for (const d of drawn) ledger.add(d.units, d.unitCost, m.date, m.seq, d.tag);
     }
   }
 
@@ -241,7 +247,7 @@ export function runFinishedGoodsEngine(
   for (const [k, stack] of channelLedgers) {
     const [sku, destination] = k.split("|");
     for (const l of stack.layers_()) {
-      shipped.push({ sku, destination, units: l.units, unitCost: l.unitCost, date: l.date });
+      shipped.push({ sku, destination, units: l.units, unitCost: l.unitCost, date: l.date, tag: l.tag });
     }
   }
 

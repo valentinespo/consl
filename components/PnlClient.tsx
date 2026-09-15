@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import Image from "next/image";
 import { useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
@@ -275,6 +276,21 @@ export function PnlClient({
           </span>
         </div>
       ))}
+      {pnl.estimated.units > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-[12px] text-muted">
+          <span className="pill-amber inline-flex items-center rounded-full border px-2.5 py-[3px] text-[11px] font-medium">Cost of goods partly estimated</span>
+          <span>
+            {pnl.estimated.units.toLocaleString()} of the units sold came from {pnl.estimated.lots.length === 1 ? "a lot" : "lots"} not fully costed yet:{" "}
+            {pnl.estimated.lots.map((l, i) => (
+              <span key={l.id}>
+                {i > 0 && ", "}
+                <Link href={`/lots/${l.id}`} className="font-medium text-ink-soft underline-offset-2 hover:underline">{l.label}</Link>
+              </span>
+            ))}
+            . They carry the latest paid lot&apos;s cost, or the onboarding cost, until every transaction is in — wait for that before sending this period to your accounting software.
+          </span>
+        </div>
+      )}
       {pnl.preHistoryUnits > 0 && (
         <p className="text-[12px] text-muted">
           {pnl.preHistoryUnits.toLocaleString()} of the units sold predate the first shipment on record for their product, so they carry the
