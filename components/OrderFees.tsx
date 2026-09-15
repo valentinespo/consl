@@ -441,7 +441,7 @@ export function RulesDialog({ options, onClose }: { options: FeeOptions; onClose
                 ? "Voids every matching order"
                 : `Adds ${amount(r)} · under ${r.bucket === "payment_fees" ? "Payment processing" : "Custom fees"}`;
             return (
-              <li key={r.id} className={`grid grid-cols-[1fr_auto] items-start gap-x-4 gap-y-1 px-3 py-2.5 text-[13px] ${r.active ? "" : "opacity-60"}`}>
+              <li key={r.id} className={`grid grid-cols-[1fr_auto] items-stretch gap-x-4 gap-y-1 px-3 py-2.5 text-[13px] ${r.active ? "" : "opacity-60"}`}>
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={`${r.action === "void" ? "pill-neutral" : "pill-chart"} inline-flex items-center rounded-full border px-2 py-px text-[10.5px] font-medium`}>{r.action === "void" ? "Void" : "Fee"}</span>
@@ -456,14 +456,22 @@ export function RulesDialog({ options, onClose }: { options: FeeOptions; onClose
                     <span className="inline-flex items-center rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted">{whenChip}</span>
                   </div>
                 </div>
-                <div className="flex flex-col items-end gap-1.5">
+                {/* Count at the top right; the small buttons sit on the chips' row, bottom right. */}
+                <div className="flex h-full flex-col items-end justify-between gap-1.5">
                   <span className="text-[12px] tabular text-muted">{r.orders.toLocaleString()} {r.orders === 1 ? "order" : "orders"}</span>
-                  <div className="flex items-center gap-2 text-[12px]">
-                    <button className="text-muted hover:text-ink disabled:opacity-50" disabled={pending} onClick={() => act(() => setFeeRuleActive(r.id, !r.active))}>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      className="inline-flex h-7 items-center rounded-md border border-border bg-surface px-2.5 text-[11.5px] font-medium text-ink-soft hover:border-ink/25 hover:text-ink disabled:opacity-50"
+                      disabled={pending}
+                      onClick={() => act(() => setFeeRuleActive(r.id, !r.active))}
+                    >
                       {r.active ? "Pause" : "Resume"}
                     </button>
-                    <span className="text-line">·</span>
-                    <button className="text-muted hover:text-negative disabled:opacity-50" disabled={pending} onClick={() => act(() => deleteFeeRule(r.id))}>
+                    <button
+                      className="inline-flex h-7 items-center rounded-md border border-border bg-surface px-2.5 text-[11.5px] font-medium text-ink-soft hover:border-negative hover:text-negative disabled:opacity-50"
+                      disabled={pending}
+                      onClick={() => act(() => deleteFeeRule(r.id))}
+                    >
                       Delete
                     </button>
                   </div>
