@@ -25,12 +25,34 @@ function rewriteLegacyUploads(req: Request & { nextUrl: URL }): URL | null {
   return to;
 }
 
+// An install that starts on Shopify's side (the App Store listing's Install button, or the app in
+// a store's admin) lands on the app URL with the store attached: "/?shop=x.myshopify.com&hmac=…".
+// Send it straight into the connect flow — after sign-in when nobody is signed in yet.
+function shopifyInstallTarget(req: Request & { nextUrl: URL }): string | null {
+  const shop = (req.nextUrl.searchParams.get("shop") ?? "").trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shop)) return null;
+  return `/api/integrations/shopify/connect?shop=${encodeURIComponent(shop)}`;
+}
+
 const enforced = clerkMiddleware(async (auth, req) => {
   // A signed-out visitor to the root gets the marketing site; signed-in users keep the dashboard.
   // Redirect rather than rewrite: the app shell decides bare-vs-chrome from the client pathname,
   // which under a rewrite would still read "/" and wrap the landing page in app chrome.
   if (req.nextUrl.pathname === "/") {
     const { userId } = await auth();
+    const install = shopifyInstallTarget(req);
+    if (install) {
+      const url = req.nextUrl.clone();
+      const [path, query] = install.split("?");
+      if (userId) {
+        url.pathname = path;
+        url.search = `?${query}`;
+      } else {
+        url.pathname = "/sign-in";
+        url.search = `?redirect_url=${encodeURIComponent(install)}`;
+      }
+      return NextResponse.redirect(url);
+    }
     if (!userId) {
       const url = req.nextUrl.clone();
       url.pathname = "/home";
