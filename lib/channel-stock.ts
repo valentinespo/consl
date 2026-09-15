@@ -1,8 +1,8 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import { decryptSecret } from "@/lib/secret-box";
 import { shopifyGraphQL } from "@/lib/shopify";
 import { refreshChannelPlaces } from "@/lib/fulfillment";
+import { shopifyAccessToken } from "@/lib/shopify-oauth";
 
 /**
  * Pull the stock a sales channel says it is holding and file it against the facility that actually
@@ -223,7 +223,7 @@ export async function syncTikTokStock(opts: { retried?: boolean } = {}): Promise
 export async function syncShopifyStock(opts: { retried?: boolean } = {}): Promise<ChannelStockSyncResult> {
   const conn = await prisma.integration.findFirst({ where: { provider: "shopify", status: "connected" } });
   if (!conn?.refreshTokenEnc || !conn.sellerId) return EMPTY;
-  const token = decryptSecret(conn.refreshTokenEnc);
+  const token = await shopifyAccessToken(conn);
 
   const byLocation = await placeFacilities("SHOPIFY");
   const facilityIds = [...new Set(byLocation.values())];

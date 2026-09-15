@@ -6,7 +6,7 @@ import { prismaBase } from "@/lib/prisma-base";
 import { decryptSecret, encryptSecret } from "@/lib/secret-box";
 import { ensureChannelFacilities } from "@/lib/integrations";
 import { makeState } from "@/lib/oauth-state";
-import { shopifyGraphQL } from "@/lib/shopify";
+import { shopifyGraphQL, ShopifyError } from "@/lib/shopify";
 import { syncShopifyLocations } from "@/lib/shopify-locations";
 import { runWithOrg } from "@/lib/tenant";
 
@@ -15,8 +15,14 @@ import { runWithOrg } from "@/lib/tenant";
  * merchant's shop domain: we send them to https://{shop}/admin/oauth/authorize for our app, and
  * Shopify returns them to the registered callback with a one-time `code` plus an `hmac` signed
  * with the app secret. We verify our own signed `state` (org binding) AND Shopify's hmac, then
- * exchange the code for the shop's permanent offline access token — stored encrypted on the org's
- * Integration row. One Shopify app (key/secret in env) serves every tenant.
+ * exchange the code for the shop's offline tokens — stored encrypted on the org's Integration row.
+ *
+ * Tokens EXPIRE (Shopify's rule for public apps since 2026; the Admin API answers 403 to the old
+ * permanent kind): the access token lives an hour, the refresh token that mints the next one lives
+ * 90 days and is renewed every time it is used. So every Admin API call gets its token through
+ * shopifyAccessToken(), which refreshes when the hour is nearly up. A connection made before this
+ * (Herbl's custom app) still holds a permanent token in refreshTokenEnc with no accessTokenEnc —
+ * that is the legacy shape and is used as-is until the store reconnects.
  *
  * An install can also START ON SHOPIFY'S SIDE (the listing's Install button, a development store's
  * app page) with nobody signed in to consl. Shopify requires authorization to begin before any
@@ -104,23 +110,103 @@ export function verifyCallbackHmac(url: URL, kind: ShopifyAppKind = "default"): 
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-/** Exchange the one-time code for the shop's permanent offline access token. */
-export async function exchangeShopifyCode(shop: string, code: string, kind: ShopifyAppKind = "default"): Promise<{ accessToken: string; scope: string | null }> {
-  const app = shopifyAppCredentials(kind);
+/** What one token request returns. `refreshToken` null = Shopify issued a permanent token (the
+ *  legacy kind; only custom apps still can) and `expiresAt` is then null too. */
+export type ShopifyTokens = { accessToken: string; scope: string | null; expiresAt: Date | null; refreshToken: string | null };
+
+async function tokenRequest(shop: string, body: Record<string, string>): Promise<ShopifyTokens> {
   const r = await fetch(`https://${shop}/admin/oauth/access_token`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      client_id: app.key,
-      client_secret: app.secret,
-      code,
-    }),
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+    body: new URLSearchParams(body).toString(),
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j.access_token) {
-    throw new Error(`Token exchange failed: ${j.error_description || j.error || r.status}`);
+    throw new ShopifyError(`Token exchange failed: ${j.error_description || j.error || r.status}`, r.status);
   }
-  return { accessToken: j.access_token as string, scope: (j.scope as string) ?? null };
+  const expiresIn = Number(j.expires_in);
+  const refreshToken = typeof j.refresh_token === "string" && j.refresh_token ? (j.refresh_token as string) : null;
+  return {
+    accessToken: j.access_token as string,
+    scope: (j.scope as string) ?? null,
+    expiresAt: refreshToken && Number.isFinite(expiresIn) && expiresIn > 0 ? new Date(Date.now() + expiresIn * 1000) : null,
+    refreshToken,
+  };
+}
+
+/** Exchange the one-time code for the shop's offline tokens — the expiring kind (`expiring=1`). */
+export async function exchangeShopifyCode(shop: string, code: string, kind: ShopifyAppKind = "default"): Promise<ShopifyTokens> {
+  const app = shopifyAppCredentials(kind);
+  return tokenRequest(shop, { client_id: app.key, client_secret: app.secret, code, expiring: "1" });
+}
+
+/** Mint the next access token (and the next refresh token) from the current refresh token. */
+export async function refreshShopifyTokens(shop: string, refreshToken: string, kind: ShopifyAppKind): Promise<ShopifyTokens> {
+  const app = shopifyAppCredentials(kind);
+  return tokenRequest(shop, { client_id: app.key, client_secret: app.secret, grant_type: "refresh_token", refresh_token: refreshToken });
+}
+
+/** How tokens sit on an Integration row: the refresh token (or, legacy, the permanent token) in
+ *  refreshTokenEnc; the hour-long access token and its expiry beside it, null for the legacy kind. */
+function tokenColumns(t: ShopifyTokens) {
+  return {
+    refreshTokenEnc: encryptSecret(t.refreshToken ?? t.accessToken),
+    accessTokenEnc: t.refreshToken ? encryptSecret(t.accessToken) : null,
+    accessTokenExpiresAt: t.refreshToken ? t.expiresAt : null,
+  };
+}
+
+const REFRESH_MARGIN_MS = 5 * 60 * 1000; // refresh when the hour is nearly up, never mid-request
+const inflightRefresh = new Map<string, Promise<string>>();
+
+type ShopifyConn = {
+  id: string;
+  orgId: string | null;
+  sellerId: string | null;
+  refreshTokenEnc: string | null;
+  accessTokenEnc: string | null;
+  accessTokenExpiresAt: Date | null;
+};
+
+/**
+ * The access token to call the Admin API with, for a connected shop — THE way every Shopify call
+ * gets its token. Legacy rows (permanent token, no accessTokenEnc) return it as-is; expiring rows
+ * return the cached access token while it has more than a few minutes left, and otherwise mint a
+ * new one from the refresh token and store the pair. Concurrent callers share one refresh.
+ * A refresh Shopify rejects outright (the store uninstalled the app, or 90 days went by unused)
+ * marks the connection as needing a reconnect; a network hiccup does not.
+ */
+export async function shopifyAccessToken(conn: ShopifyConn): Promise<string> {
+  if (!conn.refreshTokenEnc || !conn.sellerId) throw new ShopifyError("Shopify is not connected");
+  if (!conn.accessTokenEnc) return decryptSecret(conn.refreshTokenEnc);
+  const msLeft = (conn.accessTokenExpiresAt?.getTime() ?? 0) - Date.now();
+  if (msLeft > REFRESH_MARGIN_MS) return decryptSecret(conn.accessTokenEnc);
+
+  const shop = conn.sellerId;
+  const refreshTokenEnc = conn.refreshTokenEnc;
+  let pending = inflightRefresh.get(conn.id);
+  if (!pending) {
+    pending = (async () => {
+      try {
+        const kind = conn.orgId ? await shopifyAppFor(conn.orgId) : "public";
+        const fresh = await refreshShopifyTokens(shop, decryptSecret(refreshTokenEnc), kind);
+        await prismaBase.integration.update({ where: { id: conn.id }, data: { ...tokenColumns(fresh), lastError: null } });
+        return fresh.accessToken;
+      } catch (e) {
+        const rejected = e instanceof ShopifyError && !!e.status && e.status >= 400 && e.status < 500;
+        if (rejected) {
+          await prismaBase.integration
+            .update({ where: { id: conn.id }, data: { status: "error", lastError: `Shopify sign-in expired — reconnect the store. (${(e as Error).message})` } })
+            .catch(() => {});
+        }
+        throw e;
+      } finally {
+        inflightRefresh.delete(conn.id);
+      }
+    })();
+    inflightRefresh.set(conn.id, pending);
+  }
+  return pending;
 }
 
 /**
@@ -128,7 +214,8 @@ export async function exchangeShopifyCode(shop: string, code: string, kind: Shop
  * Integration (encrypted token, sellerId = myshopify domain) and materialise the locked SHOP
  * facility. Unscoped client with an explicit, already-authorized orgId — same as Amazon.
  */
-export async function completeShopifyConnection(orgId: string, shop: string, accessToken: string, scope: string | null): Promise<void> {
+export async function completeShopifyConnection(orgId: string, shop: string, tokens: ShopifyTokens): Promise<void> {
+  const { accessToken, scope } = tokens;
   const data = await shopifyGraphQL<{ shop: { name: string; myshopifyDomain: string; ianaTimezone: string | null } }>(
     shop,
     accessToken,
@@ -143,7 +230,7 @@ export async function completeShopifyConnection(orgId: string, shop: string, acc
       orgId,
       provider: "shopify",
       status: "connected",
-      refreshTokenEnc: encryptSecret(accessToken),
+      ...tokenColumns(tokens),
       sellerId: canonical,
       scope,
       timezone,
@@ -152,7 +239,7 @@ export async function completeShopifyConnection(orgId: string, shop: string, acc
     },
     update: {
       status: "connected",
-      refreshTokenEnc: encryptSecret(accessToken),
+      ...tokenColumns(tokens),
       sellerId: canonical,
       scope,
       timezone,
@@ -203,7 +290,7 @@ export async function completeShopifyConnection(orgId: string, shop: string, acc
 export async function ensureShopifyTimezone(orgId: string): Promise<void> {
   const conn = await prismaBase.integration.findFirst({ where: { orgId, provider: "shopify", status: "connected" } });
   if (!conn?.refreshTokenEnc || !conn.sellerId || conn.timezone) return;
-  const data = await shopifyGraphQL<{ shop: { ianaTimezone: string | null } }>(conn.sellerId, decryptSecret(conn.refreshTokenEnc), `{ shop { ianaTimezone } }`);
+  const data = await shopifyGraphQL<{ shop: { ianaTimezone: string | null } }>(conn.sellerId, await shopifyAccessToken(conn), `{ shop { ianaTimezone } }`);
   if (data.shop.ianaTimezone) await prismaBase.integration.update({ where: { id: conn.id }, data: { timezone: data.shop.ianaTimezone } });
 }
 
@@ -231,13 +318,18 @@ export function pendingAuthorizeUrl(shop: string): string {
 
 /** Park a store's token until someone signs in: one row per shop (a second install replaces the
  *  first) and a random claim token the installing browser keeps in a cookie. Returns the token. */
-export async function savePendingInstall(shop: string, accessToken: string, scope: string | null): Promise<string> {
+export async function savePendingInstall(shop: string, tokens: ShopifyTokens): Promise<string> {
   const claimToken = randomBytes(24).toString("base64url");
-  const accessTokenEnc = encryptSecret(accessToken);
+  const cols = {
+    accessTokenEnc: encryptSecret(tokens.accessToken),
+    refreshTokenEnc: tokens.refreshToken ? encryptSecret(tokens.refreshToken) : null,
+    accessTokenExpiresAt: tokens.expiresAt,
+    scope: tokens.scope,
+  };
   await prismaBase.shopifyPendingInstall.upsert({
     where: { shop },
-    create: { shop, accessTokenEnc, scope, claimToken },
-    update: { accessTokenEnc, scope, claimToken },
+    create: { shop, ...cols, claimToken },
+    update: { ...cols, claimToken },
   });
   // Installs nobody ever came back for don't accumulate.
   await prismaBase.shopifyPendingInstall
@@ -288,7 +380,18 @@ export async function claimPendingInstall(orgId: string): Promise<string | null>
   if (!pending) return null;
   const row = await prismaBase.shopifyPendingInstall.findUnique({ where: { claimToken: pending.claimToken } });
   if (!row) return null;
-  await completeShopifyConnection(orgId, row.shop, decryptSecret(row.accessTokenEnc), row.scope);
+  // The parked access token may have run out while the person signed up; the refresh token is
+  // what actually carries the install (parked installs always come through the public app).
+  let tokens: ShopifyTokens = {
+    accessToken: decryptSecret(row.accessTokenEnc),
+    scope: row.scope,
+    expiresAt: row.accessTokenExpiresAt,
+    refreshToken: row.refreshTokenEnc ? decryptSecret(row.refreshTokenEnc) : null,
+  };
+  if (tokens.refreshToken && (tokens.expiresAt?.getTime() ?? 0) - Date.now() < REFRESH_MARGIN_MS) {
+    tokens = await refreshShopifyTokens(row.shop, tokens.refreshToken, "public");
+  }
+  await completeShopifyConnection(orgId, row.shop, tokens);
   await markOrgOnPublicApp(orgId);
   await prismaBase.shopifyPendingInstall.delete({ where: { id: row.id } }).catch(() => {});
   startFirstImports(orgId);

@@ -2,7 +2,8 @@ import "server-only";
 
 /**
  * Minimal Shopify Admin GraphQL client, per connected shop. The token is the shop's offline
- * access token from the OAuth flow (permanent until uninstall — no refresh dance like Amazon).
+ * access token from the OAuth flow — an expiring one since 2026, so callers get it through
+ * shopifyAccessToken() in lib/shopify-oauth.ts (which refreshes it) rather than off the row.
  * Version is pinned: quarterly Shopify releases are supported for ~12 months, so bump this
  * deliberately (and re-test the sync queries) rather than floating on "latest".
  */

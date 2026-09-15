@@ -1,6 +1,5 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import { decryptSecret } from "@/lib/secret-box";
 
 /**
  * "Fulfilled at" as a consl facility — always from the platform's own record, never a guess.
@@ -104,7 +103,8 @@ export async function refreshChannelPlaces(channel: "SHOPIFY" | "TIKTOK"): Promi
       if (!conn?.refreshTokenEnc || !conn.sellerId) return false;
       const amazon = await prisma.integration.findFirst({ where: { provider: "amazon", status: "connected" }, select: { id: true } });
       const { syncShopifyLocations } = await import("@/lib/shopify-locations");
-      await syncShopifyLocations(conn.sellerId, decryptSecret(conn.refreshTokenEnc), { amazonConnected: !!amazon });
+      const { shopifyAccessToken } = await import("@/lib/shopify-oauth");
+      await syncShopifyLocations(conn.sellerId, await shopifyAccessToken(conn), { amazonConnected: !!amazon });
       return true;
     }
     const conn = await prisma.integration.findFirst({ where: { provider: "tiktok", status: "connected" } });

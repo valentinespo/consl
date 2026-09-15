@@ -48,18 +48,18 @@ export async function GET(request: Request) {
   if (isPendingState(subject)) {
     if (!verifyCallbackHmac(url, "public")) return finish(`?error=${encodeURIComponent("Invalid signature on the Shopify callback.")}`);
     try {
-      const { accessToken, scope } = await exchangeShopifyCode(shop, code, "public");
+      const tokens = await exchangeShopifyCode(shop, code, "public");
       const gate = await requireOwner();
       if (gate.ok) {
         const current = await connectedShopOf(gate.orgId);
         if (!current || current === shop) {
-          await completeShopifyConnection(gate.orgId, shop, accessToken, scope);
+          await completeShopifyConnection(gate.orgId, shop, tokens);
           await markOrgOnPublicApp(gate.orgId);
           startFirstImports(gate.orgId);
           return NextResponse.redirect(SHOPIFY_CONNECTED_URL);
         }
       }
-      const claimToken = await savePendingInstall(shop, accessToken, scope);
+      const claimToken = await savePendingInstall(shop, tokens);
       const res = finish();
       res.cookies.set(PENDING_INSTALL_COOKIE, claimToken, {
         httpOnly: true,
@@ -87,8 +87,8 @@ export async function GET(request: Request) {
   }
 
   try {
-    const { accessToken, scope } = await exchangeShopifyCode(shop, code, appKind);
-    await completeShopifyConnection(stateOrg, shop, accessToken, scope);
+    const tokens = await exchangeShopifyCode(shop, code, appKind);
+    await completeShopifyConnection(stateOrg, shop, tokens);
     startFirstImports(stateOrg);
     // Land on the mapping screen: a fresh channel's catalog is waiting to be reviewed.
     return NextResponse.redirect(SHOPIFY_CONNECTED_URL);

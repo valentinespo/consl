@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import { decryptSecret } from "@/lib/secret-box";
 import { shopifyGraphQL } from "@/lib/shopify";
+import { shopifyAccessToken } from "@/lib/shopify-oauth";
 
 /**
  * Keep this environment's Shopify order and location webhook subscriptions registered for the current org's
@@ -33,7 +33,7 @@ export async function ensureShopifyWebhooks(): Promise<{ created: number; presen
   if (!conn?.refreshTokenEnc || !conn.sellerId) return { created: 0, present: 0 };
   const origin = process.env.APP_ORIGIN;
   if (!origin) return { created: 0, present: 0 };
-  const token = decryptSecret(conn.refreshTokenEnc);
+  const token = await shopifyAccessToken(conn);
   const callbackUrl = `${origin}/api/webhooks/shopify`;
 
   const existing: {

@@ -7,6 +7,7 @@ import { upsertShopifyFinanceEvents, importShopifyPaymentsLedger, hasShopifyPaym
 import { applyFeeRulesToOrders } from "@/lib/order-fees";
 import { resolveFulfillmentFacilities, ensureAmazonShipFromPlaces } from "@/lib/fulfillment";
 import { paymentMethodKey, paymentMethodLabel, walletLabel } from "@/lib/payment-methods";
+import { shopifyAccessToken } from "@/lib/shopify-oauth";
 
 /**
  * Pull orders from the connected channels into SalesOrder/SalesOrderLine — the raw feed for
@@ -385,7 +386,7 @@ function sinceInstant(since: number | Date | undefined): Date | null {
 export async function importShopifyOrders(since?: number | Date): Promise<OrderImportResult> {
   const conn = await prisma.integration.findFirst({ where: { provider: "shopify", status: "connected" } });
   if (!conn?.refreshTokenEnc || !conn.sellerId) return { channel: "SHOPIFY", orders: 0, lines: 0 };
-  const token = decryptSecret(conn.refreshTokenEnc);
+  const token = await shopifyAccessToken(conn);
   const map = await productMap("SHOPIFY");
 
   const sinceAt = sinceInstant(since);
@@ -437,7 +438,7 @@ export async function importShopifyOrders(since?: number | Date): Promise<OrderI
 export async function importShopifyOrderById(orderGid: string): Promise<OrderImportResult> {
   const conn = await prisma.integration.findFirst({ where: { provider: "shopify", status: "connected" } });
   if (!conn?.refreshTokenEnc || !conn.sellerId) return { channel: "SHOPIFY", orders: 0, lines: 0 };
-  const token = decryptSecret(conn.refreshTokenEnc);
+  const token = await shopifyAccessToken(conn);
   const data: { node: ShopifyOrderNode | null } = await shopifyGraphQL(
     conn.sellerId,
     token,

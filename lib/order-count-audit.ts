@@ -1,11 +1,11 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrgId } from "@/lib/tenant";
-import { decryptSecret } from "@/lib/secret-box";
 import { shopifyGraphQL } from "@/lib/shopify";
 import { tiktokApi, TIKTOK_API_VERSION } from "@/lib/tiktok";
 import { getTikTokAccessToken } from "@/lib/tiktok-oauth";
 import { importShopifyOrders, importTikTokOrders } from "@/lib/orders";
+import { shopifyAccessToken } from "@/lib/shopify-oauth";
 
 /**
  * The independent check for Shopify and TikTok orders — the belt to the importers' braces.
@@ -45,7 +45,7 @@ async function ourCounts(channel: string, from: Date): Promise<Map<string, numbe
 export async function auditShopifyOrderCounts(): Promise<CountAudit | null> {
   const conn = await prisma.integration.findFirst({ where: { provider: "shopify", status: "connected" } });
   if (!conn?.refreshTokenEnc || !conn.sellerId) return null;
-  const token = decryptSecret(conn.refreshTokenEnc);
+  const token = await shopifyAccessToken(conn);
   const days = windowDays();
   const ours = await ourCounts("SHOPIFY", days[0].from);
   const mismatched: string[] = [];

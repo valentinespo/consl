@@ -1147,6 +1147,10 @@ model ShopifyPendingInstall {
   id             String   @id @default(cuid())
   shop           String   @unique // the store's myshopify domain; a second install replaces the first
   accessTokenEnc String
+  // Expiring offline tokens (what public apps get since 2026): the access token above lasts an
+  // hour, this refresh token mints the next one when the store is finally attached.
+  refreshTokenEnc      String?
+  accessTokenExpiresAt DateTime?
   scope          String?
   claimToken     String   @unique // random, unguessable — the installing browser holds it in a cookie
   createdAt      DateTime @default(now())

@@ -2,6 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { decryptSecret } from "@/lib/secret-box";
 import { shopifyGraphQL } from "@/lib/shopify";
+import { shopifyAccessToken } from "@/lib/shopify-oauth";
 
 /**
  * The mapping layer between a connected channel's catalog and consl products.
@@ -118,7 +119,7 @@ async function upsertListings(channel: ChannelKey, fetched: FetchedListing[]): P
 export async function refreshShopifyListings(): Promise<{ seen: number }> {
   const conn = await prisma.integration.findFirst({ where: { provider: "shopify", status: "connected" } });
   if (!conn?.refreshTokenEnc || !conn.sellerId) throw new Error("Shopify is not connected");
-  const token = decryptSecret(conn.refreshTokenEnc);
+  const token = await shopifyAccessToken(conn);
 
   const fetched: FetchedListing[] = [];
   let cursor: string | null = null;
