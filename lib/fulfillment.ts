@@ -200,3 +200,34 @@ export async function resolveAllFulfillment(opts: { onlyUnresolved?: boolean } =
   }
   return changed;
 }
+
+/** Re-read where every order of one channel shipped from — after a place was re-mapped on Map
+ *  facilities — and return the ids whose facility changed, so fee and void rules can be re-applied. */
+export async function resolveChannelOrders(channel: "SHOPIFY" | "TIKTOK"): Promise<string[]> {
+  const ctx = await loadContext();
+  const changed: string[] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    const batch = await prisma.salesOrder.findMany({
+      where: { channel },
+      select: { id: true, channel: true, fulfillment: true, fulfillmentLabel: true, shipFromKey: true, sourceData: true, fulfillmentFacilityId: true },
+      orderBy: { id: "asc" },
+      take: 1000,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
+    if (batch.length === 0) break;
+    const byTarget = new Map<string | null, string[]>();
+    for (const o of batch) {
+      const r = detectFacility(o, ctx);
+      if (r.facilityId === o.fulfillmentFacilityId) continue;
+      byTarget.set(r.facilityId, [...(byTarget.get(r.facilityId) ?? []), o.id]);
+    }
+    for (const [facilityId, ids] of byTarget) {
+      await prisma.salesOrder.updateMany({ where: { id: { in: ids } }, data: { fulfillmentFacilityId: facilityId } });
+      changed.push(...ids);
+    }
+    cursor = batch[batch.length - 1].id;
+    if (batch.length < 1000) break;
+  }
+  return changed;
+}

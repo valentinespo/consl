@@ -66,12 +66,18 @@ export async function syncTikTokWarehouses(accessToken: string, shopCipher: stri
   // A warehouse that IS Amazon's MCF mirrors stock consl already holds as Amazon FBA — same rule
   // as Shopify's MCF location: never a second facility; orders from it resolve to FBA instead.
   const amazonConnected = (await prisma.facility.count({ where: { channel: "AMAZON_FBA" } })) > 0;
-  const wanted = all.filter((w) => w.type === "SALES_WAREHOUSE" && w.effect_status === "ENABLED" && !(amazonConnected && /amazon/i.test(w.name)));
+  // What a person decided each place is (Map facilities): merged / MCF / ignored places never get
+  // a facility of their own; "own" overrides consl's Amazon guess.
+  const modeOf = new Map((await prisma.channelLocation.findMany({ where: { channel: "TIKTOK" }, select: { externalId: true, mode: true } })).map((l) => [l.externalId, l.mode]));
+  const wanted = all.filter((w) => {
+    const mode = modeOf.get(w.id) ?? "auto";
+    if (mode === "merged" || mode === "mcf" || mode === "ignored") return false;
+    if (mode === "auto" && amazonConnected && /amazon/i.test(w.name)) return false;
+    return w.type === "SALES_WAREHOUSE" && w.effect_status === "ENABLED";
+  });
 
   const existing = await prisma.facility.findMany({ where: { channel: "TIKTOK" } });
   const byExternal = new Map(existing.filter((f) => f.externalId).map((f) => [f.externalId!, f]));
-  // A warehouse a person pointed at another facility ("same place as…") gets no facility of its own.
-  const manual = new Set((await prisma.channelLocation.findMany({ where: { channel: "TIKTOK", mappedManually: true }, select: { externalId: true } })).map((l) => l.externalId));
 
   let created = 0;
   let updated = 0;
@@ -79,7 +85,6 @@ export async function syncTikTokWarehouses(accessToken: string, shopCipher: stri
 
   for (const w of wanted) {
     seen.add(w.id);
-    if (manual.has(w.id)) continue;
     const name = w.name;
     const address =
       w.address?.full_address?.trim() ||
@@ -117,10 +122,18 @@ export async function syncTikTokWarehouses(accessToken: string, shopCipher: stri
   // A return warehouse is on record too, with no facility: stock reported there is known and
   // deliberately uncounted — not a "new place" for the stock sync to chase.
   for (const w of all) {
-    const data = { name: w.name, facilityId: facilityByExternal.get(w.id) ?? null, amazonMirror: /amazon/i.test(w.name), active: w.type === "SALES_WAREHOUSE" && w.effect_status === "ENABLED" };
-    const row = await prisma.channelLocation.findFirst({ where: { channel: "TIKTOK", externalId: w.id }, select: { id: true, mappedManually: true } });
-    // A mapping made by a person keeps its facility; the sync only refreshes the rest.
-    if (row) await prisma.channelLocation.update({ where: { id: row.id }, data: row.mappedManually ? { name: data.name, amazonMirror: data.amazonMirror, active: data.active } : data });
+    const row = await prisma.channelLocation.findFirst({ where: { channel: "TIKTOK", externalId: w.id }, select: { id: true, mode: true } });
+    const mode = row?.mode ?? "auto";
+    const own = facilityByExternal.get(w.id) ?? null;
+    const active = w.type === "SALES_WAREHOUSE" && w.effect_status === "ENABLED";
+    // A person's decision stands; only consl's own guess (auto) is re-read from the platform.
+    const data =
+      mode === "merged" ? { name: w.name, active, amazonMirror: false }
+      : mode === "mcf" ? { name: w.name, active, amazonMirror: true, facilityId: null }
+      : mode === "ignored" ? { name: w.name, active, amazonMirror: false, facilityId: null }
+      : mode === "own" ? { name: w.name, active, amazonMirror: false, facilityId: own }
+      : { name: w.name, active, amazonMirror: /amazon/i.test(w.name), facilityId: own };
+    if (row) await prisma.channelLocation.update({ where: { id: row.id }, data });
     else await prisma.channelLocation.create({ data: { channel: "TIKTOK", externalId: w.id, ...data } });
   }
 

@@ -9,6 +9,9 @@ import { requirePermission } from "@/lib/membership";
 import { computeEngineResult, recomputeAll } from "@/lib/recompute";
 import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
 import { applyFeeRulesToOrders } from "@/lib/order-fees";
+import { runWithOrg } from "@/lib/tenant";
+import { codeFromLocationName } from "@/lib/shopify-locations";
+import { codeFromWarehouseName } from "@/lib/tiktok-locations";
 
 /** Create a facility — a co-packer, warehouse, 3PL or anywhere else stock lives. */
 export async function createFacility(input: { code: string; name: string; type: string }) {
@@ -473,98 +476,139 @@ export async function createFacilityForShipFrom(placeId: string, input: { name: 
   return mapAmazonShipFrom(placeId, f.id);
 }
 
-/**
- * "Same place as…": a Shopify location or TikTok warehouse that is really one of the company's
- * other facilities (the one warehouse both platforms ship from). From now on its orders and its
- * reported stock count at that facility. The facility the sync had created for this very place
- * hands everything it held — orders, fee rules, lots, movements, purchases, stock routes — to the
- * survivor and retires; the places syncs keep the choice and never bring it back
- * (see lib/shopify-locations.ts, lib/tiktok-locations.ts).
- */
-export async function mergeChannelPlace(placeId: string, targetFacilityId: string) {
-  const gate = await requirePermission("facilities", "edit");
-  if (!gate.ok) return { ok: false as const, error: gate.error };
-  const place = await prisma.channelLocation.findFirst({
-    where: { id: placeId, channel: { in: ["SHOPIFY", "TIKTOK"] } },
-    include: { facility: { select: { id: true, channel: true, externalId: true } } },
-  });
-  if (!place) return { ok: false as const, error: "That place is no longer on record." };
-  if (place.amazonMirror) return { ok: false as const, error: "Amazon's fulfilment place always counts as Amazon FBA." };
-  const target = await prisma.facility.findFirst({ where: { id: targetFacilityId }, select: { id: true, channel: true, inactive: true } });
-  if (!target || target.inactive) return { ok: false as const, error: "Pick a facility." };
-  if (target.channel?.startsWith("AMAZON")) return { ok: false as const, error: "A Shopify location or TikTok warehouse can't be one of Amazon's own warehouses." };
-  if (target.id === place.facilityId) return { ok: true as const, moved: 0 };
-  // The duplicate: the facility the sync created for this very place. A facility the place was
-  // merely pointed at earlier is somebody else's place too — its history stays.
-  const dup = place.facility && place.facility.id !== target.id && place.facility.channel === place.channel && place.facility.externalId === place.externalId ? place.facility : null;
-  const previous = place.facilityId;
+export type PlaceMode = "own" | "merged" | "mcf" | "ignored";
 
-  const movedOrders = dup
-    ? (await prisma.salesOrder.findMany({ where: { OR: [{ fulfillmentFacilityId: dup.id }, { fulfillmentOverrideFacilityId: dup.id }] }, select: { id: true } })).map((o) => o.id)
-    : [];
-  await prisma.$transaction([
-    prisma.channelLocation.update({ where: { id: place.id }, data: { facilityId: target.id, mappedManually: true } }),
-    ...(dup
-      ? [
-          prisma.salesOrder.updateMany({ where: { fulfillmentFacilityId: dup.id }, data: { fulfillmentFacilityId: target.id } }),
-          prisma.salesOrder.updateMany({ where: { fulfillmentOverrideFacilityId: dup.id }, data: { fulfillmentOverrideFacilityId: target.id } }),
-          prisma.orderFeeRule.updateMany({ where: { facilityId: dup.id }, data: { facilityId: target.id } }),
-          prisma.lot.updateMany({ where: { facilityId: dup.id }, data: { facilityId: target.id } }),
-          prisma.stockMovement.updateMany({ where: { fromFacilityId: dup.id }, data: { fromFacilityId: target.id } }),
-          prisma.stockMovement.updateMany({ where: { toFacilityId: dup.id }, data: { toFacilityId: target.id } }),
-          prisma.purchase.updateMany({ where: { facilityId: dup.id }, data: { facilityId: target.id } }),
-          prisma.purchaseOrder.updateMany({ where: { facilityId: dup.id }, data: { facilityId: target.id } }),
-          prisma.channelStock.deleteMany({ where: { facilityId: dup.id } }),
-          prisma.facility.update({ where: { id: dup.id }, data: { inactive: true, stockSource: null } }),
-        ]
-      : []),
-  ]);
-  // Stock routes named the duplicate: they name the survivor now.
-  if (dup) {
-    const stored = (await getOrgSettings()).stockRoutes as { from: string; to: string }[] | null;
-    if (Array.isArray(stored)) {
-      const swap = (id: string) => (id === dup.id ? target.id : id);
-      const routes = [
-        ...new Map(
-          stored
-            .filter((r) => r && typeof r.from === "string" && typeof r.to === "string")
-            .map((r) => ({ from: swap(r.from), to: swap(r.to) }))
-            .filter((r) => r.from !== r.to)
-            .map((r) => [`${r.from}>${r.to}`, r] as const),
-        ).values(),
-      ];
-      await saveOrgSettings({ stockRoutes: routes });
-    }
+/** A facility of its own for a place that has none yet (a person overrode consl's Amazon guess, or
+ *  un-ignored a place the platform can't be read from this minute). The next places sync fills in
+ *  the address. */
+async function createOwnFacility(place: { channel: string; externalId: string; name: string }) {
+  const base = place.channel === "SHOPIFY" ? codeFromLocationName(place.name) : codeFromWarehouseName(place.name);
+  let code = base;
+  for (let n = 2; await prisma.facility.findFirst({ where: { code }, select: { id: true } }); n++) code = `${base}${n}`.slice(0, 8);
+  return prisma.facility.create({ data: { code, name: place.name, type: "channel", channel: place.channel, externalId: place.externalId, locked: true } });
+}
+
+/** A place's own facility stops being the answer and retires — kept, never deleted, so the history
+ *  it still names stays intact. Its orders go to `orderHeir` (the merge target, Amazon FBA, or
+ *  nowhere for an ignored place). Rules, lots, movements, purchases and routes follow only into a
+ *  merge (`historyHeir`): they describe THAT place, and Amazon's warehouse is not it — a "fulfilled
+ *  at Alton" fee must never start charging every FBA order. */
+async function retireOwnFacility(id: string, orderHeir: string | null, historyHeir: string | null): Promise<void> {
+  // Plain statements, in order, each safe to repeat: a choice made again finishes whatever an
+  // interrupted run left undone. (A batch transaction here stalls under the dev bundler.)
+  await prisma.salesOrder.updateMany({ where: { fulfillmentFacilityId: id }, data: { fulfillmentFacilityId: orderHeir } });
+  await prisma.salesOrder.updateMany({ where: { fulfillmentOverrideFacilityId: id }, data: { fulfillmentOverrideFacilityId: orderHeir } });
+  if (historyHeir) {
+    await prisma.orderFeeRule.updateMany({ where: { facilityId: id }, data: { facilityId: historyHeir } });
+    await prisma.lot.updateMany({ where: { facilityId: id }, data: { facilityId: historyHeir } });
+    await prisma.stockMovement.updateMany({ where: { fromFacilityId: id }, data: { fromFacilityId: historyHeir } });
+    await prisma.stockMovement.updateMany({ where: { toFacilityId: id }, data: { toFacilityId: historyHeir } });
+    await prisma.purchase.updateMany({ where: { facilityId: id }, data: { facilityId: historyHeir } });
+    await prisma.purchaseOrder.updateMany({ where: { facilityId: id }, data: { facilityId: historyHeir } });
   }
-  // Orders this place had put at its earlier facility (a person's previous choice) re-read their
-  // place and land at the new one; orders that facility holds for other reasons stay.
-  let changed = 0;
-  if (previous && !dup) {
-    const { resolveFulfillmentFacilities } = await import("@/lib/fulfillment");
-    const ids = (await prisma.salesOrder.findMany({ where: { fulfillmentFacilityId: previous, channel: place.channel }, select: { id: true } })).map((o) => o.id);
-    for (let i = 0; i < ids.length; i += 1000) changed += await resolveFulfillmentFacilities(ids.slice(i, i + 1000), { sync: false });
+  await prisma.channelStock.deleteMany({ where: { facilityId: id } });
+  await prisma.facility.update({ where: { id }, data: { inactive: true, stockSource: null } });
+  // Stock routes that named it name the merge target now, or are dropped.
+  const stored = (await getOrgSettings()).stockRoutes as { from: string; to: string }[] | null;
+  if (Array.isArray(stored)) {
+    const swap = (x: string) => (x === id ? historyHeir : x);
+    const routes = [
+      ...new Map(
+        stored
+          .filter((r) => r && typeof r.from === "string" && typeof r.to === "string")
+          .map((r) => ({ from: swap(r.from), to: swap(r.to) }))
+          .filter((r): r is { from: string; to: string } => !!r.from && !!r.to && r.from !== r.to)
+          .map((r) => [`${r.from}>${r.to}`, r] as const),
+      ).values(),
+    ];
+    await saveOrgSettings({ stockRoutes: routes });
   }
-  // A fee or void rule keyed on the facility may match differently now.
-  for (let i = 0; i < movedOrders.length; i += 500) await applyFeeRulesToOrders(movedOrders.slice(i, i + 500));
-  revalidatePath("/", "layout");
-  return { ok: true as const, moved: movedOrders.length + changed };
 }
 
 /**
- * "Own facility again": the place stops pointing at another facility and gets a facility of its
- * own back from the places sync (run right away; the scheduler's next pass repeats it if the
- * platform can't be read this minute). History that moved stays where it went.
+ * What a Shopify location or TikTok warehouse IS, as decided by a person on Map facilities:
+ *  - own: a facility of its own (back from a merge / MCF / ignore, or overriding consl's guess);
+ *  - merged: the same place as another facility — its orders and the platform's stock count there;
+ *  - mcf: Amazon's fulfilment — orders count as shipped from Amazon FBA, units reported here are
+ *    ignored because they are already counted as FBA stock;
+ *  - ignored: not a place consl tracks — gone from Facilities, orders from it have no facility,
+ *    units reported here are not counted.
+ * The place's own facility hands on what it held and retires when it stops being the answer; the
+ * places sync, the stock sync and a re-read of every order of the channel run right away so the
+ * change shows immediately (the scheduler repeats them if the platform can't be read this minute).
  */
-export async function unmergeChannelPlace(placeId: string) {
+export async function setChannelPlaceMode(placeId: string, input: { mode: PlaceMode; targetFacilityId?: string | null; stockSource?: string | null }) {
   const gate = await requirePermission("facilities", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };
-  const place = await prisma.channelLocation.findFirst({ where: { id: placeId, mappedManually: true, channel: { in: ["SHOPIFY", "TIKTOK"] } } });
-  if (!place) return { ok: false as const, error: "That place is no longer on record." };
-  await prisma.channelLocation.update({ where: { id: place.id }, data: { mappedManually: false } });
-  const { refreshChannelPlaces } = await import("@/lib/fulfillment");
-  const refreshed = await refreshChannelPlaces(place.channel as "SHOPIFY" | "TIKTOK");
-  revalidatePath("/", "layout");
-  return { ok: true as const, refreshed };
+  // Explicit org context for the whole flow: the tenant client then never has to look the org up
+  // mid-flight, which inside a batch transaction would wait on the very connection it holds.
+  return runWithOrg(gate.orgId, async () => {
+    const place = await prisma.channelLocation.findFirst({ where: { id: placeId, channel: { in: ["SHOPIFY", "TIKTOK"] } } });
+    if (!place) return { ok: false as const, error: "That place is no longer on record." };
+    const channel = place.channel as "SHOPIFY" | "TIKTOK";
+    const mode = input.mode;
+    if (mode !== "own" && mode !== "merged" && mode !== "mcf" && mode !== "ignored") return { ok: false as const, error: "Pick what this place is." };
+    const fba = await prisma.facility.findFirst({ where: { channel: "AMAZON_FBA", inactive: false }, select: { id: true } });
+    // The facility the sync made for this very place, active or retired.
+    const ownFacility = await prisma.facility.findFirst({ where: { channel, externalId: place.externalId }, select: { id: true, inactive: true } });
+
+    let target: { id: string; channel: string | null } | null = null;
+    if (mode === "merged") {
+      if (!input.targetFacilityId) return { ok: false as const, error: "Pick a facility." };
+      const t = await prisma.facility.findFirst({ where: { id: input.targetFacilityId }, select: { id: true, channel: true, inactive: true } });
+      if (!t || t.inactive) return { ok: false as const, error: "Pick a facility." };
+      if (t.channel?.startsWith("AMAZON")) return { ok: false as const, error: "For Amazon's warehouse, choose “Amazon MCF”." };
+      if (ownFacility && t.id === ownFacility.id) return { ok: false as const, error: "That is this place's own facility — choose “Its own facility”." };
+      target = t;
+    }
+    if (mode === "mcf" && !fba) return { ok: false as const, error: "Connect Amazon first — there is no Amazon FBA facility to count these orders at." };
+
+    // 1. The place itself.
+    const previousFacilityId = place.facilityId;
+    let facilityId: string | null = null;
+    if (mode === "own") {
+      facilityId = ownFacility ? ownFacility.id : (await createOwnFacility(place)).id;
+      if (ownFacility?.inactive) await prisma.facility.update({ where: { id: ownFacility.id }, data: { inactive: false } });
+    } else if (mode === "merged") facilityId = target!.id;
+    await prisma.channelLocation.update({ where: { id: place.id }, data: { mode, mappedManually: true, facilityId, amazonMirror: mode === "mcf" } });
+    // This platform's stock rows at a facility the place no longer counts at (an earlier merge).
+    if (previousFacilityId && previousFacilityId !== facilityId && previousFacilityId !== ownFacility?.id) {
+      await prisma.channelStock.deleteMany({ where: { facilityId: previousFacilityId, channel } });
+    }
+
+    // 2. Its own facility hands on what it held and retires, when it stops being the answer. Places
+    //    another platform had merged into it are the same warehouse, so they follow the decision.
+    if (ownFacility && !ownFacility.inactive && mode !== "own") {
+      await retireOwnFacility(ownFacility.id, mode === "merged" ? target!.id : mode === "mcf" ? fba!.id : null, mode === "merged" ? target!.id : null);
+      await prisma.channelLocation.updateMany({
+        where: { facilityId: ownFacility.id, mode: "merged", id: { not: place.id } },
+        data: mode === "merged" ? { facilityId: target!.id } : mode === "mcf" ? { mode: "mcf", facilityId: null, amazonMirror: true } : { mode: "ignored", facilityId: null, amazonMirror: false },
+      });
+    }
+
+    // 3. Which platform's count a merged channel facility uses.
+    if (mode === "merged" && target && (target.channel === "SHOPIFY" || target.channel === "TIKTOK") && input.stockSource !== undefined) {
+      const source = input.stockSource || null;
+      if (source && source !== target.channel && source !== channel) return { ok: false as const, error: "That platform doesn't report stock at this facility." };
+      await prisma.facility.update({ where: { id: target.id }, data: { stockSource: source } });
+    }
+
+    // 4. Right away: the platform's places (name, address), its stock, and every order of the channel.
+    const { refreshChannelPlaces, resolveChannelOrders } = await import("@/lib/fulfillment");
+    await refreshChannelPlaces(channel);
+    try {
+      const { syncShopifyStock, syncTikTokStock } = await import("@/lib/channel-stock");
+      await (channel === "SHOPIFY" ? syncShopifyStock() : syncTikTokStock());
+    } catch (e) {
+      console.error(`[facilities] ${channel} stock sync after re-mapping failed:`, (e as Error).message);
+    }
+    // Both platforms' orders re-read their place: a place of the other platform may have been merged
+    // into the facility that just changed, and its orders follow.
+    const changed = [...(await resolveChannelOrders("SHOPIFY")), ...(await resolveChannelOrders("TIKTOK"))];
+    for (let i = 0; i < changed.length; i += 500) await applyFeeRulesToOrders(changed.slice(i, i + 500));
+    revalidatePath("/", "layout");
+    return { ok: true as const, changed: changed.length };
+  });
 }
 
 /** Which platform's report counts as a facility's stock, when more than one reports it. */

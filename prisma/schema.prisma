@@ -1038,11 +1038,19 @@ model ChannelLocation {
   name         String
   facility     Facility?     @relation(fields: [facilityId], references: [id], onDelete: SetNull)
   facilityId   String? // the consl facility that mirrors it, when it is a real place of its own
-  // True once a person pointed this place at a facility ("same place as…"): the syncs then keep
-  // their hands off `facilityId` and never spawn a facility of its own for it.
-  mappedManually Boolean     @default(false)
+  // What a person said this place is (Facilities → Map facilities): auto = consl decides (Amazon's
+  // mirror by its name, else a facility of its own) | own | merged (facilityId = the facility a
+  // person chose) | mcf (counts as Amazon FBA; units reported here are FBA's) | ignored (no
+  // facility, not counted). Anything but auto is a decision the syncs never overturn.
+  mode         String        @default("auto")
+  mappedManually Boolean     @default(false) // kept in step with mode !== "auto"
   amazonMirror Boolean       @default(false) // Amazon's MCF — the FBA pool by another name
   active       Boolean       @default(true)
+  // What the platform last reported here for the company's products, so Map facilities can say
+  // what an ignored or MCF place holds that is not counted.
+  reportedUnits Int          @default(0)
+  reportedSkus  Int          @default(0)
+  reportedAt   DateTime?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 

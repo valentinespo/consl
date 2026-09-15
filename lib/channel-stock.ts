@@ -51,16 +51,33 @@ async function replaceStock(
   ]);
 }
 
-/** The facility each of a platform's places counts at: the place record (which a person may have
- *  pointed at another facility) first, else the facility the platform's sync created for it. */
+/** The facility each of a platform's places counts at: the place record first (a person may have
+ *  pointed it at another facility, or said it counts nowhere), else the facility the platform's
+ *  sync created for it. */
 async function placeFacilities(channel: "SHOPIFY" | "TIKTOK"): Promise<Map<string, string>> {
   const [places, facilities] = await Promise.all([
-    prisma.channelLocation.findMany({ where: { channel, facilityId: { not: null } }, select: { externalId: true, facilityId: true } }),
+    prisma.channelLocation.findMany({ where: { channel }, select: { externalId: true, facilityId: true, mode: true } }),
     prisma.facility.findMany({ where: { channel, externalId: { not: null }, inactive: false }, select: { externalId: true, id: true } }),
   ]);
   const m = new Map(facilities.map((f) => [f.externalId!, f.id]));
-  for (const p of places) m.set(p.externalId, p.facilityId!);
+  for (const p of places) {
+    if (p.mode === "ignored" || p.mode === "mcf") m.delete(p.externalId); // counted nowhere — MCF units are FBA's
+    else if (p.facilityId) m.set(p.externalId, p.facilityId);
+  }
   return m;
+}
+
+/** What each place reported for the company's products, kept on the place itself — so Map
+ *  facilities can say what an ignored or MCF place holds that is not counted. */
+async function recordReported(channel: "SHOPIFY" | "TIKTOK", reported: Map<string, Map<string, number>>): Promise<void> {
+  const rows = await prisma.channelLocation.findMany({ where: { channel }, select: { id: true, externalId: true } });
+  const now = new Date();
+  for (const r of rows) {
+    const per = reported.get(r.externalId);
+    const units = per ? [...per.values()].reduce((t, u) => t + u, 0) : 0;
+    const skus = per ? [...per.values()].filter((u) => u > 0).length : 0;
+    await prisma.channelLocation.update({ where: { id: r.id }, data: { reportedUnits: units, reportedSkus: skus, reportedAt: now } });
+  }
 }
 
 export type ChannelStockCell = {
@@ -70,7 +87,6 @@ export type ChannelStockCell = {
   channel: string; // the facility's own platform (SHOPIFY | TIKTOK) — the pool its units are valued from
   source: string; // the platform whose report these units come from
 };
-export type StockDisagreement = { facilityId: string; productId: string; source: string; units: number; other: string; otherUnits: number };
 export type FacilityStockSource = { facilityId: string; platforms: string[]; source: string | null };
 
 /** Which platform's report counts for a facility: the choice made on it (while that platform
@@ -82,11 +98,11 @@ export function stockSourceOf(f: { channel: string | null; stockSource: string |
 }
 
 /** Per active facility: the platforms that report its stock (its own, plus every place a person
- *  pointed at it) and the one that counts. */
+ *  merged into it) and the one that counts. */
 export async function facilityStockSources(): Promise<Map<string, FacilityStockSource>> {
   const [facilities, places] = await Promise.all([
     prisma.facility.findMany({ where: { inactive: false }, select: { id: true, channel: true, stockSource: true } }),
-    prisma.channelLocation.findMany({ where: { facilityId: { not: null }, channel: { in: ["SHOPIFY", "TIKTOK"] } }, select: { facilityId: true, channel: true } }),
+    prisma.channelLocation.findMany({ where: { facilityId: { not: null }, mode: "merged", channel: { in: ["SHOPIFY", "TIKTOK"] } }, select: { facilityId: true, channel: true } }),
   ]);
   const out = new Map<string, FacilityStockSource>();
   for (const f of facilities) {
@@ -98,10 +114,9 @@ export async function facilityStockSources(): Promise<Map<string, FacilityStockS
 }
 
 /** The stock the platforms report at the company's CHANNEL facilities — ONE platform per facility
- *  (its stock source), so a warehouse two platforms report is never counted twice — plus where the
- *  other platform disagrees by more than a couple of units. A facility the company keeps its own
- *  books for (lots and movements) has no cell here: those books count, as ever. */
-export async function readChannelStock(): Promise<{ cells: ChannelStockCell[]; disagreements: StockDisagreement[] }> {
+ *  (its stock source), so a warehouse two platforms report is never counted twice. A facility the
+ *  company keeps its own books for (lots and movements) has no cell here: those books count. */
+export async function readChannelStock(): Promise<{ cells: ChannelStockCell[] }> {
   const [rows, sources] = await Promise.all([
     prisma.channelStock.findMany({
       where: { units: { gt: 0 } },
@@ -111,31 +126,14 @@ export async function readChannelStock(): Promise<{ cells: ChannelStockCell[]; d
     facilityStockSources(),
   ]);
   const cells: ChannelStockCell[] = [];
-  const byKey = new Map<string, number>(); // "facility|product|platform" → units
-  const reporting = new Set<string>(); // "facility|platform": the platform has reported something there
-  const pairs = new Map<string, { facilityId: string; productId: string }>();
   for (const r of rows) {
     const fc = r.facility.channel;
     if ((fc !== "SHOPIFY" && fc !== "TIKTOK") || r.facility.inactive) continue;
     const reported = r.channel ?? fc;
-    byKey.set(`${r.facilityId}|${r.productId}|${reported}`, r.units);
-    reporting.add(`${r.facilityId}|${reported}`);
-    pairs.set(`${r.facilityId}|${r.productId}`, { facilityId: r.facilityId, productId: r.productId });
     const src = sources.get(r.facilityId)?.source ?? fc;
     if (reported === src) cells.push({ facilityId: r.facilityId, productId: r.productId, units: r.units, channel: fc, source: src });
   }
-  const disagreements: StockDisagreement[] = [];
-  for (const [k, { facilityId, productId }] of pairs) {
-    const s = sources.get(facilityId);
-    if (!s?.source || s.platforms.length < 2) continue;
-    const mine = byKey.get(`${k}|${s.source}`) ?? 0;
-    for (const p of s.platforms) {
-      if (p === s.source || !reporting.has(`${facilityId}|${p}`)) continue;
-      const other = byKey.get(`${k}|${p}`) ?? 0;
-      if (Math.abs(other - mine) > 2) disagreements.push({ facilityId, productId, source: s.source, units: mine, other: p, otherUnits: other });
-    }
-  }
-  return { cells, disagreements };
+  return { cells };
 }
 
 type TikTokStockProduct = {
@@ -170,6 +168,7 @@ export async function syncTikTokStock(opts: { retried?: boolean } = {}): Promise
 
   // facilityId → productId → units. Nested so repeated SKU/warehouse pairs across pages sum.
   const totals = new Map<string, Map<string, number>>();
+  const reported = new Map<string, Map<string, number>>(); // warehouse → product → units, facility or not
   let skipped = 0;
   let pageToken: string | null = null;
 
@@ -193,6 +192,11 @@ export async function syncTikTokStock(opts: { retried?: boolean } = {}): Promise
         for (const inv of s.inventory ?? []) {
           const units = Math.max(0, Math.round(inv.quantity ?? 0));
           const facilityId = inv.warehouse_id ? byWarehouse.get(inv.warehouse_id) : undefined;
+          if (productId && inv.warehouse_id && units > 0) {
+            const per = reported.get(inv.warehouse_id) ?? new Map<string, number>();
+            per.set(productId, (per.get(productId) ?? 0) + units);
+            reported.set(inv.warehouse_id, per);
+          }
           if (!productId || !facilityId) {
             if (units > 0) skipped++;
             if (units > 0 && inv.warehouse_id && !facilityId && !known.has(inv.warehouse_id)) unknown.add(inv.warehouse_id);
@@ -209,7 +213,7 @@ export async function syncTikTokStock(opts: { retried?: boolean } = {}): Promise
   }
 
   if (unknown.size > 0 && !opts.retried && (await refreshChannelPlaces("TIKTOK"))) return syncTikTokStock({ retried: true });
-  return persist("TIKTOK", facilityIds, totals, skipped);
+  return persist("TIKTOK", facilityIds, totals, skipped, reported);
 }
 
 /**
@@ -235,6 +239,7 @@ export async function syncShopifyStock(opts: { retried?: boolean } = {}): Promis
   const byVariant = new Map(products.map((p) => [p.shopifyVariantId!, p.id]));
 
   const totals = new Map<string, Map<string, number>>();
+  const reported = new Map<string, Map<string, number>>(); // location → product → units, facility or not
   let skipped = 0;
   let cursor: string | null = null;
 
@@ -275,6 +280,11 @@ export async function syncShopifyStock(opts: { retried?: boolean } = {}): Promis
       for (const lvl of v.inventoryItem?.inventoryLevels.nodes ?? []) {
         const units = Math.max(0, Math.round(lvl.quantities?.[0]?.quantity ?? 0));
         const facilityId = byLocation.get(lvl.location.id);
+        if (productId && units > 0) {
+          const per = reported.get(lvl.location.id) ?? new Map<string, number>();
+          per.set(productId, (per.get(productId) ?? 0) + units);
+          reported.set(lvl.location.id, per);
+        }
         if (!productId || !facilityId) {
           if (units > 0) skipped++;
           if (units > 0 && !facilityId && !known.has(lvl.location.id)) unknown.add(lvl.location.id);
@@ -290,7 +300,7 @@ export async function syncShopifyStock(opts: { retried?: boolean } = {}): Promis
   }
 
   if (unknown.size > 0 && !opts.retried && (await refreshChannelPlaces("SHOPIFY"))) return syncShopifyStock({ retried: true });
-  return persist("SHOPIFY", facilityIds, totals, skipped);
+  return persist("SHOPIFY", facilityIds, totals, skipped, reported);
 }
 
 /** Flatten the per-facility tallies, write them, and report what landed. */
@@ -299,12 +309,14 @@ async function persist(
   facilityIds: string[],
   totals: Map<string, Map<string, number>>,
   skipped: number,
+  reported: Map<string, Map<string, number>>,
 ): Promise<ChannelStockSyncResult> {
   const rows: Array<{ facilityId: string; productId: string; units: number }> = [];
   for (const [facilityId, perFacility] of totals) {
     for (const [productId, units] of perFacility) rows.push({ facilityId, productId, units });
   }
   await replaceStock(channel, facilityIds, rows);
+  await recordReported(channel, reported);
   return {
     facilities: facilityIds.length,
     skus: rows.filter((r) => r.units > 0).length,

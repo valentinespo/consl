@@ -90,8 +90,13 @@ export async function syncShopifyLocations(
   const all = data.locations.nodes;
 
   const skippedMcf: string[] = [];
+  // What a person decided each place is (Map facilities): merged / MCF / ignored places never get
+  // a facility of their own; "own" overrides consl's Amazon guess.
+  const modeOf = new Map((await prisma.channelLocation.findMany({ where: { channel: "SHOPIFY" }, select: { externalId: true, mode: true } })).map((l) => [l.externalId, l.mode]));
   const wanted = all.filter((loc) => {
-    if (opts.amazonConnected && isAmazonMirror(loc)) {
+    const mode = modeOf.get(loc.id) ?? "auto";
+    if (mode === "merged" || mode === "mcf" || mode === "ignored") return false;
+    if (mode === "auto" && opts.amazonConnected && isAmazonMirror(loc)) {
       skippedMcf.push(loc.name);
       return false;
     }
@@ -100,8 +105,6 @@ export async function syncShopifyLocations(
 
   const existing = await prisma.facility.findMany({ where: { channel: "SHOPIFY" } });
   const byExternal = new Map(existing.filter((f) => f.externalId).map((f) => [f.externalId!, f]));
-  // A location a person pointed at another facility ("same place as…") gets no facility of its own.
-  const manual = new Set((await prisma.channelLocation.findMany({ where: { channel: "SHOPIFY", mappedManually: true }, select: { externalId: true } })).map((l) => l.externalId));
 
   let created = 0;
   let updated = 0;
@@ -109,7 +112,6 @@ export async function syncShopifyLocations(
 
   for (const loc of wanted) {
     seen.add(loc.id);
-    if (manual.has(loc.id)) continue;
     const name = displayName(loc);
     const address = [loc.address?.address1, loc.address?.city, loc.address?.provinceCode, loc.address?.countryCode]
       .filter(Boolean)
@@ -145,10 +147,17 @@ export async function syncShopifyLocations(
   const facilities = await prisma.facility.findMany({ where: { channel: "SHOPIFY", externalId: { not: null } }, select: { id: true, externalId: true } });
   const facilityByExternal = new Map(facilities.map((f) => [f.externalId as string, f.id]));
   for (const loc of all) {
-    const data = { name: loc.name, facilityId: facilityByExternal.get(loc.id) ?? null, amazonMirror: isAmazonMirror(loc), active: loc.isActive };
-    const row = await prisma.channelLocation.findFirst({ where: { channel: "SHOPIFY", externalId: loc.id }, select: { id: true, mappedManually: true } });
-    // A mapping made by a person keeps its facility; the sync only refreshes the rest.
-    if (row) await prisma.channelLocation.update({ where: { id: row.id }, data: row.mappedManually ? { name: data.name, amazonMirror: data.amazonMirror, active: data.active } : data });
+    const row = await prisma.channelLocation.findFirst({ where: { channel: "SHOPIFY", externalId: loc.id }, select: { id: true, mode: true } });
+    const mode = row?.mode ?? "auto";
+    const own = facilityByExternal.get(loc.id) ?? null;
+    // A person's decision stands; only consl's own guess (auto) is re-read from the platform.
+    const data =
+      mode === "merged" ? { name: loc.name, active: loc.isActive, amazonMirror: false }
+      : mode === "mcf" ? { name: loc.name, active: loc.isActive, amazonMirror: true, facilityId: null }
+      : mode === "ignored" ? { name: loc.name, active: loc.isActive, amazonMirror: false, facilityId: null }
+      : mode === "own" ? { name: loc.name, active: loc.isActive, amazonMirror: false, facilityId: own }
+      : { name: loc.name, active: loc.isActive, amazonMirror: isAmazonMirror(loc), facilityId: own };
+    if (row) await prisma.channelLocation.update({ where: { id: row.id }, data });
     else await prisma.channelLocation.create({ data: { channel: "SHOPIFY", externalId: loc.id, ...data } });
   }
 
