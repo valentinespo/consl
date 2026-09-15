@@ -1,8 +1,8 @@
 # Reviewer notes — Shopify and Meta app reviews
 
 Test company: **Consl Demo** on https://consl.ai (a fictional specialty-coffee brand with six
-months of production, stock, orders and money already loaded). Reviewer login: see the
-submission form (email + password, no two-factor step).
+months of production, stock, orders and money already loaded). Reviewer login: reviews@consl.ai
+with the password given in the submission form (no two-factor step, no email code).
 
 ## Shopify — how to test the "Consl" public app
 
@@ -30,8 +30,8 @@ https://consl.ai/api/integrations/shopify/compliance and are handled automatical
 ## Meta — how to test the ads_read permission
 
 1. Sign in at https://consl.ai with the reviewer login.
-2. Go to **Integrations** → **Meta Ads** → **Connect**. Log in with the Meta test user from the
-   submission notes (or any account with a role on the app) and allow access.
+2. Go to **Integrations** → **Meta Ads** → **Connect**. Log in with your reviewer account (the app
+   is Live; ads_read is the permission under review) and allow access.
 3. Pick the ad account(s) to count. Their daily spend then appears on the **P&L** as an
    "Advertising" line under the sales channel it counts against (Amazon, Shopify or TikTok).
 4. That is the only use of `ads_read`: daily spend totals per ad account, shown to the company
