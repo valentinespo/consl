@@ -2,7 +2,7 @@ import { NextResponse, after } from "next/server";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { requireOwner } from "@/lib/membership";
 import { verifyState } from "@/lib/oauth-state";
-import { normalizeShopDomain, verifyCallbackHmac, exchangeShopifyCode, completeShopifyConnection, APP_ORIGIN } from "@/lib/shopify-oauth";
+import { normalizeShopDomain, verifyCallbackHmac, exchangeShopifyCode, completeShopifyConnection, shopifyAppFor, APP_ORIGIN } from "@/lib/shopify-oauth";
 
 const back = (params: string) => NextResponse.redirect(`${APP_ORIGIN}/settings/integrations?${params}`);
 
@@ -19,10 +19,12 @@ export async function GET(request: Request) {
   const shop = normalizeShopDomain(url.searchParams.get("shop") ?? "");
 
   if (!code || !state || !shop) return back(`error=${encodeURIComponent("Missing authorization details from Shopify.")}`);
-  if (!verifyCallbackHmac(url)) return back(`error=${encodeURIComponent("Invalid signature on the Shopify callback.")}`);
 
   const stateOrg = verifyState(state);
   if (!stateOrg) return back(`error=${encodeURIComponent("This connection link expired — try again.")}`);
+  // The signature is the app's: verify against the app this company connects through.
+  const appKind = await shopifyAppFor(stateOrg);
+  if (!verifyCallbackHmac(url, appKind)) return back(`error=${encodeURIComponent("Invalid signature on the Shopify callback.")}`);
 
   // The person finishing the flow must be an owner of the org it was started for.
   const gate = await requireOwner();
@@ -32,7 +34,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const { accessToken, scope } = await exchangeShopifyCode(shop, code);
+    const { accessToken, scope } = await exchangeShopifyCode(shop, code, appKind);
     await completeShopifyConnection(stateOrg, shop, accessToken, scope);
     // History starts loading right away, in the background: every pass for this company runs now.
     after(async () => {

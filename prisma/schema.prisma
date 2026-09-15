@@ -445,6 +445,9 @@ model Settings {
   // Reorder 2.0 — which facilities can send stock to which ([{ from, to }] facility ids). Null =
   // the suggested set: every own facility to everything, AWD to FBA, plus every lane the
   // movement history shows. Saved once the operator edits the grid.
+  // Which Shopify app this company connects through: null = consl's default app, "public" = the
+  // public-distribution app (installable on any store — reviewers' development stores included).
+  shopifyApp        String?
   stockRoutes       Json?
   // Retired 2026-09-09 (columns kept — migrations are additive): the double-count exclusions are
   // no longer settings. They are derived at read time from which channels are present — see

@@ -30,6 +30,24 @@ export function shopifyOAuthConfigured(): boolean {
   return Boolean(process.env.SHOPIFY_API_KEY && process.env.SHOPIFY_API_SECRET && process.env.INTEGRATION_ENC_KEY);
 }
 
+/** Which Shopify app a company connects through: consl's default app, or the public-distribution
+ *  app (any store can install it — reviewers' development stores included). Two apps share this
+ *  host during the review period; webhooks already verify against either secret. */
+export type ShopifyAppKind = "default" | "public";
+
+export function shopifyAppCredentials(kind: ShopifyAppKind): { key: string; secret: string } {
+  if (kind === "public" && process.env.SHOPIFY_PUBLIC_API_KEY && process.env.SHOPIFY_PUBLIC_API_SECRET) {
+    return { key: process.env.SHOPIFY_PUBLIC_API_KEY, secret: process.env.SHOPIFY_PUBLIC_API_SECRET };
+  }
+  return { key: process.env.SHOPIFY_API_KEY ?? "", secret: process.env.SHOPIFY_API_SECRET ?? "" };
+}
+
+/** The app a company is set to connect through (Settings.shopifyApp = "public", else default). */
+export async function shopifyAppFor(orgId: string): Promise<ShopifyAppKind> {
+  const s = await prismaBase.settings.findFirst({ where: { orgId }, select: { shopifyApp: true } });
+  return s?.shopifyApp === "public" ? "public" : "default";
+}
+
 /**
  * Normalise what a person types into a canonical *.myshopify.com domain, or null if it can't be
  * one. Accepts "herbl", "herbl.myshopify.com", or a pasted admin URL; a custom storefront domain
@@ -47,9 +65,9 @@ export function normalizeShopDomain(raw: string): string | null {
 }
 
 /** The consent URL on the merchant's own shop. */
-export function authorizeUrl(shop: string, orgId: string): string {
+export function authorizeUrl(shop: string, orgId: string, kind: ShopifyAppKind = "default"): string {
   const params = new URLSearchParams({
-    client_id: process.env.SHOPIFY_API_KEY ?? "",
+    client_id: shopifyAppCredentials(kind).key,
     scope: SHOPIFY_SCOPES,
     redirect_uri: SHOPIFY_REDIRECT_URI,
     state: makeState(orgId),
@@ -62,8 +80,8 @@ export function authorizeUrl(shop: string, orgId: string): string {
  * except `hmac`/`signature`, joined with "&"), hex-encoded. Anyone can hit our callback URL;
  * only Shopify can produce this signature.
  */
-export function verifyCallbackHmac(url: URL): boolean {
-  const secret = process.env.SHOPIFY_API_SECRET;
+export function verifyCallbackHmac(url: URL, kind: ShopifyAppKind = "default"): boolean {
+  const secret = shopifyAppCredentials(kind).secret;
   const given = url.searchParams.get("hmac");
   if (!secret || !given) return false;
   const pairs: string[] = [];
@@ -79,13 +97,14 @@ export function verifyCallbackHmac(url: URL): boolean {
 }
 
 /** Exchange the one-time code for the shop's permanent offline access token. */
-export async function exchangeShopifyCode(shop: string, code: string): Promise<{ accessToken: string; scope: string | null }> {
+export async function exchangeShopifyCode(shop: string, code: string, kind: ShopifyAppKind = "default"): Promise<{ accessToken: string; scope: string | null }> {
+  const app = shopifyAppCredentials(kind);
   const r = await fetch(`https://${shop}/admin/oauth/access_token`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      client_id: process.env.SHOPIFY_API_KEY ?? "",
-      client_secret: process.env.SHOPIFY_API_SECRET ?? "",
+      client_id: app.key,
+      client_secret: app.secret,
       code,
     }),
   });

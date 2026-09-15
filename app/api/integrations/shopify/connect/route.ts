@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireOwner } from "@/lib/membership";
-import { shopifyOAuthConfigured, normalizeShopDomain, authorizeUrl, APP_ORIGIN } from "@/lib/shopify-oauth";
+import { shopifyOAuthConfigured, normalizeShopDomain, authorizeUrl, shopifyAppFor, APP_ORIGIN } from "@/lib/shopify-oauth";
 
 const back = (msg: string) => NextResponse.redirect(`${APP_ORIGIN}/settings/integrations?error=${encodeURIComponent(msg)}`);
 
@@ -18,5 +18,5 @@ export async function GET(request: Request) {
   const shop = normalizeShopDomain(raw);
   if (!shop) return back("Enter your store's myshopify.com domain (e.g. yourstore.myshopify.com).");
 
-  return NextResponse.redirect(authorizeUrl(shop, gate.orgId));
+  return NextResponse.redirect(authorizeUrl(shop, gate.orgId, await shopifyAppFor(gate.orgId)));
 }
