@@ -1,5 +1,4 @@
-import { NextResponse } from "next/server";
-import { nudgeOrgImports } from "@/lib/scheduler-gates";
+import { NextResponse, after } from "next/server";
 import { requireOwner } from "@/lib/membership";
 import { tiktokConfigured } from "@/lib/tiktok";
 import { completeTikTokConnection, APP_ORIGIN } from "@/lib/tiktok-oauth";
@@ -26,7 +25,11 @@ export async function GET(request: Request) {
 
   try {
     await completeTikTokConnection(gate.orgId, code);
-    nudgeOrgImports(gate.orgId); // history starts loading on the next tick, not after the cadence
+    // History starts loading right away, in the background: every pass for this company runs now.
+    after(async () => {
+      const { runOrgImportsNow } = await import("@/lib/scheduler");
+      await runOrgImportsNow(gate.orgId).catch((e) => console.error("[connect] first import failed:", (e as Error).message));
+    });
     // Land on the mapping screen: a fresh channel's catalog is waiting to be reviewed.
     return NextResponse.redirect(`${APP_ORIGIN}/catalog/mapping?channel=TIKTOK&connected=1`);
   } catch (e) {

@@ -1,5 +1,4 @@
-import { NextResponse } from "next/server";
-import { nudgeOrgImports } from "@/lib/scheduler-gates";
+import { NextResponse, after } from "next/server";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { requireOwner } from "@/lib/membership";
 import { verifyState } from "@/lib/oauth-state";
@@ -35,7 +34,11 @@ export async function GET(request: Request) {
   try {
     const { accessToken, scope } = await exchangeShopifyCode(shop, code);
     await completeShopifyConnection(stateOrg, shop, accessToken, scope);
-    nudgeOrgImports(stateOrg); // history starts loading on the next tick, not after the cadence
+    // History starts loading right away, in the background: every pass for this company runs now.
+    after(async () => {
+      const { runOrgImportsNow } = await import("@/lib/scheduler");
+      await runOrgImportsNow(stateOrg).catch((e) => console.error("[connect] first import failed:", (e as Error).message));
+    });
     // Land on the mapping screen: a fresh channel's catalog is waiting to be reviewed.
     return NextResponse.redirect(`${APP_ORIGIN}/catalog/mapping?channel=SHOPIFY&connected=1`);
   } catch (e) {

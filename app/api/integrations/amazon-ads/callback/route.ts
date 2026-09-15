@@ -1,5 +1,4 @@
-import { NextResponse } from "next/server";
-import { nudgeOrgImports } from "@/lib/scheduler-gates";
+import { NextResponse, after } from "next/server";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { requireOwner } from "@/lib/membership";
 import { verifyState, exchangeAdsCode, completeAmazonAdsConnection } from "@/lib/amazon-ads";
@@ -23,7 +22,11 @@ export async function GET(request: Request) {
   try {
     const tokens = await exchangeAdsCode(code);
     await completeAmazonAdsConnection(stateOrg, tokens);
-    nudgeOrgImports(stateOrg); // history starts loading on the next tick, not after the cadence
+    // History starts loading right away, in the background: every pass for this company runs now.
+    after(async () => {
+      const { runOrgImportsNow } = await import("@/lib/scheduler");
+      await runOrgImportsNow(stateOrg).catch((e) => console.error("[connect] first import failed:", (e as Error).message));
+    });
     return back("connected=amazon_ads");
   } catch (e) {
     return back(`error=${encodeURIComponent(e instanceof Error ? e.message : "Connection failed.")}`);

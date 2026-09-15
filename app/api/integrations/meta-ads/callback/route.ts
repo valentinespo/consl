@@ -1,5 +1,4 @@
 import { NextResponse, after } from "next/server";
-import { nudgeOrgImports } from "@/lib/scheduler-gates";
 import { getCurrentOrgId, runWithOrg } from "@/lib/tenant";
 import { requireOwner } from "@/lib/membership";
 import { verifyState, exchangeMetaCode, completeMetaAdsConnection } from "@/lib/meta-ads";
@@ -24,7 +23,11 @@ export async function GET(request: Request) {
   try {
     const token = await exchangeMetaCode(code);
     await completeMetaAdsConnection(stateOrg, token);
-    nudgeOrgImports(stateOrg); // history starts loading on the next tick, not after the cadence
+    // History starts loading right away, in the background: every pass for this company runs now.
+    after(async () => {
+      const { runOrgImportsNow } = await import("@/lib/scheduler");
+      await runOrgImportsNow(stateOrg).catch((e) => console.error("[connect] first import failed:", (e as Error).message));
+    });
     // The first read starts as soon as the person is back on the page, so the P&L shows the
     // spend within minutes instead of at the scheduler's next six-hour pass.
     after(() =>

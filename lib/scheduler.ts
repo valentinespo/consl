@@ -20,6 +20,7 @@ import {
   lastAmazonFinanceSweep,
   lastAmazonAdsTick,
   lastMetaAdsTick,
+  nudgeOrgImports,
 } from "@/lib/scheduler-gates";
 import { deleteStored } from "@/lib/storage";
 import { DELETE_GRACE_DAYS } from "@/lib/constants";
@@ -111,6 +112,18 @@ async function runOrgDaily(orgId: string): Promise<void> {
       const r = await syncAmazonCore(); // no-op for orgs with no Amazon-mapped SKUs
       await getRestock(); // records today's inventory-value snapshot with fresh numbers
 
+      // Second opinion on Shopify and TikTok orders: the platform's own count per day for the
+      // last two weeks against consl's; a day that differs is re-read. Best-effort.
+      try {
+        const { auditShopifyOrderCounts, auditTikTokOrderCounts } = await import("@/lib/order-count-audit");
+        for (const audit of [auditShopifyOrderCounts, auditTikTokOrderCounts]) {
+          const a = await audit();
+          if (a && a.mismatched.length) console.warn(`[scheduler] ${a.channel.toLowerCase()} order count audit for ${orgId}: ${a.mismatched.length} of ${a.days} days differed (${a.mismatched.join(", ")}) — re-read`);
+        }
+      } catch (e) {
+        console.error(`[scheduler] order count audit failed for org ${orgId}:`, (e as Error).message);
+      }
+
       // Money ledger self-check: re-read the last two weeks so anything Amazon revised in place
       // (a held sale it cancelled, a reissued fee) is caught. Upserts make the re-read free.
       try {
@@ -158,7 +171,28 @@ async function runOrgDaily(orgId: string): Promise<void> {
  * Isolated three ways — a bad org can't stop other orgs, and a bad channel can't stop the other
  * channels or the daily sync.
  */
+// An org's channel pass never runs twice at once: a connect flow starts one right away, and the
+// minute tick must not pile a second on top of it.
+const busyOrgs = new Set<string>();
+
+/** Everything a company's channels have to offer, right now — what a fresh connection calls so
+ *  history starts loading within seconds; the clocks are cleared first so no pass is skipped. */
+export async function runOrgImportsNow(orgId: string): Promise<void> {
+  nudgeOrgImports(orgId);
+  await runOrgChannelStock(orgId);
+}
+
 async function runOrgChannelStock(orgId: string): Promise<void> {
+  if (busyOrgs.has(orgId)) return;
+  busyOrgs.add(orgId);
+  try {
+    await runOrgChannelStockInner(orgId);
+  } finally {
+    busyOrgs.delete(orgId);
+  }
+}
+
+async function runOrgChannelStockInner(orgId: string): Promise<void> {
   try {
     await runWithOrg(orgId, async () => {
       const s = await getOrgSettings();

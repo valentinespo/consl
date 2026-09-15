@@ -51,12 +51,18 @@ export async function disconnectIntegrationAndWipe(provider: Provider): Promise<
   }
 }
 
-/** Stop importing one linked Meta ad account and take its spend off the books. Owner-only. */
-export async function removeMetaAdAccount(accountId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+/** Stop importing one linked Meta ad account. "keep" leaves its spend on the books (the account
+ *  stays listed as removed and can be linked again); "wipe" deletes the account and every day of
+ *  its spend. Owner-only. */
+export async function removeMetaAdAccount(accountId: string, mode: "keep" | "wipe" = "wipe"): Promise<{ ok: true } | { ok: false; error: string }> {
   const gate = await requireOwner();
   if (!gate.ok) return { ok: false, error: gate.error };
   try {
-    await forgetMetaAdAccounts(gate.orgId, [accountId]);
+    if (mode === "keep") {
+      await prismaBase.metaAdAccount.updateMany({ where: { orgId: gate.orgId, accountId }, data: { status: "removed", accessTokenEnc: null, lastError: null } });
+    } else {
+      await forgetMetaAdAccounts(gate.orgId, [accountId]);
+    }
     revalidatePath("/settings/integrations");
     revalidatePath("/", "layout");
     return { ok: true };
