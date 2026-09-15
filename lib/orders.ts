@@ -225,7 +225,6 @@ type ShopifyOrderNode = {
   // Shipping as charged: the list price and what the customer actually paid after any shipping
   // discount code (`totalShippingPriceSet` is the price BEFORE discounts).
   shippingLines?: { nodes: Array<{ originalPriceSet: { shopMoney: { amount: string } } | null; discountedPriceSet: { shopMoney: { amount: string } } | null; taxLines?: Array<{ priceSet: { shopMoney: { amount: string } } | null }> | null }> } | null;
-  shippingAddress: { city: string | null; provinceCode: string | null; zip: string | null; countryCodeV2: string | null } | null;
   fulfillments: Array<{
     location: { id: string | null; name: string | null; isFulfillmentService?: boolean | null; fulfillmentService?: { handle: string | null; serviceName: string | null } | null } | null;
   }>;
@@ -280,7 +279,6 @@ export const SHOPIFY_ORDER_FIELDS = `
   originalTotalDutiesSet { shopMoney { amount } }
   originalTotalAdditionalFeesSet { shopMoney { amount } }
   shippingLines(first: 10) { nodes { originalPriceSet { shopMoney { amount } } discountedPriceSet { shopMoney { amount } } taxLines { priceSet { shopMoney { amount } } } } }
-  shippingAddress { city provinceCode zip countryCodeV2 }
   fulfillments(first: 3) { location { id name isFulfillmentService fulfillmentService { handle serviceName } } }
   paymentGatewayNames
   lineItems(first: 100) {
@@ -350,10 +348,8 @@ function mapShopifyOrder(o: ShopifyOrderNode): Fetched {
     tax: money(o.totalTaxSet?.shopMoney.amount),
     // What the customer paid for shipping after any shipping discount code.
     shipping: o.shippingLines ? o.shippingLines.nodes.reduce((s, l) => s + money(l.discountedPriceSet?.shopMoney.amount), 0) : money(o.totalShippingPriceSet?.shopMoney.amount),
-    shipCity: o.shippingAddress?.city ?? null,
-    shipState: o.shippingAddress?.provinceCode ?? null,
-    shipPostalCode: o.shippingAddress?.zip ?? null,
-    shipCountry: o.shippingAddress?.countryCodeV2 ?? null,
+    // No ship-to fields for Shopify orders: the store's customer address is protected customer data
+    // consl does not need (velocity, cost of goods and the P&L never read it).
     platformUpdatedAt: o.updatedAt ? new Date(o.updatedAt) : null,
     sourceData: o as unknown,
     lines: o.lineItems.nodes.map((l) => {
