@@ -12,6 +12,8 @@ import { CompanyEditor, type CompanyForEdit } from "@/components/CompanyEditor";
 import { TimezoneSettings } from "@/components/TimezoneSettings";
 import { IntegrationControls } from "@/components/IntegrationControls";
 import { ChannelMappingClient } from "@/components/ChannelMappingClient";
+import { MapPlacesPopup } from "@/components/MapPlacesPopup";
+import type { MappingData } from "@/components/FacilityMappingClient";
 import { SelectMenu } from "@/components/SelectMenu";
 import { NewProductButton, NewMaterialButton } from "@/components/CreateButtons";
 import { SkuAvatar, Card } from "@/components/ui";
@@ -172,6 +174,8 @@ export function OnboardingWizard(props: {
   reorderDefaults: ReorderDefaults;
   facilities: WizardFacility[];
   channelCounts: ChannelCount[];
+  /** Every place the channels ship from, for the "Map your places" pop-up on the facilities step. */
+  places: MappingData;
   materials: WizardMaterial[];
   finishedOpenings: Record<string, Record<string, number>>;
   rawOpenings: Record<string, RawLine[]>;
@@ -417,6 +421,7 @@ export function OnboardingWizard(props: {
                 <StepFacilities
                   ownFacilities={ownFacilities}
                   channelCounts={props.channelCounts}
+                  places={props.places}
                   products={props.products}
                   finishedOpenings={props.finishedOpenings}
                 />
@@ -1005,11 +1010,13 @@ function ReorderDefaultsSection({ defaults }: { defaults: ReorderDefaults }) {
 function StepFacilities({
   ownFacilities,
   channelCounts,
+  places,
   products,
   finishedOpenings,
 }: {
   ownFacilities: WizardFacility[];
   channelCounts: ChannelCount[];
+  places: MappingData;
   products: WizardProduct[];
   finishedOpenings: Record<string, Record<string, number>>;
 }) {
@@ -1032,15 +1039,21 @@ function StepFacilities({
         </section>
       )}
 
-      {channelCounts.length > 0 && (
+      {(channelCounts.length > 0 || places.channelPlaces.length + places.shipFrom.length > 0) && (
         <section className={panelCls}>
-          <h2 className="mb-1 flex items-center gap-1.5 text-[14px] font-semibold text-ink">
-            <Lock size={13} className="text-muted" /> Sales channels — counted automatically
-          </h2>
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            <h2 className="flex items-center gap-1.5 text-[14px] font-semibold text-ink">
+              <Lock size={13} className="text-muted" /> Sales channels — counted automatically
+            </h2>
+            {places.channelPlaces.length + places.shipFrom.length > 0 && <MapPlacesPopup data={places} />}
+          </div>
           <p className="mb-3 text-[12.5px] text-muted">
             These are what your connected channels report holding right now. When you finish setup, consl records them as your
-            starting balance at your starting cost — nothing to type here.
+            starting balance at your starting cost — nothing to type here. A location or warehouse that is really one of your
+            other facilities, Amazon&apos;s fulfilment, or nothing consl should count: say so under Map your places, before the
+            starting balance is written.
           </p>
+          {channelCounts.length === 0 && <p className="text-[12.5px] text-muted">Nothing reported in stock yet.</p>}
           <div className="grid gap-3 md:grid-cols-2">
             {channelCounts.map((c) => {
               const units = c.skus.reduce((t, s) => t + s.units, 0);

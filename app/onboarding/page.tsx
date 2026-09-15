@@ -15,6 +15,7 @@ import { tiktokConfigured } from "@/lib/tiktok";
 import { CHANNEL_TITLES, PRODUCT_MATCH_SELECT, mappedExternalId, suggestMappings, type ChannelKey } from "@/lib/channel-catalog";
 import { ROOT_LOGO, PROVIDER_LOGO } from "@/lib/channel-logos";
 import { OnboardingWizard, type WizardMapping, type WizardLot } from "@/components/onboarding/OnboardingWizard";
+import { loadMappingData } from "@/lib/facility-mapping";
 import { readOnboardingJob } from "@/lib/onboarding-jobs";
 
 export const dynamic = "force-dynamic";
@@ -52,6 +53,7 @@ export default async function OnboardingPage({
       getMyAccess().catch(() => null),
       readOnboardingJob(),
     ]);
+  const places = await loadMappingData();
 
   const connected = new Set(integrations.map((i) => i.provider));
   // Step 1's button: a connection newer than the last wizard pull means data is waiting to be
@@ -278,6 +280,7 @@ export default async function OnboardingPage({
       providers={providers}
       channelsPullPending={channelsPullPending}
       mapping={mapping}
+      places={places}
       products={products.map((p) => ({ id: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl, openingUnitCost: p.openingUnitCost }))}
       reorderDefaults={{
         minMonths: settings.defaultMinMonths,

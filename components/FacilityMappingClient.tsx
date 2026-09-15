@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Lock, Plus, X } from "@/components/icons";
+import { Check, ChevronLeft, Lock, Plus, X } from "@/components/icons";
 import { SelectMenu } from "@/components/SelectMenu";
 import { inputCls } from "@/components/FormKit";
 import { ROOT_LOGO } from "@/lib/channel-logos";
@@ -141,12 +141,12 @@ function ShipFromRow({ place, candidates }: { place: MappingData["shipFrom"][num
 }
 
 type Mode = "own" | "merged" | "mcf" | "ignored";
-type Place = MappingData["channelPlaces"][number];
+export type Place = MappingData["channelPlaces"][number];
 const btnDanger = "inline-flex h-8 items-center gap-1.5 rounded-lg bg-negative px-3 text-[12.5px] font-medium text-white hover:opacity-90 disabled:opacity-50";
 
 /** "What is this place?" — four answers, each spelling out what it will do with the real numbers
  *  before anything happens. */
-function PlaceDialog({ place, candidates, fbaName, onClose }: { place: Place; candidates: MappingData["candidates"]; fbaName: string | null; onClose: () => void }) {
+export function PlaceDialog({ place, candidates, fbaName, onClose, inline = false }: { place: Place; candidates: MappingData["candidates"]; fbaName: string | null; onClose: () => void; inline?: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const current: Mode = place.mode === "auto" ? (place.autoMcf ? "mcf" : "own") : place.mode;
@@ -209,6 +209,88 @@ function PlaceDialog({ place, candidates, fbaName, onClose }: { place: Place; ca
     { value: "mcf", title: "Amazon MCF", hint: fbaName ? "Amazon ships these orders from FBA. They count there, and the units reported here are ignored: they are already your FBA stock." : "Connect Amazon first.", disabled: !fbaName },
     { value: "ignored", title: `Ignore this ${noun}`, hint: "Not a place consl should track. Gone from Facilities, its orders have no facility, its units are not counted." },
   ];
+  const content = (
+    <>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          {inline && (
+            <button type="button" onClick={onClose} className="mb-2 inline-flex items-center gap-1 text-[12px] font-medium text-accent hover:underline">
+              <ChevronLeft size={13} /> Back to your places
+            </button>
+          )}
+          <div className="truncate text-[15px] font-semibold text-ink">What is “{place.label}”?</div>
+          <div className="text-[12px] text-muted">{platform} {noun}</div>
+        </div>
+        {!inline && (
+          <button type="button" onClick={onClose} className="rounded-md p-1 text-muted hover:bg-surface-2 hover:text-ink" aria-label="Close">
+            <X size={16} />
+          </button>
+        )}
+      </div>
+      <div className="mt-4 space-y-2">
+        {choices.map((c) => {
+          const selected = mode === c.value;
+          return (
+            <div key={c.value} className={`rounded-lg border ${selected ? "border-accent-strong bg-accent-soft/30" : "border-border"} ${c.disabled ? "opacity-50" : ""}`}>
+              <button type="button" disabled={c.disabled} onClick={() => setMode(c.value)} className="flex w-full items-start gap-3 px-3 py-2.5 text-left disabled:cursor-not-allowed">
+                <span className={`mt-0.5 h-4 w-4 shrink-0 rounded-full border ${selected ? "border-[5px] border-accent-strong" : "border-border bg-surface"}`} />
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-medium text-ink">{c.title}</span>
+                  <span className="block text-[12px] leading-relaxed text-muted">{c.hint}</span>
+                </span>
+              </button>
+              {selected && c.value === "merged" && (
+                <div className="border-t border-border px-3 py-2.5">
+                  <div className="max-w-[300px]">
+                    <SelectMenu value={target} onChange={setTarget} options={[{ value: "", label: "Pick a facility" }, ...options.map((f) => ({ value: f.id, label: f.name, hint: f.code }))]} />
+                  </div>
+                  {stockChoice && (
+                    <div className="mt-2.5 text-[12px] text-ink-soft">
+                      <div>Both {PLATFORM[stockChoice.channel!]} and {platform} report stock at this place. Count it from</div>
+                      <div className="mt-1.5 flex flex-wrap gap-2">
+                        {[stockChoice.channel!, place.channel].map((pf) => (
+                          <button
+                            key={pf}
+                            type="button"
+                            onClick={() => setSource(pf)}
+                            className={`rounded-md border px-2.5 py-1 text-[12px] font-medium ${chosenSource === pf ? "border-accent-strong bg-accent-strong text-white" : "border-border bg-surface text-ink-soft hover:text-ink"}`}
+                          >
+                            {PLATFORM[pf] ?? pf}
+                            {pf === stockChoice.channel && <span className="ml-1 font-normal opacity-80">(default)</span>}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-4 rounded-lg border border-border bg-surface-2/40 px-3 py-2.5">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">What happens</div>
+        <ul className="mt-1 list-disc space-y-1 pl-4 text-[12.5px] leading-relaxed text-ink-soft">
+          {lines.map((l, i) => (
+            <li key={i}>{l}</li>
+          ))}
+        </ul>
+        <div className="mt-1.5 text-[11.5px] text-muted">You can change your mind any time from this same dialog.</div>
+      </div>
+      {error && <p className="mt-2 text-[12px] text-negative">{error}</p>}
+      <div className="mt-4 flex items-center justify-end gap-2">
+        <button type="button" className={btnSecondary} onClick={onClose} disabled={pending}>
+          Cancel
+        </button>
+        <button type="button" className={mode === "ignored" ? btnDanger : btnPrimary} onClick={save} disabled={pending || unchanged || (mode === "merged" && !target)}>
+          {pending ? "Working…" : label}
+        </button>
+      </div>
+    </>
+  );
+  // Inside the setup wizard's pop-up the form takes the pop-up's place instead of stacking a
+  // second overlay on top of it.
+  if (inline) return <div className="mx-auto max-w-lg">{content}</div>;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
       <div
@@ -218,74 +300,7 @@ function PlaceDialog({ place, candidates, fbaName, onClose }: { place: Place; ca
         className="org-pop max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="truncate text-[15px] font-semibold text-ink">What is “{place.label}”?</div>
-            <div className="text-[12px] text-muted">{platform} {noun}</div>
-          </div>
-          <button type="button" onClick={onClose} className="rounded-md p-1 text-muted hover:bg-surface-2 hover:text-ink" aria-label="Close">
-            <X size={16} />
-          </button>
-        </div>
-        <div className="mt-4 space-y-2">
-          {choices.map((c) => {
-            const selected = mode === c.value;
-            return (
-              <div key={c.value} className={`rounded-lg border ${selected ? "border-accent-strong bg-accent-soft/30" : "border-border"} ${c.disabled ? "opacity-50" : ""}`}>
-                <button type="button" disabled={c.disabled} onClick={() => setMode(c.value)} className="flex w-full items-start gap-3 px-3 py-2.5 text-left disabled:cursor-not-allowed">
-                  <span className={`mt-0.5 h-4 w-4 shrink-0 rounded-full border ${selected ? "border-[5px] border-accent-strong" : "border-border bg-surface"}`} />
-                  <span className="min-w-0">
-                    <span className="block text-[13px] font-medium text-ink">{c.title}</span>
-                    <span className="block text-[12px] leading-relaxed text-muted">{c.hint}</span>
-                  </span>
-                </button>
-                {selected && c.value === "merged" && (
-                  <div className="border-t border-border px-3 py-2.5">
-                    <div className="max-w-[300px]">
-                      <SelectMenu value={target} onChange={setTarget} options={[{ value: "", label: "Pick a facility" }, ...options.map((f) => ({ value: f.id, label: f.name, hint: f.code }))]} />
-                    </div>
-                    {stockChoice && (
-                      <div className="mt-2.5 text-[12px] text-ink-soft">
-                        <div>Both {PLATFORM[stockChoice.channel!]} and {platform} report stock at this place. Count it from</div>
-                        <div className="mt-1.5 flex flex-wrap gap-2">
-                          {[stockChoice.channel!, place.channel].map((pf) => (
-                            <button
-                              key={pf}
-                              type="button"
-                              onClick={() => setSource(pf)}
-                              className={`rounded-md border px-2.5 py-1 text-[12px] font-medium ${chosenSource === pf ? "border-accent-strong bg-accent-strong text-white" : "border-border bg-surface text-ink-soft hover:text-ink"}`}
-                            >
-                              {PLATFORM[pf] ?? pf}
-                              {pf === stockChoice.channel && <span className="ml-1 font-normal opacity-80">(default)</span>}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-        <div className="mt-4 rounded-lg border border-border bg-surface-2/40 px-3 py-2.5">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">What happens</div>
-          <ul className="mt-1 list-disc space-y-1 pl-4 text-[12.5px] leading-relaxed text-ink-soft">
-            {lines.map((l, i) => (
-              <li key={i}>{l}</li>
-            ))}
-          </ul>
-          <div className="mt-1.5 text-[11.5px] text-muted">You can change your mind any time from this same dialog.</div>
-        </div>
-        {error && <p className="mt-2 text-[12px] text-negative">{error}</p>}
-        <div className="mt-4 flex items-center justify-end gap-2">
-          <button type="button" className={btnSecondary} onClick={onClose} disabled={pending}>
-            Cancel
-          </button>
-          <button type="button" className={mode === "ignored" ? btnDanger : btnPrimary} onClick={save} disabled={pending || unchanged || (mode === "merged" && !target)}>
-            {pending ? "Working…" : label}
-          </button>
-        </div>
+        {content}
       </div>
     </div>
   );
@@ -320,7 +335,7 @@ function SourceSwitch({ stock, from }: { stock: NonNullable<Place["stock"]>; fro
 }
 
 /** One Shopify location or TikTok warehouse: what consl does with it, and one button to change it. */
-function ChannelPlaceRow({ place, candidates, fbaName }: { place: Place; candidates: MappingData["candidates"]; fbaName: string | null }) {
+function ChannelPlaceRow({ place, candidates, fbaName, onEdit }: { place: Place; candidates: MappingData["candidates"]; fbaName: string | null; onEdit?: (place: Place) => void }) {
   const [open, setOpen] = useState(false);
   const platform = PLATFORM[place.channel] ?? place.channel;
   const noun = place.channel === "SHOPIFY" ? "location" : "warehouse";
@@ -364,7 +379,7 @@ function ChannelPlaceRow({ place, candidates, fbaName }: { place: Place; candida
           </div>
           {sub && <div className="text-[11.5px] text-muted">{sub}</div>}
         </div>
-        <button type="button" className={btnSecondary} onClick={() => setOpen(true)}>
+        <button type="button" className={btnSecondary} onClick={() => (onEdit ? onEdit(place) : setOpen(true))}>
           Change
         </button>
       </div>
@@ -373,7 +388,9 @@ function ChannelPlaceRow({ place, candidates, fbaName }: { place: Place; candida
   );
 }
 
-export function FacilityMappingClient({ data }: { data: MappingData }) {
+/** `onEdit`: hand the "Change" click to the caller (the setup wizard's pop-up shows the form in
+ *  place of its list) instead of opening the dialog as its own overlay. */
+export function FacilityMappingClient({ data, onEdit }: { data: MappingData; onEdit?: (place: Place) => void }) {
   const shopify = data.channelPlaces.filter((p) => p.channel === "SHOPIFY");
   const tiktok = data.channelPlaces.filter((p) => p.channel === "TIKTOK");
   const managed = <span className={`${PILL} pill-neutral`}><Lock size={11} /> Managed</span>;
@@ -399,14 +416,14 @@ export function FacilityMappingClient({ data }: { data: MappingData }) {
       {shopify.length > 0 && (
         <Section channel="SHOPIFY" title="Shopify" hint="Each location becomes a facility on its own. Change it if a location is really another facility, Amazon's fulfilment, or nothing consl should track.">
           {shopify.map((p) => (
-            <ChannelPlaceRow key={p.id} place={p} candidates={data.candidates} fbaName={data.fbaName} />
+            <ChannelPlaceRow key={p.id} place={p} candidates={data.candidates} fbaName={data.fbaName} onEdit={onEdit} />
           ))}
         </Section>
       )}
       {tiktok.length > 0 && (
         <Section channel="TIKTOK" title="TikTok Shop" hint="Each warehouse becomes a facility on its own. Change it if a warehouse is really another facility, Amazon's fulfilment, or nothing consl should track.">
           {tiktok.map((p) => (
-            <ChannelPlaceRow key={p.id} place={p} candidates={data.candidates} fbaName={data.fbaName} />
+            <ChannelPlaceRow key={p.id} place={p} candidates={data.candidates} fbaName={data.fbaName} onEdit={onEdit} />
           ))}
         </Section>
       )}
