@@ -100,6 +100,8 @@ export async function syncShopifyLocations(
 
   const existing = await prisma.facility.findMany({ where: { channel: "SHOPIFY" } });
   const byExternal = new Map(existing.filter((f) => f.externalId).map((f) => [f.externalId!, f]));
+  // A location a person pointed at another facility ("same place as…") gets no facility of its own.
+  const manual = new Set((await prisma.channelLocation.findMany({ where: { channel: "SHOPIFY", mappedManually: true }, select: { externalId: true } })).map((l) => l.externalId));
 
   let created = 0;
   let updated = 0;
@@ -107,6 +109,7 @@ export async function syncShopifyLocations(
 
   for (const loc of wanted) {
     seen.add(loc.id);
+    if (manual.has(loc.id)) continue;
     const name = displayName(loc);
     const address = [loc.address?.address1, loc.address?.city, loc.address?.provinceCode, loc.address?.countryCode]
       .filter(Boolean)
@@ -143,8 +146,9 @@ export async function syncShopifyLocations(
   const facilityByExternal = new Map(facilities.map((f) => [f.externalId as string, f.id]));
   for (const loc of all) {
     const data = { name: loc.name, facilityId: facilityByExternal.get(loc.id) ?? null, amazonMirror: isAmazonMirror(loc), active: loc.isActive };
-    const row = await prisma.channelLocation.findFirst({ where: { channel: "SHOPIFY", externalId: loc.id }, select: { id: true } });
-    if (row) await prisma.channelLocation.update({ where: { id: row.id }, data });
+    const row = await prisma.channelLocation.findFirst({ where: { channel: "SHOPIFY", externalId: loc.id }, select: { id: true, mappedManually: true } });
+    // A mapping made by a person keeps its facility; the sync only refreshes the rest.
+    if (row) await prisma.channelLocation.update({ where: { id: row.id }, data: row.mappedManually ? { name: data.name, amazonMirror: data.amazonMirror, active: data.active } : data });
     else await prisma.channelLocation.create({ data: { channel: "SHOPIFY", externalId: loc.id, ...data } });
   }
 

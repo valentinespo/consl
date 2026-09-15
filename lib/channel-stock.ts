@@ -34,19 +34,108 @@ export type ChannelStockSyncResult = {
 
 const EMPTY: ChannelStockSyncResult = { facilities: 0, skus: 0, units: 0, skipped: 0 };
 
-/** Replace the stored stock for exactly the facilities this sync covers, in one transaction. */
+/** Replace one platform's stored stock for exactly the facilities this sync covers, in one
+ *  transaction. Another platform's rows on the same facility (a merged warehouse) are untouched. */
 async function replaceStock(
+  channel: "SHOPIFY" | "TIKTOK",
   facilityIds: string[],
   rows: Array<{ facilityId: string; productId: string; units: number }>,
 ): Promise<void> {
   if (facilityIds.length === 0) return;
   const now = new Date();
   await prisma.$transaction([
-    prisma.channelStock.deleteMany({ where: { facilityId: { in: facilityIds } } }),
+    prisma.channelStock.deleteMany({ where: { facilityId: { in: facilityIds }, OR: [{ channel }, { channel: null }] } }),
     ...rows
       .filter((r) => r.units > 0)
-      .map((r) => prisma.channelStock.create({ data: { ...r, syncedAt: now } })),
+      .map((r) => prisma.channelStock.create({ data: { ...r, channel, syncedAt: now } })),
   ]);
+}
+
+/** The facility each of a platform's places counts at: the place record (which a person may have
+ *  pointed at another facility) first, else the facility the platform's sync created for it. */
+async function placeFacilities(channel: "SHOPIFY" | "TIKTOK"): Promise<Map<string, string>> {
+  const [places, facilities] = await Promise.all([
+    prisma.channelLocation.findMany({ where: { channel, facilityId: { not: null } }, select: { externalId: true, facilityId: true } }),
+    prisma.facility.findMany({ where: { channel, externalId: { not: null }, inactive: false }, select: { externalId: true, id: true } }),
+  ]);
+  const m = new Map(facilities.map((f) => [f.externalId!, f.id]));
+  for (const p of places) m.set(p.externalId, p.facilityId!);
+  return m;
+}
+
+export type ChannelStockCell = {
+  facilityId: string;
+  productId: string;
+  units: number;
+  channel: string; // the facility's own platform (SHOPIFY | TIKTOK) — the pool its units are valued from
+  source: string; // the platform whose report these units come from
+};
+export type StockDisagreement = { facilityId: string; productId: string; source: string; units: number; other: string; otherUnits: number };
+export type FacilityStockSource = { facilityId: string; platforms: string[]; source: string | null };
+
+/** Which platform's report counts for a facility: the choice made on it (while that platform
+ *  still reports there), else its own platform, else the first platform pointed at it. */
+export function stockSourceOf(f: { channel: string | null; stockSource: string | null }, platforms: string[]): string | null {
+  if (f.stockSource && platforms.includes(f.stockSource)) return f.stockSource;
+  if (f.channel === "SHOPIFY" || f.channel === "TIKTOK") return f.channel;
+  return platforms[0] ?? null;
+}
+
+/** Per active facility: the platforms that report its stock (its own, plus every place a person
+ *  pointed at it) and the one that counts. */
+export async function facilityStockSources(): Promise<Map<string, FacilityStockSource>> {
+  const [facilities, places] = await Promise.all([
+    prisma.facility.findMany({ where: { inactive: false }, select: { id: true, channel: true, stockSource: true } }),
+    prisma.channelLocation.findMany({ where: { facilityId: { not: null }, channel: { in: ["SHOPIFY", "TIKTOK"] } }, select: { facilityId: true, channel: true } }),
+  ]);
+  const out = new Map<string, FacilityStockSource>();
+  for (const f of facilities) {
+    const platforms = f.channel === "SHOPIFY" || f.channel === "TIKTOK" ? [f.channel] : [];
+    for (const p of places) if (p.facilityId === f.id && !platforms.includes(p.channel)) platforms.push(p.channel);
+    out.set(f.id, { facilityId: f.id, platforms, source: stockSourceOf(f, platforms) });
+  }
+  return out;
+}
+
+/** The stock the platforms report at the company's CHANNEL facilities — ONE platform per facility
+ *  (its stock source), so a warehouse two platforms report is never counted twice — plus where the
+ *  other platform disagrees by more than a couple of units. A facility the company keeps its own
+ *  books for (lots and movements) has no cell here: those books count, as ever. */
+export async function readChannelStock(): Promise<{ cells: ChannelStockCell[]; disagreements: StockDisagreement[] }> {
+  const [rows, sources] = await Promise.all([
+    prisma.channelStock.findMany({
+      where: { units: { gt: 0 } },
+      select: { productId: true, facilityId: true, units: true, channel: true, facility: { select: { channel: true, inactive: true } } },
+      orderBy: [{ facilityId: "asc" }, { productId: "asc" }],
+    }),
+    facilityStockSources(),
+  ]);
+  const cells: ChannelStockCell[] = [];
+  const byKey = new Map<string, number>(); // "facility|product|platform" → units
+  const reporting = new Set<string>(); // "facility|platform": the platform has reported something there
+  const pairs = new Map<string, { facilityId: string; productId: string }>();
+  for (const r of rows) {
+    const fc = r.facility.channel;
+    if ((fc !== "SHOPIFY" && fc !== "TIKTOK") || r.facility.inactive) continue;
+    const reported = r.channel ?? fc;
+    byKey.set(`${r.facilityId}|${r.productId}|${reported}`, r.units);
+    reporting.add(`${r.facilityId}|${reported}`);
+    pairs.set(`${r.facilityId}|${r.productId}`, { facilityId: r.facilityId, productId: r.productId });
+    const src = sources.get(r.facilityId)?.source ?? fc;
+    if (reported === src) cells.push({ facilityId: r.facilityId, productId: r.productId, units: r.units, channel: fc, source: src });
+  }
+  const disagreements: StockDisagreement[] = [];
+  for (const [k, { facilityId, productId }] of pairs) {
+    const s = sources.get(facilityId);
+    if (!s?.source || s.platforms.length < 2) continue;
+    const mine = byKey.get(`${k}|${s.source}`) ?? 0;
+    for (const p of s.platforms) {
+      if (p === s.source || !reporting.has(`${facilityId}|${p}`)) continue;
+      const other = byKey.get(`${k}|${p}`) ?? 0;
+      if (Math.abs(other - mine) > 2) disagreements.push({ facilityId, productId, source: s.source, units: mine, other: p, otherUnits: other });
+    }
+  }
+  return { cells, disagreements };
 }
 
 type TikTokStockProduct = {
@@ -69,8 +158,8 @@ export async function syncTikTokStock(opts: { retried?: boolean } = {}): Promise
   const { tiktokApi, TIKTOK_API_VERSION } = await import("@/lib/tiktok");
   const token = await getTikTokAccessToken(conn);
 
-  const facilities = await prisma.facility.findMany({ where: { channel: "TIKTOK", externalId: { not: null } } });
-  const byWarehouse = new Map(facilities.map((f) => [f.externalId!, f.id]));
+  const byWarehouse = await placeFacilities("TIKTOK");
+  const facilityIds = [...new Set(byWarehouse.values())];
   // Every warehouse consl has on record, facility or not (Amazon's MCF one, a return warehouse).
   // Stock in a warehouse on NO record means a new place: re-read the shop's warehouses once and go
   // again, so it counts from its first pass instead of being skipped until an order names it.
@@ -120,7 +209,7 @@ export async function syncTikTokStock(opts: { retried?: boolean } = {}): Promise
   }
 
   if (unknown.size > 0 && !opts.retried && (await refreshChannelPlaces("TIKTOK"))) return syncTikTokStock({ retried: true });
-  return persist(facilities.map((f) => f.id), totals, skipped);
+  return persist("TIKTOK", facilityIds, totals, skipped);
 }
 
 /**
@@ -132,8 +221,8 @@ export async function syncShopifyStock(opts: { retried?: boolean } = {}): Promis
   if (!conn?.refreshTokenEnc || !conn.sellerId) return EMPTY;
   const token = decryptSecret(conn.refreshTokenEnc);
 
-  const facilities = await prisma.facility.findMany({ where: { channel: "SHOPIFY", externalId: { not: null } } });
-  const byLocation = new Map(facilities.map((f) => [f.externalId!, f.id]));
+  const byLocation = await placeFacilities("SHOPIFY");
+  const facilityIds = [...new Set(byLocation.values())];
   // Every location consl has on record, facility or not (the MCF mirror, a deactivated one). Stock
   // at a location on NO record means a new place: re-read the shop's locations once and go again,
   // so it counts from its first pass instead of being skipped until an order names it.
@@ -201,11 +290,12 @@ export async function syncShopifyStock(opts: { retried?: boolean } = {}): Promis
   }
 
   if (unknown.size > 0 && !opts.retried && (await refreshChannelPlaces("SHOPIFY"))) return syncShopifyStock({ retried: true });
-  return persist(facilities.map((f) => f.id), totals, skipped);
+  return persist("SHOPIFY", facilityIds, totals, skipped);
 }
 
 /** Flatten the per-facility tallies, write them, and report what landed. */
 async function persist(
+  channel: "SHOPIFY" | "TIKTOK",
   facilityIds: string[],
   totals: Map<string, Map<string, number>>,
   skipped: number,
@@ -214,7 +304,7 @@ async function persist(
   for (const [facilityId, perFacility] of totals) {
     for (const [productId, units] of perFacility) rows.push({ facilityId, productId, units });
   }
-  await replaceStock(facilityIds, rows);
+  await replaceStock(channel, facilityIds, rows);
   return {
     facilities: facilityIds.length,
     skus: rows.filter((r) => r.units > 0).length,

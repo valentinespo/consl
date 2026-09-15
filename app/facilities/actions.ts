@@ -7,6 +7,8 @@ import { maxMovableOn } from "@/lib/availability";
 import { checkOwned } from "@/lib/ownership";
 import { requirePermission } from "@/lib/membership";
 import { computeEngineResult, recomputeAll } from "@/lib/recompute";
+import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
+import { applyFeeRulesToOrders } from "@/lib/order-fees";
 
 /** Create a facility — a co-packer, warehouse, 3PL or anywhere else stock lives. */
 export async function createFacility(input: { code: string; name: string; type: string }) {
@@ -469,4 +471,113 @@ export async function createFacilityForShipFrom(placeId: string, input: { name: 
   for (let n = 2; await prisma.facility.findFirst({ where: { code }, select: { id: true } }); n++) code = `${base}${n}`.slice(0, 8);
   const f = await prisma.facility.create({ data: { code, name, type: input.type || "warehouse", address: place.name } });
   return mapAmazonShipFrom(placeId, f.id);
+}
+
+/**
+ * "Same place as…": a Shopify location or TikTok warehouse that is really one of the company's
+ * other facilities (the one warehouse both platforms ship from). From now on its orders and its
+ * reported stock count at that facility. The facility the sync had created for this very place
+ * hands everything it held — orders, fee rules, lots, movements, purchases, stock routes — to the
+ * survivor and retires; the places syncs keep the choice and never bring it back
+ * (see lib/shopify-locations.ts, lib/tiktok-locations.ts).
+ */
+export async function mergeChannelPlace(placeId: string, targetFacilityId: string) {
+  const gate = await requirePermission("facilities", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  const place = await prisma.channelLocation.findFirst({
+    where: { id: placeId, channel: { in: ["SHOPIFY", "TIKTOK"] } },
+    include: { facility: { select: { id: true, channel: true, externalId: true } } },
+  });
+  if (!place) return { ok: false as const, error: "That place is no longer on record." };
+  if (place.amazonMirror) return { ok: false as const, error: "Amazon's fulfilment place always counts as Amazon FBA." };
+  const target = await prisma.facility.findFirst({ where: { id: targetFacilityId }, select: { id: true, channel: true, inactive: true } });
+  if (!target || target.inactive) return { ok: false as const, error: "Pick a facility." };
+  if (target.channel?.startsWith("AMAZON")) return { ok: false as const, error: "A Shopify location or TikTok warehouse can't be one of Amazon's own warehouses." };
+  if (target.id === place.facilityId) return { ok: true as const, moved: 0 };
+  // The duplicate: the facility the sync created for this very place. A facility the place was
+  // merely pointed at earlier is somebody else's place too — its history stays.
+  const dup = place.facility && place.facility.id !== target.id && place.facility.channel === place.channel && place.facility.externalId === place.externalId ? place.facility : null;
+  const previous = place.facilityId;
+
+  const movedOrders = dup
+    ? (await prisma.salesOrder.findMany({ where: { OR: [{ fulfillmentFacilityId: dup.id }, { fulfillmentOverrideFacilityId: dup.id }] }, select: { id: true } })).map((o) => o.id)
+    : [];
+  await prisma.$transaction([
+    prisma.channelLocation.update({ where: { id: place.id }, data: { facilityId: target.id, mappedManually: true } }),
+    ...(dup
+      ? [
+          prisma.salesOrder.updateMany({ where: { fulfillmentFacilityId: dup.id }, data: { fulfillmentFacilityId: target.id } }),
+          prisma.salesOrder.updateMany({ where: { fulfillmentOverrideFacilityId: dup.id }, data: { fulfillmentOverrideFacilityId: target.id } }),
+          prisma.orderFeeRule.updateMany({ where: { facilityId: dup.id }, data: { facilityId: target.id } }),
+          prisma.lot.updateMany({ where: { facilityId: dup.id }, data: { facilityId: target.id } }),
+          prisma.stockMovement.updateMany({ where: { fromFacilityId: dup.id }, data: { fromFacilityId: target.id } }),
+          prisma.stockMovement.updateMany({ where: { toFacilityId: dup.id }, data: { toFacilityId: target.id } }),
+          prisma.purchase.updateMany({ where: { facilityId: dup.id }, data: { facilityId: target.id } }),
+          prisma.purchaseOrder.updateMany({ where: { facilityId: dup.id }, data: { facilityId: target.id } }),
+          prisma.channelStock.deleteMany({ where: { facilityId: dup.id } }),
+          prisma.facility.update({ where: { id: dup.id }, data: { inactive: true, stockSource: null } }),
+        ]
+      : []),
+  ]);
+  // Stock routes named the duplicate: they name the survivor now.
+  if (dup) {
+    const stored = (await getOrgSettings()).stockRoutes as { from: string; to: string }[] | null;
+    if (Array.isArray(stored)) {
+      const swap = (id: string) => (id === dup.id ? target.id : id);
+      const routes = [
+        ...new Map(
+          stored
+            .filter((r) => r && typeof r.from === "string" && typeof r.to === "string")
+            .map((r) => ({ from: swap(r.from), to: swap(r.to) }))
+            .filter((r) => r.from !== r.to)
+            .map((r) => [`${r.from}>${r.to}`, r] as const),
+        ).values(),
+      ];
+      await saveOrgSettings({ stockRoutes: routes });
+    }
+  }
+  // Orders this place had put at its earlier facility (a person's previous choice) re-read their
+  // place and land at the new one; orders that facility holds for other reasons stay.
+  let changed = 0;
+  if (previous && !dup) {
+    const { resolveFulfillmentFacilities } = await import("@/lib/fulfillment");
+    const ids = (await prisma.salesOrder.findMany({ where: { fulfillmentFacilityId: previous, channel: place.channel }, select: { id: true } })).map((o) => o.id);
+    for (let i = 0; i < ids.length; i += 1000) changed += await resolveFulfillmentFacilities(ids.slice(i, i + 1000), { sync: false });
+  }
+  // A fee or void rule keyed on the facility may match differently now.
+  for (let i = 0; i < movedOrders.length; i += 500) await applyFeeRulesToOrders(movedOrders.slice(i, i + 500));
+  revalidatePath("/", "layout");
+  return { ok: true as const, moved: movedOrders.length + changed };
+}
+
+/**
+ * "Own facility again": the place stops pointing at another facility and gets a facility of its
+ * own back from the places sync (run right away; the scheduler's next pass repeats it if the
+ * platform can't be read this minute). History that moved stays where it went.
+ */
+export async function unmergeChannelPlace(placeId: string) {
+  const gate = await requirePermission("facilities", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  const place = await prisma.channelLocation.findFirst({ where: { id: placeId, mappedManually: true, channel: { in: ["SHOPIFY", "TIKTOK"] } } });
+  if (!place) return { ok: false as const, error: "That place is no longer on record." };
+  await prisma.channelLocation.update({ where: { id: place.id }, data: { mappedManually: false } });
+  const { refreshChannelPlaces } = await import("@/lib/fulfillment");
+  const refreshed = await refreshChannelPlaces(place.channel as "SHOPIFY" | "TIKTOK");
+  revalidatePath("/", "layout");
+  return { ok: true as const, refreshed };
+}
+
+/** Which platform's report counts as a facility's stock, when more than one reports it. */
+export async function setFacilityStockSource(facilityId: string, source: string) {
+  const gate = await requirePermission("facilities", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  const f = await prisma.facility.findFirst({ where: { id: facilityId }, select: { id: true } });
+  if (!f) return { ok: false as const, error: "That facility no longer exists." };
+  if (source !== "SHOPIFY" && source !== "TIKTOK") return { ok: false as const, error: "Unknown platform." };
+  const { facilityStockSources } = await import("@/lib/channel-stock");
+  const s = (await facilityStockSources()).get(f.id);
+  if (!s?.platforms.includes(source)) return { ok: false as const, error: "That platform doesn't report stock at this facility." };
+  await prisma.facility.update({ where: { id: f.id }, data: { stockSource: source } });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
 }

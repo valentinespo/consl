@@ -331,10 +331,7 @@ export async function completeOnboarding() {
   const [products, snaps, channelHeld] = await Promise.all([
     prisma.product.findMany({ select: { id: true, openingUnitCost: true } }),
     prisma.skuSnapshot.findMany({ distinct: ["productId"], orderBy: { capturedAt: "desc" } }),
-    prisma.channelStock.findMany({
-      where: { units: { gt: 0 } },
-      select: { productId: true, units: true, facility: { select: { channel: true } } },
-    }),
+    import("@/lib/channel-stock").then(async ({ readChannelStock }) => (await readChannelStock()).cells.map((c) => ({ productId: c.productId, units: c.units, facility: { channel: c.channel } }))),
   ]);
   const costById = new Map(products.map((p) => [p.id, p.openingUnitCost ?? 0]));
 

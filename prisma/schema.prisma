@@ -209,6 +209,10 @@ model Facility {
   // The platform stopped reporting this place (location deactivated or deleted). Kept — it may
   // carry lots and movements — but no longer synced, and hidden from pickers for NEW activity.
   inactive        Boolean         @default(false)
+  // When several platforms report this facility's stock (a warehouse that is both a Shopify
+  // location and a TikTok warehouse), the one whose count is used: SHOPIFY | TIKTOK. Null = the
+  // facility's own platform, else the first platform mapped to it.
+  stockSource     String?
   legalName       String? // vendor name printed on POs (falls back to name)
   address         String? // multiline vendor address for POs
   notes           String?
@@ -846,11 +850,14 @@ model ChannelStock {
   product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   productId  String
   units      Int      @default(0)
+  // The platform that reported these units (SHOPIFY | TIKTOK). One warehouse that two platforms
+  // report holds one row per platform; the facility's stock source says which one counts.
+  channel    String?
   syncedAt   DateTime @default(now())
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  @@unique([orgId, facilityId, productId])
+  @@unique([orgId, facilityId, productId, channel])
   @@index([orgId, productId])
   @@index([facilityId])
 }
@@ -1031,6 +1038,9 @@ model ChannelLocation {
   name         String
   facility     Facility?     @relation(fields: [facilityId], references: [id], onDelete: SetNull)
   facilityId   String? // the consl facility that mirrors it, when it is a real place of its own
+  // True once a person pointed this place at a facility ("same place as…"): the syncs then keep
+  // their hands off `facilityId` and never spawn a facility of its own for it.
+  mappedManually Boolean     @default(false)
   amazonMirror Boolean       @default(false) // Amazon's MCF — the FBA pool by another name
   active       Boolean       @default(true)
   createdAt    DateTime      @default(now())

@@ -29,7 +29,7 @@ export const dynamic = "force-dynamic";
 
 export default async function FacilitiesPage() {
   await requireView("facilities");
-  const [facilities, stock, rawByFacilityCode, movements, products, materials, facilityOptions, channelStock, { money, qty, date }, availability, finishedLines, latestPurchases, latestRawLayers, anyChannel, unmappedShipFrom] = await Promise.all([
+  const [facilities, stock, rawByFacilityCode, movements, products, materials, facilityOptions, channelStock, { money, qty, date }, availability, finishedLines, latestPurchases, latestRawLayers, anyChannel, unmappedShipFrom, merged] = await Promise.all([
     getFacilitiesDetailed(),
     getFinishedStock(),
     getRawStockByFacility(),
@@ -59,7 +59,10 @@ export default async function FacilitiesPage() {
     prisma.integration.count({ where: { status: "connected", provider: { in: ["amazon", "shopify", "tiktok"] } } }),
     // Merchant-fulfilled Amazon ship-from addresses still waiting for a facility — the badge on Map facilities.
     prisma.channelLocation.count({ where: { channel: "AMAZON", facilityId: null } }),
+    // Places a person pointed at another facility ("same place as…") — their retired own facility says where it went.
+    prisma.channelLocation.findMany({ where: { mappedManually: true }, select: { channel: true, externalId: true, facility: { select: { name: true } } } }),
   ]);
+  const mergedInto = new Map(merged.map((m) => [`${m.channel}|${m.externalId}`, m.facility?.name ?? null]));
 
   // Newest known cost per item, for prefilling "Cost per unit" on found stock / returns. Newest
   // = most recently FINISHED, not most recently ordered (lib/lot-status appearedAt).
@@ -273,12 +276,14 @@ export default async function FacilitiesPage() {
                         <span className="truncate font-semibold text-ink">{f.name}</span>
                         {f.inactive && (
                           <span className="whitespace-nowrap rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[10.5px] font-medium text-muted">
-                            Inactive
+                            {f.channel && f.externalId && mergedInto.get(`${f.channel}|${f.externalId}`) ? "Merged" : "Inactive"}
                           </span>
                         )}
                       </div>
                       <div className="truncate text-[12.5px] text-muted">
-                        {f.channel ? (PROVIDERS[CHANNEL_PROVIDER[f.channel]]?.label ?? facilityTypeLabel(f.type)) : facilityTypeLabel(f.type)}
+                        {f.inactive && f.channel && f.externalId && mergedInto.get(`${f.channel}|${f.externalId}`)
+                          ? `Now counted at ${mergedInto.get(`${f.channel}|${f.externalId}`)}`
+                          : f.channel ? (PROVIDERS[CHANNEL_PROVIDER[f.channel]]?.label ?? facilityTypeLabel(f.type)) : facilityTypeLabel(f.type)}
                       </div>
                     </div>
                     <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] text-muted">

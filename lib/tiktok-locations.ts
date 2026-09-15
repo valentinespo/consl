@@ -70,6 +70,8 @@ export async function syncTikTokWarehouses(accessToken: string, shopCipher: stri
 
   const existing = await prisma.facility.findMany({ where: { channel: "TIKTOK" } });
   const byExternal = new Map(existing.filter((f) => f.externalId).map((f) => [f.externalId!, f]));
+  // A warehouse a person pointed at another facility ("same place as…") gets no facility of its own.
+  const manual = new Set((await prisma.channelLocation.findMany({ where: { channel: "TIKTOK", mappedManually: true }, select: { externalId: true } })).map((l) => l.externalId));
 
   let created = 0;
   let updated = 0;
@@ -77,6 +79,7 @@ export async function syncTikTokWarehouses(accessToken: string, shopCipher: stri
 
   for (const w of wanted) {
     seen.add(w.id);
+    if (manual.has(w.id)) continue;
     const name = w.name;
     const address =
       w.address?.full_address?.trim() ||
@@ -115,8 +118,9 @@ export async function syncTikTokWarehouses(accessToken: string, shopCipher: stri
   // deliberately uncounted — not a "new place" for the stock sync to chase.
   for (const w of all) {
     const data = { name: w.name, facilityId: facilityByExternal.get(w.id) ?? null, amazonMirror: /amazon/i.test(w.name), active: w.type === "SALES_WAREHOUSE" && w.effect_status === "ENABLED" };
-    const row = await prisma.channelLocation.findFirst({ where: { channel: "TIKTOK", externalId: w.id }, select: { id: true } });
-    if (row) await prisma.channelLocation.update({ where: { id: row.id }, data });
+    const row = await prisma.channelLocation.findFirst({ where: { channel: "TIKTOK", externalId: w.id }, select: { id: true, mappedManually: true } });
+    // A mapping made by a person keeps its facility; the sync only refreshes the rest.
+    if (row) await prisma.channelLocation.update({ where: { id: row.id }, data: row.mappedManually ? { name: data.name, amazonMirror: data.amazonMirror, active: data.active } : data });
     else await prisma.channelLocation.create({ data: { channel: "TIKTOK", externalId: w.id, ...data } });
   }
 

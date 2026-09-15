@@ -140,7 +140,8 @@ export async function getChannelStock(): Promise<{ rows: ChannelStockRow[]; tota
       }
       continue;
     }
-    // A Shopify/TikTok product needs no ASIN — read the valued cells, not the Amazon rows.
+    // A Shopify/TikTok product needs no ASIN — read the valued cells, not the Amazon rows. One
+    // cell per facility × product: the facility's stock source, when two platforms report it.
     for (const v of channelStock) {
       if (v.facilityId !== f.id || v.units <= 0) continue;
       const p = productById.get(v.productId);

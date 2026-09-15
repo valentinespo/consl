@@ -48,10 +48,7 @@ export default async function OnboardingPage({
       getMaterialTypes(),
       prisma.stockMovement.findMany({ where: { kind: "OPENING" } }),
       prisma.skuSnapshot.findMany({ distinct: ["productId"], orderBy: { capturedAt: "desc" } }),
-      prisma.channelStock.findMany({
-        where: { units: { gt: 0 } },
-        select: { productId: true, units: true, facility: { select: { channel: true } } },
-      }),
+      import("@/lib/channel-stock").then(async ({ readChannelStock }) => (await readChannelStock()).cells.map((c) => ({ productId: c.productId, units: c.units, facility: { channel: c.channel } }))),
       getMyAccess().catch(() => null),
       readOnboardingJob(),
     ]);

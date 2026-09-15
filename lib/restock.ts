@@ -334,15 +334,13 @@ export async function getRestock(): Promise<{
   // recorded shipments), newest first. One shared pass per channel × SKU, so a channel's several
   // facilities can never draw the same layer twice — the whole channel is ONE pool, per the
   // founder's design. Units beyond any recorded layer fall back to the newest lot cost.
-  const channelHeld = await prisma.channelStock.findMany({
-    where: { units: { gt: 0 } },
-    select: { productId: true, facilityId: true, units: true, facility: { select: { channel: true, code: true } } },
-    orderBy: [{ facility: { code: "asc" } }, { productId: "asc" }],
-  });
+  // One platform per facility (its stock source) — a warehouse two platforms report is never
+  // counted twice; see readChannelStock.
+  const { readChannelStock } = await import("@/lib/channel-stock");
+  const channelHeld = (await readChannelStock()).cells;
   const channelGroups = new Map<string, { channel: string; productId: string; cells: { facilityId: string; units: number }[] }>();
   for (const c of channelHeld) {
-    const ch = c.facility.channel;
-    if (ch !== "SHOPIFY" && ch !== "TIKTOK") continue; // Amazon never lives in ChannelStock
+    const ch = c.channel;
     const k = `${ch}|${c.productId}`;
     const cur = channelGroups.get(k) ?? { channel: ch, productId: c.productId, cells: [] };
     if (!channelGroups.has(k)) channelGroups.set(k, cur);
