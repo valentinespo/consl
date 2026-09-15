@@ -19,6 +19,7 @@ import { MapTrifold } from "@/components/icons";
 import { NewMovementPanel, type OnHandRow } from "@/components/MovementForm";
 import { MovementsLedger } from "@/components/MovementsLedger";
 import { StockSection } from "@/components/StockSection";
+import { HoverHint } from "@/components/HoverHint";
 import { facilityTypeLabel, isProductionSite } from "@/lib/facility-types";
 import { appearedAt } from "@/lib/lot-status";
 import { getChannelStock, PROVIDERS, CHANNEL_PROVIDER, CHANNEL_LOGO } from "@/lib/integrations";
@@ -61,9 +62,36 @@ export default async function FacilitiesPage() {
     prisma.channelLocation.count({ where: { channel: "AMAZON", facilityId: null } }),
     // Places a person merged, marked as Amazon MCF or ignored on Map facilities — their retired own
     // facility has nothing to show here (Map facilities says where it went).
-    prisma.channelLocation.findMany({ where: { mode: { not: "auto" } }, select: { channel: true, externalId: true } }),
+    prisma.channelLocation.findMany({ where: { mode: { not: "auto" } }, select: { channel: true, externalId: true, name: true, mode: true, facilityId: true } }),
   ]);
   const retiredByChoice = new Set(decided.map((m) => `${m.channel}|${m.externalId}`));
+  // The facility that stayed wears a small pill naming the places merged into it.
+  const PLACE_PLATFORM: Record<string, string> = { SHOPIFY: "Shopify", TIKTOK: "TikTok" };
+  const mergedHere = new Map<string, string[]>();
+  for (const m of decided) {
+    if (m.mode !== "merged" || !m.facilityId) continue;
+    mergedHere.set(m.facilityId, [...(mergedHere.get(m.facilityId) ?? []), `${PLACE_PLATFORM[m.channel] ?? m.channel} · ${m.name}`]);
+  }
+  const mergedPill = (facilityId: string) => {
+    const list = mergedHere.get(facilityId);
+    if (!list) return null;
+    return (
+      <HoverHint
+        title="Merged into this facility"
+        body={
+          <ul className="space-y-0.5">
+            {list.map((l) => (
+              <li key={l}>{l}</li>
+            ))}
+          </ul>
+        }
+      >
+        <span className="whitespace-nowrap rounded-md border border-accent-strong/40 bg-accent-soft/40 px-1.5 py-0.5 text-[10.5px] font-medium text-accent">
+          {list.length} merged
+        </span>
+      </HoverHint>
+    );
+  };
 
   // Newest known cost per item, for prefilling "Cost per unit" on found stock / returns. Newest
   // = most recently FINISHED, not most recently ordered (lib/lot-status appearedAt).
@@ -199,6 +227,7 @@ export default async function FacilitiesPage() {
                         </div>
                       )}
                     </div>
+                    {mergedPill(f.id)}
                     <ChevronRight size={16} className="shrink-0 text-muted" />
                   </div>
 
@@ -285,6 +314,7 @@ export default async function FacilitiesPage() {
                         {f.channel ? (PROVIDERS[CHANNEL_PROVIDER[f.channel]]?.label ?? facilityTypeLabel(f.type)) : facilityTypeLabel(f.type)}
                       </div>
                     </div>
+                    {mergedPill(f.id)}
                     <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] text-muted">
                       <Lock size={12} /> Managed
                     </span>
