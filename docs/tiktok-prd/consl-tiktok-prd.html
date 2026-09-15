@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>consl for TikTok Shop — Product Design Document</title>
+<style>
+  @page { size: Letter; margin: 18mm 17mm 20mm 17mm; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: Inter, "Helvetica Neue", Helvetica, Arial, sans-serif; color: #1f2937; font-size: 10pt; line-height: 1.45; }
+  h1 { font-size: 20pt; margin: 0 0 6pt; color: #111827; letter-spacing: -0.01em; }
+  h2 { font-size: 13.5pt; margin: 16pt 0 6pt; page-break-after: avoid; color: #111827; }
+  h3 { font-size: 11pt; margin: 10pt 0 4pt; page-break-after: avoid; color: #4c1d95; }
+  p { margin: 0 0 7pt; }
+  ul { margin: 0 0 8pt 0; padding-left: 18pt; } li { margin-bottom: 3pt; }
+  .muted { color: #6b7280; }
+  .section { page-break-before: auto; } .break { page-break-before: always; }
+  .kicker { font-size: 8.5pt; letter-spacing: .12em; text-transform: uppercase; color: #7c3aed; font-weight: 600; margin-bottom: 4pt; }
+  table { border-collapse: collapse; width: 100%; margin: 6pt 0 10pt; font-size: 9.3pt; page-break-inside: auto; }
+  th, td { border: 1px solid #e5e7eb; padding: 5pt 6pt; vertical-align: top; text-align: left; }
+  th { background: #f5f3ff; color: #3b0764; font-weight: 600; }
+  tr { page-break-inside: avoid; }
+  code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 8.6pt; background: #f3f4f6; padding: 1px 4px; border-radius: 3px; }
+  figure { margin: 8pt 0 12pt; page-break-inside: avoid; }
+  figure img { width: 88%; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 6px; display: block; }
+  figcaption { font-size: 8.8pt; color: #6b7280; margin-top: 4pt; }
+  .cover { height: 236mm; display: flex; flex-direction: column; justify-content: space-between; }
+  .cover .brand { display: flex; align-items: center; gap: 10pt; }
+  .cover .brand img { width: 30pt; height: 30pt; }
+  .cover .brand span { font-size: 16pt; font-weight: 700; letter-spacing: -0.02em; }
+  .cover h1 { font-size: 30pt; line-height: 1.15; margin: 34pt 0 10pt; }
+  .cover .sub { font-size: 12.5pt; color: #4b5563; max-width: 150mm; }
+  .cover img.hero { width: 100%; border-radius: 8px; border: 1px solid #e5e7eb; margin: 20pt 0 0; }
+  .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 3pt 18pt; font-size: 9.5pt; margin-top: 16pt; }
+  .meta b { color: #111827; }
+  .flow { display: flex; align-items: stretch; gap: 6pt; margin: 8pt 0 12pt; }
+  .flow .box { flex: 1; border: 1px solid #ddd6fe; background: #faf5ff; border-radius: 6px; padding: 6pt 7pt; font-size: 8.8pt; }
+  .flow .box b { display: block; color: #4c1d95; margin-bottom: 2pt; font-size: 9.2pt; }
+  .flow .arrow { align-self: center; color: #7c3aed; font-size: 14pt; }
+  .callout { border-left: 3px solid #7c3aed; background: #faf5ff; padding: 6pt 9pt; margin: 8pt 0 10pt; font-size: 9.6pt; }
+  .toc li { margin-bottom: 2pt; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10pt; }
+  .footer { position: fixed; bottom: -12mm; left: 0; right: 0; font-size: 8pt; color: #9ca3af; }
+</style></head>
+<body>
+
+<!-- ===================== COVER ===================== -->
+<div class="cover">
+  <div>
+    <div class="brand"><img src="img/consl-mark.png" alt=""><span>consl</span></div>
+    <h1>consl for TikTok Shop<br>Product Design Document</h1>
+    <div class="sub">How the Consl app reads a TikTok Shop's orders, warehouses, stock and settlements, and turns them into inventory, reorder and profit views for the merchant.</div>
+    <img class="hero" src="img/cover.png" alt="">
+  </div>
+  <div class="meta">
+    <div><b>App name</b> Consl (custom app, category Connectors)</div><div><b>Partner Center service ID</b> 7671534619103135501</div>
+    <div><b>Developer</b> Bluesteam LLC (consl.ai)</div><div><b>Market</b> United States, local sellers</div>
+    <div><b>Product URL</b> https://consl.ai</div><div><b>Contact</b> admin@consl.ai</div>
+    <div><b>Document version</b> 1.0 — September 16, 2026</div><div><b>Integration mode</b> Read-only (no writes to the shop)</div>
+  </div>
+</div>
+
+<!-- ===================== CONTENTS ===================== -->
+<div class="section break">
+  <div class="kicker">Contents</div>
+  <ol class="toc">
+    <li>Product overview</li>
+    <li>Key use cases</li>
+    <li>Key features</li>
+    <li>Data flow</li>
+    <li>API scopes and endpoints</li>
+    <li>Data stored, privacy and security</li>
+    <li>Merchant setup and testing</li>
+    <li>Appendix — screenshots</li>
+  </ol>
+
+  <h2>1. Product overview</h2>
+  <p><b>consl</b> is an operations console for brands that manufacture or assemble their own products and sell them on TikTok Shop, Shopify and Amazon. It keeps one set of books for the whole business: raw-material purchases, production batches with their landed cost per unit (FIFO), finished stock at every warehouse and channel, orders from every channel, and a profit and loss statement per channel that includes the platform's own fees.</p>
+  <p>The TikTok Shop integration lets a merchant authorize their shop once and then see, inside consl, everything TikTok Shop already knows about their business: orders and their status, the warehouses stock ships from, how much stock TikTok reports at each warehouse, and the settlement lines that explain what the merchant actually earned on each order.</p>
+  <div class="callout">The integration is <b>read-only</b>. consl never creates, edits or ships orders, never changes prices or stock on TikTok Shop, and never contacts buyers. It reads data so the merchant can plan production, restock the right warehouse in time, and understand true profit per channel.</div>
+
+  <h3>Who uses it</h3>
+  <ul>
+    <li>Small and mid-size consumer brands (food and beverage, supplements, cosmetics, apparel accessories) that produce in batches through a co-packer or their own workshop.</li>
+    <li>Operators and finance people at those brands who need one place for stock, costs and profit across channels.</li>
+  </ul>
+  <h3>What the merchant gets from the TikTok Shop connection</h3>
+  <ul>
+    <li><b>Orders</b> — every TikTok order with its items, units, prices, discounts, tax, fulfillment type (seller or Fulfilled by TikTok), warehouse and status, updated within minutes of a change.</li>
+    <li><b>Warehouses and stock</b> — each TikTok warehouse becomes a facility in consl, with the stock TikTok reports for each SKU, so the merchant sees TikTok stock next to Shopify, Amazon and their own warehouses.</li>
+    <li><b>Profit</b> — settlement statements are turned into a per-channel P&amp;L: sales, platform commission, transaction and shipping fees, affiliate commission, refunds, minus the FIFO cost of the units sold.</li>
+    <li><b>Reorder planning</b> — sales velocity per warehouse feeds reorder suggestions (what to produce or move, how much, when).</li>
+    <li><b>Listing mapping</b> — TikTok SKUs are matched to consl products automatically when the seller SKU matches, and can be mapped by hand otherwise.</li>
+  </ul>
+</div>
+
+<!-- ===================== USE CASES ===================== -->
+<div class="section">
+  <h2>2. Key use cases</h2>
+  <table>
+    <tr><th style="width:26%">Use case</th><th style="width:46%">What consl does</th><th>TikTok Shop data used</th></tr>
+    <tr><td>See all sales in one place</td><td>The Orders page lists TikTok orders next to Shopify and Amazon orders, with the same columns: items, source, warehouse it shipped from, payment, status, units, total. Filters by channel, date, warehouse and free-text search.</td><td>Orders (search + detail), warehouses</td></tr>
+    <tr><td>Know the real profit of TikTok sales</td><td>The P&amp;L has a TikTok tab: gross sales, refunds, platform commission, transaction and shipping fees, affiliate commission, and the landed cost of goods for the units sold, giving net profit and margin for any period.</td><td>Settlement statements and transactions, unsettled orders, order line items (for units)</td></tr>
+    <tr><td>Keep TikTok warehouses stocked</td><td>Each TikTok warehouse is a facility with reported stock per SKU. Sales velocity per warehouse produces reorder alerts and planned quantities (produce, or move stock from another location) before the warehouse runs out.</td><td>Warehouses, product/SKU stock per warehouse, orders</td></tr>
+    <tr><td>Value channel inventory correctly</td><td>Units at TikTok warehouses are valued at the cost they carried when they were shipped there (FIFO layers), so the dashboard's total inventory value includes TikTok stock at true cost.</td><td>Stock per warehouse</td></tr>
+    <tr><td>React to order changes fast</td><td>Order status, cancellation and return webhooks tell consl which order changed; consl then re-reads that order from the API and updates it within minutes, including cancellations and refunds.</td><td>Webhooks (order status, cancellation status, return status), order detail</td></tr>
+    <tr><td>Map the catalog once</td><td>On connect, the shop's products are listed with their SKUs and images. Exact SKU matches are mapped to consl products automatically; the rest are mapped from a picker or ignored.</td><td>Products / SKUs</td></tr>
+  </table>
+
+  <h2>3. Key features</h2>
+  <h3>3.1 Connect the shop (authorization)</h3>
+  <p>Integrations → TikTok Shop → Connect sends the merchant to TikTok Shop's authorization page for the Consl app. After approval, TikTok returns the merchant to consl with an authorization code; consl exchanges it for tokens and immediately reads the shop's warehouses and products, then starts the order and settlement history import in the background. Only a company <b>owner</b> in consl can connect or disconnect a shop.</p>
+  <figure><img src="img/tt-integrations.png" alt=""><figcaption>Figure 1 — Integrations: where the merchant connects TikTok Shop. Every connected platform gets locked "managed" facilities.</figcaption></figure>
+</div>
+
+<div class="section">
+  <h3>3.2 Orders</h3>
+  <p>Every TikTok order with its line items, units, prices, seller discounts, tax, fulfillment type, warehouse and status. The list is refreshed every 15 minutes and immediately on webhook events. Cancelled and refunded orders are marked and excluded from sales figures.</p>
+  <figure><img src="img/tt-orders.png" alt=""><figcaption>Figure 2 — Orders filtered to TikTok, with the warehouse each order shipped from.</figcaption></figure>
+  <h3>3.3 Warehouses as facilities, with reported stock</h3>
+  <p>Each TikTok warehouse becomes a locked facility ("managed by the connection"). Stock reported by TikTok per SKU and warehouse is shown as finished stock at that facility and valued at FIFO cost. Movements from the merchant's own locations to a TikTok warehouse are recorded so the books and the reported counts stay in step.</p>
+  <figure><img src="img/tt-facilities.png" alt=""><figcaption>Figure 3 — Facilities: own locations plus the managed sales-channel facilities, including the TikTok warehouse and its stock value.</figcaption></figure>
+</div>
+
+<div class="section">
+  <h3>3.4 Profit and loss per channel</h3>
+  <p>The P&amp;L reads TikTok settlement statements and their transactions and buckets every line: sales, refunds, referral (platform commission), advertising (affiliate commission), and other fees (transaction, shipping). Cost of goods comes from consl's own FIFO engine for the units on each order. Orders not yet settled are shown as "pending" from the order data until the statement arrives.</p>
+  <figure><img src="img/tt-pnl-tiktok.png" alt=""><figcaption>Figure 4 — P&amp;L, TikTok tab: sales, fees, refunds, cost of goods, net profit and margin for the period.</figcaption></figure>
+  <h3>3.5 Dashboard and reorder planning</h3>
+  <p>The dashboard shows total inventory value across own locations and channels, production lead time, months of cover and reorder alerts. Sales velocity per warehouse (TikTok included) drives the suggested quantities and timing.</p>
+  <figure><img src="img/tt-dashboard.png" alt=""><figcaption>Figure 5 — Dashboard with channel stock included in inventory value and reorder alerts.</figcaption></figure>
+</div>
+
+<!-- ===================== DATA FLOW ===================== -->
+<div class="section">
+  <h2>4. Data flow</h2>
+  <div class="flow">
+    <div class="box"><b>1. Authorize</b>Merchant clicks Connect in consl → TikTok Shop authorization page → approves the Consl app.</div><div class="arrow">→</div>
+    <div class="box"><b>2. Tokens</b>TikTok returns an auth code to consl's callback; consl exchanges it (auth.tiktok-shops.com) for an access token + refresh token, stored encrypted for that company only.</div><div class="arrow">→</div>
+    <div class="box"><b>3. Read</b>Scheduled, signed API calls: shops, warehouses, products/stock, orders, statements. Webhooks ring a bell; the order is re-read from the API.</div><div class="arrow">→</div>
+    <div class="box"><b>4. Store</b>Order, warehouse, stock, SKU and settlement rows in consl's database, tagged with the company id. No buyer identity fields.</div><div class="arrow">→</div>
+    <div class="box"><b>5. Show</b>Orders, Facilities, P&amp;L, Dashboard and Reorder pages for that company's users only.</div>
+  </div>
+
+  <h3>Reading schedule</h3>
+  <table>
+    <tr><th style="width:28%">What</th><th style="width:36%">How often</th><th>Notes</th></tr>
+    <tr><td>Shop identity</td><td>At connect, and whenever tokens are refreshed</td><td>Shop id, cipher and region are needed on every call.</td></tr>
+    <tr><td>Warehouses</td><td>At connect, then every 15 minutes</td><td>New warehouses become facilities; deactivated ones are hidden.</td></tr>
+    <tr><td>Products and stock</td><td>Products at connect and on demand (mapping screen); stock every few minutes</td><td>Reported quantity per SKU and warehouse.</td></tr>
+    <tr><td>Orders</td><td>Full history at connect; the recent window every 15 minutes; immediately on webhook</td><td>Webhook payloads are only a signal; the order is always re-read over the authenticated API.</td></tr>
+    <tr><td>Settlements</td><td>Statements and their transactions as TikTok publishes them; unsettled orders bridged from order data</td><td>Feeds the P&amp;L per channel.</td></tr>
+    <tr><td>Token refresh</td><td>Before expiry, automatically</td><td>Access and refresh tokens rotate; both are stored encrypted.</td></tr>
+  </table>
+
+  <h3>Webhooks</h3>
+  <p>consl subscribes to <code>ORDER_STATUS_CHANGE</code>, <code>CANCELLATION_STATUS_CHANGE</code> and <code>RETURN_STATUS_CHANGE</code> at <code>https://consl.ai/api/webhooks/tiktok</code>. Each event is verified (HMAC with the app secret) and treated as a doorbell: it names the order that changed, and consl re-reads that order through the API in the background. Nothing is written from the webhook payload itself, so a forged or stale event can never alter data.</p>
+
+  <h3>Authentication and signing</h3>
+  <p>Token calls go to <code>auth.tiktok-shops.com</code> with the app key and secret. Every Shop API call to <code>open-api.tiktokglobalshop.com</code> carries <code>app_key</code>, <code>timestamp</code>, the HMAC-SHA256 <code>sign</code> computed with the app secret over path, sorted parameters and body, and the shop's access token in <code>x-tts-access-token</code>. API version <code>202309</code> is used, with <code>202501</code> and <code>202507</code> for the newer finance endpoints.</p>
+</div>
+
+<!-- ===================== SCOPES ===================== -->
+<div class="section">
+  <h2>5. API scopes and endpoints</h2>
+  <table>
+    <tr><th style="width:23%">Scope</th><th style="width:37%">Endpoints</th><th>Purpose in consl</th></tr>
+    <tr><td>Shop Authorized Information</td><td><code>GET /authorization/202309/shops</code></td><td>Identify the authorized shop (id, cipher, region) after authorization and on refresh.</td></tr>
+    <tr><td>Order Information</td><td><code>POST /order/202309/orders/search</code><br><code>GET /order/202309/orders</code></td><td>Order history and the recent window; re-read of single orders after a webhook. Order header, status, fulfillment type, warehouse, totals, line items (SKU, quantity, prices, discounts).</td></tr>
+    <tr><td>Logistics Basic</td><td><code>GET /logistics/202309/warehouses</code></td><td>Sales warehouses become facilities; return warehouses are skipped.</td></tr>
+    <tr><td>Product Basic</td><td><code>POST /product/202309/products/search</code></td><td>Product and SKU list for the mapping screen; reported stock per SKU and warehouse.</td></tr>
+    <tr><td>Finance Information</td><td><code>GET /finance/202309/statements</code><br><code>GET /finance/202501/statements/{id}/statement_transactions</code><br><code>GET /finance/202501/orders/{id}/statement_transactions</code><br><code>GET /finance/202507/orders/unsettled</code></td><td>Settlement lines for the P&amp;L: revenue, fees, commission, affiliate, refunds, shipping; unsettled orders shown as pending.</td></tr>
+    <tr><td>Fulfillment Basic; Fulfilled by TikTok (FBT) Info</td><td>Fields on the order payload</td><td>Tell seller-fulfilled from TikTok-fulfilled orders, and the warehouse an order ships from.</td></tr>
+    <tr><td>Return &amp; Refund Basic</td><td>Webhook <code>RETURN_STATUS_CHANGE</code>; refund lines on statements</td><td>Mark refunded orders and book refunds in the P&amp;L.</td></tr>
+    <tr><td>Webhook management</td><td><code>GET/PUT /event/202309/webhooks</code></td><td>Register the three event subscriptions at connect and keep them pointed at consl.</td></tr>
+    <tr><td>Global Product Information; TikTok Shop Analytics</td><td>—</td><td>Granted for cross-border catalogs and shop analytics; not read by the current version.</td></tr>
+  </table>
+  <p class="muted">consl requests no write scopes. It never calls endpoints that create or change orders, products, prices, stock or shipments.</p>
+
+  <h2>6. Data stored, privacy and security</h2>
+  <h3>What is stored</h3>
+  <table>
+    <tr><th style="width:22%">Object</th><th>Fields kept</th><th style="width:30%">Not kept</th></tr>
+    <tr><td>Order</td><td>TikTok order id, created/updated times, status, cancellation flag, fulfillment type and warehouse, payment method name, totals (product gross, discounts, tax, shipping, total, currency), ship-to <b>city, state and country</b> only.</td><td>Buyer name, street address, phone number, e-mail, notes, any identifier of the buyer.</td></tr>
+    <tr><td>Order line</td><td>Seller SKU, quantity, list and sale price, seller discount, link to the consl product.</td><td>—</td></tr>
+    <tr><td>Warehouse</td><td>Warehouse id, name, type, address (business address of the warehouse).</td><td>—</td></tr>
+    <tr><td>Product / SKU</td><td>Product id, SKU id, seller SKU, title, image URL, price — for mapping only.</td><td>Descriptions, videos, listing content.</td></tr>
+    <tr><td>Stock</td><td>Reported quantity per SKU and warehouse, with the time it was read.</td><td>—</td></tr>
+    <tr><td>Settlement</td><td>Statement id, order id, line type, amount, currency, settlement and order dates, SKU and units when the line is item-level.</td><td>Bank or payout account details.</td></tr>
+    <tr><td>Tokens</td><td>Access and refresh tokens, encrypted at rest; shop id, cipher, region.</td><td>Tokens are never shown in the UI or logs.</td></tr>
+  </table>
+  <h3>Security</h3>
+  <ul>
+    <li>Hosted on Railway (United States). The database is reachable only over the platform's private network; all traffic, browser to consl and consl to TikTok, is HTTPS.</li>
+    <li>Every stored row belongs to exactly one customer company, and every query is scoped to the signed-in user's company by the data layer. Sign-in is handled by Clerk; consl never sees passwords.</li>
+    <li>Platform tokens are encrypted with a key that exists only in the hosting environment. Application secrets live only in environment variables, never in the repository.</li>
+    <li>Administrative access is limited to the developer, under accounts protected by multi-factor authentication.</li>
+    <li>Data is never sold, never used for advertising, never shared with any outside party, and never exported to other services. Merchants see it on their own screens only.</li>
+    <li>Disconnecting the shop deletes its tokens immediately and stops all reads. Deleting the company purges all of its data after a short grace period.</li>
+    <li>Security incidents are contained, assessed and reported to affected customers and to TikTok as the developer terms require; the written policy is reviewed every six months.</li>
+  </ul>
+</div>
+
+<!-- ===================== SETUP ===================== -->
+<div class="section">
+  <h2>7. Merchant setup and testing</h2>
+  <h3>Setup steps</h3>
+  <ol>
+    <li>Sign in to consl (https://consl.ai) as a company owner.</li>
+    <li>Open <b>Integrations</b> (left sidebar) → <b>TikTok Shop</b> → <b>Connect</b>.</li>
+    <li>Approve the Consl app on TikTok Shop's authorization page. consl reads the shop's warehouses and products and starts importing orders and settlements.</li>
+    <li>Review <b>Catalog → Map listings</b>: SKUs that match are already linked; map or ignore the rest.</li>
+    <li>Use Orders, Facilities, P&amp;L, Dashboard and Reorder. Data refreshes on its own.</li>
+  </ol>
+  <h3>Testing with the review account</h3>
+  <p>The review account provided in the submission opens the company <b>Consl Demo</b>, a fictional brand with demo data already loaded, including a TikTok channel: TikTok orders on the Orders page, a TikTok warehouse with stock on Facilities, and a TikTok tab on the P&amp;L. To test authorization end to end, connect a test shop from Integrations; its orders, warehouses and stock then import automatically.</p>
+  <h3>Support</h3>
+  <p>Bluesteam LLC — admin@consl.ai — https://consl.ai. Privacy policy: https://consl.ai/privacy. Terms: https://consl.ai/terms.</p>
+</div>
+
+<!-- ===================== APPENDIX ===================== -->
+<div class="section break">
+  <h2>Appendix — screenshots</h2>
+  <p class="muted">All screenshots show the Consl Demo company (fictional data).</p>
+  <figure><img src="img/tt-orders.png" alt=""><figcaption>A1 — Orders, TikTok filter.</figcaption></figure>
+  <figure><img src="img/tt-facilities.png" alt=""><figcaption>A2 — Facilities with the TikTok warehouse.</figcaption></figure>
+</div>
+<div class="section break">
+  <figure><img src="img/tt-pnl-tiktok.png" alt=""><figcaption>A3 — P&amp;L, TikTok tab.</figcaption></figure>
+  <figure><img src="img/tt-pnl.png" alt=""><figcaption>A4 — P&amp;L, all channels.</figcaption></figure>
+</div>
+<div class="section break">
+  <figure><img src="img/tt-dashboard.png" alt=""><figcaption>A5 — Dashboard.</figcaption></figure>
+  <figure><img src="img/tt-integrations.png" alt=""><figcaption>A6 — Integrations.</figcaption></figure>
+</div>
+</body></html>
