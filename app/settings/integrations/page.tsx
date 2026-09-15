@@ -46,7 +46,7 @@ export default async function IntegrationsSettingsPage({
   const CONNECTABLE: Record<Provider, boolean> = { amazon: amazonReady, shopify: shopifyOAuthConfigured(), tiktok: tiktokConfigured(), amazon_ads: amazonAdsConfigured(), meta_ads: metaAdsConfigured() };
 
   return (
-    <div className="max-w-3xl space-y-3">
+    <div className="space-y-3">
       {connected && (
         <div className="flex items-center gap-2 rounded-lg border border-positive/25 bg-positive/10 px-3 py-2 text-[12.5px] text-positive">
           <Check size={14} /> {PROVIDERS[connected as Provider]?.label ?? connected} connected.
@@ -67,6 +67,8 @@ export default async function IntegrationsSettingsPage({
         can&apos;t be edited or deleted; they belong to the connection.
       </p>
 
+      {/* Two columns on a wide screen, the full width of the page. */}
+      <div className="grid gap-3 md:grid-cols-2">
       {(Object.keys(PROVIDERS) as Provider[]).map((p) => {
         const def = PROVIDERS[p];
         const row = byProvider.get(p);
@@ -82,7 +84,8 @@ export default async function IntegrationsSettingsPage({
               : "Coming soon";
 
         return (
-          <Card key={p} className="flex flex-wrap items-center gap-4">
+          <Card key={p} className="flex h-full flex-col gap-3">
+           <div className="flex items-start gap-4">
             {/* The platform's own mark on a white tile — same treatment as everywhere else. */}
             <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white p-1.5">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -133,12 +136,17 @@ export default async function IntegrationsSettingsPage({
                 <span className="text-[11px] text-muted">{statusText}</span>
               </div>
             </div>
-            {/* Disconnect only for a real per-tenant connection; a legacy (workspace-key) Amazon
+           </div>
+            {/* Controls on their own row, right-aligned, so the text keeps the card's full width.
+                Disconnect only for a real per-tenant connection; a legacy (workspace-key) Amazon
                 still offers Connect so the seller can establish the real OAuth connection. */}
-            <IntegrationControls provider={p} connected={liveConn} canConnect={CONNECTABLE[p]} addLabel={p === "meta_ads" ? "Add ad accounts" : undefined} />
+            <div className="mt-auto flex justify-end">
+              <IntegrationControls provider={p} connected={liveConn} canConnect={CONNECTABLE[p]} addLabel={p === "meta_ads" ? "Add ad accounts" : undefined} />
+            </div>
           </Card>
         );
       })}
+      </div>
     </div>
   );
 }
