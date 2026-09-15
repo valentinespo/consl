@@ -25,8 +25,9 @@ with the password given in the submission form (no two-factor step, no email cod
      location becomes a facility with its stock) and Reorder (stock per place).
    - **Shopify Payments payouts** (`read_shopify_payments_*`) → P&L, "Pending" vs paid-out money.
 5. Nothing is ever written to the store. consl only reads.
-6. Uninstalling the app from the store, or clicking **Disconnect** in consl, stops all reads;
-   the store's data can then be wiped from consl with **Disconnect and wipe**.
+6. Uninstalling the app from the store, or clicking **Disconnect** in consl, stops all reads.
+   What was already imported stays in the company's books (the company owner can delete the
+   company from Settings, which removes everything).
 
 GDPR webhooks (`customers/data_request`, `customers/redact`, `shop/redact`) are registered at
 https://consl.ai/api/integrations/shopify/compliance and are handled automatically.
