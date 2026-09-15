@@ -37,6 +37,19 @@ function mirrorChannel(source: string | null): string | null {
   return key ? MIRROR_TO_CHANNEL[key] : null;
 }
 
+const PLACE_CHANNEL: Record<string, string> = { AMAZON_FBA: "Amazon", AMAZON_AWD: "Amazon", SHOPIFY: "Shopify", TIKTOK: "TikTok" };
+
+/** Display names for facilities: a name two facilities share (one warehouse that both Shopify and
+ *  TikTok report) gets its platform, else its code, appended so a picker can tell them apart. */
+export function distinctFacilityNames<T extends { id: string; name: string; code?: string | null; channel?: string | null }>(facilities: T[]): (T & { label: string })[] {
+  const count = new Map<string, number>();
+  for (const f of facilities) count.set(f.name, (count.get(f.name) ?? 0) + 1);
+  return facilities.map((f) => ({
+    ...f,
+    label: (count.get(f.name) ?? 0) > 1 ? `${f.name} · ${(f.channel && PLACE_CHANNEL[f.channel]) || f.code || "?"}` : f.name,
+  }));
+}
+
 export type OrdersFilter = {
   channel?: string; // AMAZON | SHOPIFY | TIKTOK
   from?: string; // ISO day (inclusive); undefined = beginning of time
@@ -65,11 +78,12 @@ export async function salesChannelOptions(): Promise<{ id: string; name: string;
  *  with a "No facility" entry when some orders have none — the choices of the Orders filter. */
 export async function fulfilledAtOptions(): Promise<{ id: string; name: string; orders: number }[]> {
   const orgId = await getCurrentOrgId();
-  const rows = await prisma.$queryRaw<{ id: string | null; name: string | null; orders: number }[]>`
-    SELECT f.id, f.name, COUNT(*)::int AS orders
+  const rows = await prisma.$queryRaw<{ id: string | null; name: string | null; code: string | null; channel: string | null; orders: number }[]>`
+    SELECT f.id, f.name, f.code, f.channel, COUNT(*)::int AS orders
     FROM "SalesOrder" o LEFT JOIN "Facility" f ON f.id = COALESCE(o."fulfillmentOverrideFacilityId", o."fulfillmentFacilityId")
-    WHERE o."orgId" = ${orgId} GROUP BY 1, 2 ORDER BY 3 DESC`;
-  const out = rows.filter((r) => r.id).map((r) => ({ id: r.id as string, name: r.name ?? "?", orders: r.orders }));
+    WHERE o."orgId" = ${orgId} GROUP BY 1, 2, 3, 4 ORDER BY 5 DESC`;
+  const named = distinctFacilityNames(rows.filter((r) => r.id).map((r) => ({ id: r.id as string, name: r.name ?? "?", code: r.code, channel: r.channel, orders: r.orders })));
+  const out = named.map((r) => ({ id: r.id, name: r.label, orders: r.orders }));
   const none = rows.find((r) => !r.id);
   if (none) out.push({ id: "none", name: "No facility", orders: none.orders });
   return out;
@@ -173,9 +187,9 @@ const dayIn = (d: Date, tz: string) => new Intl.DateTimeFormat("en-CA", { timeZo
 export async function feeRuleOptions(): Promise<FeeRuleOptions> {
   const orgId = await getCurrentOrgId();
   const [rules, sources, facilities, settings, oldestRow, methods, voidedByRule] = await Promise.all([
-    prisma.orderFeeRule.findMany({ orderBy: { createdAt: "asc" }, include: { _count: { select: { fees: true } }, facility: { select: { id: true, name: true } } } }),
+    prisma.orderFeeRule.findMany({ orderBy: { createdAt: "asc" }, include: { _count: { select: { fees: true } }, facility: { select: { id: true, name: true, code: true, channel: true } } } }),
     prisma.salesOrder.groupBy({ by: ["source", "sourceLabel"], where: { channel: "SHOPIFY", source: { not: null } } }),
-    prisma.facility.findMany({ where: { inactive: false }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.facility.findMany({ where: { inactive: false }, select: { id: true, name: true, code: true, channel: true }, orderBy: { name: "asc" } }),
     getOrgSettings(),
     prisma.salesOrder.findFirst({ orderBy: { orderedAt: "asc" }, select: { orderedAt: true } }),
     // Every payment method on record, with whether the platform's own ledger carries fees for
@@ -193,6 +207,7 @@ export async function feeRuleOptions(): Promise<FeeRuleOptions> {
     prisma.salesOrder.groupBy({ by: ["voidRuleId"], where: { voidRuleId: { not: null } }, _count: true }),
   ]);
   const voidedCount = new Map(voidedByRule.map((r) => [r.voidRuleId as string, r._count]));
+  const facilityLabel = new Map(distinctFacilityNames(facilities).map((f) => [f.id, f.label]));
   const tz = settings.syncTz;
   const seen = new Set<string>();
   const src = sources
@@ -214,14 +229,14 @@ export async function feeRuleOptions(): Promise<FeeRuleOptions> {
   return {
     rules: rules.map((r) => ({
       id: r.id, name: r.name, action: r.action, kind: r.kind, value: r.value, extraFixed: r.extraFixed, bucket: r.bucket, channel: r.channel, source: r.source,
-      paymentMethod: r.paymentMethod, facility: r.facility, tag: r.tag, appliesToPast: r.appliesToPast,
+      paymentMethod: r.paymentMethod, facility: r.facility ? { id: r.facility.id, name: facilityLabel.get(r.facility.id) ?? r.facility.name } : null, tag: r.tag, appliesToPast: r.appliesToPast,
       period: r.periodFrom ? { from: dayIn(r.periodFrom, tz), to: r.periodTo ? dayIn(r.periodTo, tz) : null } : null,
       createdDay: dayIn(r.createdAt, tz),
       active: r.active, orders: r.action === "void" ? voidedCount.get(r.id) ?? 0 : r._count.fees,
     })),
     sources: src,
     paymentMethods,
-    facilities,
+    facilities: distinctFacilityNames(facilities).map((f) => ({ id: f.id, name: f.label })),
     days: { today: todayIn(tz), oldest: oldestRow ? dayIn(oldestRow.orderedAt, tz) : todayIn(tz) },
   };
 }
@@ -461,6 +476,8 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
   };
 
   const total = await prisma.salesOrder.count({ where });
+  // Display names for the Fulfilled at column: one warehouse two platforms report gets its platform appended.
+  const placeLabel = new Map(distinctFacilityNames(await prisma.facility.findMany({ select: { id: true, name: true, code: true, channel: true } })).map((f) => [f.id, f.label]));
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const current = Math.min(Math.max(1, page), pageCount);
 
@@ -516,8 +533,8 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
     channelLabel: CHANNEL_LABEL[o.channel] ?? o.channel,
     sourceLabel: o.sourceLabel,
     fulfillmentLabel: o.fulfillmentLabel,
-    fulfilledAt: (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility) ? { id: (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility)!.id, name: (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility)!.name } : null,
-    fulfilledAtDetected: o.fulfillmentOverrideFacility && o.fulfillmentFacility ? { id: o.fulfillmentFacility.id, name: o.fulfillmentFacility.name } : null,
+    fulfilledAt: (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility) ? { id: (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility)!.id, name: placeLabel.get((o.fulfillmentOverrideFacility ?? o.fulfillmentFacility)!.id) ?? (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility)!.name } : null,
+    fulfilledAtDetected: o.fulfillmentOverrideFacility && o.fulfillmentFacility ? { id: o.fulfillmentFacility.id, name: placeLabel.get(o.fulfillmentFacility.id) ?? o.fulfillmentFacility.name } : null,
     viaMcf: o.channel !== "AMAZON" && (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility)?.channel === "AMAZON_FBA",
     shipFromLabel: o.shipFromLabel,
     paymentMethod: o.paymentMethod,
