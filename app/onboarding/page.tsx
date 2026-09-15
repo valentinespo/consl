@@ -10,7 +10,7 @@ import { buildCostChips } from "@/lib/lot-costs";
 import type { EditorLine } from "@/components/LotEditor";
 import { PROVIDERS, CHANNEL_PROVIDERS, type Provider } from "@/lib/integrations";
 import { amazonOAuthConfigured } from "@/lib/amazon-oauth";
-import { shopifyOAuthConfigured } from "@/lib/shopify-oauth";
+import { shopifyOAuthConfigured, attachPendingInstallToNewCompany } from "@/lib/shopify-oauth";
 import { tiktokConfigured } from "@/lib/tiktok";
 import { CHANNEL_TITLES, PRODUCT_MATCH_SELECT, mappedExternalId, suggestMappings, type ChannelKey } from "@/lib/channel-catalog";
 import { ROOT_LOGO, PROVIDER_LOGO } from "@/lib/channel-logos";
@@ -36,6 +36,9 @@ export default async function OnboardingPage({
   const org = await getCurrentOrg();
   if (!org) redirect("/welcome");
   if (org.onboardedAt) redirect("/");
+  // An install that started on Shopify's side just before this company was created: attach the
+  // store now, so the wizard opens with it connected. Never replaces a connection that exists.
+  if ((await currentRole()) === "owner") await attachPendingInstallToNewCompany(org.id).catch(() => null);
   const sp = await searchParams;
 
   const [role, orgs, settings, integrations, products, facilities, materials, openingMovs, snaps, channelHeld, access, job] =

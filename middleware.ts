@@ -12,6 +12,12 @@ const isPublic = createRouteMatcher([
   "/terms",
   "/api/integrations/shopify/compliance",
   "/api/webhooks/(.*)",
+  // Shopify's install flow: an install that starts on Shopify's side runs with nobody signed in
+  // (authorization first, sign-in after — Shopify's rule), so its start, its callback and the
+  // "finish connecting" page must not bounce a signed-out visitor to sign-in.
+  "/api/integrations/shopify/connect",
+  "/api/integrations/shopify/callback",
+  "/connect/shopify",
 ]);
 
 // Legacy files used to sit in public/uploads and were served statically with no auth. They've been
@@ -25,9 +31,11 @@ function rewriteLegacyUploads(req: Request & { nextUrl: URL }): URL | null {
   return to;
 }
 
-// An install that starts on Shopify's side (the App Store listing's Install button, or the app in
-// a store's admin) lands on the app URL with the store attached: "/?shop=x.myshopify.com&hmac=…".
-// Send it straight into the connect flow — after sign-in when nobody is signed in yet.
+// An install that starts on Shopify's side (the App Store listing's Install button, a development
+// store's app page, the app opened from a store's admin) lands on the app URL with the store
+// attached: "/?shop=x.myshopify.com&hmac=…". Shopify requires the app to start its authorization
+// right away — before any sign-in — so this goes straight to the connect route, signed in or not;
+// the callback parks the store's token until the person signs in or signs up.
 function shopifyInstallTarget(req: Request & { nextUrl: URL }): string | null {
   const shop = (req.nextUrl.searchParams.get("shop") ?? "").trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shop)) return null;
@@ -39,20 +47,15 @@ const enforced = clerkMiddleware(async (auth, req) => {
   // Redirect rather than rewrite: the app shell decides bare-vs-chrome from the client pathname,
   // which under a rewrite would still read "/" and wrap the landing page in app chrome.
   if (req.nextUrl.pathname === "/") {
-    const { userId } = await auth();
     const install = shopifyInstallTarget(req);
     if (install) {
       const url = req.nextUrl.clone();
       const [path, query] = install.split("?");
-      if (userId) {
-        url.pathname = path;
-        url.search = `?${query}`;
-      } else {
-        url.pathname = "/sign-in";
-        url.search = `?redirect_url=${encodeURIComponent(install)}`;
-      }
+      url.pathname = path;
+      url.search = `?${query}`;
       return NextResponse.redirect(url);
     }
+    const { userId } = await auth();
     if (!userId) {
       const url = req.nextUrl.clone();
       url.pathname = "/home";

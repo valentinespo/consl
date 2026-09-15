@@ -20,7 +20,7 @@ const PRESETS: { label: string; code: string; symbol: string; locale: string }[]
 const inputCls =
   "h-10 w-full rounded-lg border border-border bg-surface px-3 text-[14px] text-ink outline-none focus:border-accent-strong";
 
-export function WelcomeForm({ additional = false }: { additional?: boolean }) {
+export function WelcomeForm({ additional = false, pendingShop = null }: { additional?: boolean; pendingShop?: string | null }) {
   const [name, setName] = useState("");
   const [presetIdx, setPresetIdx] = useState(0);
   const [custom, setCustom] = useState(false);
@@ -64,6 +64,11 @@ export function WelcomeForm({ additional = false }: { additional?: boolean }) {
             ? "A separate workspace with its own products, stock and books. You can switch between your companies at any time from the sidebar."
             : "This is the workspace your products, purchases and production live in. You can change any of it later in Settings."}
         </p>
+        {pendingShop && (
+          <p className="mt-3 rounded-lg bg-accent-soft px-3 py-2 text-[12.5px] leading-relaxed text-accent">
+            Your Shopify store <span className="font-medium">{pendingShop}</span> connects to this company as soon as it&apos;s created.
+          </p>
+        )}
 
         <div className="mt-6 space-y-4">
           <label className="block">

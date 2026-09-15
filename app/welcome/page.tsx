@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { currentUserId } from "@/lib/current-user";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { WelcomeForm } from "@/components/WelcomeForm";
+import { readPendingInstall } from "@/lib/shopify-oauth";
 
 export const dynamic = "force-dynamic";
 
@@ -16,5 +17,8 @@ export default async function WelcomePage({ searchParams }: { searchParams: Prom
   // Only bounce people who landed here with nothing to do: they already have a company and
   // didn't ask to add another.
   if (!isAdditional && (await getCurrentOrgId())) redirect("/");
-  return <WelcomeForm additional={isAdditional === "1"} />;
+  // An install that started on Shopify's side lands here when the person has no company yet: the
+  // store is parked, and the setup wizard attaches it the moment the company exists.
+  const pending = await readPendingInstall();
+  return <WelcomeForm additional={isAdditional === "1"} pendingShop={pending?.shop ?? null} />;
 }

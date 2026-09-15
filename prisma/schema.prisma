@@ -1137,3 +1137,18 @@ model FxRate {
 
   @@unique([day, base, quote])
 }
+
+// An install that started on Shopify's side (the listing's Install button, a development store's
+// app page) with nobody signed in to consl. Shopify requires authorization to start before any
+// sign-in, so the store's token is parked here — encrypted like Integration.refreshTokenEnc — until
+// the person signs in or signs up and it is attached to their company (lib/shopify-oauth.ts).
+// Cross-tenant by nature (there is no company yet), so it is read through prismaBase.
+model ShopifyPendingInstall {
+  id             String   @id @default(cuid())
+  shop           String   @unique // the store's myshopify domain; a second install replaces the first
+  accessTokenEnc String
+  scope          String?
+  claimToken     String   @unique // random, unguessable — the installing browser holds it in a cookie
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}

@@ -1,5 +1,7 @@
 import "server-only";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { cookies } from "next/headers";
+import { after } from "next/server";
 import { prismaBase } from "@/lib/prisma-base";
 import { decryptSecret, encryptSecret } from "@/lib/secret-box";
 import { ensureChannelFacilities } from "@/lib/integrations";
@@ -15,6 +17,12 @@ import { runWithOrg } from "@/lib/tenant";
  * with the app secret. We verify our own signed `state` (org binding) AND Shopify's hmac, then
  * exchange the code for the shop's permanent offline access token — stored encrypted on the org's
  * Integration row. One Shopify app (key/secret in env) serves every tenant.
+ *
+ * An install can also START ON SHOPIFY'S SIDE (the listing's Install button, a development store's
+ * app page) with nobody signed in to consl. Shopify requires authorization to begin before any
+ * sign-in, so that flow runs with a "nobody yet" state: the callback takes the token and parks it
+ * (ShopifyPendingInstall, claim token in a cookie) until the person signs in or signs up, and the
+ * store is then attached to their company — see the pending-install helpers at the bottom.
  */
 
 export const APP_ORIGIN = process.env.APP_ORIGIN || "https://consl.ai";
@@ -197,4 +205,113 @@ export async function ensureShopifyTimezone(orgId: string): Promise<void> {
   if (!conn?.refreshTokenEnc || !conn.sellerId || conn.timezone) return;
   const data = await shopifyGraphQL<{ shop: { ianaTimezone: string | null } }>(conn.sellerId, decryptSecret(conn.refreshTokenEnc), `{ shop { ianaTimezone } }`);
   if (data.shop.ianaTimezone) await prismaBase.integration.update({ where: { id: conn.id }, data: { timezone: data.shop.ianaTimezone } });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Installs that start on Shopify's side (nobody signed in yet)
+// ---------------------------------------------------------------------------------------------
+
+/** The `state` subject of a flow started with nobody signed in — never a real org id (cuid). */
+const PENDING_STATE = "install";
+export const PENDING_INSTALL_COOKIE = "so_shopify_install";
+/** The cookie outlives a sign-up comfortably; the parked row a little longer (a week). */
+export const PENDING_COOKIE_MAX_AGE = 60 * 60 * 24;
+const PENDING_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export const SHOPIFY_CONNECTED_URL = `${APP_ORIGIN}/catalog/mapping?channel=SHOPIFY&connected=1`;
+
+export function isPendingState(subject: string): boolean {
+  return subject === PENDING_STATE;
+}
+
+/** Consent URL for an install that starts on Shopify's side: the public app (the one such installs
+ *  come through), a state that says "nobody yet" — the callback parks the token. */
+export function pendingAuthorizeUrl(shop: string): string {
+  return authorizeUrl(shop, PENDING_STATE, "public");
+}
+
+/** Park a store's token until someone signs in: one row per shop (a second install replaces the
+ *  first) and a random claim token the installing browser keeps in a cookie. Returns the token. */
+export async function savePendingInstall(shop: string, accessToken: string, scope: string | null): Promise<string> {
+  const claimToken = randomBytes(24).toString("base64url");
+  const accessTokenEnc = encryptSecret(accessToken);
+  await prismaBase.shopifyPendingInstall.upsert({
+    where: { shop },
+    create: { shop, accessTokenEnc, scope, claimToken },
+    update: { accessTokenEnc, scope, claimToken },
+  });
+  // Installs nobody ever came back for don't accumulate.
+  await prismaBase.shopifyPendingInstall
+    .deleteMany({ where: { updatedAt: { lt: new Date(Date.now() - PENDING_TTL_MS) } } })
+    .catch(() => {});
+  return claimToken;
+}
+
+/** The store parked for this browser, if any — the claim cookie must match a live row. */
+export async function readPendingInstall(): Promise<{ shop: string; claimToken: string } | null> {
+  let token: string | undefined;
+  try {
+    token = (await cookies()).get(PENDING_INSTALL_COOKIE)?.value;
+  } catch {
+    return null; // no request context
+  }
+  if (!token) return null;
+  const row = await prismaBase.shopifyPendingInstall.findUnique({
+    where: { claimToken: token },
+    select: { shop: true, claimToken: true, updatedAt: true },
+  });
+  if (!row || Date.now() - row.updatedAt.getTime() > PENDING_TTL_MS) return null;
+  return { shop: row.shop, claimToken: row.claimToken };
+}
+
+/** A company that connected through the public app keeps connecting through it. */
+export async function markOrgOnPublicApp(orgId: string): Promise<void> {
+  const set = await prismaBase.settings.updateMany({ where: { orgId }, data: { shopifyApp: "public" } });
+  if (set.count === 0) await prismaBase.settings.create({ data: { orgId, shopifyApp: "public" } }).catch(() => {});
+}
+
+/** History starts loading right away, in the background: every pass for this company runs now. */
+export function startFirstImports(orgId: string): void {
+  after(async () => {
+    const { runOrgImportsNow } = await import("@/lib/scheduler");
+    await runOrgImportsNow(orgId).catch((e) => console.error("[connect] first import failed:", (e as Error).message));
+  });
+}
+
+/**
+ * Attach the store parked for this browser to `orgId`: the same completion as a connect started
+ * in consl, the company marked as connecting through the public app, the parked row gone, the
+ * first imports started. Returns the shop, or null when nothing is parked. The caller decides
+ * whether attaching is allowed (owner; not silently replacing another store).
+ */
+export async function claimPendingInstall(orgId: string): Promise<string | null> {
+  const pending = await readPendingInstall();
+  if (!pending) return null;
+  const row = await prismaBase.shopifyPendingInstall.findUnique({ where: { claimToken: pending.claimToken } });
+  if (!row) return null;
+  await completeShopifyConnection(orgId, row.shop, decryptSecret(row.accessTokenEnc), row.scope);
+  await markOrgOnPublicApp(orgId);
+  await prismaBase.shopifyPendingInstall.delete({ where: { id: row.id } }).catch(() => {});
+  startFirstImports(orgId);
+  return row.shop;
+}
+
+/** The store `orgId` is connected to, if any (null = nothing connected). */
+export async function connectedShopOf(orgId: string): Promise<string | null> {
+  const row = await prismaBase.integration.findFirst({
+    where: { orgId, provider: "shopify", status: "connected" },
+    select: { sellerId: true },
+  });
+  return row?.sellerId ?? null;
+}
+
+/**
+ * A brand-new company created right after an install that started on Shopify's side gets its
+ * store attached without another click (the setup wizard calls this as it opens). Only when the
+ * company has no store yet — an existing connection is never replaced silently.
+ */
+export async function attachPendingInstallToNewCompany(orgId: string): Promise<string | null> {
+  const pending = await readPendingInstall();
+  if (!pending) return null;
+  if (await connectedShopOf(orgId)) return null;
+  return claimPendingInstall(orgId);
 }

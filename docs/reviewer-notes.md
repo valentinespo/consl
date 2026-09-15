@@ -6,12 +6,16 @@ with the password given in the submission form (no two-factor step, no email cod
 
 ## Shopify — how to test the "Consl" public app
 
-1. Sign in at https://consl.ai with the reviewer login. The company opens on its dashboard.
-2. Go to **Integrations** (left sidebar) → **Shopify** → enter your development store's
-   `.myshopify.com` domain → **Connect**.
-3. Approve the app on your store's consent screen. You land back in consl on **Catalog → Map
-   listings**, where the store's products are listed next to consl's products (exact matches are
-   mapped automatically; the rest can be mapped from the picker).
+1. Install the app on your development store (from the listing's Install button or the store's
+   Apps page) and approve it on the consent screen. Authorization runs first, before any sign-in.
+2. You land on consl's "Your store has authorized consl" page. Sign in with the reviewer login
+   (or, if you were already signed in, click **Attach to Consl Demo**). The store attaches to the
+   Consl Demo company.
+   - The other way in: sign in first, then **Integrations** (left sidebar) → **Shopify** → enter
+     your development store's `.myshopify.com` domain → **Connect** → approve on the consent screen.
+3. Either way you land in consl on **Catalog → Map listings**, where the store's products are
+   listed next to consl's products (exact matches are mapped automatically; the rest can be mapped
+   from the picker).
 4. What consl reads from the store, and where it shows:
    - **Products** (`read_products`) → Catalog → Map listings.
    - **Orders**, including orders older than 60 days (`read_orders`, `read_all_orders`) → Orders
