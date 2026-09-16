@@ -14,15 +14,16 @@ import { needsBillingGate } from "@/lib/billing";
  * template cannot do this: the root segment is shared by every route and is skipped on
  * client-side navigation, which is how a gated company reached the dashboard on 2026-09-16.
  *
- * Order: no company yet → set one up; trial not started (early access) → the waiting screen;
+ * Order: no company yet → the application; trial not started (early access) → the waiting screen;
  * setup wizard unfinished → the wizard. /onboarding sits outside the group and repeats the
  * billing check itself. Redirects go through gateRedirect — see lib/gate-redirect.tsx for why.
  */
 export default async function AppGateLayout({ children }: { children: React.ReactNode }) {
   const orgId = await getCurrentOrgId();
   if (!orgId) {
-    // Signed in with no company: set one up. Signed out never gets here (middleware).
-    if (await currentUserId()) return gateRedirect("/welcome");
+    // Signed in with no company: back into the application, whose account step creates and links
+    // it. Signed out never gets here (middleware).
+    if (await currentUserId()) return gateRedirect("/apply");
     return <>{children}</>;
   }
   const org = await getCurrentOrg().catch(() => null);

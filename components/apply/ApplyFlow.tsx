@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { useUser } from "@clerk/nextjs";
 import { ArrowRight, Check, ChevronLeft } from "@/components/icons";
 import {
   ADS,
@@ -86,6 +87,16 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [honeypot, setHoneypot] = useState("");
   const source = useRef<string | null>(null);
+  const { user } = useUser();
+
+  // Someone already signed in (an applicant whose company was never created) shouldn't retype
+  // what their login already knows.
+  useEffect(() => {
+    if (!ready || !user) return;
+    setAnswers((a) =>
+      a.fullName || a.email ? a : { ...a, fullName: user.fullName ?? "", email: user.primaryEmailAddress?.emailAddress ?? "" },
+    );
+  }, [ready, user]);
 
   // Resume after a refresh: everything typed so far lives in sessionStorage for this tab.
   useEffect(() => {
@@ -180,6 +191,27 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
       saveAnswers(applicationId, answers, { complete: next === "result" }).catch(() => {});
     }
     return true;
+  }
+
+  /** The server lost our row (it was deleted underneath us): create a fresh one from the answers
+   *  in this tab, so the account step can link it. */
+  async function recreateApplication(): Promise<string | null> {
+    try {
+      const res = await saveContact({
+        fullName: answers.fullName,
+        companyName: answers.companyName,
+        email: answers.email,
+        phone: answers.phone,
+        website: honeypot,
+        source: source.current ?? undefined,
+      });
+      if (!res.ok) return null;
+      await saveAnswers(res.id, answers, { complete: true }).catch(() => {});
+      setApplicationId(res.id);
+      return res.id;
+    } catch {
+      return null;
+    }
   }
 
   async function goNext() {
@@ -473,6 +505,7 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
                     setOrgId(id);
                     setStep("book");
                   }}
+                  onApplicationLost={recreateApplication}
                 />
               ) : (
                 <Restart />

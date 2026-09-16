@@ -9,7 +9,7 @@ import { needsBillingGate } from "@/lib/billing";
  * the dashboard's tree, never mounts the app chrome, and never enters the render-phase redirect
  * race that crashed the router on 2026-09-16. Plain module: no React `cache`, no `cookies()`.
  *
- * Rules, in order: signed in with no company → set one up; company whose trial hasn't started
+ * Rules, in order: signed in with no company → the application; company whose trial hasn't started
  * (early access) → the waiting screen; company that hasn't finished the setup wizard → the wizard.
  */
 
@@ -42,7 +42,9 @@ export async function gateDecision(input: GateInput): Promise<string | null> {
       select: { orgId: true },
       orderBy: { createdAt: "asc" },
     });
-    if (memberships.length === 0) return "/welcome";
+    // An early-access applicant whose company was never created (or was removed) belongs back in
+    // the application, where the account step creates and links it — not on the generic company form.
+    if (memberships.length === 0) return "/apply";
     orgId = cookieOrgId && memberships.some((m) => m.orgId === cookieOrgId) ? cookieOrgId : memberships[0].orgId;
   } else if (devBypass) {
     if (cookieOrgId) {

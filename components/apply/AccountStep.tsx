@@ -68,12 +68,16 @@ export function AccountStep({
   onChange,
   onBack,
   onDone,
+  onApplicationLost,
 }: {
   applicationId: string;
   answers: Answers;
   onChange: <K extends keyof Answers>(k: K, v: Answers[K]) => void;
   onBack: () => void;
   onDone: (orgId: string) => void;
+  /** The saved row vanished server-side: rebuild it from the answers in this browser. Resolves to
+   *  the new id (which arrives here as a new `applicationId` prop and retries the link) or null. */
+  onApplicationLost: () => Promise<string | null>;
 }) {
   const { signUp, fetchStatus: signUpFetch } = useSignUp();
   const { signIn, fetchStatus: signInFetch } = useSignIn();
@@ -102,10 +106,16 @@ export function AccountStep({
     if (!linking) return;
     let cancelled = false;
     attachAccount(applicationId)
-      .then((res) => {
+      .then(async (res) => {
         if (cancelled) return;
-        if (res.ok) onDone(res.orgId);
-        else setLinkError(res.error);
+        if (res.ok) return onDone(res.orgId);
+        if (res.code === "not_found") {
+          // Rebuild the row from the answers still in this tab; the new id re-runs this effect.
+          const id = await onApplicationLost();
+          if (!cancelled && !id) setLinkError("We couldn't recover your application. Please start again from the home page.");
+          return;
+        }
+        setLinkError(res.error);
       })
       .catch(() => {
         if (!cancelled) setLinkError("Something went wrong setting up your workspace. Try again.");

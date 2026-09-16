@@ -39,7 +39,7 @@ export function CalendlyEmbed({
   name,
   email,
   onScheduled,
-  minHeight = 700,
+  minHeight = 720,
 }: {
   url: string;
   name: string;
@@ -90,7 +90,9 @@ export function CalendlyEmbed({
 
   return (
     <div>
-      <div ref={box} style={{ minHeight }} className="w-full" />
+      {/* A definite height, not a minimum: Calendly's iframe fills 100% of its parent, and a
+          percentage height against a min-height-only parent collapses to the browser's 150px. */}
+      <div ref={box} style={{ height: minHeight }} className="w-full" />
       {failed && (
         <Notice>
           The calendar didn&apos;t load.{" "}

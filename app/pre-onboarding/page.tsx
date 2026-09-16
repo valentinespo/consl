@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  */
 export default async function PreOnboardingPage() {
   const org = await getCurrentOrg();
-  if (!org) redirect((await currentUserId()) ? "/welcome" : "/sign-in");
+  if (!org) redirect((await currentUserId()) ? "/apply" : "/sign-in");
   if (!needsBillingGate(org)) return gateRedirect("/");
 
   const app = await prismaBase.accessApplication.findFirst({

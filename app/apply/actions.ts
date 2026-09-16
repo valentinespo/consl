@@ -38,7 +38,7 @@ function withOther(list: string[], other: string): string[] {
   return list.map((k) => (k === "other" ? `other:${str(other, 120)}` : k));
 }
 
-type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
+type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string; code?: "not_found" };
 
 export type ContactInput = {
   fullName: string;
@@ -129,7 +129,8 @@ export async function attachAccount(id: string): Promise<Result<{ orgId: string 
   const userId = await currentUserId();
   if (!userId) return { ok: false, error: "Sign in first, then try again." };
   const app = await prismaBase.accessApplication.findUnique({ where: { id } });
-  if (!app) return { ok: false, error: "We couldn't find your application. Please start again." };
+  // "not_found" lets the browser rebuild the row from the answers it still holds and retry.
+  if (!app) return { ok: false, error: "We couldn't find your application.", code: "not_found" };
 
   if (app.orgId) {
     const member = await prismaBase.membership.findFirst({ where: { orgId: app.orgId, clerkUserId: userId }, select: { id: true } });
