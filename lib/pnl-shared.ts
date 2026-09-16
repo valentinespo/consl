@@ -26,6 +26,25 @@ export type PnlGroupBlock = { group: string; total: number; types: PnlTypeRow[] 
 export type PnlChannel = "AMAZON" | "SHOPIFY" | "TIKTOK";
 export const PNL_CHANNEL_LABEL: Record<PnlChannel, string> = { AMAZON: "Amazon", SHOPIFY: "Shopify", TIKTOK: "TikTok" };
 
+export const PNL_BREAKDOWNS = [
+  { value: "none", label: "No breakdown" },
+  { value: "day", label: "By day" },
+  { value: "week", label: "By week" },
+  { value: "month", label: "By month" },
+  { value: "quarter", label: "By quarter" },
+  { value: "year", label: "By year" },
+] as const;
+export type PnlBreakdown = (typeof PNL_BREAKDOWNS)[number]["value"];
+
+export function parsePnlBreakdown(value: string | undefined): PnlBreakdown {
+  return PNL_BREAKDOWNS.find((option) => option.value === value)?.value ?? "none";
+}
+
+/** Company-calendar days: the full period and the portion inside the selected range. */
+export type PnlPeriodRange = { key: string; start: string; end: string; from: string; to: string };
+export type PnlStatement = Pick<Pnl, "groups" | "sales" | "cogs" | "unitsSold" | "netProfit" | "margin" | "roi" | "mcf" | "unreported">;
+export type PnlPeriod = PnlPeriodRange & { statement: PnlStatement };
+
 export type Pnl = {
   groups: PnlGroupBlock[];
   sales: number;

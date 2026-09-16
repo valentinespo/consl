@@ -1,7 +1,8 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrgId } from "@/lib/tenant";
-import { GROUP_ORDER, PNL_SOURCE_ORDER, type Pnl, type PnlChannel, type PnlGroupBlock, type PnlSource } from "@/lib/pnl-shared";
+import { type Pnl, type PnlChannel, type PnlPeriod, type PnlPeriodRange, type PnlSource } from "@/lib/pnl-shared";
+import { addPnlAmount, createPnlPeriods, pnlGroups } from "@/lib/pnl-periods";
 import { getCurrentOrg } from "@/lib/org";
 import { fxRate } from "@/lib/fx";
 import { computeFinishedGoods } from "@/lib/queries";
@@ -9,6 +10,7 @@ import { activeExclusions } from "@/lib/order-metrics";
 import { IMPORTER_VERSIONS, importerVersion } from "@/lib/import-versions";
 
 export { GROUP_ORDER, GROUP_LABEL, PNL_CHANNEL_LABEL, type Pnl, type PnlChannel, type PnlGroupBlock, type PnlTypeRow } from "@/lib/pnl-shared";
+export { zonedDayStart, zonedDayBounds } from "@/lib/pnl-periods";
 
 /**
  * The P&L read side, across channels: sum each channel's financial ledger by bucket for a date
@@ -53,28 +55,6 @@ export { GROUP_ORDER, GROUP_LABEL, PNL_CHANNEL_LABEL, type Pnl, type PnlChannel,
 
 export const PNL_CHANNELS: PnlChannel[] = ["AMAZON", "SHOPIFY", "TIKTOK"];
 
-/** UTC instant of local midnight starting `day` (YYYY-MM-DD) in `tz`, DST-safe. */
-export function zonedDayStart(day: string, tz: string): Date {
-  const guess = new Date(`${day}T00:00:00Z`);
-  const offsetAt = (at: Date) => {
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
-      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-    }).formatToParts(at);
-    const m = Object.fromEntries(parts.map((x) => [x.type, x.value]));
-    return Date.UTC(+m.year, +m.month - 1, +m.day, +m.hour % 24, +m.minute, +m.second) - at.getTime();
-  };
-  const first = new Date(guess.getTime() - offsetAt(guess));
-  return new Date(guess.getTime() - offsetAt(first)); // second pass settles DST edges
-}
-
-/** Inclusive [from-day, to-day] as UTC instants in `tz`. */
-export function zonedDayBounds(fromDay: string, toDay: string, tz: string): { from: Date; to: Date } {
-  const next = new Date(`${toDay}T00:00:00Z`);
-  next.setUTCDate(next.getUTCDate() + 1);
-  return { from: zonedDayStart(fromDay, tz), to: new Date(zonedDayStart(next.toISOString().slice(0, 10), tz).getTime() - 1) };
-}
-
 /** Channels with anything to show — a ledger, or orders. */
 export async function presentPnlChannels(): Promise<PnlChannel[]> {
   const [ledger, orders] = await Promise.all([prisma.financeEvent.groupBy({ by: ["channel"] }), prisma.salesOrder.groupBy({ by: ["channel"] })]);
@@ -110,7 +90,7 @@ type QueueKey = string;
 /** `mcf`: an MCF order counted while Amazon is the only channel. `unreported`: an Amazon order
  *  that shipped but Amazon posted no money for (a free unit, a replacement) — units from the
  *  Orders tab. Both are reported as their own lines under cost of goods. */
-type Sale = { productId: string; units: number; at: number | null; channel: PnlChannel; queue: QueueKey | null; mcf?: boolean; unreported?: boolean };
+type Sale = { productId: string; units: number; at: number | null; channel: PnlChannel; queue: QueueKey | null; mcf?: boolean; unreported?: boolean; periodAt?: number };
 type Cogs = {
   cogs: number;
   units: number;
@@ -193,7 +173,7 @@ async function loadQueues(): Promise<{ queues: Map<QueueKey, Map<string, Layer[]
  * product's fallback cost (on-hand average, else the pre-consl average, else the newest cost on
  * record), take nothing from any queue, and count in `unplacedUnits` / `unplacedCogs`.
  */
-async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlChannel>, scope: Scope): Promise<Cogs> {
+async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlChannel>, scope: Scope, onCost: (sale: Sale, cogs: number) => void): Promise<Cogs> {
   const { queues, fallback } = await loadQueues();
   const exits = await prisma.stockMovement.findMany({
     where: { itemType: "FINISHED", kind: "STANDARD", fromFacilityId: { not: null }, productId: { not: null } },
@@ -235,6 +215,7 @@ async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlCh
         out.unreportedUnits += qty;
         out.unreportedCogs -= qty * (unitCost ?? 0);
       }
+      onCost(sale!, -qty * (unitCost ?? 0));
       continue;
     }
     const layers = queues.get(d.queue)?.get(product.id) ?? [];
@@ -294,6 +275,7 @@ async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlCh
       out.unreportedUnits += qty;
       out.unreportedCogs -= cost;
     }
+    onCost(sale!, -cost);
   }
   return out;
 }
@@ -304,13 +286,14 @@ type Bridge = {
   fba: number;
   referral: number;
   /** Units per SKU, with the facility the order was fulfilled from, for the FIFO walk to price. */
-  lines: { sku: string; units: number; facility: string | null }[];
+  lines: { sku: string; units: number; facility: string | null; orderedAt: Date }[];
+  entries: { at: number; group: string; type: string; amount: number }[];
   pendingSales: number;
 };
 
 /** Orders in range whose shipment money hasn't posted yet → exact revenue + estimated fees. */
 async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurrency: string): Promise<Bridge> {
-  const none: Bridge = { sales: [], taxes: 0, fba: 0, referral: 0, lines: [], pendingSales: 0 };
+  const none: Bridge = { sales: [], taxes: 0, fba: 0, referral: 0, lines: [], entries: [], pendingSales: 0 };
   const orgId = await getCurrentOrgId();
   if (!orgId) return none;
 
@@ -339,6 +322,11 @@ async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurre
   const orders = candidates.filter((o) => inScopeOrders.has(o.id));
   if (orders.length === 0) return none;
   const facilityOf = new Map(orders.map((o) => [o.id, o.facility]));
+  const dateOf = new Map(orders.map((o) => [o.id, o.orderedAt]));
+  const entries: Bridge["entries"] = [];
+  const entry = (at: Date, group: string, type: string, amount: number) => {
+    if (amount !== 0) entries.push({ at: at.getTime(), group, type, amount });
+  };
 
   // Revenue split straight off the order records — exact, not an estimate — in the company's
   // currency (a sister-marketplace order converts at its day's reference rate).
@@ -353,8 +341,15 @@ async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurre
       tax += (o.tax ?? 0) * fx;
       shipping += (o.shipping ?? 0) * fx;
       wrap += (o.giftWrap ?? 0) * fx;
+      entry(o.orderedAt, "sales", "Principal (pending)", o.productGross * fx);
+      entry(o.orderedAt, "sales", "Promotion (pending)", -(o.discounts ?? 0) * fx);
+      entry(o.orderedAt, "sales", "Tax (pending)", (o.tax ?? 0) * fx);
+      entry(o.orderedAt, "sales", "ShippingCharge (pending)", (o.shipping ?? 0) * fx);
+      entry(o.orderedAt, "sales", "GiftWrap (pending)", (o.giftWrap ?? 0) * fx);
+      entry(o.orderedAt, "taxes", "TaxWithheld (pending)", -(o.tax ?? 0) * fx);
     } else {
       principal += o.total * fx; // fresh order the report hasn't detailed yet — total is what we know
+      entry(o.orderedAt, "sales", "Principal (pending)", o.total * fx);
     }
   }
 
@@ -380,7 +375,7 @@ async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurre
   // or cost here; its order-level revenue split above is the one approximation this makes).
   const lines = allLines.filter((l) => inScopeOrders.has(l.orderId) && l.sku && scope.has(l.sku));
   let fba = 0, referral = 0;
-  const pendingLines: { sku: string; units: number; facility: string | null }[] = [];
+  const pendingLines: Bridge["lines"] = [];
   for (const l of lines) {
     const sku = l.sku ?? "";
     const fx = rateOf.get(l.orderId) ?? 1;
@@ -390,7 +385,10 @@ async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurre
     const gross = (l.gross || l.quantity * l.unitPrice) * fx;
     fba += l.quantity * fbaPerUnit;
     referral += gross * commissionRate;
-    pendingLines.push({ sku, units: l.quantity, facility: facilityOf.get(l.orderId) ?? null });
+    const orderedAt = dateOf.get(l.orderId)!;
+    entry(orderedAt, "fba_fees", "FBAPerUnitFulfillmentFee (pending)", l.quantity * fbaPerUnit);
+    entry(orderedAt, "referral_fees", "Commission (pending)", gross * commissionRate);
+    pendingLines.push({ sku, units: l.quantity, facility: facilityOf.get(l.orderId) ?? null, orderedAt });
   }
 
   const sales = [
@@ -407,6 +405,7 @@ async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurre
     fba,
     referral,
     lines: pendingLines,
+    entries,
     pendingSales: principal + promo + tax + shipping + wrap,
   };
 }
@@ -415,7 +414,7 @@ async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurre
  *  sale from the order (what the buyer paid for the goods after the seller's discount, plus the
  *  shipping they paid), the fees at this shop's own historical rate. Units are NOT added here —
  *  every TikTok order's lines already drive cost of goods. */
-async function tiktokPendingBridge(orgId: string, from: Date, to: Date, baseCurrency: string): Promise<{ sales: number; fees: number }> {
+async function tiktokPendingBridge(orgId: string, from: Date, to: Date, baseCurrency: string): Promise<{ sales: number; fees: number; entries: { at: number; sales: number; fees: number }[] }> {
   const orders = await prisma.$queryRaw<
     { total: number; currency: string; orderedAt: Date; productGross: number | null; discounts: number | null; shipping: number | null; sourceData: unknown }[]
   >`
@@ -427,19 +426,22 @@ async function tiktokPendingBridge(orgId: string, from: Date, to: Date, baseCurr
       AND NOT EXISTS (
         SELECT 1 FROM "FinanceEvent" fe
         WHERE fe."orgId" = so."orgId" AND fe.channel = 'TIKTOK' AND fe."orderId" = so."externalId")`;
-  if (orders.length === 0) return { sales: 0, fees: 0 };
+  if (orders.length === 0) return { sales: 0, fees: 0, entries: [] };
   const hist = await prisma.financeEvent.groupBy({ by: ["group"], where: { channel: "TIKTOK" }, _sum: { baseAmount: true } });
   const histSales = hist.filter((h) => h.group === "sales").reduce((t, h) => t + (h._sum.baseAmount ?? 0), 0);
   const histFees = hist.filter((h) => ["referral_fees", "payment_fees", "advertising", "other"].includes(h.group)).reduce((t, h) => t + (h._sum.baseAmount ?? 0), 0);
   const rate = histSales > 0 ? Math.abs(histFees) / histSales : 0;
   let sales = 0;
+  const entries: { at: number; sales: number; fees: number }[] = [];
   for (const o of orders) {
     const sd = o.sourceData as { payment?: { sub_total?: string | null } } | null;
     const goods = sd?.payment?.sub_total != null ? Number(sd.payment.sub_total) : (o.productGross ?? 0) - (o.discounts ?? 0);
     const fx = o.currency === baseCurrency ? 1 : await fxRate(o.currency, baseCurrency, o.orderedAt);
-    sales += (Math.max(0, goods) + (o.shipping ?? 0)) * fx;
+    const amount = (Math.max(0, goods) + (o.shipping ?? 0)) * fx;
+    sales += amount;
+    entries.push({ at: o.orderedAt.getTime(), sales: amount, fees: -amount * rate });
   }
-  return { sales, fees: -sales * rate };
+  return { sales, fees: -sales * rate, entries };
 }
 
 const EMPTY: Pnl = {
@@ -448,12 +450,13 @@ const EMPTY: Pnl = {
 };
 
 /** The statement for a window, over the given channels (default: every channel with data). */
-export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Promise<Pnl> {
+export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], breakdown?: { ranges: PnlPeriodRange[]; timeZone: string }): Promise<Pnl & { periods: PnlPeriod[] }> {
+  const periods = createPnlPeriods(breakdown?.ranges ?? [], breakdown?.timeZone ?? "UTC");
   const orgId = await getCurrentOrgId();
   const present = await presentPnlChannels();
   const selected = (channels ?? present).filter((c) => present.includes(c));
   const selectedSet = new Set(selected);
-  if (!orgId || selected.length === 0) return EMPTY;
+  if (!orgId || selected.length === 0) return { ...EMPTY, periods: periods.finish() };
   const [scope, org, exclusions, facilities, adsSettings] = await Promise.all([
     loadScope(),
     getCurrentOrg(),
@@ -484,9 +487,10 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
   // channel's mirror is dropped here too.
   // Each row also says where its money came from: the channel's own ledger, or the ad platform
   // whose spend was written onto that channel (Meta and Amazon Ads rows are told apart by txId).
-  const sums = await prisma.$queryRaw<{ group: string; type: string; source: string; amount: number }[]>`
+  const sums = await prisma.$queryRaw<{ group: string; type: string; source: string; day: string; amount: number }[]>`
     SELECT fe."group", fe."type",
       CASE WHEN fe."txId" LIKE 'meta:%' THEN 'META' WHEN fe."txId" LIKE 'ads:%' THEN 'AMAZON_ADS' ELSE fe.channel END AS source,
+      CASE WHEN ${!!breakdown?.ranges.length} THEN (fe."eventAt" AT TIME ZONE 'UTC' AT TIME ZONE ${breakdown?.timeZone ?? "UTC"})::date::text ELSE '' END AS day,
       COALESCE(SUM(fe."baseAmount"), 0)::float8 AS amount
     FROM "FinanceEvent" fe
     WHERE fe."orgId" = ${orgId} AND fe.channel = ANY(${selected}::text[])
@@ -499,18 +503,16 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
         WHERE so."orgId" = fe."orgId" AND so.channel = fe.channel AND so."externalId" = fe."orderId"
           AND (so.voided OR (so.channel = 'SHOPIFY' AND so.source = ANY(${excludedSources}::text[]))))
       AND NOT (fe.channel = 'AMAZON' AND fe.type = 'ProductAdsPayment' AND ${adsSince}::timestamp IS NOT NULL AND fe."eventAt" >= ${adsSince})
-    GROUP BY 1, 2, 3`;
+    GROUP BY 1, 2, 3, 4`;
   // One line per type inside a bucket; a type two channels both post keeps both sources.
   const blocks = new Map<string, Map<string, { amount: number; sources: Set<PnlSource> }>>();
   const add = (group: string, type: string, amount: number, source: PnlSource) => {
-    const types = blocks.get(group) ?? new Map<string, { amount: number; sources: Set<PnlSource> }>();
-    const row = types.get(type) ?? { amount: 0, sources: new Set<PnlSource>() };
-    row.amount += amount;
-    row.sources.add(source);
-    types.set(type, row);
-    blocks.set(group, types);
+    addPnlAmount(blocks, group, type, amount, source);
   };
-  for (const s of sums) add(s.group, s.type, s.amount, s.source as PnlSource);
+  for (const s of sums) {
+    add(s.group, s.type, s.amount, s.source as PnlSource);
+    periods.addAmount(s.day, s.group, s.type, s.amount, s.source as PnlSource);
+  }
 
   // Custom fees the operator attached (by rule or by hand): a cost on the order's own channel. A
   // fee counts whenever its order counts; on an MCF order it always counts (the fee is a real
@@ -531,6 +533,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
     const bucket = f.bucket === "payment_fees" ? "payment_fees" : "custom_fees";
     const k = `${bucket}|${f.name}`;
     feeByName.set(k, { bucket, name: f.name, amount: (feeByName.get(k)?.amount ?? 0) - f.amount * fx });
+    periods.addAmount(f.orderedAt.getTime(), bucket, f.name, -f.amount * fx, "CUSTOM");
   }
   for (const f of feeByName.values()) add(f.bucket, f.name, f.amount, "CUSTOM");
 
@@ -575,10 +578,12 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
       if (bridge.fba !== 0) add("fba_fees", "FBAPerUnitFulfillmentFee (pending)", bridge.fba, "AMAZON");
       if (bridge.referral !== 0) add("referral_fees", "Commission (pending)", bridge.referral, "AMAZON");
       pending.push({ channel: "AMAZON", sales: bridge.pendingSales });
+      for (const e of bridge.entries) periods.addAmount(e.at, e.group, e.type, e.amount, "AMAZON");
     }
     for (const l of bridge.lines) {
       const p = scope.amazon.get(l.sku);
-      if (p) pendingSales.push({ productId: p.id, units: l.units, at: null, channel: "AMAZON", queue: queueOf(l.facility) });
+      // Pending units still draw last, but appear in the column of the order's business day.
+      if (p) pendingSales.push({ productId: p.id, units: l.units, at: null, periodAt: l.orderedAt.getTime(), channel: "AMAZON", queue: queueOf(l.facility) });
     }
   }
   if (selectedSet.has("TIKTOK")) {
@@ -587,6 +592,10 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
       add("sales", "Sales (pending)", bridge.sales, "TIKTOK");
       if (bridge.fees !== 0) add("referral_fees", "Fees (pending)", bridge.fees, "TIKTOK");
       pending.push({ channel: "TIKTOK", sales: bridge.sales });
+      for (const e of bridge.entries) {
+        if (e.sales !== 0) periods.addAmount(e.at, "sales", "Sales (pending)", e.sales, "TIKTOK");
+        if (e.fees !== 0) periods.addAmount(e.at, "referral_fees", "Fees (pending)", e.fees, "TIKTOK");
+      }
     }
   }
 
@@ -651,15 +660,11 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
     for (const r of mcfRows) sales.push({ productId: r.productId, units: r.units, at: r.at.getTime(), channel: "AMAZON", queue: queueOf(r.facility), mcf: true });
   }
 
-  const fifo = await fifoCogs([...sales, ...pendingSales], from, to, selectedSet, scope);
-
-  const bySourceOrder = (a: PnlSource, b: PnlSource) => PNL_SOURCE_ORDER.indexOf(a) - PNL_SOURCE_ORDER.indexOf(b);
-  const groups: PnlGroupBlock[] = GROUP_ORDER.map((g) => {
-    const types = [...(blocks.get(g) ?? new Map()).entries()]
-      .map(([type, r]) => ({ type, amount: r.amount, sources: [...r.sources].sort(bySourceOrder) }))
-      .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
-    return { group: g, total: types.reduce((t, r) => t + r.amount, 0), types };
-  }).filter((b) => b.types.length > 0);
+  const fifo = await fifoCogs([...sales, ...pendingSales], from, to, selectedSet, scope, (sale, cogs) => {
+    const at = sale.periodAt ?? sale.at;
+    if (at != null) periods.addCost(at, sale.units, cogs, sale.mcf, sale.unreported);
+  });
+  const groups = pnlGroups(blocks);
 
   const salesTotal = groups.find((g) => g.group === "sales")?.total ?? 0;
   const ledgerTotal = groups.reduce((t, g) => t + g.total, 0);
@@ -678,6 +683,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[]): Pro
   ];
 
   return {
+    periods: periods.finish(),
     groups,
     sales: salesTotal,
     cogs: fifo.cogs,
@@ -735,12 +741,12 @@ export function amazonImportProgress(
 }
 
 /** Oldest dated money or order across the channels — the date picker's lower bound. */
-export async function oldestFinanceDate(): Promise<string | null> {
+export async function oldestFinanceDate(timeZone = "UTC"): Promise<string | null> {
   const [fe, so] = await Promise.all([
     prisma.financeEvent.findFirst({ orderBy: { eventAt: "asc" }, select: { eventAt: true } }),
     prisma.salesOrder.findFirst({ where: { channel: { in: ["SHOPIFY", "TIKTOK"] } }, orderBy: { orderedAt: "asc" }, select: { orderedAt: true } }),
   ]);
   const dates = [fe?.eventAt, so?.orderedAt].filter((d): d is Date => !!d);
   if (dates.length === 0) return null;
-  return new Date(Math.min(...dates.map((d) => d.getTime()))).toISOString().slice(0, 10);
+  return new Date(Math.min(...dates.map((d) => d.getTime()))).toLocaleDateString("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
 }

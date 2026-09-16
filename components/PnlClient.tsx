@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useState } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { ChevronDown, PnlFilled, Receipt, X } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
-import { GROUP_LABEL, PNL_CHANNEL_LABEL, PNL_SOURCE_LABEL, PNL_SOURCE_ORDER, type Pnl, type PnlChannel, type PnlGroupBlock, type PnlSource } from "@/lib/pnl-shared";
+import { SelectMenu } from "@/components/SelectMenu";
+import { GROUP_LABEL, GROUP_ORDER, PNL_BREAKDOWNS, PNL_CHANNEL_LABEL, PNL_SOURCE_LABEL, PNL_SOURCE_ORDER, type Pnl, type PnlBreakdown, type PnlChannel, type PnlGroupBlock, type PnlPeriod, type PnlSource, type PnlStatement } from "@/lib/pnl-shared";
+import { pnlPeriodHeading } from "@/lib/pnl-periods";
 import { ROOT_LOGO, SOURCE_LOGO } from "@/lib/channel-logos";
 import { EmptyState } from "@/components/EmptyState";
 import { SkuAvatar } from "@/components/ui";
@@ -110,22 +112,115 @@ function GroupRow({ block, money }: { block: PnlGroupBlock; money: (n: number) =
   );
 }
 
+const periodLabelCell = "sticky left-0 z-10 w-[var(--pnl-label-width)] min-w-[var(--pnl-label-width)] max-w-[var(--pnl-label-width)] bg-surface px-4 text-left";
+const periodValueCell = (index: number, centered = false) => `min-w-[180px] px-4 ${centered ? "text-center" : "text-right"} whitespace-nowrap ${index === 0 ? "sm:sticky sm:left-[var(--pnl-label-width)] sm:z-10 bg-surface-2 border-r border-border" : ""}`;
+const periodRowBorder = "[&>th]:border-t [&>td]:border-t [&>th]:border-line [&>td]:border-line";
+
+function PeriodGroupRows({ block, statements, money }: { block: PnlGroupBlock; statements: PnlStatement[]; money: (n: number) => string }) {
+  const [open, setOpen] = useState(false);
+  const expandable = block.types.length > 1 || (block.types.length === 1 && block.types[0].type !== block.group);
+  const groups = statements.map((statement) => statement.groups.find((group) => group.group === block.group));
+  return (
+    <>
+      <tr className={`${periodRowBorder} text-[13px]`}>
+        <th scope="row" className={`${periodLabelCell} py-2.5 font-medium text-ink`}>
+          <button type="button" onClick={() => expandable && setOpen((value) => !value)} aria-expanded={expandable ? open : undefined} className={`flex w-full items-center gap-2 text-left ${expandable ? "hover:text-accent" : "cursor-default"}`}>
+            {!expandable && <SourceMarks sources={blockSources(block)} />}
+            {GROUP_LABEL[block.group] ?? block.group}
+            {expandable && <ChevronDown size={13} className={`shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`} />}
+          </button>
+        </th>
+        {groups.map((group, index) => <td key={index} className={`${periodValueCell(index)} py-2.5`}><Amount value={group?.total ?? 0} money={money} /></td>)}
+      </tr>
+      {open && block.types.map((type) => (
+        <tr key={type.type} className="dropdown-in text-[12.5px] text-ink-soft">
+          <th scope="row" className={`${periodLabelCell} py-1.5 pl-8 font-normal`}>
+            <span className="flex items-center gap-2"><SourceMarks sources={type.sources} size={13} /><span title={humanize(type.type)} className="truncate">{humanize(type.type)}</span></span>
+          </th>
+          {groups.map((group, index) => <td key={index} className={`${periodValueCell(index)} py-1.5`}><Amount value={group?.types.find((row) => row.type === type.type)?.amount ?? 0} money={money} /></td>)}
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function PnlBreakdownTable({ pnl, periods, breakdown, money, locale }: { pnl: Pnl; periods: PnlPeriod[]; breakdown: PnlBreakdown; money: (n: number) => string; locale: string }) {
+  const statements: PnlStatement[] = [pnl, ...periods.map((period) => period.statement)];
+  // Include a line even when opposite movements in different periods cancel out in Total.
+  const groups = GROUP_ORDER.flatMap((group) => {
+    const blocks = statements.flatMap((statement) => statement.groups.filter((block) => block.group === group));
+    if (!blocks.length) return [];
+    const types = new Map<string, PnlGroupBlock["types"][number]>();
+    for (const block of blocks) for (const type of block.types) {
+      const current = types.get(type.type);
+      types.set(type.type, { ...type, sources: PNL_SOURCE_ORDER.filter((source) => type.sources.includes(source) || current?.sources.includes(source)) });
+    }
+    return [{ group, total: blocks[0].total, types: [...types.values()] }];
+  });
+  const pct = (value: number | null) => value == null ? "—" : `${(value * 100).toLocaleString(locale, { maximumFractionDigits: 1 })}%`;
+  function row(key: string, label: ReactNode, value: (statement: PnlStatement) => ReactNode, summary = false) {
+    return (
+      <tr key={key} className={`${periodRowBorder} ${summary ? "bg-surface-2/40 text-[14px]" : "text-[13px]"}`}>
+        <th scope="row" className={`${periodLabelCell} py-2.5 ${summary ? "font-semibold" : "font-medium"} text-ink`}>{label}</th>
+        {statements.map((statement, index) => <td key={index} className={`${periodValueCell(index)} py-2.5`}>{value(statement)}</td>)}
+      </tr>
+    );
+  }
+  return (
+    <div className="overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface">
+      <div role="region" aria-label="P&L by period" tabIndex={0} className="overflow-x-auto [--pnl-label-width:180px] sm:[--pnl-label-width:260px]">
+        <table className="w-full border-separate border-spacing-0">
+          <caption className="sr-only">Profit and loss for the selected date range, with totals and a breakdown {PNL_BREAKDOWNS.find((option) => option.value === breakdown)?.label.toLowerCase()}.</caption>
+          <thead>
+            <tr className="text-[12px] text-ink-soft">
+              <th scope="col" className={`${periodLabelCell} py-3 font-medium`}>P&amp;L</th>
+              <th scope="col" className={`${periodValueCell(0, true)} py-3 align-middle font-semibold text-ink`}>Total</th>
+              {periods.map((period) => {
+                const heading = pnlPeriodHeading(period, breakdown, locale);
+                return (
+                  <th scope="col" key={period.key} className="min-w-[180px] px-4 py-3 text-center align-middle font-medium whitespace-nowrap">
+                    {heading.label}
+                    {heading.note && <span className="mt-1 block text-[11px] font-normal text-muted">{heading.note}</span>}
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {groups.filter((group) => group.group === "sales").map((block) => <PeriodGroupRows key={block.group} block={block} statements={statements} money={money} />)}
+            {row("cogs", <span className="flex items-center gap-2"><SourceMarks sources={["CONSL"]} />Cost of goods</span>, (statement) => <><Amount value={statement.cogs} money={money} /><span className="mt-0.5 block text-[11px] text-muted">{statement.unitsSold.toLocaleString(locale)} units at landed cost</span></>)}
+            {pnl.mcf.units > 0 && row("mcf", <span className="pl-4 text-[12px] font-normal text-ink-soft">of which MCF orders</span>, (statement) => <><Amount value={statement.mcf.cogs} money={money} /><span className="block text-[11px] text-muted">{statement.mcf.units.toLocaleString(locale)} units</span></>)}
+            {pnl.unreported.units > 0 && row("unreported", <span className="pl-4 text-[12px] font-normal text-ink-soft">of which free units &amp; replacements</span>, (statement) => <><Amount value={statement.unreported.cogs} money={money} /><span className="block text-[11px] text-muted">{statement.unreported.units.toLocaleString(locale)} units</span></>)}
+            {groups.filter((group) => group.group !== "sales").map((block) => <PeriodGroupRows key={block.group} block={block} statements={statements} money={money} />)}
+            {row("profit", "Net profit", (statement) => <span className={`tabular font-semibold ${statement.netProfit >= 0 ? "text-positive" : "text-negative"}`}>{statement.netProfit < 0 ? `−${money(Math.abs(statement.netProfit))}` : money(statement.netProfit)}</span>, true)}
+            {row("margin", <span className="font-normal text-ink-soft">Margin</span>, (statement) => <span className="tabular text-ink-soft">{pct(statement.margin)}</span>)}
+            {row("roi", <span className="font-normal text-ink-soft">ROI</span>, (statement) => <span className="tabular text-ink-soft">{pct(statement.roi)}</span>)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export function PnlClient({
   pnl,
+  periods,
   channels,
   filter,
   dataBounds,
 }: {
   pnl: Pnl;
+  periods: PnlPeriod[];
   /** Channels with data, in display order — the filter's choices. */
   channels: PnlChannel[];
-  filter: { range: Range; channel: string };
+  filter: { range: Range; channel: string; breakdown: PnlBreakdown };
   dataBounds: { newest: string; oldest: string };
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
   const { money, locale } = useMoney();
+  const [pending, startTransition] = useTransition();
 
   function setRange(r: Range) {
     const q = new URLSearchParams(params.toString());
@@ -147,12 +242,19 @@ export function PnlClient({
     router.push(`${pathname}?${q.toString()}`);
   }
 
+  function setBreakdown(value: string) {
+    const q = new URLSearchParams(params.toString());
+    if (value === "none") q.delete("breakdown");
+    else q.set("breakdown", value);
+    startTransition(() => router.push(`${pathname}?${q.toString()}`, { scroll: false }));
+  }
+
   const pct = (v: number | null) => (v == null ? "—" : `${(v * 100).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`);
   const salesBlock = pnl.groups.find((g) => g.group === "sales");
   const rest = pnl.groups.filter((g) => g.group !== "sales");
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5" aria-busy={pending}>
       <div className="flex flex-wrap items-center gap-2">
         <DateRangePicker value={filter.range} onChange={setRange} newest={dataBounds.newest} oldest={dataBounds.oldest} locale={locale} />
         {channels.length > 1 && (
@@ -177,6 +279,11 @@ export function PnlClient({
             })}
           </div>
         )}
+        <div className="flex items-center gap-2">
+          <span className="text-[12px] text-muted">Breakdown</span>
+          <SelectMenu value={filter.breakdown} onChange={setBreakdown} options={[...PNL_BREAKDOWNS]} ariaLabel="P&L breakdown" className="w-[152px]" disabled={pending} />
+          {pending && <span role="status" className="text-[12px] text-muted">Updating P&amp;L…</span>}
+        </div>
         {pnl.importProgress && (
           <span className="inline-flex flex-wrap items-center gap-2 text-[12px] text-muted" title="Amazon's money report is read a week at a time, from today back to two years ago. Older periods fill in as it goes.">
             <span className={`h-1.5 w-1.5 rounded-full ${pnl.importProgress.stalled ? "bg-warn" : "animate-pulse bg-accent"}`} aria-hidden />
@@ -203,6 +310,8 @@ export function PnlClient({
           title="No ledger data for this period yet"
           body="Amazon's financial events are importing in the background. Fresh fees post within the hour; history fills in window by window."
         />
+      ) : periods.length > 0 ? (
+        <PnlBreakdownTable pnl={pnl} periods={periods} breakdown={filter.breakdown} money={money} locale={locale} />
       ) : (
         <div className="overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface">
           <div className="divide-y divide-line">

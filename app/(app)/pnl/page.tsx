@@ -6,6 +6,8 @@ import { prisma } from "@/lib/prisma";
 import { todayIn } from "@/lib/channel-tz";
 import { PnlClient, PreConslCostButton } from "@/components/PnlClient";
 import { rangeBounds, RANGES, type RangeKey } from "@/lib/chart";
+import { parsePnlBreakdown } from "@/lib/pnl-shared";
+import { isPnlDay, pnlPeriodRanges } from "@/lib/pnl-periods";
 
 export const dynamic = "force-dynamic";
 
@@ -34,10 +36,17 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
   const channel = channelParam && (present as string[]).includes(channelParam) ? (channelParam as PnlChannel) : undefined;
 
   const newest = todayIn(tz);
-  const oldest = (await oldestFinanceDate()) ?? newest;
+  const oldest = (await oldestFinanceDate(tz)) ?? newest;
   const b = rangeBounds(rangeKey, newest, str(sp.from), str(sp.to));
-  const bounds = zonedDayBounds(rangeKey === "all" ? oldest : (b.from ?? oldest), rangeKey === "all" ? newest : (b.to ?? newest), tz);
-  const pnl = await getPnl(bounds.from, bounds.to, channel ? [channel] : undefined);
+  const start = isPnlDay(b.from) ? b.from : oldest;
+  const end = isPnlDay(b.to) ? b.to : newest;
+  const from = start <= end ? start : end;
+  const to = start <= end ? end : start;
+  const breakdown = parsePnlBreakdown(str(sp.breakdown));
+  const bounds = zonedDayBounds(from, to, tz);
+  const { periods, ...pnl } = await getPnl(bounds.from, bounds.to, channel ? [channel] : undefined, {
+    ranges: pnlPeriodRanges(from, to, breakdown), timeZone: tz,
+  });
   const products = await prisma.product.findMany({
     where: { sellerSku: { not: null } },
     select: { id: true, code: true, name: true, imageUrl: true, preConslUnitCost: true, openingUnitCost: true },
@@ -51,8 +60,9 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
       </PageHeader>
       <PnlClient
         pnl={pnl}
+        periods={periods}
         channels={present}
-        filter={{ channel: channel ?? "", range: { key: rangeKey, from: b.from ?? oldest, to: b.to ?? newest } }}
+        filter={{ channel: channel ?? "", range: { key: rangeKey, from, to }, breakdown }}
         dataBounds={{ newest, oldest }}
       />
     </>
