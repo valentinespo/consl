@@ -5,6 +5,7 @@ import { prismaBase } from "@/lib/prisma-base";
 import { currentUserId } from "@/lib/current-user";
 import { setActiveOrgCookie } from "@/lib/active-org";
 import { createCompanyForUser } from "@/lib/create-company";
+import { recordScheduledCall } from "@/lib/calendly";
 import {
   ADS,
   CHALLENGE_MIN,
@@ -155,8 +156,9 @@ export async function attachAccount(id: string): Promise<Result<{ orgId: string 
   return { ok: true, orgId: org.id };
 }
 
-/** Calendly confirmed a booking in the embed: remember when, and which event. */
-export async function markCallBooked(id: string, eventUri?: string, inviteeUri?: string): Promise<Result> {
+/** Calendly confirmed a booking in the embed: remember when, which event, and — when a Calendly
+ *  API token is configured — the appointment's actual time, returned so the screen can show it. */
+export async function markCallBooked(id: string, eventUri?: string, inviteeUri?: string): Promise<Result<{ scheduledAt: string | null }>> {
   const userId = await currentUserId();
   if (!userId) return { ok: false, error: "Sign in first." };
   const app = await prismaBase.accessApplication.findUnique({ where: { id }, select: { clerkUserId: true, status: true } });
@@ -172,5 +174,7 @@ export async function markCallBooked(id: string, eventUri?: string, inviteeUri?:
       status: "call_booked",
     },
   });
-  return { ok: true };
+  const uri = str(eventUri, 300);
+  const call = uri ? await recordScheduledCall(id, uri) : null;
+  return { ok: true, scheduledAt: call?.startsAt.toISOString() ?? null };
 }

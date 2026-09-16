@@ -4,6 +4,7 @@ import { getCurrentOrg } from "@/lib/org";
 import { needsBillingGate } from "@/lib/billing";
 import { prismaBase } from "@/lib/prisma-base";
 import { PreOnboarding } from "@/components/apply/PreOnboarding";
+import { calendlyConfigured, recordScheduledCall } from "@/lib/calendly";
 
 export const dynamic = "force-dynamic";
 
@@ -20,8 +21,13 @@ export default async function PreOnboardingPage() {
   const app = await prismaBase.accessApplication.findFirst({
     where: { orgId: org.id },
     orderBy: { createdAt: "desc" },
-    select: { id: true, fullName: true, email: true, callBookedAt: true },
+    select: { id: true, fullName: true, email: true, callBookedAt: true, callScheduledAt: true, calendlyEventUri: true },
   });
+  // A call booked before the Calendly token was configured has no appointment time yet: look it up now.
+  let callScheduledAt = app?.callScheduledAt ?? null;
+  if (app && !callScheduledAt && app.callBookedAt && app.calendlyEventUri && calendlyConfigured()) {
+    callScheduledAt = (await recordScheduledCall(app.id, app.calendlyEventUri))?.startsAt ?? null;
+  }
 
   return (
     <PreOnboarding
@@ -30,6 +36,7 @@ export default async function PreOnboardingPage() {
       email={app?.email ?? org.email ?? ""}
       applicationId={app?.id ?? null}
       callBookedAt={app?.callBookedAt?.toISOString() ?? null}
+      callScheduledAt={callScheduledAt?.toISOString() ?? null}
       trialUnlocked={!!org.trialUnlockedAt}
       calendlyUrl={process.env.CALENDLY_URL?.trim() || null}
     />

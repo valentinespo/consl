@@ -18,6 +18,7 @@ export function PreOnboarding({
   email,
   applicationId,
   callBookedAt,
+  callScheduledAt,
   trialUnlocked,
   calendlyUrl,
 }: {
@@ -26,10 +27,13 @@ export function PreOnboarding({
   email: string;
   applicationId: string | null;
   callBookedAt: string | null;
+  /** The appointment itself (ISO), when Calendly's API told us; null = only the booking moment is known. */
+  callScheduledAt: string | null;
   trialUnlocked: boolean;
   calendlyUrl: string | null;
 }) {
   const [booked, setBooked] = useState<string | null>(callBookedAt);
+  const [scheduledAt, setScheduledAt] = useState<string | null>(callScheduledAt);
   const [showCalendar, setShowCalendar] = useState(false);
   const [pending, setPending] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -37,7 +41,9 @@ export function PreOnboarding({
   async function scheduled(s: Scheduled) {
     setBooked(new Date().toISOString());
     setShowCalendar(false);
-    if (applicationId) await markCallBooked(applicationId, s.eventUri, s.inviteeUri).catch(() => {});
+    if (!applicationId) return;
+    const res = await markCallBooked(applicationId, s.eventUri, s.inviteeUri).catch(() => null);
+    if (res?.ok && res.scheduledAt) setScheduledAt(res.scheduledAt);
   }
 
   async function onStartTrial() {
@@ -54,9 +60,14 @@ export function PreOnboarding({
     }
   }
 
-  const bookedLabel = booked
-    ? new Date(booked).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+  // Formatted in the viewer's own timezone — it's their calendar, not ours.
+  const bookedLabel = booked ? new Date(booked).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : null;
+  const callLabel = scheduledAt
+    ? new Date(scheduledAt).toLocaleString(undefined, { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })
     : null;
+  const callBody = callLabel
+    ? `${callLabel}, your local time. The invite is in your inbox.`
+    : `Booked ${bookedLabel}. The invite with the exact time is in your inbox.`;
 
   return (
     <div className="min-h-screen bg-surface-2 px-5 py-8 sm:py-12">
@@ -89,8 +100,8 @@ export function PreOnboarding({
             <Row
               icon={<CalendarDays size={17} />}
               done={!!booked}
-              title={booked ? "Discovery call booked" : "Book your discovery call"}
-              body={booked ? `Booked ${bookedLabel}. The invite is in your inbox.` : "Pick a time that suits you."}
+              title={booked ? (callLabel ? "Your discovery call" : "Discovery call booked") : "Book your discovery call"}
+              body={booked ? callBody : "Pick a time that suits you."}
               action={
                 !booked && calendlyUrl ? (
                   <button

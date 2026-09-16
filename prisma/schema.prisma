@@ -1200,7 +1200,9 @@ model AccessApplication {
   organization       Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
   orgId              String?
   accountCreatedAt   DateTime?
-  callBookedAt       DateTime?
+  callBookedAt       DateTime? // when they confirmed a slot in the embed
+  callScheduledAt    DateTime? // the appointment itself, from Calendly's API (needs CALENDLY_TOKEN)
+  callJoinUrl        String?   // Zoom / Meet link from the same lookup
   calendlyEventUri   String?
   calendlyInviteeUri String?
 

@@ -1,20 +1,12 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
 import { Inter, Geist_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 import { AppShell } from "@/components/AppShell";
-import { getCurrentOrgId } from "@/lib/tenant";
-import { currentUserId } from "@/lib/current-user";
 import { getCurrentOrg } from "@/lib/org";
 import { listMyOrgs } from "@/lib/orgs";
 import { getMyAccess } from "@/lib/membership";
 import { RESOURCE_KEYS, actionsOf } from "@/lib/permissions";
-import { needsBillingGate } from "@/lib/billing";
-
-/** Pages that must stay reachable before you belong to a company. */
-const NO_ORG_OK = ["/sign-in", "/sign-up", "/welcome", "/join", "/home", "/privacy", "/terms", "/apply", "/pre-onboarding"];
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
@@ -27,31 +19,10 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  // A signed-in user who doesn't belong to a company yet gets sent to set one up. Without this
-  // they'd land on the dashboard and every query would fail — there's no tenant to read from.
-  const pathname = (await headers()).get("x-pathname") ?? "";
-  if (!NO_ORG_OK.some((p) => pathname.startsWith(p)) && !(await getCurrentOrgId())) {
-    if (await currentUserId()) redirect("/welcome");
-  }
+  // Every redirect that used to live here — no company yet, trial not started, wizard unfinished —
+  // moved to app/template.tsx: a layout renders once per full page load and is skipped on
+  // client-side navigation, so gates in it could be walked around by any in-app hop.
   const org = await getCurrentOrg().catch(() => null);
-  // Early access: a company whose trial hasn't started waits on the pre-onboarding screen — book
-  // the discovery call, then an admin unlocks the trial there. Companies that existed before this
-  // shipped are exempt (see lib/billing.ts), so nothing changes for them. Checked before the wizard
-  // gate: a waiting company must not reach the wizard either.
-  if (org && needsBillingGate(org) && !NO_ORG_OK.some((p) => pathname.startsWith(p))) {
-    redirect("/pre-onboarding");
-  }
-  // A company that hasn't finished onboarding sees ONLY the setup wizard — every app path lands
-  // there until the wizard completes. The auth/marketing pages above stay reachable (sign out,
-  // invite links), and the wizard page itself must not redirect to itself.
-  if (
-    org &&
-    !org.onboardedAt &&
-    !pathname.startsWith("/onboarding") &&
-    !NO_ORG_OK.some((p) => pathname.startsWith(p))
-  ) {
-    redirect("/onboarding");
-  }
   const orgs = await listMyOrgs().catch(() => []);
   // Which sections this member may see, so the sidebar only shows what they can open. Owners get
   // everything; a resolution failure leaves this null and the nav falls open (page guards still
