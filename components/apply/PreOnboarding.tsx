@@ -163,15 +163,16 @@ const BRING = [
   { icon: <MapTrifold size={13} />, text: "A map of your facilities: warehouses, co-packers, manufacturers and 3PLs." },
 ];
 
+/** Sits under the row's icon + text, so its divider and bullets start at the icon's left edge. */
 function BringList() {
   return (
-    <div className="mt-3">
+    <div className="mt-3.5 border-t border-border pt-3.5">
       <div className="text-[12.5px] text-muted">Make sure to have these ready for the call:</div>
-      <ul className="mt-2 space-y-2">
+      <ul className="mt-2.5 space-y-2">
         {BRING.map((b) => (
-          <li key={b.text} className="flex items-start gap-2.5 text-[13px] leading-snug text-ink-soft">
-            <span className="mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-surface-2 text-muted">{b.icon}</span>
-            <span>{b.text}</span>
+          <li key={b.text} className="flex items-start gap-3.5 text-[13px] leading-snug text-ink-soft">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-positive/10 text-positive">{b.icon}</span>
+            <span className="pt-1">{b.text}</span>
           </li>
         ))}
       </ul>
@@ -195,20 +196,22 @@ function Row({
   children?: ReactNode;
 }) {
   return (
-    <div className={`flex gap-3.5 rounded-xl border border-border bg-bg px-4 py-3.5 ${children ? "items-start" : "items-center"}`}>
-      <span
-        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
-          done ? "bg-positive/10 text-positive" : "bg-surface-2 text-muted"
-        }`}
-      >
-        {done ? <Check size={16} /> : icon}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="text-[14px] font-medium text-ink">{title}</div>
-        <div className="text-[12.5px] text-muted">{body}</div>
-        {children}
+    <div className="rounded-xl border border-border bg-bg px-4 py-3.5">
+      <div className="flex items-center gap-3.5">
+        <span
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+            done ? "bg-positive/10 text-positive" : "bg-surface-2 text-muted"
+          }`}
+        >
+          {done ? <Check size={16} /> : icon}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[14px] font-medium text-ink">{title}</div>
+          <div className="text-[12.5px] text-muted">{body}</div>
+        </div>
+        {action}
       </div>
-      {action}
+      {children}
     </div>
   );
 }
