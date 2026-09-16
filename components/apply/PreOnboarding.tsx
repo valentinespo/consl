@@ -68,9 +68,11 @@ export function PreOnboarding({
     ? `${callLabel}, your local time. The invite is in your inbox.`
     : `Booked ${bookedLabel}. The invite with the exact time is in your inbox.`;
 
+  // Wide while the calendar is on the page — Calendly lays the month and the time slots side by
+  // side only from about 1000px — and back to a compact card once the call is booked.
   return (
     <div className="min-h-screen bg-surface-2 px-5 py-8 sm:py-12">
-      <div className="mx-auto w-full max-w-[600px]">
+      <div className={`mx-auto w-full transition-[max-width] ${booked ? "max-w-[600px]" : "max-w-[1040px]"}`}>
         <div className="mb-6 flex items-center justify-between">
           <span className="inline-flex items-center gap-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
