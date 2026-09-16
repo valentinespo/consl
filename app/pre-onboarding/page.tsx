@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { currentUserId } from "@/lib/current-user";
 import { getCurrentOrg } from "@/lib/org";
 import { needsBillingGate } from "@/lib/billing";
+import { gateRedirect } from "@/lib/gate-redirect";
 import { prismaBase } from "@/lib/prisma-base";
 import { PreOnboarding } from "@/components/apply/PreOnboarding";
 import { calendlyConfigured, recordScheduledCall } from "@/lib/calendly";
@@ -16,7 +17,7 @@ export const dynamic = "force-dynamic";
 export default async function PreOnboardingPage() {
   const org = await getCurrentOrg();
   if (!org) redirect((await currentUserId()) ? "/welcome" : "/sign-in");
-  if (!needsBillingGate(org)) redirect("/");
+  if (!needsBillingGate(org)) return gateRedirect("/");
 
   const app = await prismaBase.accessApplication.findFirst({
     where: { orgId: org.id },

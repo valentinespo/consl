@@ -1,6 +1,9 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { gateDecision } from "@/lib/gate-decision";
+import { ACTIVE_ORG_COOKIE } from "@/lib/active-org-cookie-name";
 
+// (Next 16: this file is the "proxy", the Node-runtime middleware — it may use the database.)
 // Auth screens plus the public marketing pages; everything else requires a signed-in user. The
 // Shopify compliance webhook and the order webhooks are server-to-server (no session) — each
 // authenticates with its own HMAC inside the route.
@@ -66,12 +69,37 @@ const enforced = clerkMiddleware(async (auth, req) => {
   if (!isPublic(req)) await auth.protect();
   const legacy = rewriteLegacyUploads(req);
   if (legacy) return NextResponse.rewrite(legacy);
-  // Pass the path through as a request header so the root layout can tell whether the user is
-  // already on the onboarding pages before deciding to redirect them there.
+  // The product gate, decided here so the answer is a plain HTTP redirect before any render —
+  // the one form of redirect Next's router handles cleanly on client-side navigation. See
+  // lib/gate-decision.ts for the rules and for why this is not done in a layout.
+  const gated = await gateForRequest(req, (await auth()).userId ?? null, false);
+  if (gated) return gated;
+  // Pass the path through as a request header so server code can tell which page it's on.
   const headers = new Headers(req.headers);
   headers.set("x-pathname", req.nextUrl.pathname);
   return NextResponse.next({ request: { headers } });
 });
+
+/** The gate's redirect response for this request, or null to let it through. Never throws: a
+ *  database hiccup must not lock everyone out, so a failed decision lets the page's own checks
+ *  (the route-group layout) take over. */
+async function gateForRequest(req: NextRequest, userId: string | null, devBypass: boolean) {
+  try {
+    const to = await gateDecision({
+      pathname: req.nextUrl.pathname,
+      userId,
+      cookieOrgId: req.cookies.get(ACTIVE_ORG_COOKIE)?.value ?? null,
+      devBypass,
+    });
+    if (!to) return null;
+    const url = req.nextUrl.clone();
+    url.pathname = to;
+    url.search = "";
+    return NextResponse.redirect(url);
+  } catch {
+    return null;
+  }
+}
 
 // Local-dev escape hatch: skip Clerk so the app can be run without signing in. Gated on an
 // explicit opt-in rather than NODE_ENV alone — a preview box or a wrong start command must not
@@ -79,9 +107,12 @@ const enforced = clerkMiddleware(async (auth, req) => {
 const devBypass = process.env.NODE_ENV === "development" && process.env.ALLOW_DEV_AUTH_BYPASS === "1";
 
 export default devBypass
-  ? (req: Request & { nextUrl: URL }) => {
+  ? async (req: NextRequest) => {
       const legacy = rewriteLegacyUploads(req);
       if (legacy) return NextResponse.rewrite(legacy);
+      // Same gate as the enforced branch, resolving the company the way the bypass does.
+      const gated = await gateForRequest(req, null, true);
+      if (gated) return gated;
       // The layout reads x-pathname to know where it is (e.g. the onboarding gate deciding
       // whether to redirect). Without it, an un-onboarded org redirect-loops on /onboarding —
       // so the bypass branch must pass it through exactly like the enforced branch does.

@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { gateRedirect } from "@/lib/gate-redirect";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { currentUserId } from "@/lib/current-user";
 import { getCurrentOrg } from "@/lib/org";
@@ -16,17 +16,17 @@ import { needsBillingGate } from "@/lib/billing";
  *
  * Order: no company yet → set one up; trial not started (early access) → the waiting screen;
  * setup wizard unfinished → the wizard. /onboarding sits outside the group and repeats the
- * billing check itself.
+ * billing check itself. Redirects go through gateRedirect — see lib/gate-redirect.tsx for why.
  */
 export default async function AppGateLayout({ children }: { children: React.ReactNode }) {
   const orgId = await getCurrentOrgId();
   if (!orgId) {
     // Signed in with no company: set one up. Signed out never gets here (middleware).
-    if (await currentUserId()) redirect("/welcome");
+    if (await currentUserId()) return gateRedirect("/welcome");
     return <>{children}</>;
   }
   const org = await getCurrentOrg().catch(() => null);
-  if (org && needsBillingGate(org)) redirect("/pre-onboarding");
-  if (org && !org.onboardedAt) redirect("/onboarding");
+  if (org && needsBillingGate(org)) return gateRedirect("/pre-onboarding");
+  if (org && !org.onboardedAt) return gateRedirect("/onboarding");
   return <>{children}</>;
 }

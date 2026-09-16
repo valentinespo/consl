@@ -8,7 +8,8 @@ import { cookies } from "next/headers";
  * which one they have open right now. It is only ever trusted after checking the membership
  * still exists, so a stale or hand-edited cookie can't reach a company you were removed from.
  */
-export const ACTIVE_ORG_COOKIE = "so_active_org";
+import { ACTIVE_ORG_COOKIE } from "@/lib/active-org-cookie-name";
+export { ACTIVE_ORG_COOKIE };
 
 const ONE_YEAR = 60 * 60 * 24 * 365;
 
