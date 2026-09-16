@@ -45,7 +45,7 @@ export default async function BillingSettingsPage() {
           </div>
           {row?.foundingMember && (
             <span className="pill-chart inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium">
-              Founding member · 50% off for life
+              Founding member · 50% OFF for life
             </span>
           )}
         </div>

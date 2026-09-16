@@ -73,7 +73,7 @@ const SECTION: Record<StepId, string> = {
 
 const PERKS: { title: string; short: string; body: string; icon: LucideIcon }[] = [
   { title: "One of 20 seats.", short: "One of 20 seats", body: "Limited to twenty brands that make and sell physical products.", icon: UserPlus },
-  { title: "Lifetime 50% off.", short: "50% off for life", body: "The early-access price is locked in for as long as you're with us.", icon: Tag },
+  { title: "Lifetime 50% OFF.", short: "50% OFF for life", body: "The early-access price is locked in for as long as you're with us.", icon: Tag },
   { title: "14-day free trial.", short: "14-day free trial", body: "Nothing is charged for 14 days. Cancel anytime.", icon: CalendarDays },
   { title: "A personal brand manager.", short: "Personal brand manager", body: "Sets consl up with you, 1-1, until every number you care about lives in one place.", icon: User },
 ];
