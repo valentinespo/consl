@@ -46,6 +46,12 @@ const PRODUCTION_NAV: NavItem[] = [
   { href: "/catalog", label: "Catalog", icon: ImagesFilled, resource: "catalog" },
 ];
 
+// The internal area (admin account only): early-access applications and every company.
+const INTERNAL_NAV: NavItem[] = [
+  { href: "/internal", label: "Applications", icon: OrdersFilled, exact: true, resource: "internal" },
+  { href: "/internal/companies", label: "Companies", icon: Building2Filled, resource: "internal" },
+];
+
 const COLLAPSE_KEYS = { finances: "consl.nav.finances.collapsed", production: "consl.nav.production.collapsed" };
 
 function isActive(item: NavItem, pathname: string): boolean {
@@ -154,6 +160,27 @@ export function Sidebar({
       </Link>
     );
   };
+
+  // The internal area swaps the product nav for its own two tabs; nothing here is company-scoped.
+  if (pathname === "/internal" || pathname.startsWith("/internal/")) {
+    return (
+      <aside className="flex h-full w-[230px] shrink-0 flex-col overflow-hidden bg-sidebar">
+        <div className="shrink-0 px-3 pb-2.5 pt-3">
+          <ThemeToggle />
+        </div>
+        <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
+          <SectionHeader label="Internal" />
+          {INTERNAL_NAV.map(renderLink)}
+        </nav>
+        <div className="flex shrink-0 items-center justify-between px-4 pb-4 pt-2">
+          <div className="min-w-0">
+            <div className="truncate text-[12px] font-medium text-ink-soft">consl internal</div>
+            <div className="text-[11px] text-muted">Early access &amp; companies</div>
+          </div>
+        </div>
+      </aside>
+    );
+  }
 
   return (
     <aside className="flex h-full w-[230px] shrink-0 flex-col overflow-hidden bg-sidebar">

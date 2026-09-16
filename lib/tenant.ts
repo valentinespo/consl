@@ -5,6 +5,7 @@ import { auth } from "@clerk/nextjs/server";
 import { prismaBase } from "@/lib/prisma-base";
 import { readActiveOrgCookie } from "@/lib/active-org";
 import { devAuthBypass } from "@/lib/current-user";
+import { isSuperuserId } from "@/lib/superuser-ids";
 
 // Explicit org context for background jobs / scripts (no logged-in user).
 const orgStore = new AsyncLocalStorage<{ orgId: string }>();
@@ -35,11 +36,14 @@ const orgIdFromAuth = cache(async (): Promise<string | null> => {
     select: { orgId: true },
     orderBy: { createdAt: "asc" },
   });
-  if (memberships.length === 0) return null;
-
   const selected = await readActiveOrgCookie();
   if (selected && memberships.some((m) => m.orgId === selected)) return selected;
-  return memberships[0].orgId;
+  // The admin account (lib/superuser-ids.ts) may open any live company from the internal area.
+  if (selected && isSuperuserId(userId)) {
+    const exists = await prismaBase.organization.findFirst({ where: { id: selected, deactivatedAt: null }, select: { id: true } });
+    if (exists) return selected;
+  }
+  return memberships[0]?.orgId ?? null;
 });
 
 /**

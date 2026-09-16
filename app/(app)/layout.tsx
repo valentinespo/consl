@@ -3,6 +3,7 @@ import { getCurrentOrgId } from "@/lib/tenant";
 import { currentUserId } from "@/lib/current-user";
 import { getCurrentOrg } from "@/lib/org";
 import { needsBillingGate } from "@/lib/billing";
+import { isSuperuser } from "@/lib/superuser";
 
 /**
  * The gate in front of the product. Every product page lives in this route group; the auth
@@ -23,11 +24,11 @@ export default async function AppGateLayout({ children }: { children: React.Reac
   if (!orgId) {
     // Signed in with no company: back into the application, whose account step creates and links
     // it. Signed out never gets here (middleware).
-    if (await currentUserId()) return gateRedirect("/apply");
+    if (await currentUserId()) return gateRedirect((await isSuperuser()) ? "/internal" : "/apply");
     return <>{children}</>;
   }
   const org = await getCurrentOrg().catch(() => null);
-  if (org && needsBillingGate(org)) return gateRedirect("/pre-onboarding");
+  if (org && needsBillingGate(org) && !(await isSuperuser())) return gateRedirect("/pre-onboarding");
   if (org && !org.onboardedAt) return gateRedirect("/onboarding");
   return <>{children}</>;
 }

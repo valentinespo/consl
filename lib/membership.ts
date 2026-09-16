@@ -5,6 +5,7 @@ import { currentUserId, devAuthBypass } from "@/lib/current-user";
 import { prismaBase } from "@/lib/prisma-base";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { can, normalizePermissions, type Action, type Resource } from "@/lib/permissions";
+import { isSuperuserId } from "@/lib/superuser-ids";
 
 /**
  * Who the signed-in user is inside their company.
@@ -27,7 +28,9 @@ export async function currentRole(): Promise<Role | null> {
     where: { clerkUserId: userId, orgId },
     select: { role: true },
   });
-  return m ? ((m.role === "owner" ? "owner" : "member") as Role) : null;
+  if (m) return (m.role === "owner" ? "owner" : "member") as Role;
+  // The admin account (lib/superuser-ids.ts) works in any company as its owner would.
+  return isSuperuserId(userId) ? "owner" : null;
 }
 
 /** Guard for actions only an owner may perform (managing the team, deleting the company). */
@@ -38,7 +41,10 @@ export async function requireOwner(): Promise<{ ok: true; orgId: string; userId:
   if (devAuthBypass && orgId) return { ok: true, orgId, userId: userId ?? "dev-user" };
   if (!userId || !orgId) return { ok: false, error: "You're not signed in to a company." };
   const m = await prismaBase.membership.findFirst({ where: { clerkUserId: userId, orgId }, select: { role: true } });
-  if (!m) return { ok: false, error: "You're not a member of this company." };
+  if (!m) {
+    if (isSuperuserId(userId)) return { ok: true, orgId, userId };
+    return { ok: false, error: "You're not a member of this company." };
+  }
   if (m.role !== "owner") return { ok: false, error: "Only an owner can do that." };
   return { ok: true, orgId, userId };
 }
@@ -64,7 +70,10 @@ export const getMyAccess = cache(async (): Promise<MyAccess | null> => {
     where: { clerkUserId: userId, orgId },
     select: { role: true, permissions: true },
   });
-  if (!m) return null;
+  if (!m) {
+    if (isSuperuserId(userId)) return { role: "owner", orgId, userId, can: () => true };
+    return null;
+  }
   const role: Role = m.role === "owner" ? "owner" : "member";
   const perms = role === "owner" ? null : normalizePermissions(m.permissions);
   return { role, orgId, userId, can: (r, a) => can(role, perms, r, a) };

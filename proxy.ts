@@ -2,6 +2,7 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse, type NextRequest } from "next/server";
 import { gateDecision } from "@/lib/gate-decision";
 import { ACTIVE_ORG_COOKIE } from "@/lib/active-org-cookie-name";
+import { isSuperuserId } from "@/lib/superuser-ids";
 
 // (Next 16: this file is the "proxy", the Node-runtime middleware — it may use the database.)
 // Auth screens plus the public marketing pages; everything else requires a signed-in user. The
@@ -90,6 +91,7 @@ async function gateForRequest(req: NextRequest, userId: string | null, devBypass
       userId,
       cookieOrgId: req.cookies.get(ACTIVE_ORG_COOKIE)?.value ?? null,
       devBypass,
+      superuser: isSuperuserId(userId),
     });
     if (!to) return null;
     const url = req.nextUrl.clone();

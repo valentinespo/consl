@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import { Check, ChevronsUpDown, Plus, Building2Outline as Building2 } from "@/components/icons";
 import type { MyOrg } from "@/lib/orgs";
 import { switchOrg } from "@/app/(app)/org/actions";
+import { INTERNAL_ORG_ID } from "@/lib/superuser-ids";
+
+const ROLE_LABEL: Record<string, string> = { owner: "Owner", member: "Member", superuser: "Superuser access", internal: "Admin area" };
 import { useExitAnimation } from "@/components/animate";
 
 /** A company's own square mark, falling back to a neutral icon when it hasn't uploaded one. */
@@ -51,6 +54,10 @@ export function OrgSwitcher({
   const wrap = useRef<HTMLDivElement>(null);
 
   const current = orgs.find((o) => o.active) ?? orgs[0] ?? null;
+  // The admin account's list: the internal area pinned on top, then every company on the platform.
+  const internal = orgs.find((o) => o.role === "internal") ?? null;
+  const companies = orgs.filter((o) => o.role !== "internal");
+  const superuser = companies.some((o) => o.role === "superuser");
 
   // Close on an outside click or Escape — a menu that traps you is worse than no menu.
   useEffect(() => {
@@ -72,6 +79,11 @@ export function OrgSwitcher({
   async function choose(orgId: string) {
     if (orgId === current?.id) {
       setOpen(false);
+      return;
+    }
+    if (orgId === INTERNAL_ORG_ID) {
+      setOpen(false);
+      window.location.href = "/internal";
       return;
     }
     setError(null);
@@ -113,31 +125,51 @@ export function OrgSwitcher({
             header ? "left-0 w-72" : "inset-x-3"
           }`}
         >
-          {orgs.length > 1 && (
+          {internal && (
+            <>
+              <button
+                role="menuitem"
+                onClick={() => choose(internal.id)}
+                disabled={busy !== null}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-surface-2 disabled:opacity-60"
+              >
+                <OrgMark org={internal} size={22} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium text-ink">{internal.name}</span>
+                  <span className="block text-[11px] text-muted">{ROLE_LABEL[internal.role]}</span>
+                </span>
+                {internal.active && <Check size={14} className="shrink-0 text-accent" />}
+              </button>
+              <div className="my-1 border-t border-line" />
+            </>
+          )}
+          {(companies.length > 1 || superuser) && (
             <div className="px-3 pb-1 pt-1.5 text-[10.5px] font-medium uppercase tracking-wide text-muted">
-              Your companies
+              {superuser ? `All companies (${companies.length})` : "Your companies"}
             </div>
           )}
-          {orgs.map((o) => (
-            <button
-              key={o.id}
-              role="menuitem"
-              onClick={() => choose(o.id)}
-              disabled={busy !== null}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-surface-2 disabled:opacity-60"
-            >
-              <OrgMark org={o} size={22} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] text-ink">{o.name}</span>
-                <span className="block text-[11px] text-muted">{o.role === "owner" ? "Owner" : "Member"}</span>
-              </span>
-              {busy === o.id ? (
-                <span className="text-[11px] text-muted">Switching…</span>
-              ) : o.active ? (
-                <Check size={14} className="shrink-0 text-accent" />
-              ) : null}
-            </button>
-          ))}
+          <div className="max-h-[55vh] overflow-y-auto">
+            {companies.map((o) => (
+              <button
+                key={o.id}
+                role="menuitem"
+                onClick={() => choose(o.id)}
+                disabled={busy !== null}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-surface-2 disabled:opacity-60"
+              >
+                <OrgMark org={o} size={22} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] text-ink">{o.name}</span>
+                  <span className="block text-[11px] text-muted">{ROLE_LABEL[o.role] ?? "Member"}</span>
+                </span>
+                {busy === o.id ? (
+                  <span className="text-[11px] text-muted">Switching…</span>
+                ) : o.active ? (
+                  <Check size={14} className="shrink-0 text-accent" />
+                ) : null}
+              </button>
+            ))}
+          </div>
 
           <div className="my-1 border-t border-line" />
 

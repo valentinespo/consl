@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prismaBase } from "@/lib/prisma-base";
 import { currentUserId, devAuthBypass } from "@/lib/current-user";
 import { setActiveOrgCookie } from "@/lib/active-org";
+import { isSuperuserId } from "@/lib/superuser-ids";
 
 /**
  * Switch which of your companies is open.
@@ -28,7 +29,13 @@ export async function switchOrg(orgId: string) {
     where: { clerkUserId: userId, orgId },
     select: { id: true },
   });
-  if (!member) return { ok: false as const, error: "You're not a member of that company." };
+  if (!member) {
+    // The admin account may open any live company from the internal area.
+    const open = isSuperuserId(userId)
+      ? await prismaBase.organization.findFirst({ where: { id: orgId, deactivatedAt: null }, select: { id: true } })
+      : null;
+    if (!open) return { ok: false as const, error: "You're not a member of that company." };
+  }
 
   await setActiveOrgCookie(orgId);
   revalidatePath("/", "layout");
