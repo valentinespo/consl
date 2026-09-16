@@ -299,10 +299,10 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
                   <Heading
                     title={
                       <>
-                        First, tell us about your brand and <Em>what you need</Em>.
+                        First, tell us how your brand operates and <Em>where your numbers get lost</Em>.
                       </>
                     }
-                    sub="Before your discovery call, we want to understand your brand and what's slowing you down — so we can help as much as possible, and make sure consl and our support team are the right tool for your business."
+                    sub="Before your discovery call, we want to understand your brand and what's slowing you down, so we can help as much as possible and make sure consl and our team of e-commerce experts are the right tool for your business."
                   />
                 </div>
                 <p className="mt-4 max-w-[560px] text-[15.5px] leading-relaxed text-neutral-600">

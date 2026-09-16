@@ -11,11 +11,11 @@ import { currentUserId } from "@/lib/current-user";
  */
 
 export const metadata: Metadata = {
-  title: "consl — inventory, production, ad spend & true profit for ecommerce operators",
+  title: "consl: inventory, production, ad spend & true profit for ecommerce operators",
   description:
     "consl connects purchases, production runs, sales channels and ad accounts into one live view: the true landed cost of every unit, daily advertising spend on the same P&L as your sales and fees, and restock alerts before you run out. Amazon, Amazon Ads, Shopify and TikTok Shop.",
   openGraph: {
-    title: "consl — the console for ecommerce operators",
+    title: "consl, the console for ecommerce operators",
     description: "True landed cost per unit, advertising spend and profit on one P&L, production tracking and multichannel restocking in one place.",
     images: ["/marketing/dashboard.jpg"],
   },
@@ -159,7 +159,7 @@ export default async function HomePage() {
             The console for ecommerce operators.
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-[16.5px] leading-relaxed text-neutral-600 sm:text-[18px]">
-            consl connects your purchases, production runs, sales channels and ad accounts into one live view — the{" "}
+            consl connects your purchases, production runs, sales channels and ad accounts into one live view: the{" "}
             <span className="font-semibold text-neutral-900">true landed cost of every unit</span>, your advertising spend on
             the same P&amp;L as your sales and fees, and restock alerts long before you run out.
           </p>
@@ -170,7 +170,7 @@ export default async function HomePage() {
           <p className="mt-4 text-[12.5px] text-neutral-500">Built for brands that make physical products and sell them everywhere.</p>
 
           <div className="relative mx-auto mt-14 max-w-5xl">
-            <Shot src="/marketing/dashboard.jpg" alt="consl dashboard — live inventory value, lead times and reorder alerts" priority />
+            <Shot src="/marketing/dashboard.jpg" alt="consl dashboard: live inventory value, lead times and reorder alerts" priority />
           </div>
         </div>
       </section>
@@ -179,7 +179,7 @@ export default async function HomePage() {
       <section id="integrations" className="border-y border-neutral-200 bg-neutral-50/60">
         <div className="mx-auto max-w-6xl px-5 py-12">
           <div className="text-center text-[12.5px] font-bold uppercase tracking-wider text-neutral-500">
-            Connects to where you sell — and where you advertise
+            Connects to where you sell, and where you advertise
           </div>
           <div className="mx-auto mt-6 grid max-w-4xl grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             <PlatformTile img="/integrations/amazon-fba.png" label="Amazon FBA" />
@@ -190,7 +190,7 @@ export default async function HomePage() {
             <PlatformTile label="Meta Ads" note="Coming soon" />
           </div>
           <p className="mx-auto mt-6 max-w-2xl text-center text-[13.5px] leading-relaxed text-neutral-600">
-            Channel stock becomes real facilities in your workspace — including Amazon MCF awareness, so inventory mirrored
+            Channel stock becomes real facilities in your workspace, including Amazon MCF awareness, so inventory mirrored
             into Shopify is never counted twice. Ad accounts feed daily spend straight into your P&amp;L.
           </p>
         </div>
@@ -201,20 +201,20 @@ export default async function HomePage() {
         <Feature
           eyebrow="Advertising & profit"
           title="See the profit that's left after ads."
-          body="consl pulls your daily advertising spend straight from Amazon Ads — Sponsored Products, Sponsored Brands and Sponsored Display — and books it on the same P&L as your sales, marketplace fees, refunds and true cost of goods. No waiting for the ad invoice: each day's spend lands on that day, so you see what your advertising really returned, by channel and by period."
+          body="consl pulls your daily advertising spend straight from Amazon Ads (Sponsored Products, Sponsored Brands and Sponsored Display) and books it on the same P&L as your sales, marketplace fees, refunds and true cost of goods. No waiting for the ad invoice: each day's spend lands on that day, so you see what your advertising really returned, by channel and by period."
           bullets={[
             "Daily ad spend from the Amazon Ads API, broken down by ad type",
             "Advertising next to fees, refunds and landed cost on one profit & loss statement",
-            "Profit after ads by channel and period — Meta Ads coming next",
+            "Profit after ads by channel and period. Meta Ads coming next",
           ]}
           shot="/marketing/pnl.jpg"
-          alt="consl P&L — sales, cost of goods, marketplace fees and daily advertising spend by ad type"
+          alt="consl P&L: sales, cost of goods, marketplace fees and daily advertising spend by ad type"
         />
         <Feature
           flip
           eyebrow="Cost engine"
-          title="Know your real cost — to the cent."
-          body="Every production lot is costed from its actual inputs: raw materials consumed oldest-stock-first, plus the deposits, final payments, certifications and fees you assign to it. The result is a landed cost per unit, per batch — not a spreadsheet estimate."
+          title="Know your real cost, to the cent."
+          body="Every production lot is costed from its actual inputs: raw materials consumed oldest-stock-first, plus the deposits, final payments, certifications and fees you assign to it. The result is a landed cost per unit, per batch, not a spreadsheet estimate."
           bullets={[
             "FIFO raw-material costing across facilities",
             "Per-SKU batch costs, statuses and payment tracking",
@@ -226,27 +226,27 @@ export default async function HomePage() {
         <Feature
           eyebrow="Restock autopilot"
           title="Never sell out. Never over-order."
-          body="consl reads your sales velocity, projects months of cover for every SKU, and tells you when to order, when to ship stock you already own, and when a lot needs expediting — before the stockout, not after."
+          body="consl reads your sales velocity, projects months of cover for every SKU, and tells you when to order, when to ship stock you already own, and when a lot needs expediting, before the stockout, not after."
           bullets={[
             "Sales-velocity forecasting with configurable windows",
             "Order and ship-by recommendations per SKU",
             "Out-of-stock and expedite alerts on the dashboard",
           ]}
           shot="/marketing/reorder.jpg"
-          alt="Reorder view — per-SKU cover, statuses and recommended actions"
+          alt="Reorder view: per-SKU cover, statuses and recommended actions"
         />
         <Feature
           flip
           eyebrow="Multichannel"
           title="Every unit, everywhere."
-          body="Co-packers, your own warehouses, 3PLs — and the channels themselves. Connecting Amazon or Shopify creates managed facilities for FBA, AWD and each store location, so channel stock has a real place in your operation instead of living in a report."
+          body="Co-packers, your own warehouses, 3PLs, and the channels themselves. Connecting Amazon or Shopify creates managed facilities for FBA, AWD and each store location, so channel stock has a real place in your operation instead of living in a report."
           bullets={[
             "Channel facilities created automatically on connect",
             "Amazon MCF-aware: mirrored stock never double-counts",
             "Stock movements between any of your locations",
           ]}
           shot="/marketing/facilities.jpg"
-          alt="Facilities — co-packers, warehouses and connected sales channels"
+          alt="Facilities: co-packers, warehouses and connected sales channels"
         />
         <Feature
           eyebrow="Production & materials"
@@ -258,7 +258,7 @@ export default async function HomePage() {
             "Low-stock alerts on the materials you make things from",
           ]}
           shot="/marketing/inventory.jpg"
-          alt="Inventory — raw materials, work in production and finished goods"
+          alt="Inventory: raw materials, work in production and finished goods"
         />
       </section>
 
@@ -270,7 +270,7 @@ export default async function HomePage() {
             className="pointer-events-none absolute inset-0"
             style={{ background: "radial-gradient(50% 80% at 50% 100%, rgba(124,58,237,0.35) 0%, transparent 70%)" }}
           />
-          <h2 className="relative text-[30px] font-bold tracking-tight text-white sm:text-[36px]">Stop guessing your margins — and your ad returns.</h2>
+          <h2 className="relative text-[30px] font-bold tracking-tight text-white sm:text-[36px]">Stop guessing your margins, and your ad returns.</h2>
           <p className="relative mx-auto mt-3 max-w-xl text-[15px] leading-relaxed text-neutral-300">
             consl is opening early access to 20 brands that make and sell physical products: lifetime 50% off and
             1-1 onboarding with a personal brand manager. Tell us about your brand to apply.
