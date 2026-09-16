@@ -40,14 +40,31 @@ export function compactMoney(v: number, symbol: string, locale: string): string 
   return `${symbol}${s}`;
 }
 
-export type RangeKey = "7" | "30" | "90" | "365" | "mtd" | "qtd" | "ytd" | "all" | "custom";
+export type RangeKey =
+  | "today"
+  | "yesterday"
+  | "7"
+  | "30"
+  | "90"
+  | "365"
+  | "lastmonth"
+  | "lastyear"
+  | "mtd"
+  | "qtd"
+  | "ytd"
+  | "all"
+  | "custom";
 
 /** Rail of the date picker. `group` inserts the dividers between families of presets. */
 export const RANGES: { key: RangeKey; label: string; days?: number; group: number }[] = [
+  { key: "today", label: "Today", days: 1, group: 0 },
+  { key: "yesterday", label: "Yesterday", group: 0 },
   { key: "7", label: "Last 7 days", days: 7, group: 0 },
   { key: "30", label: "Last 30 days", days: 30, group: 0 },
   { key: "90", label: "Last 90 days", days: 90, group: 0 },
   { key: "365", label: "Last 12 months", days: 365, group: 0 },
+  { key: "lastmonth", label: "Last month", group: 0 },
+  { key: "lastyear", label: "Last year", group: 0 },
   { key: "mtd", label: "Month to date", group: 1 },
   { key: "qtd", label: "Quarter to date", group: 1 },
   { key: "ytd", label: "Year to date", group: 1 },
@@ -82,8 +99,20 @@ export function rangeBounds(
   if (preset?.days) return { from: shiftDay(newest, preset.days - 1), to: newest };
 
   const [y, m] = newest.split("-").map(Number);
+  const mm = (n: number) => String(n).padStart(2, "0");
+  if (key === "yesterday") {
+    const day = shiftDay(newest, 1);
+    return { from: day, to: day };
+  }
+  // The previous calendar month: from its 1st to the day before this month's 1st.
+  if (key === "lastmonth") {
+    const [py, pm] = m === 1 ? [y - 1, 12] : [y, m - 1];
+    return { from: `${py}-${mm(pm)}-01`, to: shiftDay(`${y}-${mm(m)}-01`, 1) };
+  }
+  if (key === "lastyear") return { from: `${y - 1}-01-01`, to: `${y - 1}-12-31` };
+
   const startMonth = key === "mtd" ? m : key === "qtd" ? Math.floor((m - 1) / 3) * 3 + 1 : 1;
-  return { from: `${y}-${String(startMonth).padStart(2, "0")}-01`, to: newest };
+  return { from: `${y}-${mm(startMonth)}-01`, to: newest };
 }
 
 /** Narrow a day-keyed series to the selected window. */
