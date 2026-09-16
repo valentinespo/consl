@@ -4,8 +4,35 @@
     {
       "name": "herbl-dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 3000
+    },
+    {
+      "name": "consl-dev-auth",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "ALLOW_DEV_AUTH_BYPASS=0",
+        "npx",
+        "next",
+        "dev",
+        "-p",
+        "3210"
+      ],
+      "port": 3210
+    },
+    {
+      "name": "consl-dev",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "next",
+        "dev",
+        "-p",
+        "3210"
+      ],
+      "port": 3210
     }
   ]
 }
