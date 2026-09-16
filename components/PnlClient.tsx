@@ -333,6 +333,9 @@ export function PnlClient({ history, initial }: { history: PnlHistory; initial: 
   const [restored, setRestored] = useState(false);
   useEffect(() => {
     if (restored) return;
+    // Deliberately a state change inside an effect: the saved view lives in the browser's storage,
+    // which only exists after hydration — reading it any earlier would mismatch the server HTML.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRestored(true);
     if (params.has("range") || params.has("channel") || params.has("breakdown")) return;
     const saved = readSavedPnlView();

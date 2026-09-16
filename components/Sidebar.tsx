@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   LayoutDashboardFilled,
   BoxesFilled,
@@ -52,6 +52,11 @@ const INTERNAL_NAV: NavItem[] = [
   { href: "/internal", label: "Applications", icon: OrdersFilled, exact: true, resource: "internal" },
   { href: "/internal/companies", label: "Companies", icon: Building2Filled, resource: "internal" },
 ];
+
+const subscribeToStorage = (onChange: () => void) => {
+  window.addEventListener("storage", onChange);
+  return () => window.removeEventListener("storage", onChange);
+};
 
 const COLLAPSE_KEYS = { finances: "consl.nav.finances.collapsed", production: "consl.nav.production.collapsed" };
 
@@ -144,12 +149,9 @@ export function Sidebar({
   const showFinances = !collapsed.finances || financesActive;
   const showProduction = !collapsed.production || productionActive;
 
-  // The P&L tab reopens on the last view this browser had (lib/pnl-view.ts). Read after mount so
-  // the server and the first client render agree on a plain "/pnl".
-  const [pnlHref, setPnlHref] = useState("/pnl");
-  useEffect(() => {
-    setPnlHref(savedPnlHref());
-  }, [pathname]);
+  // The P&L tab reopens on the last view this browser had (lib/pnl-view.ts): the link carries it.
+  // Read as an external store — the server (and hydration) see a plain "/pnl", the browser its own.
+  const pnlHref = useSyncExternalStore(subscribeToStorage, savedPnlHref, () => "/pnl");
 
   const renderLink = (item: NavItem) => {
     const active = isActive(item, pathname);
