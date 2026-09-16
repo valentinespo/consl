@@ -40,13 +40,22 @@ function useClerkPasswordSettings(): PasswordSettings {
   }, [clerk.loaded]);
 }
 
+type ClerkLikeError = { code: string; message: string; longMessage?: string; meta?: unknown; errors?: { code: string; message: string; longMessage?: string; meta?: unknown }[] };
+
+/** The specific error, not the envelope: Clerk hands back a response error whose own code is the
+ *  generic "api_response_error", with the real one ("form_identifier_exists", …) in errors[0]. */
+function specific(error: ClerkLikeError): { code: string; message: string; longMessage?: string; meta?: unknown } {
+  return error.errors?.[0] ?? error;
+}
+
 /** Clerk's own wording for a refused password is terse ("not strong enough"); say what to do instead. */
-function passwordProblem(error: { code: string; message: string; longMessage?: string }): string | null {
+function passwordProblem(raw: ClerkLikeError): string | null {
+  const error = specific(raw);
   if (error.code === "form_password_pwned") {
     return "That password has shown up in a known data breach, so it can't be used here. Pick a different one.";
   }
   if (error.code.startsWith("form_password_")) {
-    const meta = (error as { meta?: { zxcvbn?: { suggestions?: { message: string }[] } } }).meta;
+    const meta = error.meta as { zxcvbn?: { suggestions?: { message: string }[] } } | undefined;
     const tips = meta?.zxcvbn?.suggestions?.map((t) => t.message).filter(Boolean) ?? [];
     return [error.longMessage ?? error.message, ...tips].join(" ");
   }
@@ -108,7 +117,10 @@ export function AccountStep({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linking, applicationId, linkAttempt]);
 
-  const describe = (e: { longMessage?: string; message: string }) => e.longMessage ?? e.message;
+  const describe = (e: ClerkLikeError) => {
+    const s = specific(e);
+    return s.longMessage ?? s.message;
+  };
 
   async function submitSignUp(e: React.FormEvent) {
     e.preventDefault();
@@ -122,7 +134,7 @@ export function AccountStep({
       unsafeMetadata: { applicationId, companyName: answers.companyName.trim() },
     });
     if (error) {
-      if (error.code === "form_identifier_exists") {
+      if (specific(error).code === "form_identifier_exists") {
         setMode("signin");
         setMessage("You already have a consl account with this email. Sign in with your password to continue.");
         return;
