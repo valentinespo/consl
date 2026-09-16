@@ -51,6 +51,14 @@ export type ContactInput = {
 };
 
 /** Step one: create the row as soon as we know who they are, so a drop-off still leaves a lead. */
+/** Whether a saved application still exists on the server — a browser resuming a deleted one
+ *  (a wiped test, a row removed by an admin) must start from scratch, not from its old step. */
+export async function applicationState(id: string): Promise<{ exists: false } | { exists: true; status: string; orgId: string | null }> {
+  if (!id || typeof id !== "string" || id.length > 40) return { exists: false };
+  const app = await prismaBase.accessApplication.findUnique({ where: { id }, select: { status: true, orgId: true } });
+  return app ? { exists: true, status: app.status, orgId: app.orgId } : { exists: false };
+}
+
 export async function saveContact(input: ContactInput): Promise<Result<{ id: string }>> {
   if (str(input.website, 200)) return { ok: true, id: "ok" };
   const fullName = str(input.fullName, 120);

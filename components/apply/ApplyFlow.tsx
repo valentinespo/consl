@@ -24,7 +24,7 @@ import {
 import { ChoiceCard, ChoiceGrid, Dropdown, Em, GHOST, Heading, Mark, Notice, PRIMARY, TextArea, TextField, Wordmark, fieldCls } from "@/components/apply/fields";
 import { AccountStep } from "@/components/apply/AccountStep";
 import { CalendlyStep } from "@/components/apply/CalendlyStep";
-import { saveAnswers, saveContact } from "@/app/apply/actions";
+import { saveAnswers, saveContact, applicationState } from "@/app/apply/actions";
 
 /**
  * The early-access application: a split screen — the offer on the left, one question at a time
@@ -87,7 +87,7 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [honeypot, setHoneypot] = useState("");
   const source = useRef<string | null>(null);
-  const { user } = useUser();
+  const { user, isLoaded, isSignedIn } = useUser();
 
   // Someone already signed in (an applicant whose company was never created) shouldn't retype
   // what their login already knows.
@@ -98,23 +98,52 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
     );
   }, [ready, user]);
 
-  // Resume after a refresh: everything typed so far lives in sessionStorage for this tab.
+  // Resume after a refresh: everything typed so far lives in sessionStorage for this tab — but
+  // only if the application it belongs to still exists on the server. A row that was deleted
+  // underneath the browser (a wiped test company, an admin clean-up) is not resumed: the saved
+  // progress is dropped and the form starts from scratch.
   useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const s = JSON.parse(raw) as Partial<Saved>;
-        if (s.step) setStep(s.step);
-        if (s.answers) setAnswers({ ...EMPTY_ANSWERS, ...s.answers });
-        setApplicationId(s.applicationId ?? null);
-        setOrgId(s.orgId ?? null);
+    let cancelled = false;
+    (async () => {
+      let saved: Partial<Saved> | null = null;
+      try {
+        const raw = sessionStorage.getItem(STORAGE_KEY);
+        if (raw) saved = JSON.parse(raw) as Partial<Saved>;
+        source.current = new URLSearchParams(window.location.search).get("utm_source");
+      } catch {
+        /* private mode etc. — the form still works, it just won't survive a refresh */
       }
-      source.current = new URLSearchParams(window.location.search).get("utm_source");
-    } catch {
-      /* private mode etc. — the form still works, it just won't survive a refresh */
-    }
-    setReady(true);
+      if (saved?.applicationId) {
+        const state = await applicationState(saved.applicationId).catch(() => null);
+        if (state && !state.exists) {
+          try {
+            sessionStorage.removeItem(STORAGE_KEY);
+          } catch {
+            /* ignore */
+          }
+          saved = null;
+        }
+      }
+      if (cancelled) return;
+      if (saved) {
+        if (saved.step) setStep(saved.step);
+        if (saved.answers) setAnswers({ ...EMPTY_ANSWERS, ...saved.answers });
+        setApplicationId(saved.applicationId ?? null);
+        setOrgId(saved.orgId ?? null);
+      }
+      setReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  // The booking step belongs to a signed-in applicant with a company. Resumed while signed out
+  // (the login was removed, the session expired), it steps back to the account step.
+  useEffect(() => {
+    if (!ready || !isLoaded) return;
+    if (step === "book" && !isSignedIn) setStep("account");
+  }, [ready, isLoaded, isSignedIn, step]);
   useEffect(() => {
     if (!ready) return;
     try {
