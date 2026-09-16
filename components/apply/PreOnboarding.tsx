@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { SignOutButton } from "@clerk/nextjs";
-import { CalendarDays, Check, Lock } from "@/components/icons";
+import { Boxes, CalendarDays, Check, Lock, MapTrifold, Tag } from "@/components/icons";
 import { CalendlyEmbed, type Scheduled } from "@/components/apply/CalendlyStep";
 import { markCallBooked } from "@/app/apply/actions";
 import { startTrial } from "@/app/pre-onboarding/actions";
@@ -125,7 +125,9 @@ export function PreOnboarding({
                 done
                 title={callLabel ? "Your discovery call" : "Discovery call booked"}
                 body={callBody}
-              />
+              >
+                <BringList />
+              </Row>
             )}
             <Row
               icon={<Lock size={16} />}
@@ -155,9 +157,46 @@ export function PreOnboarding({
   );
 }
 
-function Row({ icon, done, title, body, action }: { icon: ReactNode; done: boolean; title: string; body: string; action?: ReactNode }) {
+/** What to have at hand on the call — the three things onboarding is built from. */
+const BRING = [
+  { icon: <Tag size={13} />, text: "What a unit of your inventory is worth today, or an average cost of goods per product." },
+  { icon: <Boxes size={13} />, text: "An exact count of the raw materials and finished goods you hold outside your sales channels, and what they cost you." },
+  { icon: <MapTrifold size={13} />, text: "A map of your facilities: warehouses, co-packers, manufacturers and 3PLs." },
+];
+
+function BringList() {
   return (
-    <div className="flex items-center gap-3.5 rounded-xl border border-border bg-bg px-4 py-3.5">
+    <div className="mt-3.5 border-t border-border pt-3.5">
+      <div className="text-[11.5px] font-semibold uppercase tracking-wide text-muted">Bring to the call</div>
+      <ul className="mt-2.5 space-y-2">
+        {BRING.map((b) => (
+          <li key={b.text} className="flex items-start gap-2.5 text-[13px] leading-snug text-ink-soft">
+            <span className="mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-surface-2 text-muted">{b.icon}</span>
+            <span>{b.text}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function Row({
+  icon,
+  done,
+  title,
+  body,
+  action,
+  children,
+}: {
+  icon: ReactNode;
+  done: boolean;
+  title: string;
+  body: string;
+  action?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <div className={`flex gap-3.5 rounded-xl border border-border bg-bg px-4 py-3.5 ${children ? "items-start" : "items-center"}`}>
       <span
         className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
           done ? "bg-positive/10 text-positive" : "bg-surface-2 text-muted"
@@ -168,6 +207,7 @@ function Row({ icon, done, title, body, action }: { icon: ReactNode; done: boole
       <div className="min-w-0 flex-1">
         <div className="text-[14px] font-medium text-ink">{title}</div>
         <div className="text-[12.5px] text-muted">{body}</div>
+        {children}
       </div>
       {action}
     </div>
