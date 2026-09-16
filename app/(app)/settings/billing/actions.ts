@@ -12,7 +12,8 @@ export async function openBillingPortal(): Promise<{ ok: true; url: string } | {
   const org = await prismaBase.organization.findUnique({ where: { id: gate.orgId }, select: { stripeCustomerId: true } });
   if (!org?.stripeCustomerId) return { ok: false, error: "This company has no billing account yet." };
   try {
-    const session = await stripe().billingPortal.sessions.create({ customer: org.stripeCustomerId, return_url: `${appUrl()}/settings/billing` });
+    const configuration = process.env.STRIPE_PORTAL_CONFIG_ID?.trim() || undefined;
+    const session = await stripe().billingPortal.sessions.create({ customer: org.stripeCustomerId, return_url: `${appUrl()}/settings/billing`, ...(configuration ? { configuration } : {}) });
     return { ok: true, url: session.url };
   } catch (e) {
     console.error("[stripe] portal session failed:", (e as Error).message);
