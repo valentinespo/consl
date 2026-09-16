@@ -68,13 +68,16 @@ export function PreOnboarding({
     ? `${callLabel}, your local time. The invite is in your inbox.`
     : `Booked ${bookedLabel}. The invite with the exact time is in your inbox.`;
 
-  // Wide while the calendar is on the page — Calendly switches to its two-column layout (details
-  // on the left, dates on the right) only once its frame is about 1000px wide. The calendar spans
-  // the card edge to edge, so a 1040px card gives it the full ~1038px — and the card returns to
-  // its compact width once the call is booked.
+  // Geometry while the calendar is on the page (measured 2026-09-16): Calendly keeps its side-by-side
+  // layout only in a frame ≥ ~1000px, draws its booking card 800px wide centred in that frame, and
+  // widens the card to frame − 100px once a date is picked. So the card is 1002px wide with 100px
+  // side padding: the text, rows and button are exactly 800px, the frame spans the card edge to edge
+  // (1000px), and Calendly's 800px card lands flush with the content's edges — with room to grow
+  // into the padding when the time slots appear. Compact again once the call is booked.
+  const wide = !booked;
   return (
     <div className="min-h-screen bg-surface-2 px-5 py-8 sm:py-12">
-      <div className={`mx-auto w-full transition-[max-width] ${booked ? "max-w-[600px]" : "max-w-[1040px]"}`}>
+      <div className={`mx-auto w-full transition-[max-width] ${booked ? "max-w-[600px]" : "max-w-[1002px]"}`}>
         <div className="mb-6 flex items-center justify-between">
           <span className="inline-flex items-center gap-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -89,7 +92,7 @@ export function PreOnboarding({
           </div>
         </div>
 
-        <div className="rounded-[var(--radius-card)] border border-border bg-surface p-7 shadow-sm sm:p-8">
+        <div className={`rounded-[var(--radius-card)] border border-border bg-surface p-7 shadow-sm sm:p-8 ${wide ? "min-[1042px]:px-[100px]" : ""}`}>
           <span className="pill-chart inline-flex items-center rounded-full px-3 py-1 text-[12px] font-semibold">Early access</span>
           <h1 className="mt-4 text-[24px] font-semibold leading-tight tracking-tight text-ink sm:text-[27px]">
             {booked ? "Nothing to do here until your discovery call" : "Book your discovery call"}
@@ -106,7 +109,7 @@ export function PreOnboarding({
               itself trims Calendly's own blank margins, so the rows below follow closely. */}
           {!booked &&
             (calendlyUrl ? (
-              <div className="-mx-7 mt-6 border-t border-border bg-white sm:-mx-8">
+              <div className="-mx-7 mt-6 border-t border-border bg-white sm:-mx-8 min-[1042px]:-mx-[100px]">
                 <CalendlyEmbed url={calendlyUrl} name={firstName ?? ""} email={email} onScheduled={scheduled} minHeight={720} />
               </div>
             ) : (
