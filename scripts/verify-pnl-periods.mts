@@ -1,6 +1,6 @@
 /** Run with: node --import tsx scripts/verify-pnl-periods.mts */
 import assert from "node:assert/strict";
-import { createPnlPeriods, isPnlDay, pnlPeriodHeading, pnlPeriodRanges, zonedDayBounds } from "../lib/pnl-periods.js";
+import { aggregatePnlDays, createPnlPeriods, encodePnlDays, isPnlDay, pnlPeriodHeading, pnlPeriodRanges, zonedDayBounds } from "../lib/pnl-periods.js";
 import { parsePnlBreakdown, type PnlBreakdown } from "../lib/pnl-shared.js";
 
 assert.equal(parsePnlBreakdown(undefined), "none");
@@ -73,4 +73,27 @@ assert.deepEqual(tokyo.finish().map((period) => period.statement.sales), [0, 10]
 const empty = createPnlPeriods(pnlPeriodRanges("2026-01-01", "2026-03-31", "month"), "UTC").finish();
 assert.equal(empty.length, 3);
 assert.ok(empty.every(({ statement }) => statement.netProfit === 0 && statement.margin === null && statement.roi === null));
+// The browser folds compact days into any breakdown and lands on the same statements the server
+// would have bucketed directly — amounts, sources, costs, units and ratios alike.
+{
+  const dayRanges = pnlPeriodRanges("2026-01-28", "2026-03-03", "day");
+  const direct = createPnlPeriods(pnlPeriodRanges("2026-01-28", "2026-03-03", "month"), "UTC");
+  const directYear = createPnlPeriods(pnlPeriodRanges("2026-01-28", "2026-03-03", "year"), "UTC");
+  const perDay = createPnlPeriods(dayRanges, "UTC");
+  const events: [string, string, string, number, string][] = [
+    ["2026-01-28T10:00:00Z", "sales", "Principal", 100, "AMAZON"], ["2026-01-31T23:59:00Z", "sales", "Principal", 50, "SHOPIFY"],
+    ["2026-02-01T00:00:00Z", "sales", "Principal", 75, "AMAZON"], ["2026-02-14T12:00:00Z", "fba_fees", "FBAPerUnitFulfillmentFee", -12.5, "AMAZON"],
+    ["2026-02-20T12:00:00Z", "refunds", "Refund", -30, "AMAZON"], ["2026-03-03T08:00:00Z", "sales", "Principal", 20, "TIKTOK"],
+  ];
+  for (const [at, group, type, amount, source] of events) for (const b of [direct, directYear, perDay]) b.addAmount(Date.parse(at), group, type, amount, source as never);
+  for (const [at, units, cogs, mcf, unreported] of [["2026-01-29T00:00:00Z", 2, -40, false, false], ["2026-02-02T00:00:00Z", 3, -60, true, false], ["2026-03-03T00:00:00Z", 1, -15, false, true]] as const)
+    for (const b of [direct, directYear, perDay]) b.addCost(Date.parse(at), units, cogs, mcf, unreported);
+  const folded = aggregatePnlDays(encodePnlDays(perDay.finish()), pnlPeriodRanges("2026-01-28", "2026-03-03", "month"));
+  assert.deepEqual(folded, direct.finish());
+  assert.equal(folded.length, 3);
+  assert.deepEqual(folded[0].statement.groups[0].types[0].sources, ["AMAZON", "SHOPIFY"]);
+  assert.deepEqual(folded[1].statement.mcf, { units: 3, cogs: -60 });
+  assert.deepEqual(aggregatePnlDays(encodePnlDays(perDay.finish()), pnlPeriodRanges("2026-01-28", "2026-03-03", "year")), directYear.finish());
+}
+
 console.log("P&L period checks passed: date coverage, partial labels, leap years, DST, timezone boundaries, amounts, costs, sources and ratios.");

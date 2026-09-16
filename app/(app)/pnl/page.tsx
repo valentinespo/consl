@@ -7,7 +7,7 @@ import { todayIn } from "@/lib/channel-tz";
 import { PnlClient, PreConslCostButton } from "@/components/PnlClient";
 import { rangeBounds, RANGES, type RangeKey } from "@/lib/chart";
 import { parsePnlBreakdown } from "@/lib/pnl-shared";
-import { isPnlDay, pnlPeriodRanges } from "@/lib/pnl-periods";
+import { encodePnlDays, isPnlDay, pnlPeriodRanges } from "@/lib/pnl-periods";
 
 export const dynamic = "force-dynamic";
 
@@ -44,9 +44,13 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
   const to = start <= end ? end : start;
   const breakdown = parsePnlBreakdown(str(sp.breakdown));
   const bounds = zonedDayBounds(from, to, tz);
+  // The statement is always tallied day by day (in the same pass as the Total) and shipped
+  // compact; the browser folds the days into whatever breakdown is chosen, so switching between
+  // breakdowns is instant — no second trip through the ledger and the FIFO walk.
   const { periods, ...pnl } = await getPnl(bounds.from, bounds.to, channel ? [channel] : undefined, {
-    ranges: pnlPeriodRanges(from, to, breakdown), timeZone: tz,
+    ranges: pnlPeriodRanges(from, to, "day"), timeZone: tz,
   });
+  const days = encodePnlDays(periods);
   const products = await prisma.product.findMany({
     where: { sellerSku: { not: null } },
     select: { id: true, code: true, name: true, imageUrl: true, preConslUnitCost: true, openingUnitCost: true },
@@ -60,7 +64,7 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
       </PageHeader>
       <PnlClient
         pnl={pnl}
-        periods={periods}
+        days={days}
         channels={present}
         filter={{ channel: channel ?? "", range: { key: rangeKey, from, to }, breakdown }}
         dataBounds={{ newest, oldest }}

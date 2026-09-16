@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useState, useTransition, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { ChevronDown, PnlFilled, Receipt, X } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
 import { SelectMenu } from "@/components/SelectMenu";
-import { GROUP_LABEL, GROUP_ORDER, PNL_BREAKDOWNS, PNL_CHANNEL_LABEL, PNL_SOURCE_LABEL, PNL_SOURCE_ORDER, type Pnl, type PnlBreakdown, type PnlChannel, type PnlGroupBlock, type PnlPeriod, type PnlSource, type PnlStatement } from "@/lib/pnl-shared";
-import { pnlPeriodHeading } from "@/lib/pnl-periods";
+import { GROUP_LABEL, GROUP_ORDER, PNL_BREAKDOWNS, PNL_CHANNEL_LABEL, PNL_SOURCE_LABEL, PNL_SOURCE_ORDER, parsePnlBreakdown, type Pnl, type PnlBreakdown, type PnlChannel, type PnlDay, type PnlGroupBlock, type PnlPeriod, type PnlSource, type PnlStatement } from "@/lib/pnl-shared";
+import { aggregatePnlDays, pnlPeriodHeading, pnlPeriodRanges } from "@/lib/pnl-periods";
 import { ROOT_LOGO, SOURCE_LOGO } from "@/lib/channel-logos";
 import { EmptyState } from "@/components/EmptyState";
 import { SkuAvatar } from "@/components/ui";
@@ -112,9 +112,16 @@ function GroupRow({ block, money }: { block: PnlGroupBlock; money: (n: number) =
   );
 }
 
-const periodLabelCell = "sticky left-0 z-10 w-[var(--pnl-label-width)] min-w-[var(--pnl-label-width)] max-w-[var(--pnl-label-width)] bg-surface px-4 text-left";
-const periodValueCell = (index: number, centered = false) => `min-w-[180px] px-4 ${centered ? "text-center" : "text-right"} whitespace-nowrap ${index === 0 ? "sm:sticky sm:left-[var(--pnl-label-width)] sm:z-10 bg-surface-2 border-r border-border" : ""}`;
+/* ---------------------------- Breakdown table ----------------------------
+ * Fixed geometry: the label column, then Total, then one column per period, every value column
+ * the same width whatever the breakdown — a single "2026" column never stretches to fill the
+ * card; the space to its right simply stays empty (a trailing filler column carries the row
+ * lines across). Label and Total stay pinned while the periods scroll. Newest period first. */
+const VALUE_COL_W = 180;
+const periodLabelCell = "sticky left-0 z-10 bg-surface px-4 text-left";
+const periodValueCell = (index: number) => `px-4 text-right whitespace-nowrap ${index === 0 ? "sm:sticky sm:left-[var(--pnl-label-width)] sm:z-10 bg-surface-2 border-r border-border" : ""}`;
 const periodRowBorder = "[&>th]:border-t [&>td]:border-t [&>th]:border-line [&>td]:border-line";
+const Filler = () => <td aria-hidden className="border-t border-line" />;
 
 function PeriodGroupRows({ block, statements, money }: { block: PnlGroupBlock; statements: PnlStatement[]; money: (n: number) => string }) {
   const [open, setOpen] = useState(false);
@@ -131,6 +138,7 @@ function PeriodGroupRows({ block, statements, money }: { block: PnlGroupBlock; s
           </button>
         </th>
         {groups.map((group, index) => <td key={index} className={`${periodValueCell(index)} py-2.5`}><Amount value={group?.total ?? 0} money={money} /></td>)}
+        <Filler />
       </tr>
       {open && block.types.map((type) => (
         <tr key={type.type} className="dropdown-in text-[12.5px] text-ink-soft">
@@ -138,14 +146,59 @@ function PeriodGroupRows({ block, statements, money }: { block: PnlGroupBlock; s
             <span className="flex items-center gap-2"><SourceMarks sources={type.sources} size={13} /><span title={humanize(type.type)} className="truncate">{humanize(type.type)}</span></span>
           </th>
           {groups.map((group, index) => <td key={index} className={`${periodValueCell(index)} py-1.5`}><Amount value={group?.types.find((row) => row.type === type.type)?.amount ?? 0} money={money} /></td>)}
+          <Filler />
         </tr>
       ))}
     </>
   );
 }
 
+/** Cost of goods across the columns. The units live in the row's label only (like the plain
+ *  statement); the "of which" lines (MCF, free units) sit behind a chevron. */
+function PeriodCogsRows({ pnl, statements, money, locale }: { pnl: Pnl; statements: PnlStatement[]; money: (n: number) => string; locale: string }) {
+  const [open, setOpen] = useState(false);
+  const expandable = pnl.mcf.units > 0 || pnl.unreported.units > 0;
+  const sub = (key: string, label: string, units: number, value: (statement: PnlStatement) => number) => (
+    <tr key={key} className="dropdown-in text-[12.5px] text-ink-soft">
+      <th scope="row" className={`${periodLabelCell} py-1.5 pl-8 font-normal`}>
+        <span className="flex items-center gap-2">
+          <SourceMarks sources={["CONSL"]} size={13} />
+          <span className="truncate">
+            {label}
+            <span className="ml-1.5 text-[11.5px] text-muted">{units.toLocaleString(locale)} units</span>
+          </span>
+        </span>
+      </th>
+      {statements.map((statement, index) => <td key={index} className={`${periodValueCell(index)} py-1.5`}><Amount value={value(statement)} money={money} /></td>)}
+      <Filler />
+    </tr>
+  );
+  return (
+    <>
+      <tr className={`${periodRowBorder} text-[13px]`}>
+        <th scope="row" className={`${periodLabelCell} py-2.5 font-medium text-ink`}>
+          <button type="button" onClick={() => expandable && setOpen((value) => !value)} aria-expanded={expandable ? open : undefined} className={`flex w-full items-center gap-2 text-left ${expandable ? "hover:text-accent" : "cursor-default"}`}>
+            <SourceMarks sources={["CONSL"]} />
+            <span className="min-w-0 truncate">
+              Cost of goods
+              <span className="ml-2 text-[11.5px] font-normal text-muted">{pnl.unitsSold.toLocaleString(locale)} units at landed cost</span>
+            </span>
+            {expandable && <ChevronDown size={13} className={`shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`} />}
+          </button>
+        </th>
+        {statements.map((statement, index) => <td key={index} className={`${periodValueCell(index)} py-2.5`}><Amount value={statement.cogs} money={money} /></td>)}
+        <Filler />
+      </tr>
+      {open && pnl.mcf.units > 0 && sub("mcf", "of which MCF orders", pnl.mcf.units, (statement) => statement.mcf.cogs)}
+      {open && pnl.unreported.units > 0 && sub("unreported", "of which free units & replacements", pnl.unreported.units, (statement) => statement.unreported.cogs)}
+    </>
+  );
+}
+
 function PnlBreakdownTable({ pnl, periods, breakdown, money, locale }: { pnl: Pnl; periods: PnlPeriod[]; breakdown: PnlBreakdown; money: (n: number) => string; locale: string }) {
-  const statements: PnlStatement[] = [pnl, ...periods.map((period) => period.statement)];
+  // Newest period first, like a statement is read: this month, then the ones before it.
+  const ordered = [...periods].reverse();
+  const statements: PnlStatement[] = [pnl, ...ordered.map((period) => period.statement)];
   // Include a line even when opposite movements in different periods cancel out in Total.
   const groups = GROUP_ORDER.flatMap((group) => {
     const blocks = statements.flatMap((statement) => statement.groups.filter((block) => block.group === group));
@@ -163,34 +216,39 @@ function PnlBreakdownTable({ pnl, periods, breakdown, money, locale }: { pnl: Pn
       <tr key={key} className={`${periodRowBorder} ${summary ? "bg-surface-2/40 text-[14px]" : "text-[13px]"}`}>
         <th scope="row" className={`${periodLabelCell} py-2.5 ${summary ? "font-semibold" : "font-medium"} text-ink`}>{label}</th>
         {statements.map((statement, index) => <td key={index} className={`${periodValueCell(index)} py-2.5`}>{value(statement)}</td>)}
+        <Filler />
       </tr>
     );
   }
   return (
     <div className="overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface">
-      <div role="region" aria-label="P&L by period" tabIndex={0} className="overflow-x-auto [--pnl-label-width:180px] sm:[--pnl-label-width:260px]">
-        <table className="w-full border-separate border-spacing-0">
+      <div role="region" aria-label="P&L by period" tabIndex={0} className="overflow-x-auto [--pnl-label-width:200px] sm:[--pnl-label-width:300px]">
+        <table className="w-full table-fixed border-separate border-spacing-0">
           <caption className="sr-only">Profit and loss for the selected date range, with totals and a breakdown {PNL_BREAKDOWNS.find((option) => option.value === breakdown)?.label.toLowerCase()}.</caption>
+          <colgroup>
+            <col className="w-[var(--pnl-label-width)]" />
+            {statements.map((_, index) => <col key={index} style={{ width: VALUE_COL_W }} />)}
+            <col />
+          </colgroup>
           <thead>
-            <tr className="text-[12px] text-ink-soft">
-              <th scope="col" className={`${periodLabelCell} py-3 font-medium`}>P&amp;L</th>
-              <th scope="col" className={`${periodValueCell(0, true)} py-3 align-middle font-semibold text-ink`}>Total</th>
-              {periods.map((period) => {
+            <tr className="text-[13px] text-ink-soft">
+              <th scope="col" className={`${periodLabelCell} py-3 align-bottom font-medium`}>P&amp;L</th>
+              <th scope="col" className={`${periodValueCell(0)} py-3 align-bottom font-semibold text-ink`}>Total</th>
+              {ordered.map((period) => {
                 const heading = pnlPeriodHeading(period, breakdown, locale);
                 return (
-                  <th scope="col" key={period.key} className="min-w-[180px] px-4 py-3 text-center align-middle font-medium whitespace-nowrap">
+                  <th scope="col" key={period.key} className="px-4 py-3 text-right align-bottom font-medium whitespace-nowrap">
                     {heading.label}
-                    {heading.note && <span className="mt-1 block text-[11px] font-normal text-muted">{heading.note}</span>}
+                    {heading.note && <span className="mt-0.5 block text-[11px] font-normal text-muted">{heading.note}</span>}
                   </th>
                 );
               })}
+              <th aria-hidden />
             </tr>
           </thead>
           <tbody>
             {groups.filter((group) => group.group === "sales").map((block) => <PeriodGroupRows key={block.group} block={block} statements={statements} money={money} />)}
-            {row("cogs", <span className="flex items-center gap-2"><SourceMarks sources={["CONSL"]} />Cost of goods</span>, (statement) => <><Amount value={statement.cogs} money={money} /><span className="mt-0.5 block text-[11px] text-muted">{statement.unitsSold.toLocaleString(locale)} units at landed cost</span></>)}
-            {pnl.mcf.units > 0 && row("mcf", <span className="pl-4 text-[12px] font-normal text-ink-soft">of which MCF orders</span>, (statement) => <><Amount value={statement.mcf.cogs} money={money} /><span className="block text-[11px] text-muted">{statement.mcf.units.toLocaleString(locale)} units</span></>)}
-            {pnl.unreported.units > 0 && row("unreported", <span className="pl-4 text-[12px] font-normal text-ink-soft">of which free units &amp; replacements</span>, (statement) => <><Amount value={statement.unreported.cogs} money={money} /><span className="block text-[11px] text-muted">{statement.unreported.units.toLocaleString(locale)} units</span></>)}
+            <PeriodCogsRows pnl={pnl} statements={statements} money={money} locale={locale} />
             {groups.filter((group) => group.group !== "sales").map((block) => <PeriodGroupRows key={block.group} block={block} statements={statements} money={money} />)}
             {row("profit", "Net profit", (statement) => <span className={`tabular font-semibold ${statement.netProfit >= 0 ? "text-positive" : "text-negative"}`}>{statement.netProfit < 0 ? `−${money(Math.abs(statement.netProfit))}` : money(statement.netProfit)}</span>, true)}
             {row("margin", <span className="font-normal text-ink-soft">Margin</span>, (statement) => <span className="tabular text-ink-soft">{pct(statement.margin)}</span>)}
@@ -202,15 +260,67 @@ function PnlBreakdownTable({ pnl, periods, breakdown, money, locale }: { pnl: Pn
   );
 }
 
+/** Cost of goods in the plain statement: consl's mark, the units at landed cost, and — behind a
+ *  chevron — the "of which" lines (MCF orders, free units) that used to sit open underneath. */
+function CogsRow({ pnl, money }: { pnl: Pnl; money: (n: number) => string }) {
+  const [open, setOpen] = useState(false);
+  const expandable = pnl.mcf.units > 0 || pnl.unreported.units > 0;
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => expandable && setOpen((o) => !o)}
+        aria-expanded={expandable ? open : undefined}
+        className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-[13px] ${expandable ? "hover:bg-surface-2/60" : "cursor-default"}`}
+      >
+        <span className="flex min-w-0 items-center gap-2 font-medium text-ink">
+          <SourceMarks sources={["CONSL"]} />
+          <span className="min-w-0 truncate">
+            Cost of goods
+            <span className="ml-2 text-[11.5px] font-normal text-muted">{pnl.unitsSold.toLocaleString()} units at landed cost</span>
+          </span>
+          {expandable && <ChevronDown size={13} className={`shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`} />}
+        </span>
+        <Amount value={pnl.cogs} money={money} />
+      </button>
+      {open && pnl.mcf.units > 0 && (
+        <div className="dropdown-in flex items-center justify-between gap-3 px-4 py-1.5 pl-8 text-[12.5px] text-ink-soft">
+          <span className="flex min-w-0 items-center gap-2">
+            <SourceMarks sources={["CONSL"]} size={13} />
+            <span className="min-w-0 truncate">
+              of which MCF orders · {pnl.mcf.units.toLocaleString()} units
+              <span className="ml-1.5 text-[11.5px] text-muted">shipped by Amazon for another channel, no sale reported</span>
+            </span>
+          </span>
+          <Amount value={pnl.mcf.cogs} money={money} />
+        </div>
+      )}
+      {open && pnl.unreported.units > 0 && (
+        <div className="dropdown-in flex items-center justify-between gap-3 px-4 py-1.5 pl-8 text-[12.5px] text-ink-soft">
+          <span className="flex min-w-0 items-center gap-2">
+            <SourceMarks sources={["CONSL"]} size={13} />
+            <span className="min-w-0 truncate">
+              of which free units &amp; replacements · {pnl.unreported.units.toLocaleString()} units
+              <span className="ml-1.5 text-[11.5px] text-muted">shipped, but Amazon reported no money for them</span>
+            </span>
+          </span>
+          <Amount value={pnl.unreported.cogs} money={money} />
+        </div>
+      )}
+    </>
+  );
+}
+
 export function PnlClient({
   pnl,
-  periods,
+  days,
   channels,
   filter,
   dataBounds,
 }: {
   pnl: Pnl;
-  periods: PnlPeriod[];
+  /** The statement day by day over the selected range — folded into the chosen breakdown here. */
+  days: PnlDay[];
   /** Channels with data, in display order — the filter's choices. */
   channels: PnlChannel[];
   filter: { range: Range; channel: string; breakdown: PnlBreakdown };
@@ -220,7 +330,20 @@ export function PnlClient({
   const pathname = usePathname();
   const params = useSearchParams();
   const { money, locale } = useMoney();
-  const [pending, startTransition] = useTransition();
+
+  // The breakdown is browser state: switching it folds the same days differently, instantly. The
+  // URL is kept in step (bookmarkable, and a range or channel change carries it along) without a
+  // navigation, so the server never recomputes the statement just to regroup it.
+  const [breakdown, setBreakdownState] = useState<PnlBreakdown>(filter.breakdown);
+  const [seenBreakdown, setSeenBreakdown] = useState(filter.breakdown);
+  if (filter.breakdown !== seenBreakdown) {
+    setSeenBreakdown(filter.breakdown);
+    setBreakdownState(filter.breakdown);
+  }
+  const periods = useMemo(
+    () => (breakdown === "none" ? [] : aggregatePnlDays(days, pnlPeriodRanges(filter.range.from, filter.range.to, breakdown))),
+    [days, breakdown, filter.range.from, filter.range.to],
+  );
 
   function setRange(r: Range) {
     const q = new URLSearchParams(params.toString());
@@ -243,10 +366,13 @@ export function PnlClient({
   }
 
   function setBreakdown(value: string) {
+    const next = parsePnlBreakdown(value);
+    setBreakdownState(next);
     const q = new URLSearchParams(params.toString());
-    if (value === "none") q.delete("breakdown");
-    else q.set("breakdown", value);
-    startTransition(() => router.push(`${pathname}?${q.toString()}`, { scroll: false }));
+    if (next === "none") q.delete("breakdown");
+    else q.set("breakdown", next);
+    const qs = q.toString();
+    window.history.replaceState(null, "", qs ? `${pathname}?${qs}` : pathname);
   }
 
   const pct = (v: number | null) => (v == null ? "—" : `${(v * 100).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`);
@@ -254,7 +380,7 @@ export function PnlClient({
   const rest = pnl.groups.filter((g) => g.group !== "sales");
 
   return (
-    <div className="flex flex-col gap-5" aria-busy={pending}>
+    <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-2">
         <DateRangePicker value={filter.range} onChange={setRange} newest={dataBounds.newest} oldest={dataBounds.oldest} locale={locale} />
         {channels.length > 1 && (
@@ -281,8 +407,7 @@ export function PnlClient({
         )}
         <div className="flex items-center gap-2">
           <span className="text-[12px] text-muted">Breakdown</span>
-          <SelectMenu value={filter.breakdown} onChange={setBreakdown} options={[...PNL_BREAKDOWNS]} ariaLabel="P&L breakdown" className="w-[152px]" disabled={pending} />
-          {pending && <span role="status" className="text-[12px] text-muted">Updating P&amp;L…</span>}
+          <SelectMenu value={breakdown} onChange={setBreakdown} options={[...PNL_BREAKDOWNS]} ariaLabel="P&L breakdown" className="w-[152px]" />
         </div>
         {pnl.importProgress && (
           <span className="inline-flex flex-wrap items-center gap-2 text-[12px] text-muted" title="Amazon's money report is read a week at a time, from today back to two years ago. Older periods fill in as it goes.">
@@ -311,47 +436,12 @@ export function PnlClient({
           body="Amazon's financial events are importing in the background. Fresh fees post within the hour; history fills in window by window."
         />
       ) : periods.length > 0 ? (
-        <PnlBreakdownTable pnl={pnl} periods={periods} breakdown={filter.breakdown} money={money} locale={locale} />
+        <PnlBreakdownTable pnl={pnl} periods={periods} breakdown={breakdown} money={money} locale={locale} />
       ) : (
         <div className="overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface">
           <div className="divide-y divide-line">
             {salesBlock && <GroupRow block={salesBlock} money={money} />}
-            <div className="flex items-center justify-between gap-3 px-4 py-2.5 text-[13px]">
-              <span className="flex items-center gap-2 font-medium text-ink">
-                <SourceMarks sources={["CONSL"]} />
-                <span>
-                  Cost of goods
-                  <span className="ml-2 text-[11.5px] font-normal text-muted">
-                    {pnl.unitsSold.toLocaleString()} units at landed cost
-                  </span>
-                </span>
-              </span>
-              <Amount value={pnl.cogs} money={money} />
-            </div>
-            {pnl.mcf.units > 0 && (
-              <div className="flex items-center justify-between gap-3 px-4 py-1.5 pl-8 text-[12.5px] text-ink-soft">
-                <span className="flex min-w-0 items-center gap-2">
-                  <SourceMarks sources={["CONSL"]} size={13} />
-                  <span className="min-w-0 truncate">
-                  of which MCF orders · {pnl.mcf.units.toLocaleString()} units
-                  <span className="ml-1.5 text-[11.5px] text-muted">shipped by Amazon for another channel, no sale reported</span>
-                  </span>
-                </span>
-                <Amount value={pnl.mcf.cogs} money={money} />
-              </div>
-            )}
-            {pnl.unreported.units > 0 && (
-              <div className="flex items-center justify-between gap-3 px-4 py-1.5 pl-8 text-[12.5px] text-ink-soft">
-                <span className="flex min-w-0 items-center gap-2">
-                  <SourceMarks sources={["CONSL"]} size={13} />
-                  <span className="min-w-0 truncate">
-                    of which free units &amp; replacements · {pnl.unreported.units.toLocaleString()} units
-                    <span className="ml-1.5 text-[11.5px] text-muted">shipped, but Amazon reported no money for them</span>
-                  </span>
-                </span>
-                <Amount value={pnl.unreported.cogs} money={money} />
-              </div>
-            )}
+            <CogsRow pnl={pnl} money={money} />
             {rest.map((g) => (
               <GroupRow key={g.group} block={g} money={money} />
             ))}
@@ -370,7 +460,6 @@ export function PnlClient({
           </div>
         </div>
       )}
-
       {pnl.pending.map((p) => (
         <div key={p.channel} className="flex flex-wrap items-center gap-2 text-[12px] text-muted">
           <span className="pill-amber inline-flex items-center gap-1.5 rounded-full border px-2.5 py-[3px] text-[11px] font-medium">

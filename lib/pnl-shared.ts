@@ -42,6 +42,23 @@ export function parsePnlBreakdown(value: string | undefined): PnlBreakdown {
 
 /** Company-calendar days: the full period and the portion inside the selected range. */
 export type PnlPeriodRange = { key: string; start: string; end: string; from: string; to: string };
+
+/**
+ * One company-calendar day of the statement, compact for the wire. The server always sends the
+ * selected range day by day; the browser folds days into weeks, months, quarters or years itself,
+ * so switching the breakdown never goes back to the server. `rows` = [group, type, amount,
+ * sources] with sources a bitmask over PNL_SOURCE_ORDER; days with nothing on them are omitted.
+ */
+export type PnlDay = {
+  d: string;
+  rows: [string, string, number, number][];
+  cogs: number;
+  units: number;
+  mcf: [number, number];
+  unreported: [number, number];
+};
+export const sourceBits = (sources: PnlSource[]) => sources.reduce((bits, s) => bits | (1 << PNL_SOURCE_ORDER.indexOf(s)), 0);
+export const sourcesFromBits = (bits: number): PnlSource[] => PNL_SOURCE_ORDER.filter((_, i) => bits & (1 << i));
 export type PnlStatement = Pick<Pnl, "groups" | "sales" | "cogs" | "unitsSold" | "netProfit" | "margin" | "roi" | "mcf" | "unreported">;
 export type PnlPeriod = PnlPeriodRange & { statement: PnlStatement };
 

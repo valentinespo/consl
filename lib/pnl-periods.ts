@@ -1,4 +1,4 @@
-import { GROUP_ORDER, PNL_SOURCE_ORDER, type PnlBreakdown, type PnlGroupBlock, type PnlPeriod, type PnlPeriodRange, type PnlSource, type PnlStatement } from "@/lib/pnl-shared";
+import { GROUP_ORDER, PNL_SOURCE_ORDER, sourceBits, sourcesFromBits, type PnlBreakdown, type PnlDay, type PnlGroupBlock, type PnlPeriod, type PnlPeriodRange, type PnlSource, type PnlStatement } from "@/lib/pnl-shared";
 
 const iso = (date: Date) => date.toISOString().slice(0, 10);
 const dateOf = (day: string) => new Date(`${day}T00:00:00Z`);
@@ -86,6 +86,56 @@ export function pnlGroups(blocks: Blocks): PnlGroupBlock[] {
   }).filter((block) => block.types.length > 0);
 }
 
+type Tally = { units: number; cogs: number };
+
+/** A period's statement from its tallied blocks and costs — the same arithmetic as the Total. */
+export function statementFrom(blocks: Blocks, cogs: number, unitsSold: number, mcf: Tally, unreported: Tally): PnlStatement {
+  const groups = pnlGroups(blocks);
+  const sales = groups.find((group) => group.group === "sales")?.total ?? 0;
+  const netProfit = groups.reduce((sum, group) => sum + group.total, 0) + cogs;
+  return { groups, sales, cogs, unitsSold, mcf, unreported, netProfit, margin: sales !== 0 ? netProfit / sales : null, roi: cogs !== 0 ? netProfit / Math.abs(cogs) : null };
+}
+
+/** Daily statements → compact days for the browser. Empty days are left out. */
+export function encodePnlDays(days: PnlPeriod[]): PnlDay[] {
+  return days
+    .map(({ key, statement: s }) => ({
+      d: key,
+      rows: s.groups.flatMap((g) => g.types.map((t) => [g.group, t.type, t.amount, sourceBits(t.sources)] as [string, string, number, number])),
+      cogs: s.cogs,
+      units: s.unitsSold,
+      mcf: [s.mcf.units, s.mcf.cogs] as [number, number],
+      unreported: [s.unreported.units, s.unreported.cogs] as [number, number],
+    }))
+    .filter((d) => d.rows.length > 0 || d.units !== 0 || d.cogs !== 0);
+}
+
+/** Fold compact days into the given periods (both ascending by day) — the browser-side breakdown. */
+export function aggregatePnlDays(days: PnlDay[], ranges: PnlPeriodRange[]): PnlPeriod[] {
+  let i = 0;
+  return ranges.map((range) => {
+    const blocks: Blocks = new Map();
+    let cogs = 0, units = 0;
+    const mcf = { units: 0, cogs: 0 }, unreported = { units: 0, cogs: 0 };
+    while (i < days.length && days[i].d < range.from) i++;
+    for (; i < days.length && days[i].d <= range.to; i++) {
+      const day = days[i];
+      for (const [group, type, amount, bits] of day.rows) {
+        const sources = sourcesFromBits(bits);
+        addPnlAmount(blocks, group, type, amount, sources[0] ?? "CONSL");
+        for (const source of sources.slice(1)) addPnlAmount(blocks, group, type, 0, source);
+      }
+      cogs += day.cogs;
+      units += day.units;
+      mcf.units += day.mcf[0];
+      mcf.cogs += day.mcf[1];
+      unreported.units += day.unreported[0];
+      unreported.cogs += day.unreported[1];
+    }
+    return { ...range, statement: statementFrom(blocks, cogs, units, mcf, unreported) };
+  });
+}
+
 /** Receives the very same ledger amounts and FIFO draws as Total; never replays FIFO per column. */
 export function createPnlPeriods(ranges: PnlPeriodRange[], tz: string) {
   const buckets = ranges.map((range) => ({
@@ -118,13 +168,7 @@ export function createPnlPeriods(ranges: PnlPeriodRange[], tz: string) {
       if (unreported) { bucket.unreported.units += units; bucket.unreported.cogs += cogs; }
     },
     finish(): PnlPeriod[] {
-      return buckets.map(({ range, blocks, cogs, unitsSold, mcf, unreported }) => {
-        const groups = pnlGroups(blocks);
-        const sales = groups.find((group) => group.group === "sales")?.total ?? 0;
-        const netProfit = groups.reduce((sum, group) => sum + group.total, 0) + cogs;
-        const statement: PnlStatement = { groups, sales, cogs, unitsSold, mcf, unreported, netProfit, margin: sales !== 0 ? netProfit / sales : null, roi: cogs !== 0 ? netProfit / Math.abs(cogs) : null };
-        return { ...range, statement };
-      });
+      return buckets.map(({ range, blocks, cogs, unitsSold, mcf, unreported }) => ({ ...range, statement: statementFrom(blocks, cogs, unitsSold, mcf, unreported) }));
     },
   };
 }
