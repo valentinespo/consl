@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
-import { ArrowRight, Check, ChevronLeft } from "@/components/icons";
+import { ArrowRight, CalendarDays, Check, ChevronLeft, Tag, User, UserPlus, type LucideIcon } from "@/components/icons";
 import {
   ADS,
   BOOKKEEPING_TOOLS,
@@ -71,10 +71,11 @@ const SECTION: Record<StepId, string> = {
   book: "Your call",
 };
 
-const PERKS: { title: string; body: string }[] = [
-  { title: "One of 20 seats.", body: "Early access is limited to twenty brands that make and sell physical products." },
-  { title: "Lifetime 50% off.", body: "The early-access price is locked in for as long as you stay." },
-  { title: "A personal brand manager.", body: "Sets the platform up with you, 1-1, until every number you care about lives in one place." },
+const PERKS: { title: string; body: string; icon: LucideIcon }[] = [
+  { title: "One of 20 seats.", body: "Early access is limited to twenty brands that make and sell physical products.", icon: UserPlus },
+  { title: "Lifetime 50% off.", body: "The early-access price is locked in for as long as you stay.", icon: Tag },
+  { title: "14-day free trial.", body: "Started with your brand manager on the demo. Nothing is charged for 14 days, cancel anytime.", icon: CalendarDays },
+  { title: "A personal brand manager.", body: "Sets the platform up with you, 1-1, until every number you care about lives in one place.", icon: User },
 ];
 
 export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
@@ -313,7 +314,7 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
                 <p className="mt-3 max-w-[560px] text-[14px] leading-relaxed text-neutral-500">
                   About three minutes. Everything you type is saved as you go.
                 </p>
-                <Nav hideBack canNext nextLabel="Start" />
+                <Nav hideBack canNext nextLabel="Start application" align="left" />
               </Form>
             )}
 
@@ -590,17 +591,20 @@ function Nav({
   nextLabel = "Next",
   pending = false,
   hideBack = false,
+  align = "between",
 }: {
   onBack?: () => void;
   canNext: boolean;
   nextLabel?: string;
   pending?: boolean;
   hideBack?: boolean;
+  /** "left" sits the one button under the text like a paragraph's next line (the intro). */
+  align?: "between" | "left";
 }) {
   return (
-    <div className="mt-9 flex items-center justify-between gap-3">
+    <div className={`mt-9 flex items-center gap-3 ${align === "left" ? "justify-start" : "justify-between"}`}>
       {hideBack ? (
-        <span />
+        align === "left" ? null : <span />
       ) : (
         <button type="button" onClick={onBack} className={GHOST}>
           <ChevronLeft size={16} />
@@ -699,7 +703,7 @@ function Aside() {
         {PERKS.map((p) => (
           <li key={p.title} className="flex items-start gap-3 text-[14.5px] leading-snug">
             <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700">
-              <Check size={12} />
+              <p.icon size={12} />
             </span>
             <span>
               <span className="font-semibold text-neutral-900">{p.title}</span> <span className="text-neutral-600">{p.body}</span>
