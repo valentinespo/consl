@@ -139,11 +139,9 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
   }, []);
 
   // The booking step belongs to a signed-in applicant with a company. Resumed while signed out
-  // (the login was removed, the session expired), it steps back to the account step.
-  useEffect(() => {
-    if (!ready || !isLoaded) return;
-    if (step === "book" && !isSignedIn) setStep("account");
-  }, [ready, isLoaded, isSignedIn, step]);
+  // (the login was removed, the session expired), it steps back to the account step — adjusted
+  // during render, React's pattern for state that depends on something outside it.
+  if (ready && isLoaded && !isSignedIn && step === "book") setStep("account");
   useEffect(() => {
     if (!ready) return;
     try {
