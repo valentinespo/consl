@@ -71,11 +71,11 @@ const SECTION: Record<StepId, string> = {
   book: "Your call",
 };
 
-const PERKS: { title: string; body: string; icon: LucideIcon }[] = [
-  { title: "One of 20 seats.", body: "Early access is limited to twenty brands that make and sell physical products.", icon: UserPlus },
-  { title: "Lifetime 50% off.", body: "The early-access price is locked in for as long as you stay.", icon: Tag },
-  { title: "14-day free trial.", body: "Started with your brand manager on the demo. Nothing is charged for 14 days, cancel anytime.", icon: CalendarDays },
-  { title: "A personal brand manager.", body: "Sets the platform up with you, 1-1, until every number you care about lives in one place.", icon: User },
+const PERKS: { title: string; short: string; body: string; icon: LucideIcon }[] = [
+  { title: "One of 20 seats.", short: "One of 20 seats", body: "Early access is limited to twenty brands that make and sell physical products.", icon: UserPlus },
+  { title: "Lifetime 50% off.", short: "50% off for life", body: "The early-access price is locked in for as long as you stay.", icon: Tag },
+  { title: "14-day free trial.", short: "14-day free trial", body: "Started with your brand manager on the demo. Nothing is charged for 14 days, cancel anytime.", icon: CalendarDays },
+  { title: "A personal brand manager.", short: "Personal brand manager", body: "Sets the platform up with you, 1-1, until every number you care about lives in one place.", icon: User },
 ];
 
 export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
@@ -303,13 +303,12 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
                         First, tell us how your brand operates and <Em>where your numbers get lost</Em>.
                       </>
                     }
-                    sub="Before your demo, we want to understand your brand and what's slowing you down, so we can help as much as possible and make sure consl and our team of e-commerce experts are the right tool for your business."
+                    sub="Before your demo, tell us how you run your brand and what's slowing you down, so we can make sure consl and our team of e-commerce experts are the right fit."
                   />
                 </div>
                 <p className="mt-4 max-w-[560px] text-[15.5px] leading-relaxed text-neutral-600">
-                  We work 1-1 with the first twenty brands that get in, and we work relentlessly: until your numbers are true to
-                  the cent and you see your whole inventory, production and profit in real time, in one place. We just need to make
-                  sure we&apos;re a great fit first.
+                  We work 1-1 with the first twenty brands that get in, relentlessly, until your numbers are true to the cent and
+                  your inventory, production and profit live in one place, in real time.
                 </p>
                 <p className="mt-3 max-w-[560px] text-[14px] leading-relaxed text-neutral-500">
                   About three minutes. Everything you type is saved as you go.
@@ -699,6 +698,17 @@ function Aside() {
         <h2 className="text-[26px] font-bold leading-[1.08] tracking-tight text-violet-700 lg:text-[40px]">Apply for early access.</h2>
         <p className="mt-1.5 text-[17px] font-semibold text-neutral-800 lg:mt-3 lg:text-[26px]">Tell us about your brand, book your demo, start your free trial.</p>
       </div>
+      {/* Phones get the perks as a compact two-column grid; the full bullets below are desktop only. */}
+      <ul className="mt-5 grid grid-cols-2 gap-x-3 gap-y-2.5 lg:hidden">
+        {PERKS.map((p) => (
+          <li key={p.short} className="flex items-center gap-2 text-[13px] font-medium text-neutral-800">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700">
+              <p.icon size={12} />
+            </span>
+            {p.short}
+          </li>
+        ))}
+      </ul>
       <ul className="mt-9 hidden max-w-[420px] space-y-3.5 lg:block">
         {PERKS.map((p) => (
           <li key={p.title} className="flex items-start gap-3 text-[14.5px] leading-snug">
