@@ -7,7 +7,7 @@ import { listMyOrgs } from "@/lib/orgs";
 import { currentRole, getMyAccess } from "@/lib/membership";
 import { RESOURCE_KEYS, actionsOf } from "@/lib/permissions";
 import { getOrgSettings } from "@/lib/settings";
-import { getMaterialTypes, getLotOptions, getSupplierNames, getProductImageMap, getCategoriesInUse, getTransactionInvoices } from "@/lib/queries";
+import { getMaterialTypes, getLotOptions, getSupplierPicks, getProductImageMap, getCategoriesInUse, getTransactionInvoices } from "@/lib/queries";
 import { buildCostChips } from "@/lib/lot-costs";
 import type { EditorLine } from "@/components/LotEditor";
 import { PROVIDERS, CHANNEL_PROVIDERS, type Provider } from "@/lib/integrations";
@@ -186,7 +186,7 @@ export default async function OnboardingPage({
     orderBy: { lotNr: "asc" },
   });
   const [lotOptions, suppliers, skuImages, categories] = lots.length
-    ? await Promise.all([getLotOptions(), getSupplierNames(), getProductImageMap(), getCategoriesInUse()])
+    ? await Promise.all([getLotOptions(), getSupplierPicks(), getProductImageMap(), getCategoriesInUse()])
     : [[], [], {}, []];
   const matName = (code: string) => materials.find((m) => m.code === code)?.name ?? code;
   const wizardLots: WizardLot[] = [];

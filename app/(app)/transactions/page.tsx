@@ -1,4 +1,4 @@
-import { getTransactionInvoices, getLotOptions, getSupplierNames, getProductImageMap, getCategoriesInUse } from "@/lib/queries";
+import { getTransactionInvoices, getLotOptions, getSupplierPicks, getProductImageMap, getCategoriesInUse } from "@/lib/queries";
 import { PageHeader } from "@/components/ui";
 import { TransactionInvoicesTable } from "@/components/TransactionInvoicesTable";
 import { requireView } from "@/lib/membership";
@@ -10,7 +10,7 @@ export default async function TransactionsPage() {
   const [invoices, lots, suppliers, skuImages, categories] = await Promise.all([
     getTransactionInvoices(),
     getLotOptions(),
-    getSupplierNames(),
+    getSupplierPicks(),
     getProductImageMap(),
     getCategoriesInUse(),
   ]);

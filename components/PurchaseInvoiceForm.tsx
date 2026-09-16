@@ -10,7 +10,8 @@ import { upsertPurchaseInvoice, deletePurchaseInvoice, type PurchaseLineInput } 
 import { SelectOrCreate, type Opt } from "@/components/SelectOrCreate";
 import { SearchSelect } from "@/components/SearchSelect";
 import { SelectMenu } from "@/components/SelectMenu";
-import { SkuAvatar } from "@/components/ui";
+import { SkuAvatar, SupplierAvatar } from "@/components/ui";
+import type { SupplierPick } from "@/lib/supplier-pick";
 import { TwoStepDelete } from "@/components/TwoStepDelete";
 
 export type PurchaseInvoiceRow = {
@@ -40,7 +41,7 @@ export type PurchaseMaterial = { id: string; code: string; name: string; unitLab
 export type PurchaseOptions = {
   facilities: { id: string; code: string; name: string }[];
   products: { id: string; code: string; name: string; imageUrl: string | null }[];
-  suppliers: string[];
+  suppliers: SupplierPick[];
 };
 
 type EditLine = { key: string; facilityId: string; productId: string; quantity: string; total: string };
@@ -175,7 +176,7 @@ export function PurchaseInvoiceForm({
           <SearchSelect
             value={supplier}
             onChange={setSupplier}
-            options={options.suppliers}
+            options={options.suppliers.map((s) => ({ value: s.name, icon: <SupplierAvatar name={s.name} photoUrl={s.photoUrl} size={20} /> }))}
             placeholder="Select supplier…"
             createLabel="Create new supplier"
             createPlaceholder="Name the supplier, then press Enter"

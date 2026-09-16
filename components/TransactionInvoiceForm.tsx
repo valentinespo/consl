@@ -11,7 +11,8 @@ import type { Doc } from "@/components/DocumentList";
 import { SearchSelect } from "@/components/SearchSelect";
 import { SelectMenu } from "@/components/SelectMenu";
 import { TwoStepDelete } from "@/components/TwoStepDelete";
-import { SkuAvatar } from "@/components/ui";
+import { SkuAvatar, SupplierAvatar } from "@/components/ui";
+import type { SupplierPick } from "@/lib/supplier-pick";
 import { useMoney } from "@/components/CurrencyProvider";
 import { categoryOptions, isExcludedCategory, SEED_COG_CATEGORIES } from "@/lib/categories";
 
@@ -86,7 +87,7 @@ export function TransactionInvoiceForm({
   /** Already-attached documents (edit mode) — removals are staged and applied on Save. */
   documents?: Doc[];
   lots: LotOption[];
-  suppliers: string[];
+  suppliers: SupplierPick[];
   categories?: string[]; // in-use categories, merged with the seeds for the dropdown
   skuImages?: Record<string, string | null>;
   defaultLotId?: string;
@@ -323,7 +324,7 @@ export function TransactionInvoiceForm({
           <SearchSelect
             value={supplier}
             onChange={setSupplier}
-            options={suppliers}
+            options={suppliers.map((s) => ({ value: s.name, icon: <SupplierAvatar name={s.name} photoUrl={s.photoUrl} size={20} /> }))}
             placeholder="Select supplier…"
             createLabel="Create new supplier"
             createPlaceholder="Name the supplier, then press Enter"

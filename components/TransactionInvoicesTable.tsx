@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
+import type { SupplierPick } from "@/lib/supplier-pick";
 import { SelectMenu } from "@/components/SelectMenu";
 import Link from "next/link";
 import { Plus, ArrowUpDown, ChevronRight } from "@/components/icons";
@@ -30,7 +31,7 @@ export function TransactionInvoicesTable({
 }: {
   invoices: InvoiceRow[];
   lots: LotOption[];
-  suppliers: string[];
+  suppliers: SupplierPick[];
   categories?: string[];
   skuImages?: Record<string, string | null>;
   showLotColumn?: boolean;
@@ -124,7 +125,13 @@ export function TransactionInvoicesTable({
             label={(v) => (v === "ALL" ? "All lots" : v === "UNASSIGNED" ? "⚠ Unassigned" : `Lot #${v}`)}
           />
         )}
-        <Select value={supplier} onChange={setSupplier} options={["ALL", ...suppliers]} label={(v) => (v === "ALL" ? "All suppliers" : v)} />
+        <SelectMenu
+          value={supplier}
+          onChange={setSupplier}
+          ariaLabel="Supplier"
+          className="min-w-[160px] max-w-[240px]"
+          options={[{ value: "ALL", label: "All suppliers" }, ...suppliers.map((s) => ({ value: s.name, label: s.name, icon: <SupplierAvatar name={s.name} photoUrl={s.photoUrl} size={20} /> }))]}
+        />
         <DateInput value={from} onChange={setFrom} placeholder="From" />
         <DateInput value={to} onChange={setTo} placeholder="To" />
         {anyFilter && (

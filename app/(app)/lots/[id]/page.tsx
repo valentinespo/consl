@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import {
   getLot,
   getLotOptions,
-  getSupplierNames,
+  getSupplierPicks,
   getMaterialTypes,
   getFacilities,
   getTransactionInvoices,
@@ -30,7 +30,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
   const [lot, lotOptions, suppliers, materialTypes, facilities, invoices, skuImages, products, categories] = await Promise.all([
     getLot(id),
     getLotOptions(),
-    getSupplierNames(),
+    getSupplierPicks(),
     getMaterialTypes(),
     getFacilities(),
     getTransactionInvoices(id),

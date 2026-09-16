@@ -1,4 +1,5 @@
 import "server-only";
+import type { SupplierPick } from "@/lib/supplier-pick";
 import { prisma } from "./prisma";
 import { isExcludedCategory } from "./categories";
 import { isLayerKind } from "./constants";
@@ -488,6 +489,12 @@ export async function getFacilities() {
   return f.map((x) => ({ id: x.id, code: x.code, name: x.name }));
 }
 
+/** Suppliers as the pickers show them: name and picture. */
+export async function getSupplierPicks(): Promise<SupplierPick[]> {
+  const s = await prisma.supplier.findMany({ select: { name: true, photoUrl: true }, orderBy: { name: "asc" } });
+  return s.map((x) => ({ name: x.name, photoUrl: x.photoUrl }));
+}
+
 export async function getSupplierNames() {
   const s = await prisma.supplier.findMany({ orderBy: { name: "asc" } });
   return s.map((x) => x.name);
@@ -694,7 +701,7 @@ export async function getPurchaseFormOptions() {
   return {
     facilities: facilities.map((f) => ({ id: f.id, code: f.code, name: f.name })),
     products: products.map((p) => ({ id: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl })),
-    suppliers: suppliers.map((s) => s.name),
+    suppliers: suppliers.map((s) => ({ name: s.name, photoUrl: s.photoUrl })),
     materials: materials.map((m) => ({ id: m.id, code: m.code, name: m.name, skuSpecific: m.skuSpecific, unitLabel: m.unitLabel })),
   };
 }

@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useExitAnimation } from "@/components/animate";
 import { ChevronDown, Check, Plus, CornerDownLeft } from "@/components/icons";
+
+/** An option: a plain string, or a value with a leading visual (a supplier's picture). */
+export type SearchOption = string | { value: string; icon?: ReactNode };
 
 /**
  * Searchable, optionally creatable select over string values. Mirrors value to a hidden input.
@@ -25,7 +28,7 @@ export function SearchSelect({
   name?: string;
   value: string;
   onChange: (v: string) => void;
-  options: string[];
+  options: SearchOption[];
   placeholder?: string;
   allowCreate?: boolean;
   /** Label for the always-present row, e.g. "Create new supplier". */
@@ -54,8 +57,10 @@ export function SearchSelect({
   }
 
   const q = query.trim();
-  const filtered = options.filter((o) => o.toLowerCase().includes(q.toLowerCase()));
-  const exists = options.some((o) => o.toLowerCase() === q.toLowerCase());
+  const rows = options.map((o) => (typeof o === "string" ? { value: o, icon: undefined as ReactNode } : o));
+  const filtered = rows.filter((o) => o.value.toLowerCase().includes(q.toLowerCase()));
+  const exists = rows.some((o) => o.value.toLowerCase() === q.toLowerCase());
+  const current = rows.find((o) => o.value === value);
 
   function pick(v: string) {
     onChange(v);
@@ -82,8 +87,11 @@ export function SearchSelect({
         onClick={() => (open ? close() : setOpen(true))}
         className="flex h-9 w-full items-center justify-between rounded-lg border border-border bg-surface px-2.5 text-[13px] outline-none focus:border-accent-strong"
       >
-        <span className={value ? "text-ink" : "text-muted"}>{value || placeholder}</span>
-        <ChevronDown size={15} className="text-muted" />
+        <span className={`flex min-w-0 items-center gap-2 ${value ? "text-ink" : "text-muted"}`}>
+          {current?.icon && <span className="shrink-0">{current.icon}</span>}
+          <span className="truncate">{value || placeholder}</span>
+        </span>
+        <ChevronDown size={15} className="shrink-0 text-muted" />
       </button>
 
       {panel.mounted && (
@@ -98,7 +106,7 @@ export function SearchSelect({
                 if (e.key === "Enter") {
                   e.preventDefault();
                   if (creating || !exists) commitNew();
-                  else if (filtered.length > 0) pick(filtered[0]);
+                  else if (filtered.length > 0) pick(filtered[0].value);
                 } else if (e.key === "Escape") {
                   e.preventDefault();
                   close();
@@ -141,12 +149,13 @@ export function SearchSelect({
               {filtered.map((o) => (
                 <button
                   type="button"
-                  key={o}
-                  onClick={() => pick(o)}
-                  className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[13px] text-ink hover:bg-surface-2"
+                  key={o.value}
+                  onClick={() => pick(o.value)}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-ink hover:bg-surface-2"
                 >
-                  {o}
-                  {o === value && <Check size={14} className="text-accent" />}
+                  {o.icon && <span className="shrink-0">{o.icon}</span>}
+                  <span className="min-w-0 flex-1 truncate">{o.value}</span>
+                  {o.value === value && <Check size={14} className="shrink-0 text-accent" />}
                 </button>
               ))}
               {filtered.length === 0 && (

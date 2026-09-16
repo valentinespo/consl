@@ -1,6 +1,7 @@
 "use client";
 
 import { NAME_MAX } from "@/lib/format";
+import type { SupplierPick } from "@/lib/supplier-pick";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SignOutButton } from "@clerk/nextjs";
@@ -101,7 +102,7 @@ export type WizardLot = {
 type LotEditing = {
   lots: WizardLot[];
   lotOptions: LotOption[];
-  suppliers: string[];
+  suppliers: SupplierPick[];
   categories: string[];
   skuImages: Record<string, string | null>;
   materialTypes: MaterialType[];
