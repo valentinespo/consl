@@ -188,6 +188,14 @@ async function runOrgChannelStock(orgId: string): Promise<void> {
   busyOrgs.add(orgId);
   try {
     await runOrgChannelStockInner(orgId);
+    // Whatever this pass wrote (orders, money, stock) is now in the ledger: bring the company's
+    // P&L snapshot up to date right away, so the page finds it fresh instead of rebuilding itself.
+    const { refreshPnlSnapshotIfStale } = await import("@/lib/pnl-cache");
+    const r = await refreshPnlSnapshotIfStale(orgId).catch((e: Error) => {
+      console.error(`[scheduler] P&L snapshot after imports failed for org ${orgId}:`, e.message);
+      return "skipped" as const;
+    });
+    if (r === "rebuilt") console.log(`[scheduler] P&L snapshot refreshed after imports for org ${orgId}`);
   } finally {
     busyOrgs.delete(orgId);
   }
@@ -389,7 +397,7 @@ async function runOrgChannelStockInner(orgId: string): Promise<void> {
   }
 }
 
-const PNL_SNAPSHOT_TICK_MS = 2 * 60 * 1000; // how soon after a data change the P&L snapshot follows
+const PNL_SNAPSHOT_TICK_MS = 60 * 1000; // a safety net; the org pass below refreshes right after its own writes
 const DAILY_RETRY_MS = 30 * 60 * 1000; // a failed nightly sync is tried again through the day at this spacing
 const PLACES_REFRESH_MS = 15 * 60 * 1000; // Shopify locations / TikTok warehouses re-read
 const ORDERS_REFRESH_MS = 15 * 60 * 1000;
