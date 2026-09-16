@@ -59,14 +59,14 @@ export function PreOnboarding({
     }
   }
 
-  // Formatted in the viewer's own timezone — it's their calendar, not ours.
-  const bookedLabel = booked ? new Date(booked).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : null;
+  // Formatted in the viewer's own timezone — it's their calendar, not ours. The appointment time
+  // comes from Calendly's API (CALENDLY_TOKEN); until it's known, the row only confirms the booking.
   const callLabel = scheduledAt
     ? new Date(scheduledAt).toLocaleString(undefined, { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })
     : null;
   const callBody = callLabel
-    ? `${callLabel}, your local time. The invite is in your inbox.`
-    : `Booked ${bookedLabel}. The invite with the exact time is in your inbox.`;
+    ? `Booked for ${callLabel}, your local time. The invite is in your inbox.`
+    : "Booked. The invite with the exact time is in your inbox.";
 
   // Geometry while the calendar is on the page (measured 2026-09-16): Calendly keeps its side-by-side
   // layout only in a frame ≥ ~1000px, draws its booking card 800px wide centred in that frame, and
@@ -95,8 +95,7 @@ export function PreOnboarding({
         <div className={`rounded-[var(--radius-card)] border border-border bg-surface p-7 shadow-sm sm:p-8 ${wide ? "min-[1042px]:px-[100px]" : ""}`}>
           <span className="pill-chart inline-flex items-center rounded-full px-3 py-1 text-[12px] font-semibold">Early access</span>
           <h1 className="mt-4 text-[24px] font-semibold leading-tight tracking-tight text-ink sm:text-[27px]">
-            {booked ? "Nothing to do here until your discovery call" : "Book your discovery call"}
-            {firstName ? `, ${firstName}` : ""}.
+            {booked ? "Nothing to do here until your discovery call." : `Book your discovery call${firstName ? `, ${firstName}` : ""}.`}
           </h1>
           <p className="mt-3 text-[14.5px] leading-relaxed text-muted">
             {booked
@@ -123,7 +122,7 @@ export function PreOnboarding({
               <Row
                 icon={<CalendarDays size={17} />}
                 done
-                title={callLabel ? "Your discovery call" : "Discovery call booked"}
+                title="Your discovery call"
                 body={callBody}
               >
                 <BringList />
@@ -166,9 +165,9 @@ const BRING = [
 
 function BringList() {
   return (
-    <div className="mt-3.5 border-t border-border pt-3.5">
-      <div className="text-[11.5px] font-semibold uppercase tracking-wide text-muted">Bring to the call</div>
-      <ul className="mt-2.5 space-y-2">
+    <div className="mt-3">
+      <div className="text-[12.5px] text-muted">Make sure to have these ready for the call:</div>
+      <ul className="mt-2 space-y-2">
         {BRING.map((b) => (
           <li key={b.text} className="flex items-start gap-2.5 text-[13px] leading-snug text-ink-soft">
             <span className="mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-surface-2 text-muted">{b.icon}</span>
