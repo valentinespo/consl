@@ -32,6 +32,7 @@ export function SelectMenu({
   ariaLabel,
   variant = "field",
   size = "md",
+  prefix,
 }: {
   value: string;
   options: SelectMenuOption[];
@@ -46,6 +47,8 @@ export function SelectMenu({
   variant?: "field" | "inline";
   /** "sm" is the 32px row used inside dense tables and BOM lists. */
   size?: "md" | "sm";
+  /** A muted word inside the trigger naming what the choice is ("Breakdown"), so no outside label is needed. */
+  prefix?: string;
 }) {
   const btn = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -134,7 +137,10 @@ export function SelectMenu({
         className={triggerCls}
       >
         {selected?.icon && <span className="shrink-0">{selected.icon}</span>}
-        <span className={`min-w-0 flex-1 truncate ${selected ? "" : "text-muted"}`}>{selected?.label ?? placeholder}</span>
+        <span className={`min-w-0 flex-1 truncate ${selected ? "" : "text-muted"}`}>
+          {prefix && <span className="mr-1.5 text-muted">{prefix}</span>}
+          {selected?.label ?? placeholder}
+        </span>
         <ChevronDown size={variant === "inline" ? 14 : 13} className="shrink-0 text-muted" />
       </button>
       {exit.mounted &&

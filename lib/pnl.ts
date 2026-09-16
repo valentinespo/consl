@@ -187,7 +187,9 @@ type SaleDetail = {
 };
 
 async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlChannel>, scope: Scope, onCost: (sale: Sale, cogs: number, detail: SaleDetail) => void): Promise<Cogs> {
+  const tq = Date.now();
   const { queues, fallback } = await loadQueues();
+  if ((process.env.PNL_PROFILE === "1" || process.env.NODE_ENV === "development")) console.log(`[pnl history]   loadQueues ${Date.now() - tq}ms`);
   const exits = await prisma.stockMovement.findMany({
     where: { itemType: "FINISHED", kind: "STANDARD", fromFacilityId: { not: null }, productId: { not: null } },
     select: { productId: true, fromFacilityId: true, quantity: true, date: true },
@@ -200,6 +202,7 @@ async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlCh
   const order = (d: Draw) => d.at ?? Number.MAX_SAFE_INTEGER;
   draws.sort((a, b) => order(a) - order(b));
 
+  const tw = Date.now();
   const cursor = new Map<string, { idx: number; left: number }>(); // "queue|product"
   const out: Cogs = { cogs: 0, units: 0, estimatedUnits: 0, estimatedCogs: 0, estimatedLots: new Set(), preHistoryUnits: 0, overflowUnits: 0, unplacedUnits: 0, unplacedCogs: 0, mcfUnits: 0, mcfCogs: 0, unreportedUnits: 0, unreportedCogs: 0, unmatchedSkus: new Set() };
   for (const d of draws) {
@@ -304,6 +307,7 @@ async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlCh
     }
     onCost(sale!, -cost, detail);
   }
+  if ((process.env.PNL_PROFILE === "1" || process.env.NODE_ENV === "development")) console.log(`[pnl history]   replay loop ${Date.now() - tw}ms over ${draws.length} draws`);
   return out;
 }
 
@@ -783,13 +787,40 @@ function dayFormatter(tz: string): (at: number | Date) => string {
   return (at) => fmt.format(at);
 }
 
+/** The part of the history that is cheap and must always be fresh: today, the first dated money,
+ *  and the import notices. The cached part (days, lots, channels) is joined to this on every read. */
+export async function pnlMeta(tz: string): Promise<Pick<PnlHistory, "newest" | "oldest" | "importProgress" | "importing">> {
+  const newest = todayIn(tz);
+  const [oldest, settings, connections] = await Promise.all([
+    oldestFinanceDate(tz),
+    prisma.settings.findFirst({ select: { financeBackfillCursor: true, financeRewalkCursor: true, financeProgressAt: true, importerVersions: true, shopifySyncedThrough: true, tiktokSyncedThrough: true, tiktokFinanceSyncedThrough: true } }),
+    prisma.integration.findMany({ where: { status: "connected" }, select: { provider: true } }),
+  ]);
+  const connected = new Set(connections.map((c) => c.provider));
+  return {
+    newest,
+    oldest: oldest ?? newest,
+    importProgress: connected.has("amazon") ? amazonImportProgress(settings) : null,
+    importing: {
+      SHOPIFY: connected.has("shopify") && !settings?.shopifySyncedThrough,
+      TIKTOK: connected.has("tiktok") && !(settings?.tiktokSyncedThrough && settings?.tiktokFinanceSyncedThrough),
+    },
+  };
+}
+
 export async function getPnlHistory(tz: string): Promise<PnlHistory> {
+  const t0 = Date.now();
+  let last = t0;
+  const marks: string[] = [];
+  const mark = (label: string) => {
+    const now = Date.now();
+    marks.push(`${label} ${now - last}ms`);
+    last = now;
+  };
   const orgId = await getCurrentOrgId();
   const present = await presentPnlChannels();
-  const newest = todayIn(tz);
-  const oldest = (await oldestFinanceDate(tz)) ?? newest;
-  const empty: PnlHistory = { days: [], lots: [], channels: present, newest, oldest, importProgress: null, importing: {} };
-  if (!orgId || present.length === 0) return empty;
+  const meta = await pnlMeta(tz);
+  if (!orgId || present.length === 0) return { days: [], lots: [], channels: present, ...meta };
   const [scope, org, exclusions, facilities, adsSettings] = await Promise.all([
     loadScope(),
     getCurrentOrg(),
@@ -845,6 +876,7 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
       AND NOT (fe.channel = 'AMAZON' AND fe.type = 'ProductAdsPayment' AND ${adsSince}::timestamp IS NOT NULL AND fe."eventAt" >= ${adsSince})
     GROUP BY 1, 2, 3, 4, 5`;
   for (const r of sums) addPnlAmount(tally(r.channel as PnlChannel, r.day).blocks, r.group, r.type, r.amount, r.source as PnlSource);
+  mark("ledger");
 
   // Custom fees, on the order's own channel and day.
   const feeRows = await prisma.$queryRaw<{ channel: string; name: string; bucket: string; currency: string; amount: number; orderedAt: Date }[]>`
@@ -859,6 +891,7 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
     addPnlAmount(tally(f.channel as PnlChannel, dayOf(f.orderedAt)).blocks, bucket, f.name, -f.amount * fx, "CUSTOM");
   }
 
+  mark("fees");
   // Listings sold that the company doesn't manage here, per day.
   if (selected.includes("AMAZON")) {
     const left = await prisma.$queryRaw<{ sku: string; day: string; units: number; sales: number }[]>`
@@ -892,6 +925,7 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
     }
   }
 
+  mark("ignored");
   // Each channel's settlement lag, order by order — the same bridges getPnl uses, over all time.
   const allTime = { from: new Date(0), to: new Date(Date.now() + 7 * 86_400_000) };
   const pendingSales: Sale[] = [];
@@ -917,8 +951,10 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
     }
   }
 
+  mark("pending bridges");
   // Every sale on record, priced by the same FIFO walk, each landing on its channel and day.
   const sales = await allSales(orgId, scope, amazonSkus, excludedSources, exclusions.mcf, queueOf);
+  mark("load sales");
   await fifoCogs([...sales, ...pendingSales], allTime.from, allTime.to, new Set(selected), scope, (sale, cogs, detail) => {
     const at = sale.periodAt ?? sale.at;
     if (at == null) return;
@@ -937,6 +973,7 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
     if (detail.unmatched) t.unmatched.add(detail.unmatched);
   });
 
+  mark("fifo walk (queues + replay)");
   const lotIds = new Map<string, string>();
   const days: PnlDay[] = [];
   for (const [k, t] of tallies) {
@@ -955,23 +992,9 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
   }
   days.sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : a.c < b.c ? -1 : a.c > b.c ? 1 : 0));
 
-  const [settings, connections] = await Promise.all([
-    prisma.settings.findFirst({ select: { financeBackfillCursor: true, financeRewalkCursor: true, financeProgressAt: true, importerVersions: true, shopifySyncedThrough: true, tiktokSyncedThrough: true, tiktokFinanceSyncedThrough: true } }),
-    prisma.integration.findMany({ where: { status: "connected" }, select: { provider: true } }),
-  ]);
-  const connected = new Set(connections.map((c) => c.provider));
-  return {
-    days,
-    lots: [...lotIds].map(([id, label]) => ({ id, label })),
-    channels: present,
-    newest,
-    oldest,
-    importProgress: connected.has("amazon") ? amazonImportProgress(settings) : null,
-    importing: {
-      SHOPIFY: connected.has("shopify") && !settings?.shopifySyncedThrough,
-      TIKTOK: connected.has("tiktok") && !(settings?.tiktokSyncedThrough && settings?.tiktokFinanceSyncedThrough),
-    },
-  };
+  mark("encode");
+  if ((process.env.PNL_PROFILE === "1" || process.env.NODE_ENV === "development")) console.log(`[pnl history] ${Date.now() - t0}ms total — ${marks.join(" · ")}`);
+  return { days, lots: [...lotIds].map(([id, label]) => ({ id, label })), channels: present, ...meta };
 }
 
 /**

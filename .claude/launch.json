@@ -33,6 +33,19 @@
         "3210"
       ],
       "port": 3210
+    },
+    {
+      "name": "consl-profile",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "PNL_PROFILE=1",
+        "npx",
+        "next",
+        "dev",
+        "-p",
+        "3211"
+      ],
+      "port": 3211
     }
   ]
 }

@@ -389,6 +389,7 @@ async function runOrgChannelStockInner(orgId: string): Promise<void> {
   }
 }
 
+const PNL_SNAPSHOT_TICK_MS = 2 * 60 * 1000; // how soon after a data change the P&L snapshot follows
 const DAILY_RETRY_MS = 30 * 60 * 1000; // a failed nightly sync is tried again through the day at this spacing
 const PLACES_REFRESH_MS = 15 * 60 * 1000; // Shopify locations / TikTok warehouses re-read
 const ORDERS_REFRESH_MS = 15 * 60 * 1000;
@@ -530,6 +531,20 @@ async function tick(): Promise<void> {
 let started = false;
 
 /** Start the in-process daily scheduler. Safe to call multiple times (starts once). */
+async function pnlSnapshotTick(): Promise<void> {
+  const { refreshPnlSnapshotIfStale } = await import("@/lib/pnl-cache");
+  const orgs = await prismaBase.organization.findMany({ where: { deactivatedAt: null }, select: { id: true } });
+  for (const o of orgs) {
+    try {
+      const t0 = Date.now();
+      const r = await refreshPnlSnapshotIfStale(o.id);
+      if (r === "rebuilt") console.log(`[scheduler] P&L snapshot rebuilt for org ${o.id} in ${Date.now() - t0}ms`);
+    } catch (e) {
+      console.error(`[scheduler] P&L snapshot failed for org ${o.id}:`, (e as Error).message);
+    }
+  }
+}
+
 export function startDailyScheduler(): void {
   if (started) return;
   started = true;
@@ -544,5 +559,10 @@ export function startDailyScheduler(): void {
   // stock tick; it self-terminates once every org has walked back to the retention floor.
   setInterval(() => void backfillTick().catch(() => {}), TICK_MS);
   setTimeout(() => void backfillTick().catch(() => {}), 45_000);
+  // The P&L snapshots: rebuilt in the background whenever a company's inputs changed (orders
+  // landing, fees posting, a lot costed), so the P&L page almost always opens on a fresh one
+  // instead of paying the full replay itself. Stale ones are never served either way.
+  setInterval(() => void pnlSnapshotTick().catch(() => {}), PNL_SNAPSHOT_TICK_MS);
+  setTimeout(() => void pnlSnapshotTick().catch(() => {}), 60_000);
   console.log("[scheduler] daily sync scheduler started");
 }

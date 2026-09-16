@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, PnlFilled, Receipt, X } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
@@ -10,6 +10,8 @@ import { DateRangePicker, type Range } from "@/components/DateRangePicker";
 import { SelectMenu } from "@/components/SelectMenu";
 import { GROUP_LABEL, GROUP_ORDER, PNL_BREAKDOWNS, PNL_CHANNEL_LABEL, PNL_SOURCE_LABEL, PNL_SOURCE_ORDER, parsePnlBreakdown, type Pnl, type PnlBreakdown, type PnlChannel, type PnlGroupBlock, type PnlHistory, type PnlPeriod, type PnlSource, type PnlStatement } from "@/lib/pnl-shared";
 import { aggregatePnlDays, foldPnl, pnlPeriodHeading, pnlPeriodRanges } from "@/lib/pnl-periods";
+import { rangeBounds } from "@/lib/chart";
+import { readSavedPnlView, saveSavedPnlView } from "@/lib/pnl-view";
 import { ROOT_LOGO, SOURCE_LOGO } from "@/lib/channel-logos";
 import { EmptyState } from "@/components/EmptyState";
 import { SkuAvatar } from "@/components/ui";
@@ -325,6 +327,22 @@ export function PnlClient({ history, initial }: { history: PnlHistory; initial: 
   // survives a reload) without a navigation — the server is never asked to recompute anything.
   const [filter, setFilter] = useState<Filter>(initial);
   const channels = history.channels;
+  // Opening the tab plain (no window in the address) brings back the last view this browser had.
+  // The sidebar's P&L link already carries it, so this only matters for a typed or bookmarked
+  // bare URL — the presets re-resolve to today, a custom window keeps its dates.
+  const [restored, setRestored] = useState(false);
+  useEffect(() => {
+    if (restored) return;
+    setRestored(true);
+    if (params.has("range") || params.has("channel") || params.has("breakdown")) return;
+    const saved = readSavedPnlView();
+    if (!saved) return;
+    const b = rangeBounds(saved.range.key, history.newest, saved.range.from, saved.range.to);
+    const next: Filter = { ...saved, range: { key: saved.range.key, from: b.from ?? history.oldest, to: b.to ?? history.newest } };
+    setFilter(next);
+    syncUrl(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const selected = useMemo(
     () => (filter.channel && (channels as string[]).includes(filter.channel) ? [filter.channel as PnlChannel] : channels),
     [filter.channel, channels],
@@ -358,6 +376,7 @@ export function PnlClient({ history, initial }: { history: PnlHistory; initial: 
     const next = { ...filter, ...change };
     setFilter(next);
     syncUrl(next);
+    saveSavedPnlView(next);
   }
   const setRange = (r: Range) => update({ range: { key: r.key, from: r.from || history.oldest, to: r.to || history.newest } });
   const setChannel = (channel: string) => update({ channel });
@@ -393,10 +412,7 @@ export function PnlClient({ history, initial }: { history: PnlHistory; initial: 
             })}
           </div>
         )}
-        <div className="flex items-center gap-2">
-          <span className="text-[12px] text-muted">Breakdown</span>
-          <SelectMenu value={breakdown} onChange={setBreakdown} options={[...PNL_BREAKDOWNS]} ariaLabel="P&L breakdown" className="w-[152px]" />
-        </div>
+        <SelectMenu prefix="Breakdown" value={breakdown} onChange={setBreakdown} options={[...PNL_BREAKDOWNS]} ariaLabel="P&L breakdown" className="w-[228px]" />
         {pnl.importProgress && (
           <span className="inline-flex flex-wrap items-center gap-2 text-[12px] text-muted" title="Amazon's money report is read a week at a time, from today back to two years ago. Older periods fill in as it goes.">
             <span className={`h-1.5 w-1.5 rounded-full ${pnl.importProgress.stalled ? "bg-warn" : "animate-pulse bg-accent"}`} aria-hidden />

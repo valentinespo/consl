@@ -22,6 +22,7 @@ import {
   type LucideIcon,
 } from "@/components/icons";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { savedPnlHref } from "@/lib/pnl-view";
 
 type NavItem = { href: string; label: string; icon: LucideIcon; exact?: boolean; resource: string };
 
@@ -143,13 +144,20 @@ export function Sidebar({
   const showFinances = !collapsed.finances || financesActive;
   const showProduction = !collapsed.production || productionActive;
 
+  // The P&L tab reopens on the last view this browser had (lib/pnl-view.ts). Read after mount so
+  // the server and the first client render agree on a plain "/pnl".
+  const [pnlHref, setPnlHref] = useState("/pnl");
+  useEffect(() => {
+    setPnlHref(savedPnlHref());
+  }, [pathname]);
+
   const renderLink = (item: NavItem) => {
     const active = isActive(item, pathname);
     const Icon = item.icon;
     return (
       <Link
         key={item.href}
-        href={item.href}
+        href={item.href === "/pnl" ? pnlHref : item.href}
         onClick={onNavigate}
         className={`mb-0.5 flex items-center gap-3 rounded-lg px-3 py-1.5 text-[13.5px] font-medium transition-colors ${
           active ? "bg-nav-active text-ink" : "text-muted hover:bg-surface-2 hover:text-ink-soft"

@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/ui";
 import { requireView } from "@/lib/membership";
-import { getPnlHistory, type PnlChannel } from "@/lib/pnl";
+import type { PnlChannel } from "@/lib/pnl";
+import { loadPnlHistory } from "@/lib/pnl-cache";
 import { getOrgSettings } from "@/lib/settings";
 import { prisma } from "@/lib/prisma";
 import { PnlClient, PreConslCostButton } from "@/components/PnlClient";
@@ -33,7 +34,7 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
   // The whole history, tallied per company day and channel in one pass and shipped once: the
   // browser cuts the date window, the channel mix and the breakdown out of it itself, so every
   // switch on the page is immediate — nothing re-runs the ledger or the FIFO walk.
-  const history = await getPnlHistory(tz);
+  const history = await loadPnlHistory(tz);
   const channelParam = str(sp.channel)?.toUpperCase();
   const channel = channelParam && (history.channels as string[]).includes(channelParam) ? (channelParam as PnlChannel) : undefined;
 
