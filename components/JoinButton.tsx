@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { acceptInvite } from "@/app/team/actions";
+import { acceptInvite } from "@/app/(app)/team/actions";
 
 export function JoinButton({ token, orgName }: { token: string; orgName: string }) {
   const [pending, setPending] = useState(false);

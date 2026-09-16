@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { AlertTriangle } from "@/components/icons";
 import { Card } from "@/components/ui";
-import { deleteOrganization } from "@/app/team/actions";
+import { deleteOrganization } from "@/app/(app)/team/actions";
 import { DELETE_GRACE_DAYS } from "@/lib/constants";
 
 /**

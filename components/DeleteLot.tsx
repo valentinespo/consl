@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Trash2, X } from "@/components/icons";
-import { deleteLot } from "@/app/lots/actions";
+import { deleteLot } from "@/app/(app)/lots/actions";
 import { useCan } from "@/components/AccessProvider";
 
 export function DeleteLot({ lotId, lotNr }: { lotId: string; lotNr: number }) {

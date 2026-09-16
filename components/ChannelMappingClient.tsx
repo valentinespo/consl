@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { RefreshCw, Undo2, CameraOff, CheckCircle2 } from "@/components/icons";
-import { refreshChannelListings, applyChannelMappings, type MappingActionItem } from "@/app/catalog/actions";
+import { refreshChannelListings, applyChannelMappings, type MappingActionItem } from "@/app/(app)/catalog/actions";
 import { useCan } from "@/components/AccessProvider";
 import { SelectMenu } from "@/components/SelectMenu";
 import { SkuAvatar } from "@/components/ui";

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrg } from "@/lib/org";
+import { needsBillingGate } from "@/lib/billing";
 import { listMyOrgs } from "@/lib/orgs";
 import { currentRole, getMyAccess } from "@/lib/membership";
 import { RESOURCE_KEYS, actionsOf } from "@/lib/permissions";
@@ -35,6 +36,9 @@ export default async function OnboardingPage({
   // visitors, and the local-dev bypass (no Clerk) must still be able to render it.
   const org = await getCurrentOrg();
   if (!org) redirect("/welcome");
+  // Early access: the wizard is for companies whose trial has started. This page sits outside the
+  // gated route group, so it repeats the check itself.
+  if (needsBillingGate(org)) redirect("/pre-onboarding");
   if (org.onboardedAt) redirect("/");
   // An install that started on Shopify's side just before this company was created: attach the
   // store now, so the wizard opens with it connected. Never replaces a connection that exists.

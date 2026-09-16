@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Bell, CheckCircle2, PackageSearch, ShoppingCart, Truck, X, Zap } from "@/components/icons";
 import type { LucideIcon } from "@/components/icons";
 import type { Alert } from "@/lib/alerts";
-import { getHeaderNotifications, dismissNotification } from "@/app/settings/actions";
+import { getHeaderNotifications, dismissNotification } from "@/app/(app)/settings/actions";
 
 const SEV: Record<Alert["severity"], { bg: string; dot: string }> = {
   critical: { bg: "#fef2f2", dot: "#dc2626" },

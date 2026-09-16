@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { disconnectIntegration, disconnectIntegrationAndWipe } from "@/app/settings/integrations/actions";
+import { disconnectIntegration, disconnectIntegrationAndWipe } from "@/app/(app)/settings/integrations/actions";
 import type { Provider } from "@/lib/integrations";
 
 /** Connect (link to the OAuth start route) / Disconnect (two-step, server action) for one provider. */

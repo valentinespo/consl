@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X } from "@/components/icons";
 import { SkuAvatar } from "@/components/ui";
-import { createProduct, createMaterial, uploadEntityImage } from "@/app/catalog/actions";
+import { createProduct, createMaterial, uploadEntityImage } from "@/app/(app)/catalog/actions";
 import { SearchSelect } from "@/components/SearchSelect";
 import { COMMON_UNIT_LABELS, NAME_MAX } from "@/lib/format";
 import { useCan } from "@/components/AccessProvider";

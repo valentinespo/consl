@@ -7,7 +7,7 @@ import { ImageUpload } from "@/components/ImageUpload";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
 import { AddressInput } from "@/components/AddressField";
 import { initials } from "@/lib/initials";
-import { updateSupplier } from "@/app/suppliers/actions";
+import { updateSupplier } from "@/app/(app)/suppliers/actions";
 
 export type SupplierForEdit = {
   id: string;

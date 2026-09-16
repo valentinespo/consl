@@ -6,7 +6,7 @@ import { Plus, X } from "@/components/icons";
 import { DatePicker } from "@/components/DatePicker";
 import { useMoney } from "@/components/CurrencyProvider";
 import { inflectUnit } from "@/lib/format";
-import { upsertPurchaseInvoice, deletePurchaseInvoice, type PurchaseLineInput } from "@/app/purchases/actions";
+import { upsertPurchaseInvoice, deletePurchaseInvoice, type PurchaseLineInput } from "@/app/(app)/purchases/actions";
 import { SelectOrCreate, type Opt } from "@/components/SelectOrCreate";
 import { SearchSelect } from "@/components/SearchSelect";
 import { SkuAvatar } from "@/components/ui";

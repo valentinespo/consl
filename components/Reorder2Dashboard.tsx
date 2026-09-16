@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Settings, Check, ChevronDown, GripVertical, MapTrifold } from "@/components/icons";
 import { HoverHint } from "@/components/HoverHint";
 import { SkuAvatar } from "@/components/ui";
-import { updateGlobalDefaults, updateSkuPolicy, setSortMode, saveManualOrder, setSkuWindow } from "@/app/inventory/actions";
+import { updateGlobalDefaults, updateSkuPolicy, setSortMode, saveManualOrder, setSkuWindow } from "@/app/(app)/inventory/actions";
 import { computeReorder2, type Place, type PlaceResult, type PlaceStock, type Reorder2Result, type Reorder2Row, type StockRoute } from "@/lib/reorder2-engine";
 import type { Win } from "@/lib/reorder";
 import { SEG } from "@/lib/segments";

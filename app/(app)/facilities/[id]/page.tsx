@@ -10,7 +10,7 @@ import { FacilityEditor } from "@/components/FacilityEditor";
 import { Lock } from "@/components/icons";
 import { CHANNEL_PROVIDER, PROVIDERS, CHANNEL_LOGO, getChannelStock } from "@/lib/integrations";
 import { DeleteEntity } from "@/components/DeleteEntity";
-import { deleteFacility } from "@/app/facilities/actions";
+import { deleteFacility } from "@/app/(app)/facilities/actions";
 import { facilityTypeLabel } from "@/lib/facility-types";
 import { requireView } from "@/lib/membership";
 

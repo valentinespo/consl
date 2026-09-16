@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { removeMetaAdAccount } from "@/app/settings/integrations/actions";
+import { removeMetaAdAccount } from "@/app/(app)/settings/integrations/actions";
 import { AlertTriangle } from "@/components/icons";
 
 type Row = { accountId: string; name: string; businessName: string | null; currency: string | null; status: string; lastError: string | null };

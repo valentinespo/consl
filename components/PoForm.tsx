@@ -5,7 +5,7 @@ import { useExitAnimation } from "@/components/animate";
 import { useRouter } from "next/navigation";
 import { Plus, X, AlertTriangle } from "@/components/icons";
 import { DatePicker } from "@/components/DatePicker";
-import { createPurchaseOrder, updatePurchaseOrder, deletePurchaseOrder, type PoLineInput } from "@/app/purchase-orders/actions";
+import { createPurchaseOrder, updatePurchaseOrder, deletePurchaseOrder, type PoLineInput } from "@/app/(app)/purchase-orders/actions";
 import { TwoStepDelete } from "@/components/TwoStepDelete";
 import { SkuAvatar } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";

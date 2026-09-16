@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X, Trash2 } from "@/components/icons";
 import { DatePicker } from "@/components/DatePicker";
-import { createLot } from "@/app/lots/actions";
+import { createLot } from "@/app/(app)/lots/actions";
 import { SelectOrCreate, type Opt } from "@/components/SelectOrCreate";
 import { useCan } from "@/components/AccessProvider";
 

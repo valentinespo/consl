@@ -9,7 +9,7 @@ import { Card, SkuAvatar, SectionTitle } from "@/components/ui";
 import { StatusDropdown } from "@/components/StatusDropdown";
 import { useMoney } from "@/components/CurrencyProvider";
 import { inflectUnit } from "@/lib/format";
-import { updateLot } from "@/app/lots/actions";
+import { updateLot } from "@/app/(app)/lots/actions";
 import { deriveProduction, derivePayment, PRODUCTION_LABEL, PAYMENT_LABEL, DERIVED_PILL_CLS } from "@/lib/lot-status";
 import { LotBom, type MaterialType, type Mat } from "@/components/LotBom";
 import type { CostChip } from "@/lib/lot-costs";

@@ -8,7 +8,7 @@ import { ImageUpload } from "@/components/ImageUpload";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
 import { SearchSelect } from "@/components/SearchSelect";
 import { COMMON_UNIT_LABELS } from "@/lib/format";
-import { updateMaterial } from "@/app/catalog/actions";
+import { updateMaterial } from "@/app/(app)/catalog/actions";
 
 export type MaterialForEdit = {
   id: string;

@@ -9,7 +9,7 @@ import { IconSelect, type IconGroup } from "@/components/IconSelect";
 import { SkuAvatar } from "@/components/ui";
 import { CHANNEL_LOGO, ROOT_LOGO } from "@/lib/channel-logos";
 import { buildTimeline, capOn, type AvailabilityEvent } from "@/lib/availability-math";
-import { createMovement } from "@/app/facilities/actions";
+import { createMovement } from "@/app/(app)/facilities/actions";
 
 export type MoveProduct = { id: string; code: string; name: string; imageUrl: string | null };
 export type MoveMaterial = { id: string; code: string; name: string; skuSpecific: boolean; imageUrl: string | null };

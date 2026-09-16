@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, X } from "@/components/icons";
-import { deleteMovement, movementDeleteImpact } from "@/app/facilities/actions";
+import { deleteMovement, movementDeleteImpact } from "@/app/(app)/facilities/actions";
 
 /**
  * Removal for a movement — the engine just replays without it, so deleting a layer row (starting

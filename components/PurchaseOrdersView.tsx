@@ -8,7 +8,7 @@ import { ExpandRow } from "@/components/animate";
 import { Pill, SkuAvatar } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
 import { PoForm, type PoFacility, type PoProduct, type PoRow } from "@/components/PoForm";
-import { setPoStatus, deletePurchaseOrder } from "@/app/purchase-orders/actions";
+import { setPoStatus, deletePurchaseOrder } from "@/app/(app)/purchase-orders/actions";
 import { useRouter } from "next/navigation";
 import { TwoStepDelete } from "@/components/TwoStepDelete";
 import { useCan } from "@/components/AccessProvider";

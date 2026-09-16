@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Card, SkuAvatar } from "@/components/ui";
 import { ImageUpload } from "@/components/ImageUpload";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
-import { updateProduct } from "@/app/catalog/actions";
+import { updateProduct } from "@/app/(app)/catalog/actions";
 
 export type ProductForEdit = {
   id: string;

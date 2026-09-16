@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
-import { updateProductChannels } from "@/app/catalog/actions";
+import { updateProductChannels } from "@/app/(app)/catalog/actions";
 
 export type ProductChannels = {
   id: string;

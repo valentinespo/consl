@@ -1,4 +1,4 @@
-import { getAppSettings } from "@/app/settings/actions";
+import { getAppSettings } from "@/app/(app)/settings/actions";
 import { TimezoneSettings } from "@/components/TimezoneSettings";
 import { requireView } from "@/lib/membership";
 

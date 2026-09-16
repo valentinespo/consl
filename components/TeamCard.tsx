@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { UserPlus, Copy, Check, X, Lock } from "@/components/icons";
 import { Card } from "@/components/ui";
-import { createInvite, revokeInvite, removeMember } from "@/app/team/actions";
+import { createInvite, revokeInvite, removeMember } from "@/app/(app)/team/actions";
 import { PermissionsEditor } from "@/components/PermissionsEditor";
 import type { Permissions } from "@/lib/permissions";
 

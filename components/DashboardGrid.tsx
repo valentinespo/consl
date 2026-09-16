@@ -12,7 +12,7 @@ import { RecentLots, type RecentLot } from "@/components/RecentLots";
 import type { RestockTotals, ValueHistoryPoint } from "@/lib/restock";
 import type { Alert } from "@/lib/alerts";
 import type { LeadTimes } from "@/lib/queries";
-import { saveDashboardLayout } from "@/app/settings/actions";
+import { saveDashboardLayout } from "@/app/(app)/settings/actions";
 import { useExitAnimation } from "@/components/animate";
 
 const COLS = 12;

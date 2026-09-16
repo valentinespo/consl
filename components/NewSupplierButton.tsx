@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X } from "@/components/icons";
-import { createSupplier } from "@/app/suppliers/actions";
+import { createSupplier } from "@/app/(app)/suppliers/actions";
 import { useCan } from "@/components/AccessProvider";
 
 const inputCls = "h-9 w-full rounded-lg border border-border bg-surface px-2.5 text-[13px] text-ink outline-none focus:border-accent-strong";

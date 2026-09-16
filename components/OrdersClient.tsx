@@ -7,7 +7,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { AlertTriangle, Building2, ChevronDown, ChevronRight, DotsVertical, Layers, Search, Settings, Tag, WarehouseFilled } from "@/components/icons";
 import { SkuAvatar } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
-import { setOrderVoided } from "@/app/orders/actions";
+import { setOrderVoided } from "@/app/(app)/orders/actions";
 import type { OrdersSummary, OrdersPage, OrderRow } from "@/lib/order-metrics";
 import { inputCls } from "@/components/FormKit";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";

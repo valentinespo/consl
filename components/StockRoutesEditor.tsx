@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check } from "@/components/icons";
-import { saveStockRoutes, resetStockRoutes } from "@/app/reorder2/actions";
+import { saveStockRoutes, resetStockRoutes } from "@/app/(app)/reorder2/actions";
 import type { Place, StockRoute } from "@/lib/reorder2-engine";
 
 /**

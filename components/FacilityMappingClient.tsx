@@ -8,7 +8,7 @@ import { SelectMenu } from "@/components/SelectMenu";
 import { inputCls } from "@/components/FormKit";
 import { ROOT_LOGO } from "@/lib/channel-logos";
 import { FACILITY_TYPES } from "@/lib/facility-types";
-import { mapAmazonShipFrom, createFacilityForShipFrom, setChannelPlaceMode, setFacilityStockSource } from "@/app/facilities/actions";
+import { mapAmazonShipFrom, createFacilityForShipFrom, setChannelPlaceMode, setFacilityStockSource } from "@/app/(app)/facilities/actions";
 
 export type PlaceMode = "auto" | "own" | "merged" | "mcf" | "ignored";
 

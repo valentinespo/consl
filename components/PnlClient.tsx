@@ -12,7 +12,7 @@ import { ROOT_LOGO, SOURCE_LOGO } from "@/lib/channel-logos";
 import { EmptyState } from "@/components/EmptyState";
 import { SkuAvatar } from "@/components/ui";
 import { useCan } from "@/components/AccessProvider";
-import { savePreConslCosts } from "@/app/pnl/actions";
+import { savePreConslCosts } from "@/app/(app)/pnl/actions";
 
 /** "FBAPerUnitFulfillmentFee" → "FBA per unit fulfillment fee"; refund prefixes fold away. */
 function humanize(raw: string): string {

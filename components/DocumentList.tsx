@@ -4,7 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2, Upload, Paperclip } from "@/components/icons";
 import { DocPreview } from "@/components/DocPreview";
-import { uploadDocument, deleteDocument, type DocParent } from "@/app/documents/actions";
+import { uploadDocument, deleteDocument, type DocParent } from "@/app/(app)/documents/actions";
 
 export type Doc = { id: string; label: string | null; fileUrl: string; fileName: string | null };
 

@@ -7,7 +7,7 @@ import { SelectMenu } from "@/components/SelectMenu";
 import { BrandingCard, ImageSlot, type Branding } from "@/components/BrandingCard";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
 import { AddressInput } from "@/components/AddressField";
-import { updateCompanyProfile } from "@/app/settings/actions";
+import { updateCompanyProfile } from "@/app/(app)/settings/actions";
 
 /** Lets a parent trigger this editor's save (the onboarding wizard's Continue saves for the
  *  user instead of making them find the Save button). Resolves true when there was nothing to

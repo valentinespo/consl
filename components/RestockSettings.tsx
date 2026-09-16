@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
-import { saveRestockDefaults } from "@/app/settings/actions";
+import { saveRestockDefaults } from "@/app/(app)/settings/actions";
 import { BATCH_HELP, BUFFER_HELP, FLOOR_HELP, LEAD_HELP, REORDER_TO_HELP, SHIP_HELP } from "@/lib/restock-help";
 
 export type RestockDefaults = {

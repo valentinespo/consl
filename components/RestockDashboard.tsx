@@ -6,7 +6,7 @@ import { Settings, Check, ChevronDown, GripVertical } from "@/components/icons";
 import { HoverHint } from "@/components/HoverHint";
 import { BATCH_HELP, BUFFER_HELP, FLOOR_HELP, LEAD_HELP, REORDER_TO_HELP, SHIP_HELP } from "@/lib/restock-help";
 import { SkuAvatar } from "@/components/ui";
-import { updateGlobalDefaults, updateSkuPolicy, setSortMode, saveManualOrder, setSkuWindow } from "@/app/inventory/actions";
+import { updateGlobalDefaults, updateSkuPolicy, setSortMode, saveManualOrder, setSkuWindow } from "@/app/(app)/inventory/actions";
 import type { RestockRow } from "@/lib/restock";
 import { computeReorder, type ReorderResult } from "@/lib/reorder";
 import { SEG } from "@/lib/segments";

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, ChevronsUpDown, Plus, Building2Outline as Building2 } from "@/components/icons";
 import type { MyOrg } from "@/lib/orgs";
-import { switchOrg } from "@/app/org/actions";
+import { switchOrg } from "@/app/(app)/org/actions";
 import { useExitAnimation } from "@/components/animate";
 
 /** A company's own square mark, falling back to a neutral icon when it hasn't uploaded one. */

@@ -1,4 +1,4 @@
-import { getAppSettings } from "@/app/settings/actions";
+import { getAppSettings } from "@/app/(app)/settings/actions";
 import { RestockSettings } from "@/components/RestockSettings";
 import { requireView } from "@/lib/membership";
 

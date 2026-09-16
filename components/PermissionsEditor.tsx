@@ -12,7 +12,7 @@ import {
   type Permissions,
   type Resource,
 } from "@/lib/permissions";
-import { updateMemberPermissions } from "@/app/team/actions";
+import { updateMemberPermissions } from "@/app/(app)/team/actions";
 
 const ALL_ACTIONS: Action[] = ["view", "create", "edit", "delete", "manage"];
 const ACTION_LABEL: Record<Action, string> = {

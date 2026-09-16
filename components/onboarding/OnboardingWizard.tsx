@@ -25,12 +25,12 @@ import { DatePicker } from "@/components/DatePicker";
 import { Field, inputCls } from "@/components/FormKit";
 import { HoverHint } from "@/components/HoverHint";
 import { BATCH_HELP, BUFFER_HELP, FLOOR_HELP, LEAD_HELP, REORDER_TO_HELP, SHIP_HELP } from "@/lib/restock-help";
-import { updateGlobalDefaults } from "@/app/inventory/actions";
+import { updateGlobalDefaults } from "@/app/(app)/inventory/actions";
 import type { Defaults as ReorderDefaults } from "@/components/RestockDashboard";
 import { FACILITY_TYPES } from "@/lib/facility-types";
 import { Check, AlertTriangle, ChevronDown, ChevronLeft, Plus, X, Package, Lock, Pencil } from "@/components/icons";
 import type { MyOrg } from "@/lib/orgs";
-import { createFacility, saveFinishedOpenings, saveRawOpenings } from "@/app/facilities/actions";
+import { createFacility, saveFinishedOpenings, saveRawOpenings } from "@/app/(app)/facilities/actions";
 import {
   advanceOnboarding,
   backToStep,
@@ -44,7 +44,7 @@ import {
   retryOnboardingJob,
   saveOpeningCosts,
 } from "@/app/onboarding/actions";
-import { updateProduct } from "@/app/catalog/actions";
+import { updateProduct } from "@/app/(app)/catalog/actions";
 import type { OnboardingJob } from "@/lib/onboarding-jobs";
 import Image from "next/image";
 import { ROOT_LOGO } from "@/lib/channel-logos";

@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Camera, X } from "@/components/icons";
-import { uploadEntityImage, removeEntityImage } from "@/app/catalog/actions";
+import { uploadEntityImage, removeEntityImage } from "@/app/(app)/catalog/actions";
 
 export function ImageUpload({
   kind,

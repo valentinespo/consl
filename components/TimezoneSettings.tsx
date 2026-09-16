@@ -7,7 +7,7 @@ import { SelectMenu } from "@/components/SelectMenu";
 import { Card } from "@/components/ui";
 import { Field, SaveBar } from "@/components/FormKit";
 import { useMoney } from "@/components/CurrencyProvider";
-import { saveTimezone } from "@/app/settings/actions";
+import { saveTimezone } from "@/app/(app)/settings/actions";
 import type { EditorSaveRef } from "@/components/CompanyEditor";
 
 /** "GMT-03:00" for a zone, as of right now — offsets shift with daylight saving, so this is

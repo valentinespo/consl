@@ -20,8 +20,9 @@ export const metadata: Metadata = {
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   // Every redirect that used to live here — no company yet, trial not started, wizard unfinished —
-  // moved to app/template.tsx: a layout renders once per full page load and is skipped on
-  // client-side navigation, so gates in it could be walked around by any in-app hop.
+  // moved to app/(app)/layout.tsx, the gate in front of the product route group. The root layout
+  // is shared by every route and is skipped on client-side navigation, so gates in it (or in a
+  // root template) could be walked around by any in-app hop; a group layout runs on entry.
   const org = await getCurrentOrg().catch(() => null);
   const orgs = await listMyOrgs().catch(() => []);
   // Which sections this member may see, so the sidebar only shows what they can open. Owners get

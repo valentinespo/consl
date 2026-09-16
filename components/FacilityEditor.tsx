@@ -6,7 +6,7 @@ import { Card } from "@/components/ui";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
 import { AddressInput, AddressDisplay } from "@/components/AddressField";
 import { FACILITY_TYPES } from "@/lib/facility-types";
-import { updateFacility } from "@/app/facilities/actions";
+import { updateFacility } from "@/app/(app)/facilities/actions";
 
 export type FacilityForEdit = {
   id: string;

@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/ui";
 import { PrevNextNav, neighbours } from "@/components/PrevNextNav";
 import { SupplierEditor } from "@/components/SupplierEditor";
 import { DeleteEntity } from "@/components/DeleteEntity";
-import { deleteSupplier } from "@/app/suppliers/actions";
+import { deleteSupplier } from "@/app/(app)/suppliers/actions";
 import { requireView } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
