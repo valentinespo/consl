@@ -9,8 +9,9 @@ import { startTrial } from "@/app/pre-onboarding/actions";
 
 /**
  * The pre-onboarding waiting screen, in the app's own theme (it's an app page, not marketing).
- * Two things on it: the discovery call (booked, or book it now) and the trial button, greyed
- * until an admin unlocks it on the call.
+ * Before the call is booked the calendar is simply open on the page; afterwards the page says
+ * there's nothing to do, shows the booked call, and the trial button waits, greyed, for an admin
+ * to unlock it on the call.
  */
 export function PreOnboarding({
   orgName,
@@ -34,13 +35,11 @@ export function PreOnboarding({
 }) {
   const [booked, setBooked] = useState<string | null>(callBookedAt);
   const [scheduledAt, setScheduledAt] = useState<string | null>(callScheduledAt);
-  const [showCalendar, setShowCalendar] = useState(false);
   const [pending, setPending] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
   async function scheduled(s: Scheduled) {
     setBooked(new Date().toISOString());
-    setShowCalendar(false);
     if (!applicationId) return;
     const res = await markCallBooked(applicationId, s.eventUri, s.inviteeUri).catch(() => null);
     if (res?.ok && res.scheduledAt) setScheduledAt(res.scheduledAt);
@@ -89,35 +88,35 @@ export function PreOnboarding({
         <div className="rounded-[var(--radius-card)] border border-border bg-surface p-7 shadow-sm sm:p-8">
           <span className="pill-chart inline-flex items-center rounded-full px-3 py-1 text-[12px] font-semibold">Early access</span>
           <h1 className="mt-4 text-[24px] font-semibold leading-tight tracking-tight text-ink sm:text-[27px]">
-            Nothing to do here until your discovery call{firstName ? `, ${firstName}` : ""}.
+            {booked ? "Nothing to do here until your discovery call" : "Book your discovery call"}
+            {firstName ? `, ${firstName}` : ""}.
           </h1>
           <p className="mt-3 text-[14.5px] leading-relaxed text-muted">
-            If you&apos;re a good fit, your brand manager will help you set up your 14-day free trial and onboard you to
-            the platform in that same call. Yes, as easy as that.
+            {booked
+              ? "If you're a good fit, your brand manager will help you set up your 14-day free trial and onboard you to the platform in that same call. Yes, as easy as that."
+              : "Pick a time below. On the call, your brand manager will help you set up your 14-day free trial and onboard you to the platform. Yes, as easy as that."}
           </p>
 
-          <div className="mt-7 space-y-2.5">
-            <Row
-              icon={<CalendarDays size={17} />}
-              done={!!booked}
-              title={booked ? (callLabel ? "Your discovery call" : "Discovery call booked") : "Book your discovery call"}
-              body={booked ? callBody : "Pick a time that suits you."}
-              action={
-                !booked && calendlyUrl ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowCalendar((s) => !s)}
-                    className="rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-bg hover:opacity-90"
-                  >
-                    {showCalendar ? "Hide calendar" : "Pick a time"}
-                  </button>
-                ) : null
-              }
-            />
-            {showCalendar && !booked && calendlyUrl && (
-              <div className="dropdown-in overflow-hidden rounded-xl border border-border bg-white">
-                <CalendlyEmbed url={calendlyUrl} name={firstName ?? ""} email={email} onScheduled={scheduled} minHeight={660} />
+          {/* The calendar stays open until the call is booked — no button to find, nothing to hide. */}
+          {!booked &&
+            (calendlyUrl ? (
+              <div className="mt-6 overflow-hidden rounded-xl border border-border bg-white">
+                <CalendlyEmbed url={calendlyUrl} name={firstName ?? ""} email={email} onScheduled={scheduled} minHeight={720} />
               </div>
+            ) : (
+              <div className="mt-6 rounded-xl border border-border bg-bg px-4 py-3.5 text-[13.5px] text-muted">
+                Booking opens shortly. We&apos;ll email you the link.
+              </div>
+            ))}
+
+          <div className="mt-6 space-y-2.5">
+            {booked && (
+              <Row
+                icon={<CalendarDays size={17} />}
+                done
+                title={callLabel ? "Your discovery call" : "Discovery call booked"}
+                body={callBody}
+              />
             )}
             <Row
               icon={<Lock size={16} />}
