@@ -9,6 +9,7 @@ import { inflectUnit } from "@/lib/format";
 import { upsertPurchaseInvoice, deletePurchaseInvoice, type PurchaseLineInput } from "@/app/(app)/purchases/actions";
 import { SelectOrCreate, type Opt } from "@/components/SelectOrCreate";
 import { SearchSelect } from "@/components/SearchSelect";
+import { SelectMenu } from "@/components/SelectMenu";
 import { SkuAvatar } from "@/components/ui";
 import { TwoStepDelete } from "@/components/TwoStepDelete";
 
@@ -109,7 +110,7 @@ export function PurchaseInvoiceForm({
   );
   const dirty = !invoice || currentSnapshot !== originalSnapshot;
 
-  const productOpts: Opt[] = options.products.map((p) => ({ value: p.id, label: p.code }));
+  const productOpts: Opt[] = options.products.map((p) => ({ value: p.id, label: p.code, hint: p.name, icon: <SkuAvatar code={p.code} imageUrl={p.imageUrl} size={22} /> }));
 
   function patch(key: string, p: Partial<EditLine>) {
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...p } : l)));
@@ -201,27 +202,20 @@ export function PurchaseInvoiceForm({
         {lines.map((l) => {
           const q = Number(l.quantity) || 0;
           const unit = q ? (Number(l.total) || 0) / q : 0;
-          const prod = options.products.find((p) => p.id === l.productId);
           return (
             <div key={l.key} className="rounded-lg border border-border bg-surface p-2.5">
               <div className="flex flex-wrap items-end gap-2">
                 <MiniField label="Facility" className={material.skuSpecific ? "w-[88px]" : "min-w-[120px] flex-1"}>
-                  <select value={l.facilityId} onChange={(e) => patch(l.key, { facilityId: e.target.value })} className={inputCls}>
-                    {options.facilities.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.code}
-                      </option>
-                    ))}
-                  </select>
+                  <SelectMenu
+                    value={l.facilityId}
+                    onChange={(v) => patch(l.key, { facilityId: v })}
+                    ariaLabel="Facility"
+                    options={options.facilities.map((f) => ({ value: f.id, label: f.code, hint: f.name }))}
+                  />
                 </MiniField>
                 {material.skuSpecific && (
                   <MiniField label="SKU" className="min-w-[160px] flex-1">
-                    <div className="flex items-center gap-2">
-                      {prod && <SkuAvatar code={prod.code} imageUrl={prod.imageUrl} size={28} />}
-                      <div className="min-w-0 flex-1">
-                        <SelectOrCreate value={l.productId} onChange={(v) => patch(l.key, { productId: v })} options={productOpts} />
-                      </div>
-                    </div>
+                    <SelectOrCreate value={l.productId} onChange={(v) => patch(l.key, { productId: v })} options={productOpts} />
                   </MiniField>
                 )}
                 <MiniField label={`Qty (${inflectUnit(material.unitLabel, 2)})`} className="w-[100px]">

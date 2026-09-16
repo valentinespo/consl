@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui";
+import { SelectMenu } from "@/components/SelectMenu";
 import { ImageUpload } from "@/components/ImageUpload";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
 import { AddressInput } from "@/components/AddressField";
@@ -104,14 +105,12 @@ export function SupplierEditor({
             <AddressInput value={address} onChange={setAddress} />
           </Field>
           <Field label="This supplier is also one of my facilities" hint="Link it when you both pay this company and hold stock there.">
-            <select value={facilityId} onChange={(e) => setFacilityId(e.target.value)} className={inputCls}>
-              <option value="">Not a facility (regular vendor)</option>
-              {facilities.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.code} — {f.name}
-                </option>
-              ))}
-            </select>
+            <SelectMenu
+              value={facilityId}
+              onChange={setFacilityId}
+              ariaLabel="Linked facility"
+              options={[{ value: "", label: "Not a facility (regular vendor)" }, ...facilities.map((f) => ({ value: f.id, label: `${f.code} — ${f.name}` }))]}
+            />
           </Field>
           <Field label="Notes" hint="Internal only.">
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={`${inputCls} h-auto resize-y py-2`} />

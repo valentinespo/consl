@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
+import { SelectMenu } from "@/components/SelectMenu";
 import Link from "next/link";
 import { ChevronRight, Info } from "@/components/icons";
 import { ExpandRow } from "@/components/animate";
@@ -289,17 +290,5 @@ function Select({
   options: string[];
   labelFor: (v: string) => string;
 }) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="h-9 rounded-lg border border-border bg-surface px-2.5 text-[13px] text-ink-soft outline-none focus:border-accent-strong"
-    >
-      {options.map((o) => (
-        <option key={o} value={o}>
-          {labelFor(o)}
-        </option>
-      ))}
-    </select>
-  );
+  return <SelectMenu value={value} onChange={onChange} className="min-w-[140px]" options={options.map((o) => ({ value: o, label: labelFor(o) }))} />;
 }

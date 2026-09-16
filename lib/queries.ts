@@ -411,10 +411,10 @@ export async function getFinishedStock() {
 /** Suppliers as light options for the facility ↔ supplier link picker. */
 export async function getSupplierOptions() {
   const s = await prisma.supplier.findMany({
-    select: { id: true, name: true, facilityId: true, address: true },
+    select: { id: true, name: true, facilityId: true, address: true, photoUrl: true },
     orderBy: { name: "asc" },
   });
-  return s.map((x) => ({ id: x.id, name: x.name, facilityId: x.facilityId, address: x.address }));
+  return s.map((x) => ({ id: x.id, name: x.name, facilityId: x.facilityId, address: x.address, photoUrl: x.photoUrl }));
 }
 
 /** The movement ledger (raw + finished), newest first. */
@@ -775,6 +775,7 @@ export async function getPoFormOptions() {
       name: f.name,
       legalName: f.legalName ?? f.supplierProfile?.name ?? f.name,
       address: f.supplierProfile?.address ?? f.address ?? "",
+      photoUrl: f.supplierProfile?.photoUrl ?? null, // the vendor picker shows the supplier's picture
     })),
     products: products.map((p) => ({
       id: p.id,

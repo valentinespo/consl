@@ -3,10 +3,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Plus, X, AlertTriangle, ChevronDown, Pencil } from "@/components/icons";
+import { Plus, X, AlertTriangle, Pencil } from "@/components/icons";
 import { DatePicker } from "@/components/DatePicker";
 import { Card, SkuAvatar, SectionTitle } from "@/components/ui";
 import { StatusDropdown } from "@/components/StatusDropdown";
+import { SelectMenu } from "@/components/SelectMenu";
 import { useMoney } from "@/components/CurrencyProvider";
 import { inflectUnit } from "@/lib/format";
 import { updateLot } from "@/app/(app)/lots/actions";
@@ -338,17 +339,13 @@ export function LotEditor({
           </div>
         </HeroCard>
         <HeroCard label="Facility">
-          <div className="relative">
-            <select
-              value={facilityId}
-              onChange={(e) => setFacilityId(e.target.value)}
-              style={{ appearance: "none", backgroundImage: "none" }}
-              className="w-full cursor-pointer truncate bg-transparent pr-5 text-[16px] font-semibold text-ink outline-none"
-            >
-              {facilities.map((f) => (<option key={f.id} value={f.id}>{f.code} — {f.name}</option>))}
-            </select>
-            <ChevronDown size={14} className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-muted" />
-          </div>
+          <SelectMenu
+            variant="inline"
+            value={facilityId}
+            onChange={setFacilityId}
+            ariaLabel="Facility"
+            options={facilities.map((f) => ({ value: f.id, label: `${f.code} — ${f.name}` }))}
+          />
         </HeroCard>
         <HeroCard label="Total units"><div className="text-[16px] font-semibold tabular text-ink">{qty(totalUnits)}</div></HeroCard>
         <HeroCard label="Total COG"><div className="text-[16px] font-semibold tabular text-ink">{money(totalCog, 2)}</div></HeroCard>
@@ -497,10 +494,13 @@ export function LotEditor({
           {availableProducts.length > 0 && (
             <div className="flex flex-wrap items-end gap-2 border-t border-line p-3">
               <Field label="Add SKU" className="w-[220px]">
-                <select value={addProductId} onChange={(e) => setAddProductId(e.target.value)} className={inputCls}>
-                  <option value="">Select SKU…</option>
-                  {availableProducts.map((p) => (<option key={p.id} value={p.id}>{p.code} — {p.name}</option>))}
-                </select>
+                <SelectMenu
+                  value={addProductId}
+                  onChange={setAddProductId}
+                  placeholder="Select SKU…"
+                  ariaLabel="Add SKU"
+                  options={availableProducts.map((p) => ({ value: p.id, label: p.code, hint: p.name, icon: <SkuAvatar code={p.code} imageUrl={p.imageUrl} size={22} /> }))}
+                />
               </Field>
               <Field label="Units" className="w-[110px]">
                 <input type="number" min="0" value={addUnits} onChange={(e) => setAddUnits(e.target.value)} placeholder="0" className={`${inputCls} text-right tabular`} />

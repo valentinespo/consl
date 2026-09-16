@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
+import { SelectMenu } from "@/components/SelectMenu";
 import Link from "next/link";
 import { Plus, ArrowUpDown, ChevronRight } from "@/components/icons";
 import { ExpandRow } from "@/components/animate";
@@ -307,19 +308,7 @@ export function TransactionInvoicesTable({
 }
 
 function Select({ value, onChange, options, label }: { value: string; onChange: (v: string) => void; options: string[]; label: (v: string) => string }) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="h-9 max-w-[160px] rounded-lg border border-border bg-surface px-2.5 text-[13px] text-ink-soft outline-none focus:border-accent-strong"
-    >
-      {options.map((o) => (
-        <option key={o} value={o}>
-          {label(o)}
-        </option>
-      ))}
-    </select>
-  );
+  return <SelectMenu value={value} onChange={onChange} className="max-w-[200px]" options={options.map((o) => ({ value: o, label: label(o) }))} />;
 }
 
 function DateInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {

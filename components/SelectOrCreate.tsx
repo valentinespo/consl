@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { SelectMenu } from "@/components/SelectMenu";
 
-export type Opt = { value: string; label: string };
+export type Opt = { value: string; label: string; icon?: ReactNode; hint?: string };
 
 const inputCls = "h-9 w-full rounded-lg border border-border bg-surface px-2.5 text-[13px] text-ink outline-none focus:border-accent-strong";
 
@@ -97,19 +98,12 @@ export function SelectOrCreate({
   return (
     <>
       {name && <input type="hidden" name={name} value={value} />}
-      <select
+      <SelectMenu
         value={value}
-        onChange={(e) => (e.target.value === "__create__" ? setCreating(true) : onChange(e.target.value))}
-        className={inputCls}
-      >
-        {placeholder && <option value="">{placeholder}</option>}
-        {opts.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-        {onCreate && <option value="__create__">＋ Create new…</option>}
-      </select>
+        onChange={(v) => (v === "__create__" ? setCreating(true) : onChange(v))}
+        placeholder={placeholder ?? "Select…"}
+        options={[...opts, ...(onCreate ? [{ value: "__create__", label: "＋ Create new…" }] : [])]}
+      />
     </>
   );
 }

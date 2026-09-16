@@ -6,6 +6,7 @@ import { X, AlertTriangle, ArrowOutbound, ArrowInbound, Warehouse, Package, Sear
 import { DatePicker } from "@/components/DatePicker";
 import { Field, inputCls } from "@/components/FormKit";
 import { IconSelect, type IconGroup } from "@/components/IconSelect";
+import { SelectMenu } from "@/components/SelectMenu";
 import { SkuAvatar } from "@/components/ui";
 import { CHANNEL_LOGO, ROOT_LOGO } from "@/lib/channel-logos";
 import { buildTimeline, capOn, type AvailabilityEvent } from "@/lib/availability-math";
@@ -421,14 +422,17 @@ export function MovementForm({
                   label="For which product?"
                   help={{ title: "Per-product stock", body: "This material is stocked separately for each product." }}
                 >
-                  <select value={poolSku} onChange={(e) => setPoolSku(e.target.value)} className={inputCls}>
-                    <option value="">Select…</option>
-                    {skuOptions.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.code}
-                      </option>
-                    ))}
-                  </select>
+                  <SelectMenu
+                    value={poolSku}
+                    onChange={setPoolSku}
+                    placeholder="Select…"
+                    ariaLabel="Product"
+                    options={skuOptions.map((s) => ({
+                      value: s.id,
+                      label: s.code,
+                      icon: <SkuAvatar code={s.code} imageUrl={(s as { imageUrl?: string | null }).imageUrl ?? null} size={22} />,
+                    }))}
+                  />
                 </Field>
               </div>
             )}

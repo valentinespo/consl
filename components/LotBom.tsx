@@ -2,6 +2,7 @@
 
 import { X, Undo2 } from "@/components/icons";
 import { SkuAvatar } from "@/components/ui";
+import { SelectMenu } from "@/components/SelectMenu";
 import { inflectUnit } from "@/lib/format";
 import { useMoney } from "@/components/CurrencyProvider";
 
@@ -108,18 +109,14 @@ export function LotBom({
 
       {availableToOverride.length > 0 && (
         <div className="mt-3">
-          <select
+          <SelectMenu
             value=""
-            onChange={(e) => e.target.value && startOverride(e.target.value)}
-            className="h-9 max-w-full truncate rounded-lg border border-dashed border-border bg-surface px-3 text-[12.5px] text-muted outline-none focus:border-accent-strong"
-          >
-            <option value="">+ Override a specific SKU…</option>
-            {availableToOverride.map((l) => (
-              <option key={l.key} value={l.key}>
-                {l.sku} — {l.productName}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => v && startOverride(v)}
+            placeholder="+ Override a specific SKU…"
+            ariaLabel="Override a specific SKU"
+            className="max-w-full border-dashed"
+            options={availableToOverride.map((l) => ({ value: l.key, label: l.sku, hint: l.productName, icon: <SkuAvatar code={l.sku} imageUrl={l.imageUrl} size={22} /> }))}
+          />
         </div>
       )}
     </div>
@@ -186,18 +183,15 @@ function MatCard({
       </div>
       {available.length > 0 && (
         <div className="mt-3 border-t border-line pt-3">
-          <select
+          <SelectMenu
             value=""
-            onChange={(e) => e.target.value && onAdd(e.target.value)}
-            className="h-8 w-full rounded-lg border border-dashed border-border bg-surface px-2 text-[12.5px] text-muted outline-none focus:border-accent-strong"
-          >
-            <option value="">+ Add material…</option>
-            {available.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name} (in {inflectUnit(m.unitLabel, 2)})
-              </option>
-            ))}
-          </select>
+            size="sm"
+            onChange={(v) => v && onAdd(v)}
+            placeholder="+ Add material…"
+            ariaLabel="Add material"
+            className="w-full border-dashed"
+            options={available.map((m) => ({ value: m.id, label: m.name, hint: `in ${inflectUnit(m.unitLabel, 2)}` }))}
+          />
         </div>
       )}
     </div>

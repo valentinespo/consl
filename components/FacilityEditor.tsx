@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Card } from "@/components/ui";
+import { Card, SupplierAvatar } from "@/components/ui";
+import { SelectMenu } from "@/components/SelectMenu";
 import { Field, SaveBar, inputCls } from "@/components/FormKit";
 import { AddressInput, AddressDisplay } from "@/components/AddressField";
 import { FACILITY_TYPES } from "@/lib/facility-types";
@@ -19,7 +20,7 @@ export type FacilityForEdit = {
   supplierId: string | null;
 };
 
-export type SupplierOption = { id: string; name: string; facilityId: string | null; address: string | null };
+export type SupplierOption = { id: string; name: string; facilityId: string | null; address: string | null; photoUrl?: string | null };
 
 export function FacilityEditor({ facility, suppliers }: { facility: FacilityForEdit; suppliers: SupplierOption[] }) {
   const router = useRouter();
@@ -83,13 +84,7 @@ export function FacilityEditor({ facility, suppliers }: { facility: FacilityForE
             <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
           </Field>
           <Field label="Type" hint={hint}>
-            <select value={type} onChange={(e) => setType(e.target.value)} className={inputCls}>
-              {FACILITY_TYPES.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
+            <SelectMenu value={type} onChange={setType} ariaLabel="Type" options={FACILITY_TYPES.map((t) => ({ value: t.value, label: t.label, hint: t.hint }))} />
           </Field>
         </div>
 
@@ -97,16 +92,18 @@ export function FacilityEditor({ facility, suppliers }: { facility: FacilityForE
           label="Is this facility also a supplier you pay?"
           hint="The same link you can set from the Suppliers page — editable from either side."
         >
-          <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className={`${inputCls} sm:max-w-md`}>
-            <option value="">No — you don&apos;t pay this location (your own warehouse, or a 3PL billed elsewhere)</option>
-            {suppliers
-              .filter((s) => !s.facilityId || s.facilityId === facility.id)
-              .map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-          </select>
+          <SelectMenu
+            value={supplierId}
+            onChange={setSupplierId}
+            ariaLabel="Linked supplier"
+            className="w-full sm:max-w-md"
+            options={[
+              { value: "", label: "No — you don't pay this location", hint: "Your own warehouse, or a 3PL billed elsewhere" },
+              ...suppliers
+                .filter((s) => !s.facilityId || s.facilityId === facility.id)
+                .map((s) => ({ value: s.id, label: s.name, icon: <SupplierAvatar name={s.name} photoUrl={s.photoUrl ?? null} size={22} /> })),
+            ]}
+          />
         </Field>
 
         {/* One address, one place. Linked to a supplier → the supplier's address is used. */}

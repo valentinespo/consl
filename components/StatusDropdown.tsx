@@ -10,6 +10,8 @@ export const PILL_CLS: Record<string, string> = {
   FINISHED: "pill-green",
   PAID: "pill-green",
   DUE: "pill-chart", // violet, mirroring "In production" — matches the derived pills + legend
+  SENT: "pill-green", // purchase orders
+  DRAFT: "pill-neutral",
 };
 
 export type StatusOption = { value: string; label: string };

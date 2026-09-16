@@ -9,6 +9,7 @@ import { uploadDocument, deleteDocument } from "@/app/(app)/documents/actions";
 import { DocPreview } from "@/components/DocPreview";
 import type { Doc } from "@/components/DocumentList";
 import { SearchSelect } from "@/components/SearchSelect";
+import { SelectMenu } from "@/components/SelectMenu";
 import { TwoStepDelete } from "@/components/TwoStepDelete";
 import { SkuAvatar } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
@@ -379,35 +380,28 @@ export function TransactionInvoiceForm({
                 {!na && (
                   <>
                     <MiniField label="Lot" className="min-w-[150px] flex-1">
-                      <select value={l.lotId} onChange={(e) => patch(l.key, { lotId: e.target.value, sku: "ALL" })} className={inputCls}>
-                        {/* "Unassigned" is a consequence of deletion, never a deliberate choice. */}
-                        {lotUnassigned && <option value="" disabled>⚠ Unassigned — pick a lot</option>}
-                        {lots.map((x) => (
-                          <option key={x.id} value={x.id}>
-                            {x.label}
-                          </option>
-                        ))}
-                      </select>
+                      {/* "Unassigned" is a consequence of deletion, never a deliberate choice. */}
+                      <SelectMenu
+                        value={l.lotId}
+                        onChange={(v) => patch(l.key, { lotId: v, sku: "ALL" })}
+                        ariaLabel="Lot"
+                        options={[
+                          ...(lotUnassigned ? [{ value: "", label: "⚠ Unassigned — pick a lot", disabled: true }] : []),
+                          ...lots.map((x) => ({ value: x.id, label: x.label })),
+                        ]}
+                      />
                     </MiniField>
                     <MiniField label="SKU" className="w-[210px]">
-                      <div className="flex items-center gap-2">
-                        {l.sku && l.sku !== "ALL" && !skuDangling && <SkuAvatar code={l.sku} imageUrl={skuImages?.[l.sku] ?? null} size={26} />}
-                        <div className="min-w-0 flex-1">
-                          <select value={l.sku} onChange={(e) => patch(l.key, { sku: e.target.value })} className={inputCls}>
-                            <option value="ALL">Spread proportionally</option>
-                            {lotSkus.map((s) => (
-                              <option key={s} value={s}>
-                                {s}
-                              </option>
-                            ))}
-                            {skuDangling && (
-                              <option value={l.sku!} disabled>
-                                ⚠ {l.sku} — removed, reassign
-                              </option>
-                            )}
-                          </select>
-                        </div>
-                      </div>
+                      <SelectMenu
+                        value={l.sku}
+                        onChange={(v) => patch(l.key, { sku: v })}
+                        ariaLabel="SKU"
+                        options={[
+                          { value: "ALL", label: "Spread proportionally" },
+                          ...lotSkus.map((s) => ({ value: s, label: s, icon: <SkuAvatar code={s} imageUrl={skuImages?.[s] ?? null} size={22} /> })),
+                          ...(skuDangling ? [{ value: l.sku!, label: `⚠ ${l.sku} — removed, reassign`, disabled: true }] : []),
+                        ]}
+                      />
                     </MiniField>
                   </>
                 )}

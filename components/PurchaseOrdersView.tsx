@@ -2,6 +2,7 @@
 
 import { DocPreview } from "@/components/DocPreview";
 import { Fragment, useState } from "react";
+import { StatusDropdown } from "@/components/StatusDropdown";
 import Link from "next/link";
 import { ChevronRight, Receipt, Lock, Download } from "@/components/icons";
 import { ExpandRow } from "@/components/animate";
@@ -226,31 +227,53 @@ function PoLinesList({ po }: { po: PoListRow }) {
   );
 }
 
+const PO_STATUSES = [
+  { value: "DRAFT", label: "Draft" },
+  { value: "SENT", label: "Sent" },
+];
+
+/** The PO's status pill, which is also its picker. Optimistic: the pill flips the moment a status
+ *  is chosen and the row below follows on the refresh — a controlled native select used to snap
+ *  back to the old value until the server round-trip landed, which read as "nothing happened". */
 function StatusSelect({ id, status }: { id: string; status: string }) {
   const router = useRouter();
+  const [cur, setCur] = useState(status);
+  const [seen, setSeen] = useState(status);
   const [pending, setPending] = useState(false);
-  async function change(e: React.ChangeEvent<HTMLSelectElement>) {
-    const next = e.target.value === "SENT" ? "SENT" : "DRAFT";
+  const [error, setError] = useState<string | null>(null);
+  // Follow the server whenever it re-renders the row (a refresh, a change made elsewhere) —
+  // React's reset-state-on-prop-change pattern, done during render rather than in an effect.
+  if (status !== seen) {
+    setSeen(status);
+    setCur(status);
+  }
+  async function change(v: string) {
+    const next = v === "SENT" ? "SENT" : "DRAFT";
+    if (next === cur || pending) return;
+    const prev = cur;
+    setCur(next);
     setPending(true);
+    setError(null);
     try {
-      await setPoStatus(id, next);
+      const r = await setPoStatus(id, next);
+      if (!r.ok) {
+        setCur(prev);
+        setError(r.error);
+        return;
+      }
       router.refresh();
+    } catch {
+      setCur(prev);
+      setError("Couldn't change the status.");
     } finally {
       setPending(false); // always recover the control, even if the action rejects after saving
     }
   }
   return (
-    <select
-      value={status}
-      onChange={change}
-      disabled={pending}
-      className={`h-7 rounded-full border px-2 text-[11.5px] font-medium outline-none disabled:opacity-50 ${
-        status === "SENT" ? "pill-green" : "pill-neutral"
-      }`}
-    >
-      <option value="DRAFT">Draft</option>
-      <option value="SENT">Sent</option>
-    </select>
+    <span className={`inline-flex items-center gap-2 ${pending ? "opacity-70" : ""}`}>
+      <StatusDropdown value={cur} edited={false} options={PO_STATUSES} onChange={change} />
+      {error && <span className="text-[11px] text-negative">{error}</span>}
+    </span>
   );
 }
 

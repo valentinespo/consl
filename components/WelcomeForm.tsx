@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Building2 } from "@/components/icons";
+import { SelectMenu } from "@/components/SelectMenu";
 import { createCompany } from "@/app/welcome/actions";
 
 /** Common presets so most people never touch the currency fields. "Other" reveals them. */
@@ -87,25 +88,19 @@ export function WelcomeForm({ additional = false, pendingShop = null }: { additi
 
           <label className="block">
             <span className="mb-1.5 block text-[12.5px] font-medium text-ink-soft">Currency</span>
-            <select
+            <SelectMenu
               value={custom ? "custom" : String(presetIdx)}
-              onChange={(e) => {
-                if (e.target.value === "custom") {
+              onChange={(v) => {
+                if (v === "custom") {
                   setCustom(true);
                 } else {
                   setCustom(false);
-                  setPresetIdx(Number(e.target.value));
+                  setPresetIdx(Number(v));
                 }
               }}
-              className={inputCls}
-            >
-              {PRESETS.map((p, i) => (
-                <option key={p.code} value={i}>
-                  {p.label}
-                </option>
-              ))}
-              <option value="custom">Something else…</option>
-            </select>
+              ariaLabel="Currency"
+              options={[...PRESETS.map((p, i) => ({ value: String(i), label: p.label })), { value: "custom", label: "Something else…" }]}
+            />
           </label>
 
           {custom && (

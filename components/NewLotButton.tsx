@@ -6,6 +6,7 @@ import { Plus, X, Trash2 } from "@/components/icons";
 import { DatePicker } from "@/components/DatePicker";
 import { createLot } from "@/app/(app)/lots/actions";
 import { SelectOrCreate, type Opt } from "@/components/SelectOrCreate";
+import { SelectMenu } from "@/components/SelectMenu";
 import { useCan } from "@/components/AccessProvider";
 
 const inputCls = "h-9 w-full rounded-lg border border-border bg-surface px-2.5 text-[13px] text-ink outline-none focus:border-accent-strong";
@@ -80,19 +81,18 @@ export function NewLotButton({ facilities, products }: { facilities: Facility[];
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Facility">
-                  <select value={facilityId} onChange={(e) => setFacilityId(e.target.value)} className={inputCls}>
-                    {facilities.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.code} — {f.name}
-                      </option>
-                    ))}
-                  </select>
+                  <SelectMenu value={facilityId} onChange={setFacilityId} ariaLabel="Facility" options={facilities.map((f) => ({ value: f.id, label: `${f.code} — ${f.name}` }))} />
                 </Field>
                 <Field label="Status">
-                  <select value={status} onChange={(e) => setStatus(e.target.value as "IN_PRODUCTION" | "FINISHED")} className={inputCls}>
-                    <option value="IN_PRODUCTION">In production</option>
-                    <option value="FINISHED">Finished</option>
-                  </select>
+                  <SelectMenu
+                    value={status}
+                    onChange={(v) => setStatus(v as "IN_PRODUCTION" | "FINISHED")}
+                    ariaLabel="Status"
+                    options={[
+                      { value: "IN_PRODUCTION", label: "In production" },
+                      { value: "FINISHED", label: "Finished" },
+                    ]}
+                  />
                 </Field>
               </div>
               <div className="grid grid-cols-2 gap-3">

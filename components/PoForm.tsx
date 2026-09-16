@@ -3,14 +3,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useExitAnimation } from "@/components/animate";
 import { useRouter } from "next/navigation";
-import { Plus, X, AlertTriangle } from "@/components/icons";
+import { Plus, X, AlertTriangle, Package, Receipt } from "@/components/icons";
+import { SelectMenu } from "@/components/SelectMenu";
 import { DatePicker } from "@/components/DatePicker";
 import { createPurchaseOrder, updatePurchaseOrder, deletePurchaseOrder, type PoLineInput } from "@/app/(app)/purchase-orders/actions";
 import { TwoStepDelete } from "@/components/TwoStepDelete";
-import { SkuAvatar } from "@/components/ui";
+import { SkuAvatar, SupplierAvatar } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
 
-export type PoFacility = { id: string; code: string; name: string; legalName: string; address: string };
+export type PoFacility = { id: string; code: string; name: string; legalName: string; address: string; photoUrl?: string | null };
 export type PoProduct = {
   id: string;
   code: string;
@@ -255,14 +256,18 @@ export function PoForm({
       {/* Header */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Field label="Vendor (facility)">
-          <select value={facilityId} onChange={(e) => changeFacility(e.target.value)} className={inputCls} disabled={editing}>
-            <option value="">Select…</option>
-            {facilities.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.code} — {f.legalName}
-              </option>
-            ))}
-          </select>
+          <SelectMenu
+            value={facilityId}
+            onChange={changeFacility}
+            disabled={editing}
+            placeholder="Select…"
+            ariaLabel="Vendor"
+            options={facilities.map((f) => ({
+              value: f.id,
+              label: `${f.code} — ${f.legalName}`,
+              icon: <SupplierAvatar name={f.legalName} photoUrl={f.photoUrl ?? null} size={22} />,
+            }))}
+          />
         </Field>
         <Field label="PO date">
           <DatePicker value={dateISO} onChange={setDateISO} />
@@ -297,32 +302,35 @@ export function PoForm({
         </div>
 
         {lines.map((l) => {
-          const prod = products.find((p) => p.id === l.productId);
           const isSku = l.kind === "SKU";
           return (
             <div key={l.key} className={`rounded-lg border border-border bg-surface p-2.5 ${l.costFromPo ? "pb-7" : ""}`}>
               <div className="flex flex-wrap items-end gap-2">
-                <MiniField label="Type" className="w-[86px]">
-                  <select value={l.kind} onChange={(e) => patch(l.key, { kind: e.target.value as "SKU" | "FEE" })} className={inputCls}>
-                    <option value="SKU">SKU</option>
-                    <option value="FEE">Fee</option>
-                  </select>
+                <MiniField label="Type" className="w-[104px]">
+                  <SelectMenu
+                    value={l.kind}
+                    onChange={(v) => patch(l.key, { kind: v as "SKU" | "FEE" })}
+                    ariaLabel="Line type"
+                    options={[
+                      { value: "SKU", label: "SKU", icon: <Package size={14} className="text-muted" /> },
+                      { value: "FEE", label: "Fee", icon: <Receipt size={14} className="text-muted" /> },
+                    ]}
+                  />
                 </MiniField>
                 {isSku && (
-                  <MiniField label="SKU" className="w-[150px]">
-                    <div className="flex items-center gap-2">
-                      {prod && <SkuAvatar code={prod.code} imageUrl={prod.imageUrl} size={26} />}
-                      <div className="min-w-0 flex-1">
-                        <select value={l.productId} onChange={(e) => pickProduct(l.key, e.target.value)} className={inputCls}>
-                          <option value="">Select…</option>
-                          {products.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.code}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
+                  <MiniField label="SKU" className="w-[190px]">
+                    <SelectMenu
+                      value={l.productId}
+                      onChange={(v) => pickProduct(l.key, v)}
+                      placeholder="Select…"
+                      ariaLabel="SKU"
+                      options={products.map((p) => ({
+                        value: p.id,
+                        label: p.code,
+                        hint: p.name,
+                        icon: <SkuAvatar code={p.code} imageUrl={p.imageUrl} size={22} />,
+                      }))}
+                    />
                   </MiniField>
                 )}
                 <MiniField label="Description (as printed on the PO)" className="min-w-[200px] flex-1">

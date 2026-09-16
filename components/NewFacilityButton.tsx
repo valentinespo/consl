@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X } from "@/components/icons";
 import { FACILITY_TYPES } from "@/lib/facility-types";
+import { SelectMenu } from "@/components/SelectMenu";
 import { createFacility } from "@/app/(app)/facilities/actions";
 import { useCan } from "@/components/AccessProvider";
 
@@ -71,13 +72,7 @@ export function NewFacilityButton() {
               </label>
               <label className="block">
                 <span className="mb-1 block text-[12px] font-medium text-muted">Type</span>
-                <select value={type} onChange={(e) => setType(e.target.value)} className={inputCls}>
-                  {FACILITY_TYPES.map((t) => (
-                    <option key={t.value} value={t.value}>
-                      {t.label} — {t.hint}
-                    </option>
-                  ))}
-                </select>
+                <SelectMenu value={type} onChange={setType} ariaLabel="Type" options={FACILITY_TYPES.map((t) => ({ value: t.value, label: t.label, hint: t.hint }))} />
               </label>
               {error && <div className="text-[12px] text-negative">{error}</div>}
               <div className="flex justify-end gap-2 pt-1">

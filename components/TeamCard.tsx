@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { UserPlus, Copy, Check, X, Lock } from "@/components/icons";
 import { Card } from "@/components/ui";
+import { SelectMenu } from "@/components/SelectMenu";
 import { createInvite, revokeInvite, removeMember } from "@/app/(app)/team/actions";
 import { PermissionsEditor } from "@/components/PermissionsEditor";
 import type { Permissions } from "@/lib/permissions";
@@ -165,10 +166,16 @@ export function TeamCard({
                 className={inputCls}
               />
             </div>
-            <select value={role} onChange={(e) => setRole(e.target.value as "owner" | "member")} className={`${inputCls} w-[120px]`}>
-              <option value="member">Member</option>
-              <option value="owner">Owner</option>
-            </select>
+            <SelectMenu
+              value={role}
+              onChange={(v) => setRole(v as "owner" | "member")}
+              ariaLabel="Role"
+              className="w-[120px]"
+              options={[
+                { value: "member", label: "Member" },
+                { value: "owner", label: "Owner" },
+              ]}
+            />
             <button
               onClick={invite}
               disabled={pending || !email.trim()}

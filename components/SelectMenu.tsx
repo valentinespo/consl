@@ -12,6 +12,8 @@ export type SelectMenuOption = {
   icon?: ReactNode;
   /** Muted second line under the label (e.g. a facility type's explanation). */
   hint?: string;
+  /** Shown but not choosable — a dangling value that needs reassigning, never a real choice. */
+  disabled?: boolean;
 };
 
 /**
@@ -28,6 +30,8 @@ export function SelectMenu({
   disabled = false,
   className = "w-full",
   ariaLabel,
+  variant = "field",
+  size = "md",
 }: {
   value: string;
   options: SelectMenuOption[];
@@ -38,6 +42,10 @@ export function SelectMenu({
    *  (the base carries no width, so yours is the only one that applies). */
   className?: string;
   ariaLabel?: string;
+  /** "inline" drops the field chrome — a bold title that happens to be a picker (lot header). */
+  variant?: "field" | "inline";
+  /** "sm" is the 32px row used inside dense tables and BOM lists. */
+  size?: "md" | "sm";
 }) {
   const btn = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -108,6 +116,11 @@ export function SelectMenu({
     if (v !== value) onChange(v);
   }
 
+  const triggerCls =
+    variant === "inline"
+      ? `flex max-w-full items-center gap-1.5 text-left text-[16px] font-semibold text-ink outline-none transition-opacity hover:opacity-75 disabled:cursor-default disabled:opacity-50 ${className}`
+      : `flex ${size === "sm" ? "h-8 text-[12.5px]" : "h-9 text-[13px]"} items-center gap-2 rounded-[10px] border border-border bg-surface px-3 text-left text-ink outline-none transition-colors hover:border-ink/25 focus-visible:border-ink/40 disabled:cursor-default disabled:opacity-50 ${className}`;
+
   return (
     <>
       <button
@@ -118,11 +131,11 @@ export function SelectMenu({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={ariaLabel}
-        className={`flex h-9 items-center gap-2 rounded-[10px] border border-border bg-surface px-3 text-left text-[13px] text-ink outline-none transition-colors hover:border-ink/25 focus-visible:border-ink/40 disabled:cursor-default disabled:opacity-50 ${className}`}
+        className={triggerCls}
       >
         {selected?.icon && <span className="shrink-0">{selected.icon}</span>}
         <span className={`min-w-0 flex-1 truncate ${selected ? "" : "text-muted"}`}>{selected?.label ?? placeholder}</span>
-        <ChevronDown size={13} className="shrink-0 text-muted" />
+        <ChevronDown size={variant === "inline" ? 14 : 13} className="shrink-0 text-muted" />
       </button>
       {exit.mounted &&
         lastBox.current &&
@@ -163,9 +176,15 @@ export function SelectMenu({
                     type="button"
                     role="option"
                     aria-selected={active}
+                    aria-disabled={o.disabled}
+                    disabled={o.disabled}
                     onClick={() => choose(o.value)}
                     className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] transition-colors ${
-                      active ? "bg-chart-soft font-medium text-chart" : "text-ink-soft hover:bg-surface-2 hover:text-ink"
+                      o.disabled
+                        ? "cursor-not-allowed text-muted opacity-70"
+                        : active
+                          ? "bg-chart-soft font-medium text-chart"
+                          : "text-ink-soft hover:bg-surface-2 hover:text-ink"
                     }`}
                   >
                     {o.icon && <span className="shrink-0">{o.icon}</span>}
