@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Check } from "@/components/icons";
+import { currentUserId } from "@/lib/current-user";
 
 /**
  * The public marketing page — what a signed-out visitor to consl.ai sees (middleware redirects
@@ -113,7 +114,11 @@ function Feature({
   );
 }
 
-export default function HomePage() {
+export default async function HomePage() {
+  // A signed-in visitor is past applying: every call to action opens the app instead, and the
+  // gate sends them to whatever stage they're at. Reading the session makes the page per-request.
+  const signedIn = !!(await currentUserId());
+  const start = signedIn ? { href: "/", label: "Open consl" } : { href: "/apply", label: "Get started" };
   return (
     <div className="min-h-screen bg-white text-neutral-900" style={{ colorScheme: "light" }}>
       {/* ── Nav ─────────────────────────────────────────────────────────────────────────── */}
@@ -127,11 +132,13 @@ export default function HomePage() {
             <a href="#integrations" className="hover:text-neutral-900">Integrations</a>
           </nav>
           <div className="flex items-center gap-2.5">
-            <Link href="/sign-in" className="rounded-xl px-3.5 py-2 text-[13.5px] font-semibold text-neutral-700 hover:bg-neutral-100">
-              Log in
-            </Link>
-            <Link href="/apply" className="rounded-xl bg-neutral-900 px-4 py-2 text-[13.5px] font-semibold text-white hover:bg-neutral-700">
-              Get started
+            {!signedIn && (
+              <Link href="/sign-in" className="rounded-xl px-3.5 py-2 text-[13.5px] font-semibold text-neutral-700 hover:bg-neutral-100">
+                Log in
+              </Link>
+            )}
+            <Link href={start.href} className="rounded-xl bg-neutral-900 px-4 py-2 text-[13.5px] font-semibold text-white hover:bg-neutral-700">
+              {start.label}
             </Link>
           </div>
         </div>
@@ -157,7 +164,7 @@ export default function HomePage() {
             the same P&amp;L as your sales and fees, and restock alerts long before you run out.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-            <Link href="/apply" className={CTA_PRIMARY}>Get started</Link>
+            <Link href={start.href} className={CTA_PRIMARY}>{start.label}</Link>
             <a href="mailto:admin@consl.ai" className={CTA_SECONDARY}>Talk to us</a>
           </div>
           <p className="mt-4 text-[12.5px] text-neutral-500">Built for brands that make physical products and sell them everywhere.</p>
@@ -269,13 +276,15 @@ export default function HomePage() {
             1-1 onboarding with a personal brand manager. Tell us about your brand to apply.
           </p>
           <div className="relative mt-7 flex flex-wrap items-center justify-center gap-3">
-            <Link href="/apply" className={CTA_PRIMARY}>Apply for early access</Link>
-            <Link
-              href="/sign-in"
-              className="inline-flex items-center justify-center rounded-xl border border-white/25 px-5 py-3 text-[14.5px] font-semibold text-white hover:bg-white/10"
-            >
-              Log in
-            </Link>
+            <Link href={start.href} className={CTA_PRIMARY}>{signedIn ? "Open consl" : "Apply for early access"}</Link>
+            {!signedIn && (
+              <Link
+                href="/sign-in"
+                className="inline-flex items-center justify-center rounded-xl border border-white/25 px-5 py-3 text-[14.5px] font-semibold text-white hover:bg-white/10"
+              >
+                Log in
+              </Link>
+            )}
           </div>
         </div>
       </section>

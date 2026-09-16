@@ -141,6 +141,23 @@ export async function attachAccount(id: string): Promise<Result<{ orgId: string 
     return { ok: false, error: "This application belongs to another account." };
   }
 
+  // Someone who already has a company (the page normally keeps them out of the form, but a stale
+  // tab can still submit) gets the application attached to that company — never a second one.
+  const existing = await prismaBase.membership.findFirst({
+    where: { clerkUserId: userId, organization: { deactivatedAt: null } },
+    orderBy: { createdAt: "asc" },
+    select: { orgId: true },
+  });
+  if (existing) {
+    await prismaBase.accessApplication.update({
+      where: { id },
+      data: { clerkUserId: userId, orgId: existing.orgId, accountCreatedAt: new Date(), ...(app.status === "started" || app.status === "completed" ? { status: "account_created" } : {}) },
+    });
+    await setActiveOrgCookie(existing.orgId);
+    revalidatePath("/", "layout");
+    return { ok: true, orgId: existing.orgId };
+  }
+
   const org = await createCompanyForUser({ userId, name: app.companyName, email: app.email, phone: app.phone });
   await prismaBase.accessApplication.update({
     where: { id },
