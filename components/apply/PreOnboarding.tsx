@@ -64,9 +64,13 @@ export function PreOnboarding({
   const callLabel = scheduledAt
     ? new Date(scheduledAt).toLocaleString(undefined, { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })
     : null;
-  const callBody = callLabel
-    ? `Booked for ${callLabel}, your local time. The invite is in your inbox.`
-    : "Booked. The invite with the exact time is in your inbox.";
+  const callBody = callLabel ? (
+    <>
+      Booked for <span className="font-semibold text-ink">{callLabel}</span>, your local time. The invite is in your inbox.
+    </>
+  ) : (
+    "Booked. The invite with the exact time is in your inbox."
+  );
 
   // Geometry while the calendar is on the page (measured 2026-09-16): Calendly keeps its side-by-side
   // layout only in a frame ≥ ~1000px, draws its booking card 800px wide centred in that frame, and
@@ -122,7 +126,7 @@ export function PreOnboarding({
               <Row
                 icon={<CalendarDays size={17} />}
                 done
-                title="Your discovery call"
+                title="Your discovery call is booked!"
                 body={callBody}
               >
                 <BringList />
@@ -191,7 +195,7 @@ function Row({
   icon: ReactNode;
   done: boolean;
   title: string;
-  body: string;
+  body: ReactNode;
   action?: ReactNode;
   children?: ReactNode;
 }) {
