@@ -24,6 +24,7 @@ import {
 } from "@/lib/scheduler-gates";
 import { deleteStored } from "@/lib/storage";
 import { DELETE_GRACE_DAYS } from "@/lib/constants";
+import { runNightlyBackupIfDue } from "@/lib/backup";
 
 /** Current date + minute-of-day in a given IANA timezone. */
 function nowInTz(tz: string): { day: string; minutes: number } {
@@ -512,6 +513,8 @@ async function tick(): Promise<void> {
   running = true;
   try {
     await purgeExpiredOrgs();
+    // The nightly database backup to its own bucket (lib/backup.ts) — once a day, after 04:00 UTC.
+    await runNightlyBackupIfDue().catch((e) => console.error("[backup] failed:", (e as Error).message));
     // Only live orgs sync; a deactivated one is on its way out.
     const orgs = await prismaBase.organization.findMany({ where: { deactivatedAt: null }, select: { id: true } });
     // One org's failure must never stop the others; both helpers swallow their own errors.
