@@ -262,7 +262,7 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
           )}
         </div>
         <div className="flex-1 px-6 pb-16 pt-2 lg:px-16 lg:pt-8">
-          <div key={step} className="step-in mx-auto w-full max-w-[640px] lg:mx-0">
+          <div key={step} className={`step-in mx-auto w-full lg:mx-0 ${step === "book" ? "max-w-none" : "max-w-[640px]"}`}>
             {step === "intro" && (
               <Form onNext={goNext}>
                 <div className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3.5 py-1.5 text-[12.5px] font-semibold text-violet-800">

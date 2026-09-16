@@ -152,7 +152,7 @@ export function CalendlyStep({
           Booked. Taking you to your workspace…
         </div>
       ) : url ? (
-        <div className="mt-6 overflow-hidden rounded-2xl border border-neutral-200">
+        <div className="mt-6 border-t border-neutral-200">
           <CalendlyEmbed url={url} name={name} email={email} onScheduled={scheduled} />
         </div>
       ) : (

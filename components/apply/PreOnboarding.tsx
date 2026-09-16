@@ -69,11 +69,12 @@ export function PreOnboarding({
     : `Booked ${bookedLabel}. The invite with the exact time is in your inbox.`;
 
   // Wide while the calendar is on the page — Calendly switches to its two-column layout (details
-  // on the left, dates on the right) only once its frame is about 1000px wide, so the card opens to
-  // 1240px to give it ~1170px — and back to a compact card once the call is booked.
+  // on the left, dates on the right) only once its frame is about 1000px wide. The calendar spans
+  // the card edge to edge, so a 1040px card gives it the full ~1038px — and the card returns to
+  // its compact width once the call is booked.
   return (
     <div className="min-h-screen bg-surface-2 px-5 py-8 sm:py-12">
-      <div className={`mx-auto w-full transition-[max-width] ${booked ? "max-w-[600px]" : "max-w-[1240px]"}`}>
+      <div className={`mx-auto w-full transition-[max-width] ${booked ? "max-w-[600px]" : "max-w-[1040px]"}`}>
         <div className="mb-6 flex items-center justify-between">
           <span className="inline-flex items-center gap-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -100,10 +101,11 @@ export function PreOnboarding({
               : "Pick a time below. On the call, your brand manager will help you set up your 14-day free trial and onboard you to the platform. Yes, as easy as that."}
           </p>
 
-          {/* The calendar stays open until the call is booked — no button to find, nothing to hide. */}
+          {/* The calendar stays open until the call is booked — no button to find, nothing to hide.
+              It is the card's body, edge to edge under a hairline, not a box inside a box. */}
           {!booked &&
             (calendlyUrl ? (
-              <div className="mt-6 overflow-hidden rounded-xl border border-border bg-white">
+              <div className="-mx-7 mt-6 border-t border-border bg-white sm:-mx-8">
                 <CalendlyEmbed url={calendlyUrl} name={firstName ?? ""} email={email} onScheduled={scheduled} minHeight={720} />
               </div>
             ) : (
