@@ -52,7 +52,15 @@ model Organization {
   // paywall only ever applies to companies created through the application flow afterwards.
   billingExempt      Boolean   @default(false) // true = never gated (Herbl, the demo company, internal)
   trialUnlockedAt    DateTime? // set by an admin during the discovery call; enables "Start free trial"
-  subscriptionStatus String?   // mirror of Stripe's status once checkout exists: trialing | active | past_due | canceled
+  subscriptionStatus String?   // mirror of Stripe's status: trialing | active | past_due | canceled | unpaid | incomplete
+  // --- Stripe. The customer and subscription behind the company's plan, mirrored by the webhook
+  // (app/api/webhooks/stripe) and on return from Checkout. foundingMember = early access: the
+  // 50%-off-for-life coupon is applied at checkout.
+  stripeCustomerId     String?   @unique
+  stripeSubscriptionId String?   @unique
+  trialEndsAt          DateTime?
+  currentPeriodEnd     DateTime?
+  foundingMember       Boolean   @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

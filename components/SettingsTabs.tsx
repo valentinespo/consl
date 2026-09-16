@@ -8,6 +8,7 @@ const TABS = [
   { href: "/settings/timezone", label: "Time zone" },
   { href: "/settings/restock", label: "Restock defaults" },
   { href: "/settings/integrations", label: "Integrations" },
+  { href: "/settings/billing", label: "Billing" },
 ];
 
 /** Tab strip for the Settings section. Client-side only so the current tab can be highlighted. */

@@ -47,7 +47,9 @@ export type OrgBilling = { billingExempt: boolean; trialUnlockedAt: Date | null;
 export function billingState(org: OrgBilling | null): { label: string; pill: string } {
   if (!org) return { label: "No company", pill: "pill-neutral" };
   if (org.billingExempt) return { label: "Exempt", pill: "pill-neutral" };
+  if (org.subscriptionStatus === "past_due") return { label: "Past due", pill: "pill-amber" };
   if (LIVE_SUBSCRIPTION.has(org.subscriptionStatus ?? "")) return { label: org.subscriptionStatus === "active" ? "Subscribed" : "In trial", pill: "pill-green" };
+  if (org.subscriptionStatus) return { label: org.subscriptionStatus === "canceled" ? "Cancelled" : org.subscriptionStatus, pill: "pill-red" };
   if (org.trialUnlockedAt) return { label: "Trial unlocked", pill: "pill-chart" };
   return { label: "Waiting for call", pill: "pill-amber" };
 }

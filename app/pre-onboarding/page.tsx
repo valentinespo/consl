@@ -6,6 +6,8 @@ import { gateRedirect } from "@/lib/gate-redirect";
 import { prismaBase } from "@/lib/prisma-base";
 import { PreOnboarding } from "@/components/apply/PreOnboarding";
 import { calendlyConfigured, recordScheduledCall } from "@/lib/calendly";
+import { LIVE_SUBSCRIPTION } from "@/lib/billing";
+import { stripeConfigured, syncCheckoutSession } from "@/lib/stripe";
 
 export const dynamic = "force-dynamic";
 
@@ -14,10 +16,19 @@ export const dynamic = "force-dynamic";
  * address it types — until its trial has started. Nothing to do but book the discovery call;
  * the "Start free trial" button is unlocked by an admin during that call.
  */
-export default async function PreOnboardingPage() {
+export default async function PreOnboardingPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const org = await getCurrentOrg();
   if (!org) redirect((await currentUserId()) ? "/apply" : "/sign-in");
   if (!needsBillingGate(org)) return gateRedirect("/");
+
+  // Back from Stripe Checkout: mirror the new subscription right now (the webhook may be a few
+  // seconds behind) and, once the trial is on record, go straight into the setup wizard.
+  const sp = await searchParams;
+  const sessionId = typeof sp.session_id === "string" ? sp.session_id : null;
+  if (sp.checkout === "success" && sessionId && stripeConfigured()) {
+    const synced = await syncCheckoutSession(sessionId, org.id).catch(() => ({ status: null }));
+    if (synced.status && LIVE_SUBSCRIPTION.has(synced.status)) return gateRedirect("/");
+  }
 
   const app = await prismaBase.accessApplication.findFirst({
     where: { orgId: org.id },

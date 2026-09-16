@@ -149,6 +149,10 @@ export function PreOnboarding({
             {pending ? "One moment…" : "Start 14-day free trial"}
           </button>
           {note && <p className="mt-2.5 text-center text-[12.5px] text-muted">{note}</p>}
+          <p className="mt-2.5 text-center text-[12px] text-muted">
+            Founding member price: <span className="font-medium text-ink-soft">$198.50/month</span> after your free trial — 50% off the $397 list
+            price, for life. Card on file, nothing charged for 14 days, cancel anytime.
+          </p>
 
           <p className="mt-6 text-[12.5px] leading-relaxed text-muted">
             Save this page, or just come back to consl.ai and log in whenever. You&apos;ll land right here until your trial
