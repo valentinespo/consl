@@ -153,10 +153,10 @@ export function CalendlyStep({
       <Heading
         title={
           <>
-            Book your <Em>discovery call</Em>.
+            Book your <Em>demo</Em>.
           </>
         }
-        sub="Pick a time that suits you. Your brand manager will walk you through the setup and start your 14-day free trial with you on the call."
+        sub="Pick a time that suits you. Your brand manager will walk you through consl on your own numbers and start your 14-day free trial with you on the demo."
       />
       {booked ? (
         <div className="step-in mt-8 flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-[15px] font-medium text-emerald-800">

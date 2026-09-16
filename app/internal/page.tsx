@@ -35,7 +35,7 @@ export default async function InternalApplicationsPage() {
                 <th className="px-2 py-2.5 font-medium">Company</th>
                 <th className="px-2 py-2.5 font-medium">Main channel</th>
                 <th className="px-2 py-2.5 font-medium">Status</th>
-                <th className="px-2 py-2.5 font-medium">Call</th>
+                <th className="px-2 py-2.5 font-medium">Demo</th>
                 <th className="px-2 py-2.5 font-medium">Billing</th>
                 <th className="px-2 py-2.5 font-medium">Started</th>
                 <th className="px-5 py-2.5 text-right font-medium">Actions</th>

@@ -293,7 +293,7 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
             {step === "intro" && (
               <Form onNext={goNext}>
                 <div className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3.5 py-1.5 text-[12.5px] font-semibold text-violet-800">
-                  Book your discovery call
+                  Early access · 20 spots
                 </div>
                 <div className="mt-5">
                   <Heading
@@ -302,7 +302,7 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
                         First, tell us how your brand operates and <Em>where your numbers get lost</Em>.
                       </>
                     }
-                    sub="Before your discovery call, we want to understand your brand and what's slowing you down, so we can help as much as possible and make sure consl and our team of e-commerce experts are the right tool for your business."
+                    sub="Before your demo, we want to understand your brand and what's slowing you down, so we can help as much as possible and make sure consl and our team of e-commerce experts are the right tool for your business."
                   />
                 </div>
                 <p className="mt-4 max-w-[560px] text-[15.5px] leading-relaxed text-neutral-600">
@@ -503,13 +503,13 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
                         Based on your replies, we think you could be a <Em>great fit</Em>.
                       </>
                     }
-                    sub="Next: create your account and book your discovery call. Your personal brand manager will walk you through the setup and start your 14-day free trial on that call, at the lifetime early-access price."
+                    sub="Next: create your account and book your demo. Your personal brand manager will walk you through the setup and start your 14-day free trial on that call, at the lifetime early-access price."
                   />
                 </div>
                 <ol className="mt-7 space-y-3">
                   {[
                     ["Create your account", "Thirty seconds. Your details are already filled in."],
-                    ["Pick a time for your discovery call", "Straight from the next screen."],
+                    ["Pick a time for your demo", "Straight from the next screen."],
                     ["Meet your brand manager", "Set up the platform together and start your trial on the call."],
                   ].map(([t, b], i) => (
                     <li key={t} className="flex items-start gap-3.5">
@@ -693,7 +693,7 @@ function Aside() {
       </Link>
       <div className="mt-6 lg:mt-16">
         <h2 className="text-[26px] font-bold leading-[1.08] tracking-tight text-violet-700 lg:text-[40px]">Apply for early access.</h2>
-        <p className="mt-1.5 text-[17px] font-semibold text-neutral-800 lg:mt-3 lg:text-[26px]">Twenty spots, for the brands we&apos;re the right fit for.</p>
+        <p className="mt-1.5 text-[17px] font-semibold text-neutral-800 lg:mt-3 lg:text-[26px]">Tell us about your brand, book your demo, start your free trial.</p>
       </div>
       <ul className="mt-9 hidden max-w-[420px] space-y-3.5 lg:block">
         {PERKS.map((p) => (

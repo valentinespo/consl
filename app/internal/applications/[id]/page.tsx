@@ -51,7 +51,7 @@ export default async function InternalApplicationPage({ params }: { params: Prom
     { label: "Started the application", at: a.createdAt },
     { label: "Finished the questionnaire", at: a.completedAt },
     { label: "Created their account", at: a.accountCreatedAt },
-    { label: "Booked the discovery call", at: a.callBookedAt, detail: a.callScheduledAt ? `Call: ${fmtDateTime(a.callScheduledAt)} (Buenos Aires)` : undefined },
+    { label: "Booked the demo", at: a.callBookedAt, detail: a.callScheduledAt ? `Call: ${fmtDateTime(a.callScheduledAt)} (Buenos Aires)` : undefined },
     { label: "Trial unlocked", at: a.organization?.trialUnlockedAt ?? null },
     { label: "Finished the setup wizard", at: a.organization?.onboardedAt ?? null },
   ];

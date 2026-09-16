@@ -99,12 +99,12 @@ export function PreOnboarding({
         <div className={`rounded-[var(--radius-card)] border border-border bg-surface p-7 shadow-sm sm:p-8 ${wide ? "min-[1042px]:px-[100px]" : ""}`}>
           <span className="pill-chart inline-flex items-center rounded-full px-3 py-1 text-[12px] font-semibold">Early access</span>
           <h1 className="mt-4 text-[24px] font-semibold leading-tight tracking-tight text-ink sm:text-[27px]">
-            {booked ? "Nothing to do here until your discovery call." : `Book your discovery call${firstName ? `, ${firstName}` : ""}.`}
+            {booked ? "Nothing to do here until your demo." : `Book your demo${firstName ? `, ${firstName}` : ""}.`}
           </h1>
           <p className="mt-3 text-[14.5px] leading-relaxed text-muted">
             {booked
-              ? "If you're a good fit, your brand manager will help you set up your 14-day free trial and onboard you to the platform in that same call. Yes, as easy as that."
-              : "Pick a time below. On the call, your brand manager will help you set up your 14-day free trial and onboard you to the platform. Yes, as easy as that."}
+              ? "If you're a good fit, your brand manager will help you set up your 14-day free trial and onboard you to the platform on the demo itself. Yes, as easy as that."
+              : "Pick a time below. On the demo, your brand manager will walk you through consl on your own numbers, set up your 14-day free trial and onboard you to the platform. Yes, as easy as that."}
           </p>
 
           {/* The calendar stays open until the call is booked — no button to find, nothing to hide.
@@ -126,7 +126,7 @@ export function PreOnboarding({
               <Row
                 icon={<CalendarDays size={17} />}
                 done
-                title="Your discovery call is booked!"
+                title="Your demo is booked!"
                 body={callBody}
               >
                 <BringList />
@@ -136,7 +136,7 @@ export function PreOnboarding({
               icon={<Lock size={16} />}
               done={false}
               title="Start your 14-day free trial"
-              body={trialUnlocked ? "Your brand manager unlocked this for you." : "Your brand manager activates this during your call."}
+              body={trialUnlocked ? "Your brand manager unlocked this for you." : "Your brand manager activates this during your demo."}
             />
           </div>
 
@@ -175,7 +175,7 @@ const BRING = [
 function BringList() {
   return (
     <div className="mt-3.5 border-t border-border pt-3.5">
-      <div className="text-[12.5px] text-muted">Make sure to have these ready for the call:</div>
+      <div className="text-[12.5px] text-muted">Make sure to have these ready for the demo:</div>
       <ul className="mt-2.5 space-y-2">
         {BRING.map((b) => (
           <li key={b.text} className="flex items-start gap-3.5 text-[13px] leading-snug text-ink-soft">
