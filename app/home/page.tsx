@@ -272,7 +272,7 @@ export default async function HomePage() {
           />
           <h2 className="relative text-[30px] font-bold tracking-tight text-white sm:text-[36px]">Stop guessing your margins, and your ad returns.</h2>
           <p className="relative mx-auto mt-3 max-w-xl text-[15px] leading-relaxed text-neutral-300">
-            consl is opening early access to 20 brands that make and sell physical products: lifetime 50%OFF and
+            consl is opening early access to 20 brands that sell physical products: lifetime 50%OFF and
             1-1 onboarding with a personal brand manager. Tell us about your brand to apply.
           </p>
           <div className="relative mt-7 flex flex-wrap items-center justify-center gap-3">

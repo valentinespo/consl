@@ -7,7 +7,7 @@ import { gateRedirect } from "@/lib/gate-redirect";
 export const metadata: Metadata = {
   title: "Apply for early access — consl",
   description:
-    "consl is opening early access to twenty brands that make and sell physical products: lifetime 50% off and a personal brand manager who sets the platform up with you, 1-1.",
+    "consl is opening early access to twenty brands that sell physical products: lifetime 50%OFF and a personal brand manager who sets the platform up with you, 1-1.",
 };
 
 // The Calendly link is read per request so it can be set or changed without a redeploy.
