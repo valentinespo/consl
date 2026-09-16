@@ -1,13 +1,12 @@
 import { PageHeader } from "@/components/ui";
 import { requireView } from "@/lib/membership";
-import { getPnl, oldestFinanceDate, presentPnlChannels, zonedDayBounds, type PnlChannel } from "@/lib/pnl";
+import { getPnlHistory, type PnlChannel } from "@/lib/pnl";
 import { getOrgSettings } from "@/lib/settings";
 import { prisma } from "@/lib/prisma";
-import { todayIn } from "@/lib/channel-tz";
 import { PnlClient, PreConslCostButton } from "@/components/PnlClient";
 import { rangeBounds, RANGES, type RangeKey } from "@/lib/chart";
 import { parsePnlBreakdown } from "@/lib/pnl-shared";
-import { encodePnlDays, isPnlDay, pnlPeriodRanges } from "@/lib/pnl-periods";
+import { isPnlDay } from "@/lib/pnl-periods";
 
 export const dynamic = "force-dynamic";
 
@@ -31,26 +30,19 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
   const settings = await getOrgSettings();
   const tz = settings.syncTz;
 
-  const present = await presentPnlChannels();
+  // The whole history, tallied per company day and channel in one pass and shipped once: the
+  // browser cuts the date window, the channel mix and the breakdown out of it itself, so every
+  // switch on the page is immediate — nothing re-runs the ledger or the FIFO walk.
+  const history = await getPnlHistory(tz);
   const channelParam = str(sp.channel)?.toUpperCase();
-  const channel = channelParam && (present as string[]).includes(channelParam) ? (channelParam as PnlChannel) : undefined;
+  const channel = channelParam && (history.channels as string[]).includes(channelParam) ? (channelParam as PnlChannel) : undefined;
 
-  const newest = todayIn(tz);
-  const oldest = (await oldestFinanceDate(tz)) ?? newest;
-  const b = rangeBounds(rangeKey, newest, str(sp.from), str(sp.to));
-  const start = isPnlDay(b.from) ? b.from : oldest;
-  const end = isPnlDay(b.to) ? b.to : newest;
+  const b = rangeBounds(rangeKey, history.newest, str(sp.from), str(sp.to));
+  const start = isPnlDay(b.from) ? b.from : history.oldest;
+  const end = isPnlDay(b.to) ? b.to : history.newest;
   const from = start <= end ? start : end;
   const to = start <= end ? end : start;
   const breakdown = parsePnlBreakdown(str(sp.breakdown));
-  const bounds = zonedDayBounds(from, to, tz);
-  // The statement is always tallied day by day (in the same pass as the Total) and shipped
-  // compact; the browser folds the days into whatever breakdown is chosen, so switching between
-  // breakdowns is instant — no second trip through the ledger and the FIFO walk.
-  const { periods, ...pnl } = await getPnl(bounds.from, bounds.to, channel ? [channel] : undefined, {
-    ranges: pnlPeriodRanges(from, to, "day"), timeZone: tz,
-  });
-  const days = encodePnlDays(periods);
   const products = await prisma.product.findMany({
     where: { sellerSku: { not: null } },
     select: { id: true, code: true, name: true, imageUrl: true, preConslUnitCost: true, openingUnitCost: true },
@@ -62,13 +54,7 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
       <PageHeader title="P&L" subtitle="Every dollar your channels moved, period by period — and what was left.">
         <PreConslCostButton products={products} />
       </PageHeader>
-      <PnlClient
-        pnl={pnl}
-        days={days}
-        channels={present}
-        filter={{ channel: channel ?? "", range: { key: rangeKey, from, to }, breakdown }}
-        dataBounds={{ newest, oldest }}
-      />
+      <PnlClient history={history} initial={{ channel: channel ?? "", range: { key: rangeKey, from, to }, breakdown }} />
     </>
   );
 }

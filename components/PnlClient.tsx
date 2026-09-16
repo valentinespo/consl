@@ -3,13 +3,13 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useMemo, useState, type ReactNode } from "react";
-import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, PnlFilled, Receipt, X } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
 import { SelectMenu } from "@/components/SelectMenu";
-import { GROUP_LABEL, GROUP_ORDER, PNL_BREAKDOWNS, PNL_CHANNEL_LABEL, PNL_SOURCE_LABEL, PNL_SOURCE_ORDER, parsePnlBreakdown, type Pnl, type PnlBreakdown, type PnlChannel, type PnlDay, type PnlGroupBlock, type PnlPeriod, type PnlSource, type PnlStatement } from "@/lib/pnl-shared";
-import { aggregatePnlDays, pnlPeriodHeading, pnlPeriodRanges } from "@/lib/pnl-periods";
+import { GROUP_LABEL, GROUP_ORDER, PNL_BREAKDOWNS, PNL_CHANNEL_LABEL, PNL_SOURCE_LABEL, PNL_SOURCE_ORDER, parsePnlBreakdown, type Pnl, type PnlBreakdown, type PnlChannel, type PnlGroupBlock, type PnlHistory, type PnlPeriod, type PnlSource, type PnlStatement } from "@/lib/pnl-shared";
+import { aggregatePnlDays, foldPnl, pnlPeriodHeading, pnlPeriodRanges } from "@/lib/pnl-periods";
 import { ROOT_LOGO, SOURCE_LOGO } from "@/lib/channel-logos";
 import { EmptyState } from "@/components/EmptyState";
 import { SkuAvatar } from "@/components/ui";
@@ -231,15 +231,17 @@ function PnlBreakdownTable({ pnl, periods, breakdown, money, locale }: { pnl: Pn
             <col />
           </colgroup>
           <thead>
-            <tr className="text-[13px] text-ink-soft">
-              <th scope="col" className={`${periodLabelCell} py-3 align-bottom font-medium`}>P&amp;L</th>
-              <th scope="col" className={`${periodValueCell(0)} py-3 align-bottom font-semibold text-ink`}>Total</th>
+            {/* One fixed-height row, every heading on the same centre line. A partial period's note
+                floats in the cell's bottom edge instead of stacking, so it never pushes the row taller. */}
+            <tr className="h-12 text-[13px] text-ink-soft">
+              <th scope="col" className={`${periodLabelCell} align-middle font-medium`}>P&amp;L</th>
+              <th scope="col" className={`${periodValueCell(0)} align-middle font-semibold text-ink`}>Total</th>
               {ordered.map((period) => {
                 const heading = pnlPeriodHeading(period, breakdown, locale);
                 return (
-                  <th scope="col" key={period.key} className="px-4 py-3 text-right align-bottom font-medium whitespace-nowrap">
+                  <th scope="col" key={period.key} className="relative px-4 text-right align-middle font-medium whitespace-nowrap">
                     {heading.label}
-                    {heading.note && <span className="mt-0.5 block text-[11px] font-normal text-muted">{heading.note}</span>}
+                    {heading.note && <span className="absolute bottom-[3px] right-4 text-[10px] font-normal leading-none text-muted">{heading.note}</span>}
                   </th>
                 );
               })}
@@ -311,69 +313,55 @@ function CogsRow({ pnl, money }: { pnl: Pnl; money: (n: number) => string }) {
   );
 }
 
-export function PnlClient({
-  pnl,
-  days,
-  channels,
-  filter,
-  dataBounds,
-}: {
-  pnl: Pnl;
-  /** The statement day by day over the selected range — folded into the chosen breakdown here. */
-  days: PnlDay[];
-  /** Channels with data, in display order — the filter's choices. */
-  channels: PnlChannel[];
-  filter: { range: Range; channel: string; breakdown: PnlBreakdown };
-  dataBounds: { newest: string; oldest: string };
-}) {
-  const router = useRouter();
+type Filter = { range: Range; channel: string; breakdown: PnlBreakdown };
+
+export function PnlClient({ history, initial }: { history: PnlHistory; initial: Filter }) {
   const pathname = usePathname();
   const params = useSearchParams();
   const { money, locale } = useMoney();
 
-  // The breakdown is browser state: switching it folds the same days differently, instantly. The
-  // URL is kept in step (bookmarkable, and a range or channel change carries it along) without a
-  // navigation, so the server never recomputes the statement just to regroup it.
-  const [breakdown, setBreakdownState] = useState<PnlBreakdown>(filter.breakdown);
-  const [seenBreakdown, setSeenBreakdown] = useState(filter.breakdown);
-  if (filter.breakdown !== seenBreakdown) {
-    setSeenBreakdown(filter.breakdown);
-    setBreakdownState(filter.breakdown);
-  }
-  const periods = useMemo(
-    () => (breakdown === "none" ? [] : aggregatePnlDays(days, pnlPeriodRanges(filter.range.from, filter.range.to, breakdown))),
-    [days, breakdown, filter.range.from, filter.range.to],
+  // The window, the channel and the breakdown are browser state. Changing any of them cuts a new
+  // statement out of the shipped history instantly, and the URL is kept in step (bookmarkable,
+  // survives a reload) without a navigation — the server is never asked to recompute anything.
+  const [filter, setFilter] = useState<Filter>(initial);
+  const channels = history.channels;
+  const selected = useMemo(
+    () => (filter.channel && (channels as string[]).includes(filter.channel) ? [filter.channel as PnlChannel] : channels),
+    [filter.channel, channels],
   );
+  const pnl = useMemo(() => foldPnl(history, filter.range.from, filter.range.to, selected), [history, filter.range.from, filter.range.to, selected]);
+  const periods = useMemo(
+    () => (filter.breakdown === "none" ? [] : aggregatePnlDays(history.days, pnlPeriodRanges(filter.range.from, filter.range.to, filter.breakdown), selected)),
+    [history.days, filter.breakdown, filter.range.from, filter.range.to, selected],
+  );
+  const breakdown = filter.breakdown;
+  const dataBounds = { newest: history.newest, oldest: history.oldest };
 
-  function setRange(r: Range) {
+  function syncUrl(next: Filter) {
     const q = new URLSearchParams(params.toString());
-    q.set("range", r.key);
-    if (r.key === "custom") {
-      q.set("from", r.from);
-      q.set("to", r.to);
+    q.set("range", next.range.key);
+    if (next.range.key === "custom") {
+      q.set("from", next.range.from);
+      q.set("to", next.range.to);
     } else {
       q.delete("from");
       q.delete("to");
     }
-    router.push(`${pathname}?${q.toString()}`);
-  }
-
-  function setChannel(channel: string) {
-    const q = new URLSearchParams(params.toString());
-    if (channel) q.set("channel", channel.toLowerCase());
+    if (next.channel) q.set("channel", next.channel.toLowerCase());
     else q.delete("channel");
-    router.push(`${pathname}?${q.toString()}`);
-  }
-
-  function setBreakdown(value: string) {
-    const next = parsePnlBreakdown(value);
-    setBreakdownState(next);
-    const q = new URLSearchParams(params.toString());
-    if (next === "none") q.delete("breakdown");
-    else q.set("breakdown", next);
+    if (next.breakdown === "none") q.delete("breakdown");
+    else q.set("breakdown", next.breakdown);
     const qs = q.toString();
     window.history.replaceState(null, "", qs ? `${pathname}?${qs}` : pathname);
   }
+  function update(change: Partial<Filter>) {
+    const next = { ...filter, ...change };
+    setFilter(next);
+    syncUrl(next);
+  }
+  const setRange = (r: Range) => update({ range: { key: r.key, from: r.from || history.oldest, to: r.to || history.newest } });
+  const setChannel = (channel: string) => update({ channel });
+  const setBreakdown = (value: string) => update({ breakdown: parsePnlBreakdown(value) });
 
   const pct = (v: number | null) => (v == null ? "—" : `${(v * 100).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`);
   const salesBlock = pnl.groups.find((g) => g.group === "sales");

@@ -51,11 +51,46 @@ export type PnlPeriodRange = { key: string; start: string; end: string; from: st
  */
 export type PnlDay = {
   d: string;
+  /** The channel this day's figures belong to — the browser sums the channels it's showing. */
+  c: PnlChannel;
   rows: [string, string, number, number][];
   cogs: number;
   units: number;
   mcf: [number, number];
   unreported: [number, number];
+  /** Units priced from lots not fully costed yet, their (negative) cost, and those lots' ids. */
+  est?: [number, number, string[]];
+  /** Units sold before the product's first recorded layer / beyond everything recorded shipped. */
+  pre?: number;
+  over?: number;
+  /** Units from orders at no facility and their (negative) cost. */
+  unpl?: [number, number];
+  /** Managed SKUs sold with no cost on record. */
+  unm?: string[];
+  /** Listings sold that the company doesn't manage here: skus, units, sales. */
+  ign?: [string[], number, number];
+  /** Revenue from orders the channel hasn't posted the money for yet (already in `rows`). */
+  pend?: number;
+};
+
+/**
+ * The whole statement history, shipped once: every day of every channel since the first dated
+ * money, plus what the browser needs to cut any window, channel mix or breakdown out of it
+ * without another trip to the server.
+ */
+export type PnlHistory = {
+  days: PnlDay[];
+  /** Lots referenced by `est` on any day. */
+  lots: { id: string; label: string }[];
+  /** Channels with anything to show, in display order. */
+  channels: PnlChannel[];
+  /** Company-calendar bounds for the date picker: today, and the first dated money or order. */
+  newest: string;
+  oldest: string;
+  /** The running Amazon ledger walk, when Amazon is connected (shown while Amazon is in view). */
+  importProgress: Pnl["importProgress"];
+  /** Channels whose first history pull hasn't finished, by channel. */
+  importing: Partial<Record<PnlChannel, boolean>>;
 };
 export const sourceBits = (sources: PnlSource[]) => sources.reduce((bits, s) => bits | (1 << PNL_SOURCE_ORDER.indexOf(s)), 0);
 export const sourcesFromBits = (bits: number): PnlSource[] => PNL_SOURCE_ORDER.filter((_, i) => bits & (1 << i));
