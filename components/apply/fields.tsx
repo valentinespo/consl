@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Buildings, Check, ChevronDown, Layers, Package, Tag, Truck, Warehouse } from "@/components/icons";
 import { useExitAnimation } from "@/components/animate";
 import type { Choice } from "@/components/apply/options";
+import type { Rule } from "@/components/apply/password-rules";
 
 /**
  * Form primitives for the early-access questionnaire. Deliberately light-only, in the same
@@ -380,6 +381,34 @@ export function Dropdown({
         </div>
       )}
     </div>
+  );
+}
+
+/** The password checklist: every rule the login system will enforce, grey until it holds, green
+ *  once it does — so nobody meets a rejection they couldn't see coming. */
+export function RuleList({ rules }: { rules: Rule[] }) {
+  return (
+    <ul className="mt-2.5 space-y-1.5" aria-live="polite">
+      {rules.map((r) => (
+        <li
+          key={r.key}
+          className={`flex items-start gap-2 text-[12.5px] leading-snug transition-colors ${r.met ? "text-emerald-700" : "text-neutral-500"}`}
+        >
+          <span
+            aria-hidden
+            className={`mt-[2px] flex h-[15px] w-[15px] shrink-0 items-center justify-center rounded-full border transition-colors ${
+              r.met ? "border-emerald-600 bg-emerald-600 text-white" : "border-neutral-300 bg-white"
+            }`}
+          >
+            {r.met ? <Check size={9} /> : null}
+          </span>
+          <span>
+            <span className={r.met ? "font-medium" : ""}>{r.label}</span>
+            {!r.met && r.hint && <span className="block text-[12px] text-neutral-400">{r.hint}</span>}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

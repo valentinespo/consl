@@ -1,11 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useAuth, useSignIn, useSignUp } from "@clerk/nextjs";
+import { useAuth, useClerk, useSignIn, useSignUp } from "@clerk/nextjs";
 import { ArrowRight, ChevronLeft } from "@/components/icons";
-import { Em, GHOST, Heading, Notice, PRIMARY, TextField, fieldCls } from "@/components/apply/fields";
+import { Em, GHOST, Heading, Notice, PRIMARY, RuleList, TextField, fieldCls } from "@/components/apply/fields";
 import type { Answers } from "@/components/apply/options";
+import {
+  DEFAULT_PASSWORD_SETTINGS,
+  normalizePasswordSettings,
+  passwordRules,
+  rulesSatisfied,
+  type PasswordSettings,
+} from "@/components/apply/password-rules";
+import { useStrength } from "@/components/apply/useStrength";
 import { attachAccount } from "@/app/apply/actions";
 
 /**
@@ -20,6 +28,30 @@ import { attachAccount } from "@/app/apply/actions";
  */
 
 type Mode = "form" | "verify" | "signin" | "signin-code";
+
+/** The password rules the loaded Clerk client reports for this instance; the defaults until then. */
+function useClerkPasswordSettings(): PasswordSettings {
+  const clerk = useClerk();
+  return useMemo(() => {
+    if (!clerk.loaded || typeof window === "undefined") return DEFAULT_PASSWORD_SETTINGS;
+    const raw = (window as unknown as { Clerk?: { environment?: { userSettings?: { passwordSettings?: unknown } } } }).Clerk
+      ?.environment?.userSettings?.passwordSettings;
+    return raw ? normalizePasswordSettings(raw) : DEFAULT_PASSWORD_SETTINGS;
+  }, [clerk.loaded]);
+}
+
+/** Clerk's own wording for a refused password is terse ("not strong enough"); say what to do instead. */
+function passwordProblem(error: { code: string; message: string; longMessage?: string }): string | null {
+  if (error.code === "form_password_pwned") {
+    return "That password has shown up in a known data breach, so it can't be used here. Pick a different one.";
+  }
+  if (error.code.startsWith("form_password_")) {
+    const meta = (error as { meta?: { zxcvbn?: { suggestions?: { message: string }[] } } }).meta;
+    const tips = meta?.zxcvbn?.suggestions?.map((t) => t.message).filter(Boolean) ?? [];
+    return [error.longMessage ?? error.message, ...tips].join(" ");
+  }
+  return null;
+}
 
 export function AccountStep({
   applicationId,
@@ -45,6 +77,10 @@ export function AccountStep({
   const [linkError, setLinkError] = useState<string | null>(null);
   const [linkAttempt, setLinkAttempt] = useState(0);
   const busy = signUpFetch === "fetching" || signInFetch === "fetching";
+  const settings = useClerkPasswordSettings();
+  const strength = useStrength(password);
+  const rules = passwordRules(password, settings, strength);
+  const passwordOk = rulesSatisfied(rules);
 
   const email = answers.email.trim().toLowerCase();
   const [firstName, ...rest] = answers.fullName.trim().split(/\s+/);
@@ -91,7 +127,7 @@ export function AccountStep({
         setMessage("You already have a consl account with this email. Sign in with your password to continue.");
         return;
       }
-      setMessage(describe(error));
+      setMessage(passwordProblem(error) ?? describe(error));
       return;
     }
     await afterSignUp();
@@ -345,11 +381,12 @@ export function AccountStep({
             type={showPassword ? "text" : "password"}
             value={password}
             onChange={setPassword}
-            placeholder="At least 8 characters"
+            placeholder="Choose a password"
             autoFocus
             autoComplete="new-password"
             trailing={<ShowHide shown={showPassword} onToggle={() => setShowPassword((s) => !s)} />}
           />
+          <RuleList rules={rules} />
         </div>
       </div>
       {message && (
@@ -375,7 +412,7 @@ export function AccountStep({
           <ChevronLeft size={16} />
           Back
         </button>
-        <button type="submit" disabled={busy || !signUp || password.length < 8} className={PRIMARY}>
+        <button type="submit" disabled={busy || !signUp || !passwordOk} className={PRIMARY}>
           {busy ? "Creating…" : "Create account"}
           {!busy && <ArrowRight size={16} />}
         </button>
