@@ -300,7 +300,7 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
                   <Heading
                     title={
                       <>
-                        First, tell us how your brand operates and <Em>where your numbers get lost</Em>.
+                        Tell us how your brand operates and <Em>where your numbers get lost</Em>.
                       </>
                     }
                     sub="Before your demo, tell us how you run your brand and what's slowing you down, so we can make sure consl and our team of e-commerce experts are the right fit."
