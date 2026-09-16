@@ -3,7 +3,9 @@ import { Skeleton, SkelPageHeader } from "@/components/Skeleton";
 /**
  * Dashboard loading state — shaped like the dashboard's widget grid: the value card with its
  * chart beside the alerts card, then the facility donuts beside the recent-lots table. Routes
- * with their own layout carry their own loading.tsx; this one also catches any stragglers.
+ * with their own loading.tsx use that; this one catches every other PRODUCT page. It lives inside
+ * the (app) group on purpose: at the root it applied to the marketing and sign-in pages too, so
+ * moving between them flashed the dashboard skeleton.
  */
 export default function Loading() {
   return (
