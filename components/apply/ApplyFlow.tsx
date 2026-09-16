@@ -72,10 +72,10 @@ const SECTION: Record<StepId, string> = {
 };
 
 const PERKS: { title: string; short: string; body: string; icon: LucideIcon }[] = [
-  { title: "One of 20 seats.", short: "One of 20 seats", body: "Early access is limited to twenty brands that make and sell physical products.", icon: UserPlus },
-  { title: "Lifetime 50% off.", short: "50% off for life", body: "The early-access price is locked in for as long as you stay.", icon: Tag },
-  { title: "14-day free trial.", short: "14-day free trial", body: "Started with your brand manager on the demo. Nothing is charged for 14 days, cancel anytime.", icon: CalendarDays },
-  { title: "A personal brand manager.", short: "Personal brand manager", body: "Sets the platform up with you, 1-1, until every number you care about lives in one place.", icon: User },
+  { title: "One of 20 seats.", short: "One of 20 seats", body: "Only twenty brands get in.", icon: UserPlus },
+  { title: "Lifetime 50% off.", short: "50% off for life", body: "Your price never goes up.", icon: Tag },
+  { title: "14-day free trial.", short: "14-day free trial", body: "Try everything, cancel anytime.", icon: CalendarDays },
+  { title: "A personal brand manager.", short: "Personal brand manager", body: "Sets you up 1-1 until every number is right.", icon: User },
 ];
 
 export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
