@@ -15,7 +15,7 @@ import { markCallBooked } from "@/app/apply/actions";
 declare global {
   interface Window {
     Calendly?: {
-      initInlineWidget: (o: { url: string; parentElement: HTMLElement; prefill?: Record<string, string> }) => void;
+      initInlineWidget: (o: { url: string; parentElement: HTMLElement; prefill?: Record<string, string>; resize?: boolean }) => void;
     };
   }
 }
@@ -62,7 +62,13 @@ export function CalendlyEmbed({
     const init = () => {
       if (cancelled || !window.Calendly) return;
       el.innerHTML = "";
-      window.Calendly.initInlineWidget({ url: styledUrl(url), parentElement: el, prefill: { name, email } });
+      // resize: Calendly grows its own frame to fit the scheduling page, so nothing scrolls inside
+      // a box — the box takes the page's full height in either of Calendly's layouts. The floor
+      // below is only for the moment before the first size message (and if it never comes).
+      window.Calendly.initInlineWidget({ url: styledUrl(url), parentElement: el, prefill: { name, email }, resize: true });
+      const floor = () => el.querySelectorAll("iframe").forEach((f) => (f.style.minHeight = `${minHeight}px`));
+      floor();
+      setTimeout(floor, 500);
     };
     if (window.Calendly) init();
     else {
@@ -86,13 +92,13 @@ export function CalendlyEmbed({
       cancelled = true;
       window.removeEventListener("message", onMessage);
     };
-  }, [url, name, email]);
+  }, [url, name, email, minHeight]);
 
   return (
     <div>
-      {/* A definite height, not a minimum: Calendly's iframe fills 100% of its parent, and a
-          percentage height against a min-height-only parent collapses to the browser's 150px. */}
-      <div ref={box} style={{ height: minHeight }} className="w-full" />
+      {/* Height comes from Calendly's own resize messages (see init); the floor keeps the box from
+          collapsing to the browser's 150px default before the first one arrives. */}
+      <div ref={box} style={{ minHeight }} className="w-full" />
       {failed && (
         <Notice>
           The calendar didn&apos;t load.{" "}
