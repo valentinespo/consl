@@ -274,20 +274,16 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
       <span className="text-neutral-500">{SECTION[step]}</span>
     ) : null;
 
+  const showLogin = step !== "book" && step !== "account";
+
   return (
     <div className="min-h-screen bg-white text-neutral-900 lg:grid lg:grid-cols-[5fr_7fr]" style={{ colorScheme: "light" }}>
-      <Aside />
+      <Aside login={showLogin} />
       <main className="flex min-h-[70vh] flex-col lg:min-h-screen">
         <div className="flex items-center justify-between gap-4 px-6 py-5 text-[13.5px] lg:px-16 lg:py-7">
           <div className="min-h-[20px]">{counter}</div>
-          {step !== "book" && step !== "account" && (
-            <div className="text-neutral-500">
-              Already have an account?{" "}
-              <Link href="/sign-in" className="font-semibold text-violet-700 hover:text-violet-800">
-                Log in
-              </Link>
-            </div>
-          )}
+          {/* Desktop keeps the log-in link up here; phones show it next to the logo instead. */}
+          {showLogin && <LoginLink className="hidden lg:block" />}
         </div>
         <div className="flex-1 px-6 pb-16 pt-2 lg:px-16 lg:pt-8">
           <div key={step} className={`step-in mx-auto w-full lg:mx-0 ${step === "book" ? "max-w-none" : "max-w-[640px]"}`}>
@@ -687,13 +683,28 @@ function Restart() {
   );
 }
 
+function LoginLink({ className = "" }: { className?: string }) {
+  return (
+    <div className={`text-[13.5px] text-neutral-500 ${className}`}>
+      Already have an account?{" "}
+      <Link href="/sign-in" className="font-semibold text-violet-700 hover:text-violet-800">
+        Log in
+      </Link>
+    </div>
+  );
+}
+
 /** The left panel: the offer, always in view. Collapses to a compact header on phones. */
-function Aside() {
+function Aside({ login }: { login: boolean }) {
   return (
     <aside className="relative overflow-hidden border-b border-neutral-200 bg-neutral-50 px-6 py-5 lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r lg:px-12 lg:py-10">
-      <Link href="/home" aria-label="consl home" className="inline-flex">
-        <Wordmark />
-      </Link>
+      <div className="flex items-center justify-between gap-4">
+        <Link href="/home" aria-label="consl home" className="inline-flex">
+          <Wordmark />
+        </Link>
+        {/* On phones the log-in link sits in the logo row, top right. */}
+        {login && <LoginLink className="text-right lg:hidden" />}
+      </div>
       <div className="mt-6 lg:mt-16">
         <h2 className="text-[26px] font-bold leading-[1.08] tracking-tight text-violet-700 lg:text-[40px]">Apply for early access.</h2>
         <p className="mt-1.5 text-[17px] font-semibold text-neutral-800 lg:mt-3 lg:text-[26px]">Tell us about your brand, book your demo, start your free trial.</p>
