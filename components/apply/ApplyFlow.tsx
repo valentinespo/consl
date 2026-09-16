@@ -293,7 +293,7 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
             {step === "intro" && (
               <Form onNext={goNext}>
                 <div className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3.5 py-1.5 text-[12.5px] font-semibold text-violet-800">
-                  Limited to 20 spots
+                  Book your discovery call
                 </div>
                 <div className="mt-5">
                   <Heading
