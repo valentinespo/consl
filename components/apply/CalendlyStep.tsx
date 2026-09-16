@@ -59,16 +59,20 @@ export function CalendlyEmbed({
     const el = box.current;
     if (!el) return;
     let cancelled = false;
+    // The floor gives Calendly's page room to lay itself out before it has measured anything; once
+    // it reports a real height the frame follows that exactly (measured: the calendar view asks for
+    // ~660px, so a fixed floor would leave a blank band under it).
+    const setFloor = (px: number) => {
+      el.style.minHeight = `${px}px`;
+      el.querySelectorAll("iframe").forEach((f) => (f.style.minHeight = `${px}px`));
+    };
     const init = () => {
       if (cancelled || !window.Calendly) return;
       el.innerHTML = "";
-      // resize: Calendly grows its own frame to fit the scheduling page, so nothing scrolls inside
-      // a box — the box takes the page's full height in either of Calendly's layouts. The floor
-      // below is only for the moment before the first size message (and if it never comes).
+      // resize: Calendly sizes its own frame to the scheduling page, so nothing scrolls inside a box.
       window.Calendly.initInlineWidget({ url: styledUrl(url), parentElement: el, prefill: { name, email }, resize: true });
-      const floor = () => el.querySelectorAll("iframe").forEach((f) => (f.style.minHeight = `${minHeight}px`));
-      floor();
-      setTimeout(floor, 500);
+      setFloor(minHeight);
+      setTimeout(() => setFloor(minHeight), 500);
     };
     if (window.Calendly) init();
     else {
@@ -84,7 +88,10 @@ export function CalendlyEmbed({
     }
     const onMessage = (e: MessageEvent) => {
       if (!/^https:\/\/([a-z0-9-]+\.)*calendly\.com$/.test(e.origin)) return;
-      const d = e.data as { event?: string; payload?: { event?: { uri?: string }; invitee?: { uri?: string } } } | null;
+      const d = e.data as { event?: string; payload?: { height?: string; event?: { uri?: string }; invitee?: { uri?: string } } } | null;
+      // Calendly's first size messages are its loading states (a few px); the first real one means
+      // the page is laid out and the floor can go.
+      if (d?.event === "calendly.page_height" && parseFloat(d.payload?.height ?? "0") > 300) setFloor(0);
       if (d?.event === "calendly.event_scheduled") cb.current({ eventUri: d.payload?.event?.uri, inviteeUri: d.payload?.invitee?.uri });
     };
     window.addEventListener("message", onMessage);
@@ -94,11 +101,18 @@ export function CalendlyEmbed({
     };
   }, [url, name, email, minHeight]);
 
+  // Calendly's page carries its own margins around the booking card — none in its phone layout
+  // (frames under ~650px), 66px above and 30px below in both desktop layouts (measured 2026-09-16
+  // in every view). Those are trimmed off here so the card sits close to what surrounds it instead
+  // of floating in a blank band; the query keys off the frame's own width, so a narrow frame that
+  // gets Calendly's phone layout keeps a little breathing room and nothing gets cut.
   return (
     <div>
-      {/* Height comes from Calendly's own resize messages (see init); the floor keeps the box from
-          collapsing to the browser's 150px default before the first one arrives. */}
-      <div ref={box} style={{ minHeight }} className="w-full" />
+      <div className="@container">
+        <div className="overflow-hidden py-4 @[720px]:py-0">
+          <div ref={box} className="w-full @[720px]:-mt-[38px] @[720px]:-mb-[10px]" />
+        </div>
+      </div>
       {failed && (
         <Notice>
           The calendar didn&apos;t load.{" "}

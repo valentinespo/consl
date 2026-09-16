@@ -78,8 +78,8 @@ export function PreOnboarding({
         <div className="mb-6 flex items-center justify-between">
           <span className="inline-flex items-center gap-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/brand/consl-mark.png" alt="" className="iso-invert h-6 w-6 object-contain" />
-            <span className="text-[17px] font-bold tracking-tight text-ink">consl</span>
+            <img src="/brand/consl-mark.png" alt="" className="iso-invert h-5 w-5 object-contain" />
+            <span className="text-[15px] font-bold tracking-tight text-ink">consl</span>
           </span>
           <div className="flex items-center gap-3 text-[13px]">
             <span className="max-w-[200px] truncate text-muted">{orgName}</span>
@@ -102,7 +102,8 @@ export function PreOnboarding({
           </p>
 
           {/* The calendar stays open until the call is booked — no button to find, nothing to hide.
-              It is the card's body, edge to edge under a hairline, not a box inside a box. */}
+              It is the card's body, edge to edge under a hairline, not a box inside a box; the embed
+              itself trims Calendly's own blank margins, so the rows below follow closely. */}
           {!booked &&
             (calendlyUrl ? (
               <div className="-mx-7 mt-6 border-t border-border bg-white sm:-mx-8">
@@ -114,7 +115,7 @@ export function PreOnboarding({
               </div>
             ))}
 
-          <div className="mt-6 space-y-2.5">
+          <div className={`space-y-2.5 ${booked ? "mt-6" : "mt-2"}`}>
             {booked && (
               <Row
                 icon={<CalendarDays size={17} />}
