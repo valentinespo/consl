@@ -8,6 +8,7 @@ const isPublic = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/home",
+  "/apply(.*)",
   "/privacy",
   "/terms",
   "/api/integrations/shopify/compliance",

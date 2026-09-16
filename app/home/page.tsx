@@ -130,7 +130,7 @@ export default function HomePage() {
             <Link href="/sign-in" className="rounded-xl px-3.5 py-2 text-[13.5px] font-semibold text-neutral-700 hover:bg-neutral-100">
               Log in
             </Link>
-            <Link href="/sign-up" className="rounded-xl bg-neutral-900 px-4 py-2 text-[13.5px] font-semibold text-white hover:bg-neutral-700">
+            <Link href="/apply" className="rounded-xl bg-neutral-900 px-4 py-2 text-[13.5px] font-semibold text-white hover:bg-neutral-700">
               Get started
             </Link>
           </div>
@@ -157,7 +157,7 @@ export default function HomePage() {
             the same P&amp;L as your sales and fees, and restock alerts long before you run out.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-            <Link href="/sign-up" className={CTA_PRIMARY}>Get started</Link>
+            <Link href="/apply" className={CTA_PRIMARY}>Get started</Link>
             <a href="mailto:admin@consl.ai" className={CTA_SECONDARY}>Talk to us</a>
           </div>
           <p className="mt-4 text-[12.5px] text-neutral-500">Built for brands that make physical products and sell them everywhere.</p>
@@ -265,11 +265,11 @@ export default function HomePage() {
           />
           <h2 className="relative text-[30px] font-bold tracking-tight text-white sm:text-[36px]">Stop guessing your margins — and your ad returns.</h2>
           <p className="relative mx-auto mt-3 max-w-xl text-[15px] leading-relaxed text-neutral-300">
-            consl is in early access with operators who make and sell physical products. Tell us about your brand and
-            we&apos;ll get you set up.
+            consl is opening early access to 20 brands that make and sell physical products: lifetime 50% off and
+            1-1 onboarding with a personal brand manager. Tell us about your brand to apply.
           </p>
           <div className="relative mt-7 flex flex-wrap items-center justify-center gap-3">
-            <a href="mailto:admin@consl.ai" className={CTA_PRIMARY}>Get early access</a>
+            <Link href="/apply" className={CTA_PRIMARY}>Apply for early access</Link>
             <Link
               href="/sign-in"
               className="inline-flex items-center justify-center rounded-xl border border-white/25 px-5 py-3 text-[14.5px] font-semibold text-white hover:bg-white/10"

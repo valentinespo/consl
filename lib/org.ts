@@ -20,6 +20,9 @@ export type OrgProfile = {
   onboardedAt: Date | null; // null = the setup wizard still gates the app
   onboardingStep: number;
   onboardingMaxStep: number; // furthest step ever reached — the rail's click range
+  billingExempt: boolean; // never gated (pre-early-access companies, internal)
+  trialUnlockedAt: Date | null; // an admin enabled "Start free trial" on the waiting screen
+  subscriptionStatus: string | null; // Stripe's word once checkout exists
 };
 
 /** The signed-in user's company profile. Cached per request — this is read by the layout,
@@ -46,6 +49,9 @@ export const getCurrentOrg = cache(async (): Promise<OrgProfile | null> => {
     onboardedAt: org.onboardedAt,
     onboardingStep: org.onboardingStep,
     onboardingMaxStep: org.onboardingMaxStep,
+    billingExempt: org.billingExempt,
+    trialUnlockedAt: org.trialUnlockedAt,
+    subscriptionStatus: org.subscriptionStatus,
   };
 });
 

@@ -11,9 +11,10 @@ import { getCurrentOrg } from "@/lib/org";
 import { listMyOrgs } from "@/lib/orgs";
 import { getMyAccess } from "@/lib/membership";
 import { RESOURCE_KEYS, actionsOf } from "@/lib/permissions";
+import { needsBillingGate } from "@/lib/billing";
 
 /** Pages that must stay reachable before you belong to a company. */
-const NO_ORG_OK = ["/sign-in", "/sign-up", "/welcome", "/join", "/home", "/privacy", "/terms"];
+const NO_ORG_OK = ["/sign-in", "/sign-up", "/welcome", "/join", "/home", "/privacy", "/terms", "/apply", "/pre-onboarding"];
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
@@ -33,6 +34,13 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     if (await currentUserId()) redirect("/welcome");
   }
   const org = await getCurrentOrg().catch(() => null);
+  // Early access: a company whose trial hasn't started waits on the pre-onboarding screen — book
+  // the discovery call, then an admin unlocks the trial there. Companies that existed before this
+  // shipped are exempt (see lib/billing.ts), so nothing changes for them. Checked before the wizard
+  // gate: a waiting company must not reach the wizard either.
+  if (org && needsBillingGate(org) && !NO_ORG_OK.some((p) => pathname.startsWith(p))) {
+    redirect("/pre-onboarding");
+  }
   // A company that hasn't finished onboarding sees ONLY the setup wizard — every app path lands
   // there until the wizard completes. The auth/marketing pages above stay reachable (sign out,
   // invite links), and the wizard page itself must not redirect to itself.

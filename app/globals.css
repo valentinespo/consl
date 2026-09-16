@@ -405,3 +405,15 @@ html.theme-fade *::after {
     animation: none;
   }
 }
+
+/* The early-access questionnaire: each step rises in as the previous one leaves — short, eased,
+ * the same curve as the dropdowns so the whole page moves with one hand. */
+@keyframes step-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+.step-in {
+  animation: step-in 0.32s cubic-bezier(0.22, 0.61, 0.36, 1);
+}

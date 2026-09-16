@@ -48,6 +48,11 @@ model Organization {
   onboardingStep Int       @default(0) // where the wizard resumes (0–6)
   // Furthest step ever reached — steps up to here are revisitable by clicking the progress rail.
   onboardingMaxStep Int @default(0)
+  // --- Billing / early access. Existing companies were marked exempt when this shipped, so the
+  // paywall only ever applies to companies created through the application flow afterwards.
+  billingExempt      Boolean   @default(false) // true = never gated (Herbl, the demo company, internal)
+  trialUnlockedAt    DateTime? // set by an admin during the discovery call; enables "Start free trial"
+  subscriptionStatus String?   // mirror of Stripe's status once checkout exists: trialing | active | past_due | canceled
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -82,6 +87,7 @@ model Organization {
   orderFeeRules           OrderFeeRule[]
   orderFees               OrderFee[]
   channelLocations        ChannelLocation[]
+  accessApplications      AccessApplication[]
 }
 
 /// A tenant's connection to an external sales platform (Amazon, Shopify, TikTok Shop). Holds the
@@ -1155,4 +1161,50 @@ model ShopifyPendingInstall {
   claimToken     String   @unique // random, unguessable — the installing browser holds it in a cookie
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+/// An early-access application from the public questionnaire at /apply. NOT a tenant table: the
+/// row exists before there is any company (the visitor is signed out), and it is read by the
+/// internal admin tooling across every company. Always queried through the unscoped client.
+/// The funnel: started (contact details saved) → completed (every question answered) →
+/// account_created (Clerk user + company exist, linked below) → call_booked (Calendly confirmed).
+model AccessApplication {
+  id          String    @id @default(cuid())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  status      String    @default("started")
+  completedAt DateTime?
+
+  // --- Contact (step 1; the row is created here so a drop-off still leaves a lead) ---
+  fullName    String
+  companyName String
+  email       String
+  phone       String?
+
+  // --- Answers. Lists are JSON arrays of option keys; "other" choices carry their typed text. ---
+  channels        Json?   // [{ key, label, share }] — share = ballpark % of sales, highest first
+  mainChannel     String? // key of the channel with the largest share
+  fulfillment     Json?   // string[]
+  longTermStock   Json?   // string[]
+  lotTracking     String? // "yes" | "no"
+  lotTrackingTool String? // how they track lots today (dropdown key)
+  lotTrackingHow  String? // their explanation
+  adsChannels     Json?   // string[]
+  bookkeepingTool String? // dropdown key
+  bookkeeping     String? // their explanation
+  challenge       String? // the long answer (≥150 chars)
+  source          String? // where the visitor came from (utm_source), if any
+
+  // --- Progress after the questionnaire ---
+  clerkUserId        String?
+  organization       Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  orgId              String?
+  accountCreatedAt   DateTime?
+  callBookedAt       DateTime?
+  calendlyEventUri   String?
+  calendlyInviteeUri String?
+
+  @@index([email])
+  @@index([orgId])
+  @@index([createdAt])
 }

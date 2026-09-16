@@ -43,7 +43,7 @@ export function AppShell({
 
   // Auth and onboarding screens render bare — there's no company yet to put in the chrome.
   // (/onboarding is the setup wizard: it fills the screen itself, no sidebar until it finishes.)
-  const BARE = ["/sign-in", "/sign-up", "/welcome", "/join", "/home", "/privacy", "/terms", "/onboarding", "/connect/shopify"];
+  const BARE = ["/sign-in", "/sign-up", "/welcome", "/join", "/home", "/privacy", "/terms", "/onboarding", "/connect/shopify", "/apply", "/pre-onboarding"];
   if (BARE.some((p) => pathname.startsWith(p))) return <>{children}</>;
 
   return (

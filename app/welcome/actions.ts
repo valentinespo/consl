@@ -2,25 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { currentUserId } from "@/lib/current-user";
-import { prismaBase } from "@/lib/prisma-base";
 import { setActiveOrgCookie } from "@/lib/active-org";
-
-/** A URL-safe slug from the company name, with a numeric suffix if it's taken. */
-async function uniqueSlug(name: string): Promise<string> {
-  const base =
-    name
-      .toLowerCase()
-      .normalize("NFKD")
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 40) || "company";
-  let slug = base;
-  let n = 2;
-  while (await prismaBase.organization.findUnique({ where: { slug }, select: { id: true } })) {
-    slug = `${base}-${n++}`;
-  }
-  return slug;
-}
+import { createCompanyForUser } from "@/lib/create-company";
 
 export type NewCompany = {
   name: string;
@@ -32,11 +15,8 @@ export type NewCompany = {
 /**
  * Create a company for the signed-in user and make them its owner. A person can belong to several
  * — running more than one business, or being invited into a client's — so this is not limited to
- * their first.
- *
- * Uses the unscoped client throughout: the caller has no organization yet, so the tenant-scoped
- * client would refuse every query. Both rows are written in one transaction — an Organization
- * with no membership is unreachable by anyone, and a Membership without its org is meaningless.
+ * their first. The rows themselves are written by lib/create-company (shared with the early-access
+ * flow), which also decides whether the new company is billing-exempt.
  */
 export async function createCompany(input: NewCompany) {
   const userId = await currentUserId();
@@ -56,15 +36,8 @@ export async function createCompany(input: NewCompany) {
   } catch {
     /* keep en-US */
   }
-  const slug = await uniqueSlug(name);
 
-  const org = await prismaBase.$transaction(async (tx) => {
-    const created = await tx.organization.create({
-      data: { name, slug, currencyCode, currencySymbol, locale },
-    });
-    await tx.membership.create({ data: { clerkUserId: userId, orgId: created.id, role: "owner" } });
-    return created;
-  });
+  const org = await createCompanyForUser({ userId, name, currencyCode, currencySymbol, locale });
 
   // Open the company that was just created, rather than leaving them in a previous one.
   await setActiveOrgCookie(org.id);
