@@ -293,21 +293,25 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
             {step === "intro" && (
               <Form onNext={goNext}>
                 <div className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3.5 py-1.5 text-[12.5px] font-semibold text-violet-800">
-                  Early access · 20 seats
+                  Limited to 20 spots
                 </div>
                 <div className="mt-5">
                   <Heading
                     title={
                       <>
-                        Let&apos;s see if you&apos;re a <Em>fit</Em>.
+                        First, tell us about your brand and <Em>what you need</Em>.
                       </>
                     }
-                    sub="consl is opening early access to twenty brands that make and sell physical products. Every seat comes with lifetime 50% off and a personal brand manager who sets the platform up with you, 1-1, until every number you care about lives in one place."
+                    sub="Before your discovery call, we want to understand your brand and what's slowing you down — so we can help as much as possible, and make sure consl and our support team are the right tool for your business."
                   />
                 </div>
                 <p className="mt-4 max-w-[560px] text-[15.5px] leading-relaxed text-neutral-600">
-                  Twenty seats is not many, so we ask a few questions first. It takes about three minutes, and everything you
-                  type is saved as you go.
+                  We work 1-1 with the first twenty brands that get in, and we work relentlessly: until your numbers are true to
+                  the cent and you see your whole inventory, production and profit in real time, in one place. We just need to make
+                  sure we&apos;re a great fit first.
+                </p>
+                <p className="mt-3 max-w-[560px] text-[14px] leading-relaxed text-neutral-500">
+                  About three minutes. Everything you type is saved as you go.
                 </p>
                 <Nav hideBack canNext nextLabel="Start" />
               </Form>
@@ -689,7 +693,7 @@ function Aside() {
       </Link>
       <div className="mt-6 lg:mt-16">
         <h2 className="text-[26px] font-bold leading-[1.08] tracking-tight text-violet-700 lg:text-[40px]">Apply for early access.</h2>
-        <p className="mt-1.5 text-[17px] font-semibold text-neutral-800 lg:mt-3 lg:text-[26px]">First, tell us about your brand.</p>
+        <p className="mt-1.5 text-[17px] font-semibold text-neutral-800 lg:mt-3 lg:text-[26px]">Twenty spots, for the brands we&apos;re the right fit for.</p>
       </div>
       <ul className="mt-9 hidden max-w-[420px] space-y-3.5 lg:block">
         {PERKS.map((p) => (
