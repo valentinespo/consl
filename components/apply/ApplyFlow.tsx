@@ -17,6 +17,7 @@ import {
   sharesComplete,
   sharesTotal,
   toggleChoice,
+  validBrandUrl,
   validEmail,
   validPhone,
   type Answers,
@@ -170,6 +171,7 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
     contact:
       answers.fullName.trim().length >= 2 &&
       answers.companyName.trim().length >= 2 &&
+      validBrandUrl(answers.brandUrl) &&
       validEmail(answers.email) &&
       validPhone(answers.phone),
     channels: choiceComplete(answers.channels, answers.channelOther),
@@ -197,6 +199,7 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
         const res = await saveContact({
           fullName: answers.fullName,
           companyName: answers.companyName,
+          brandUrl: answers.brandUrl,
           email: answers.email,
           phone: answers.phone,
           website: honeypot,
@@ -228,6 +231,7 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
       const res = await saveContact({
         fullName: answers.fullName,
         companyName: answers.companyName,
+        brandUrl: answers.brandUrl,
         email: answers.email,
         phone: answers.phone,
         website: honeypot,
@@ -326,9 +330,12 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
                 />
                 <div className="mt-8 grid gap-4 sm:grid-cols-2">
                   <TextField label="Full name" value={answers.fullName} onChange={(v) => set("fullName", v)} placeholder="Jane Doe" autoFocus autoComplete="name" error={answers.fullName.trim().length < 2 ? "Your full name, please." : null} />
-                  <TextField label="Company name" value={answers.companyName} onChange={(v) => set("companyName", v)} placeholder="Northwind Coffee" autoComplete="organization" error={answers.companyName.trim().length < 2 ? "What's the brand called?" : null} />
+                  <TextField label="Brand name" value={answers.companyName} onChange={(v) => set("companyName", v)} placeholder="Northwind Coffee" autoComplete="organization" error={answers.companyName.trim().length < 2 ? "Your brand's name." : null} />
                   <TextField label="Work email" type="email" inputMode="email" value={answers.email} onChange={(v) => set("email", v)} placeholder="jane@northwind.com" autoComplete="email" error={!validEmail(answers.email) ? "That email doesn't look right." : null} />
                   <TextField label="Work phone" type="tel" inputMode="tel" value={answers.phone} onChange={(v) => set("phone", v)} placeholder="+1 555 123 4567" autoComplete="tel" error={!validPhone(answers.phone) ? "A number we can reach you on." : null} />
+                  <div className="sm:col-span-2">
+                    <TextField label="Brand website" inputMode="url" value={answers.brandUrl} onChange={(v) => set("brandUrl", v)} placeholder="northwind.com" autoComplete="url" hint="Or a link to your Amazon storefront or main listing, if that's where people find you." error={!validBrandUrl(answers.brandUrl) ? "Your website, or a link to your Amazon storefront or main listing." : null} />
+                  </div>
                 </div>
                 {/* Honeypot: never shown to people. Bots that fill it get a polite fake success. */}
                 <input type="text" name="website" value={honeypot} onChange={(e) => setHoneypot(e.target.value)} tabIndex={-1} autoComplete="off" aria-hidden className="hidden" />

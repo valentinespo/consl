@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { brandUrlLabel } from "@/components/apply/options";
 import { notFound } from "next/navigation";
 import { prismaBase } from "@/lib/prisma-base";
 import { Card } from "@/components/ui";
@@ -70,7 +71,17 @@ export default async function InternalApplicationPage({ params }: { params: Prom
           </div>
           <div className="mt-1 text-[13.5px] text-muted">
             {a.organization?.name ?? a.companyName}
-            {a.organization && a.organization.name !== a.companyName ? ` (applied as ${a.companyName})` : ""} · {a.email}
+            {a.organization && a.organization.name !== a.companyName ? ` (applied as ${a.companyName})` : ""}
+            {a.brandUrl && (
+              <>
+                {" · "}
+                <a href={a.brandUrl} target="_blank" rel="noreferrer" className="font-medium text-ink-soft underline decoration-line underline-offset-2 hover:text-ink">
+                  {brandUrlLabel(a.brandUrl)}
+                </a>
+              </>
+            )}
+            {" · "}
+            {a.email}
             {a.phone ? ` · ${a.phone}` : ""}
             {a.source ? ` · via ${a.source}` : ""}
           </div>

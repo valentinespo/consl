@@ -1185,9 +1185,10 @@ model AccessApplication {
 
   // --- Contact (step 1; the row is created here so a drop-off still leaves a lead) ---
   fullName    String
-  companyName String
+  companyName String  // the brand's name (asked as "Brand name")
   email       String
   phone       String?
+  brandUrl    String? // their website, Amazon storefront or main listing, normalised to https://
 
   // --- Answers. Lists are JSON arrays of option keys; "other" choices carry their typed text. ---
   channels        Json?   // [{ key, label, share }] — share = ballpark % of sales, highest first

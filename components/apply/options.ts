@@ -83,9 +83,31 @@ export const BOOKKEEPING_TOOLS: Choice[] = [
 /** Minimum length for the long answer — the one question we insist people actually write. */
 export const CHALLENGE_MIN = 150;
 
+/** "northwind.com", "www.amazon.com/stores/…" or a full URL → the https:// form, or null if it
+ *  isn't a plausible web address. A scheme is optional; the host must look like a real domain. */
+export function normalizeBrandUrl(raw: string): string | null {
+  const v = raw.trim();
+  if (!v || /\s/.test(v)) return null;
+  try {
+    const u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(v) ? v : `https://${v}`);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(u.hostname)) return null;
+    return u.href;
+  } catch {
+    return null;
+  }
+}
+
+export const validBrandUrl = (raw: string) => normalizeBrandUrl(raw) !== null;
+
+/** What to print for a stored brand URL: the address without the scheme, "www." or a trailing slash. */
+export const brandUrlLabel = (url: string) => url.replace(/^https?:\/\/(www\.)?/i, "").replace(/\/$/, "");
+
 export type Answers = {
   fullName: string;
   companyName: string;
+  /** Their website, or an Amazon storefront / main listing — whatever shows the brand. */
+  brandUrl: string;
   email: string;
   phone: string;
   channels: string[];
@@ -109,6 +131,7 @@ export type Answers = {
 export const EMPTY_ANSWERS: Answers = {
   fullName: "",
   companyName: "",
+  brandUrl: "",
   email: "",
   phone: "",
   channels: [],

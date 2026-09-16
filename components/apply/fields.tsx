@@ -46,6 +46,7 @@ export function TextField({
   autoComplete,
   inputMode,
   error,
+  hint,
   trailing,
 }: {
   label: string;
@@ -55,9 +56,11 @@ export function TextField({
   placeholder?: string;
   autoFocus?: boolean;
   autoComplete?: string;
-  inputMode?: "text" | "email" | "tel" | "numeric";
+  inputMode?: "text" | "email" | "tel" | "numeric" | "url";
   /** Shown once the visitor has typed something invalid and moved on. */
   error?: string | null;
+  /** A quiet line under the field; the error takes its place when there is one. */
+  hint?: string;
   trailing?: ReactNode;
 }) {
   const [touched, setTouched] = useState(false);
@@ -81,6 +84,7 @@ export function TextField({
         {trailing && <span className="absolute inset-y-0 right-3 flex items-center">{trailing}</span>}
       </span>
       {show && <span className="mt-1.5 block text-[12.5px] text-red-600">{error}</span>}
+      {!show && hint && <span className="mt-1.5 block text-[12.5px] text-neutral-500">{hint}</span>}
     </label>
   );
 }

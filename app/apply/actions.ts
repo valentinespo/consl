@@ -12,6 +12,7 @@ import {
   CHANNELS,
   FULFILLMENT,
   LONG_TERM_STOCK,
+  normalizeBrandUrl,
   validEmail,
   type Answers,
   type Choice,
@@ -43,9 +44,10 @@ type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string; code?
 export type ContactInput = {
   fullName: string;
   companyName: string;
+  brandUrl: string;
   email: string;
   phone: string;
-  /** Honeypot — hidden from people, filled by bots. */
+  /** Honeypot — hidden from people, filled by bots. (Not the brand's website; that is brandUrl.) */
   website?: string;
   source?: string;
 };
@@ -63,13 +65,14 @@ export async function saveContact(input: ContactInput): Promise<Result<{ id: str
   if (str(input.website, 200)) return { ok: true, id: "ok" };
   const fullName = str(input.fullName, 120);
   const companyName = str(input.companyName, 120);
+  const brandUrl = normalizeBrandUrl(str(input.brandUrl, 300));
   const email = str(input.email, 200).toLowerCase();
   const phone = str(input.phone, 40);
-  if (fullName.length < 2 || companyName.length < 2 || !validEmail(email)) {
-    return { ok: false, error: "Check your name, company and email and try again." };
+  if (fullName.length < 2 || companyName.length < 2 || !brandUrl || !validEmail(email)) {
+    return { ok: false, error: "Check your name, brand name, website and email and try again." };
   }
   const row = await prismaBase.accessApplication.create({
-    data: { fullName, companyName, email, phone: phone || null, source: str(input.source, 120) || null },
+    data: { fullName, companyName, brandUrl, email, phone: phone || null, source: str(input.source, 120) || null },
     select: { id: true },
   });
   return { ok: true, id: row.id };
@@ -97,6 +100,7 @@ export async function saveAnswers(id: string, a: Answers, opts: { complete?: boo
 
   const fullName = str(a.fullName, 120);
   const companyName = str(a.companyName, 120);
+  const brandUrl = normalizeBrandUrl(str(a.brandUrl, 300));
   const email = str(a.email, 200).toLowerCase();
   const phone = str(a.phone, 40);
   const challenge = str(a.challenge, 8000);
@@ -109,6 +113,7 @@ export async function saveAnswers(id: string, a: Answers, opts: { complete?: boo
     data: {
       ...(fullName.length >= 2 ? { fullName } : {}),
       ...(companyName.length >= 2 ? { companyName } : {}),
+      ...(brandUrl ? { brandUrl } : {}),
       ...(validEmail(email) ? { email } : {}),
       ...(phone ? { phone } : {}),
       channels,

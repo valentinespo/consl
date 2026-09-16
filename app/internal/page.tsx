@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { brandUrlLabel } from "@/components/apply/options";
 import { prismaBase } from "@/lib/prisma-base";
 import { Card, PageHeader } from "@/components/ui";
 import { OpenCompanyButton, TrialToggle } from "@/components/internal/Actions";
@@ -56,6 +57,11 @@ export default async function InternalApplicationsPage() {
                     <td className="px-2 py-3">
                       <div className="text-ink-soft">{a.organization?.name ?? a.companyName}</div>
                       {a.organization && a.organization.name !== a.companyName && <div className="text-[11.5px] text-muted">applied as {a.companyName}</div>}
+                      {a.brandUrl && (
+                        <a href={a.brandUrl} target="_blank" rel="noreferrer" className="block truncate text-[11.5px] text-muted underline decoration-line underline-offset-2 hover:text-ink-soft">
+                          {brandUrlLabel(a.brandUrl)}
+                        </a>
+                      )}
                     </td>
                     <td className="px-2 py-3 text-ink-soft">{keyLabel(CHANNELS_LIST, a.mainChannel) ?? "—"}</td>
                     <td className="px-2 py-3">

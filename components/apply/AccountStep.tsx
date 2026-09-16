@@ -393,7 +393,7 @@ export function AccountStep({
       />
       <div className="mt-8 grid gap-4 sm:grid-cols-2">
         <TextField label="Full name" value={answers.fullName} onChange={(v) => onChange("fullName", v)} autoComplete="name" />
-        <TextField label="Company" value={answers.companyName} onChange={(v) => onChange("companyName", v)} autoComplete="organization" />
+        <TextField label="Brand" value={answers.companyName} onChange={(v) => onChange("companyName", v)} autoComplete="organization" />
         <div className="sm:col-span-2">
           <TextField label="Work email" type="email" inputMode="email" value={answers.email} onChange={(v) => onChange("email", v)} autoComplete="email" />
         </div>
