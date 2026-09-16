@@ -280,12 +280,13 @@ export function ApplyFlow({ calendlyUrl }: { calendlyUrl: string | null }) {
     <div className="min-h-screen bg-white text-neutral-900 lg:grid lg:grid-cols-[5fr_7fr]" style={{ colorScheme: "light" }}>
       <Aside login={showLogin} />
       <main className="flex min-h-[70vh] flex-col lg:min-h-screen">
-        <div className="flex items-center justify-between gap-4 px-6 py-5 text-[13.5px] lg:px-16 lg:py-7">
+        {/* Desktop keeps the log-in link up here; phones show it next to the logo instead,
+            so on phones this row only exists when there is a step counter to show. */}
+        <div className={`items-center justify-between gap-4 px-6 py-5 text-[13.5px] lg:flex lg:px-16 lg:py-7 ${counter ? "flex" : "hidden"}`}>
           <div className="min-h-[20px]">{counter}</div>
-          {/* Desktop keeps the log-in link up here; phones show it next to the logo instead. */}
           {showLogin && <LoginLink className="hidden lg:block" />}
         </div>
-        <div className="flex-1 px-6 pb-16 pt-2 lg:px-16 lg:pt-8">
+        <div className={`flex-1 px-6 pb-16 lg:px-16 lg:pt-8 ${counter ? "pt-2" : "pt-7"}`}>
           <div key={step} className={`step-in mx-auto w-full lg:mx-0 ${step === "book" ? "max-w-none" : "max-w-[640px]"}`}>
             {step === "intro" && (
               <Form onNext={goNext}>
