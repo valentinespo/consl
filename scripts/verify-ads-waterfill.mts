@@ -1,6 +1,6 @@
 /** Run with: node --import tsx scripts/verify-ads-waterfill.mts */
 import assert from "node:assert/strict";
-import { HELD_SUFFIX, UNTYPED_AD_SPEND, daysBetween, waterfillAdInvoices, type AdSpendByDay } from "../lib/ads-waterfill.js";
+import { HELD_SUFFIX, UNTYPED_AD_SPEND, coveredFromFor, daysBetween, waterfillAdInvoices, type AdSpendByDay } from "../lib/ads-waterfill.js";
 
 const SP = "Sponsored Products";
 const SB = "Sponsored Brands";
@@ -177,6 +177,18 @@ const total = (rows: { amount: number; held: boolean }[], held = false) => Math.
     assert.equal(billed, invoices.reduce((t, x) => t + Math.round(x.amount * 100), 0), "the statement books the invoices, to the cent");
     assert.ok(r.rows.every((x) => x.amount > 0));
   }
+}
+
+// 8. Complete from: only the ad types the account spends on decide it. Sponsored Products alone
+//    reaches back the furthest, so an SP-only company gets every day Amazon still has.
+{
+  const coverage = { SPONSORED_PRODUCTS: "2026-06-20", SPONSORED_BRANDS: "2026-07-25", SPONSORED_DISPLAY: "2026-07-20" };
+  assert.equal(coveredFromFor(coverage, ["SPONSORED_PRODUCTS"], null), "2026-06-20");
+  assert.equal(coveredFromFor(coverage, ["SPONSORED_PRODUCTS", "SPONSORED_DISPLAY"], null), "2026-07-20");
+  assert.equal(coveredFromFor(coverage, ["SPONSORED_PRODUCTS", "SPONSORED_BRANDS", "SPONSORED_DISPLAY"], null), "2026-07-25");
+  assert.equal(coveredFromFor(coverage, [], "2026-06-20"), "2026-06-20"); // no spend at all: the import's own first day
+  assert.equal(coveredFromFor(null, ["SPONSORED_PRODUCTS"], "2026-06-22"), "2026-06-22");
+  assert.equal(coveredFromFor({ SPONSORED_PRODUCTS: "garbage" }, ["SPONSORED_PRODUCTS"], null), null);
 }
 
 console.log("ads water-fill: all checks passed");

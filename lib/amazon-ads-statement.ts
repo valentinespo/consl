@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { zonedDayStart } from "@/lib/pnl-periods";
-import { waterfillAdInvoices, type AdFillResult, type AdSpendByDay } from "@/lib/ads-waterfill";
+import { HELD_SUFFIX, coveredFromFor, waterfillAdInvoices, type AdFillResult, type AdSpendByDay } from "@/lib/ads-waterfill";
 import type { PnlSource } from "@/lib/pnl-shared";
 
 /**
@@ -32,13 +32,6 @@ function dayIn(tz: string): (at: Date) => string {
   return (at) => f.format(at);
 }
 
-/** First day EVERY ad type the account reports on is covered from — a day only some ad types
- *  reach back to would understate that day's spend, so it counts as not covered. */
-function coveredFromOf(coverage: unknown, fallback: string | null): string | null {
-  const days = coverage && typeof coverage === "object" ? Object.values(coverage as Record<string, unknown>).filter((d): d is string => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d)) : [];
-  return days.length ? days.sort().at(-1)! : fallback;
-}
-
 export async function amazonAdsStatementRows(): Promise<{ active: boolean; rows: AdStatementRow[]; audit: AdFillResult["audit"] | null }> {
   const off = { active: false, rows: [], audit: null };
   if (!AMAZON_ADS_WATERFILL) return off;
@@ -61,19 +54,21 @@ export async function amazonAdsStatementRows(): Promise<{ active: boolean; rows:
   const dayOf = dayIn(tz);
 
   const spend: AdSpendByDay = new Map();
+  const usedAdProducts = new Set<string>();
   let lastSpendDay: string | null = null;
   for (const r of spendRows) {
-    const day = (r.txId ?? "").split(":")[2] ?? "";
+    const [, adProduct = "", day = ""] = (r.txId ?? "").split(":");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
     const cost = -(r.baseAmount ?? r.amount);
     if (!(cost > 0)) continue;
+    usedAdProducts.add(adProduct);
     const types = spend.get(day) ?? new Map<string, number>();
     types.set(r.type, (types.get(r.type) ?? 0) + cost);
     spend.set(day, types);
     if (!lastSpendDay || day > lastSpendDay) lastSpendDay = day;
   }
 
-  const coveredFrom = coveredFromOf(settings.amazonAdsCoverage, dayOf(settings.amazonAdsSince));
+  const coveredFrom = coveredFromFor(settings.amazonAdsCoverage, usedAdProducts, dayOf(settings.amazonAdsSince));
   const syncedDay = settings.amazonAdsSyncedThrough ? settings.amazonAdsSyncedThrough.toISOString().slice(0, 10) : null;
   const coveredTo = syncedDay && lastSpendDay ? (syncedDay > lastSpendDay ? syncedDay : lastSpendDay) : (syncedDay ?? lastSpendDay);
 
@@ -84,9 +79,12 @@ export async function amazonAdsStatementRows(): Promise<{ active: boolean; rows:
     coveredTo,
   });
 
+  // An account Amazon bills by card never shows an ad invoice in its money report: its API spend
+  // is simply its ad spend, and "not invoiced yet" would be a promise that never comes true.
+  const billedHere = invoiceRows.length > 0;
   const rows: AdStatementRow[] = fill.rows.map((r) => ({
     at: zonedDayStart(r.day, tz).getTime() + 12 * 3_600_000,
-    type: r.type,
+    type: billedHere || !r.held ? r.type : r.type.slice(0, -HELD_SUFFIX.length),
     amount: -r.amount,
     // The amount is the invoice's (Amazon's money report); the day and ad type are Amazon Ads'.
     sources: r.held ? ["AMAZON_ADS"] : r.shaped ? ["AMAZON", "AMAZON_ADS"] : ["AMAZON"],

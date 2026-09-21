@@ -53,6 +53,19 @@ export const HELD_SUFFIX = " (not invoiced yet)";
 const cents = (n: number) => Math.round(n * 100);
 const nextDay = (day: string) => new Date(new Date(`${day}T00:00:00Z`).getTime() + 86_400_000).toISOString().slice(0, 10);
 
+/**
+ * The first day the API's figures are COMPLETE from. Amazon keeps each ad type for a different
+ * number of days (Sponsored Products the longest), so an early day may carry some ad types only:
+ * it would understate that day's spend, and counts as not covered. Only the ad types the account
+ * actually spends on decide this — a company that runs Sponsored Products alone gets every day
+ * Amazon still has. `coverage` = first covered day per ad type, `used` = ad types with any spend.
+ */
+export function coveredFromFor(coverage: unknown, used: Iterable<string>, fallback: string | null): string | null {
+  const map = coverage && typeof coverage === "object" && !Array.isArray(coverage) ? (coverage as Record<string, unknown>) : {};
+  const days = [...new Set(used)].map((k) => map[k]).filter((d): d is string => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d));
+  return days.length ? days.sort().at(-1)! : fallback;
+}
+
 export function daysBetween(from: string, to: string): string[] {
   const out: string[] = [];
   for (let d = from; d <= to; d = nextDay(d)) out.push(d);
