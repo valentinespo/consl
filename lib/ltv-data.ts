@@ -8,7 +8,7 @@ import { getPnlHistory } from "@/lib/pnl";
 import { pnlFingerprint } from "@/lib/pnl-cache";
 import { activeExclusions } from "@/lib/order-metrics";
 import { hasShopifyCustomerScope } from "@/lib/orders";
-import { buildLtvReport, type LtvOrder, type LtvReport } from "@/lib/ltv";
+import { encodeLtvOrders, isWholesaleSource, type LtvOrder, type LtvWire } from "@/lib/ltv";
 
 /**
  * The lifetime-value report for the company in context — Shopify first (the one channel that says
@@ -19,7 +19,9 @@ import { buildLtvReport, type LtvOrder, type LtvReport } from "@/lib/ltv";
  * whenever they came), its PROFIT takes off its fees (processing, custom) and what its units
  * really cost — priced by the statement's own FIFO walk (getPnlHistory's per-order hook), so the
  * two screens cannot disagree. The same orders count as on the P&L: not cancelled, not voided,
- * not another channel's mirror. Ad spend is the Shopify statement's Advertising bucket, by month.
+ * not another channel's mirror — and, here only, not a wholesale marketplace's (Faire): a retailer
+ * buying to resell is not a consumer. Ad spend is the Shopify statement's Advertising bucket, by
+ * month. The orders go to the browser compact; the page builds every view from them itself.
  */
 export type LtvPayload = {
   channel: "SHOPIFY";
@@ -28,7 +30,13 @@ export type LtvPayload = {
   connected: boolean;
   /** Orders that count on the statement but carry no customer (a connection without the permission, or a sale made with no customer on file). */
   ordersWithoutCustomer: number;
-  report: LtvReport;
+  /** Wholesale marketplace orders left out of this page (they stay on the P&L), and where from. */
+  wholesale: { orders: number; sources: string[] };
+  wire: LtvWire;
+  adSpendByMonth: Record<string, number>;
+  /** Company-calendar bounds for the date picker: today, and the first order on this page. */
+  newest: string;
+  oldest: string;
   computedAt: string;
 };
 
@@ -49,7 +57,7 @@ export async function computeLtv(tz: string): Promise<LtvPayload> {
   const orders = await prisma.salesOrder.findMany({
     where: { channel: "SHOPIFY", cancelled: false, voided: false, NOT: { source: { in: exclusions.sources } } },
     select: {
-      id: true, externalId: true, customerId: true, orderedAt: true, currency: true,
+      id: true, externalId: true, customerId: true, orderedAt: true, currency: true, source: true, sourceLabel: true,
       lines: { select: { quantity: true, unitPrice: true, gross: true, sku: true, product: { select: { name: true, code: true } } } },
       fees: { select: { amount: true } },
     },
@@ -77,7 +85,13 @@ export async function computeLtv(tz: string): Promise<LtvPayload> {
 
   const ltvOrders: LtvOrder[] = [];
   let ordersWithoutCustomer = 0;
+  const wholesale = { orders: 0, sources: new Set<string>() };
   for (const o of orders) {
+    if (isWholesaleSource(o.source)) {
+      wholesale.orders++;
+      wholesale.sources.add(o.sourceLabel || o.source || "Wholesale");
+      continue;
+    }
     if (!o.customerId) {
       ordersWithoutCustomer++;
       continue;
@@ -102,12 +116,17 @@ export async function computeLtv(tz: string): Promise<LtvPayload> {
     WHERE fe.channel = 'SHOPIFY' AND fe."group" = 'advertising'
     GROUP BY 1`;
 
+  const today = dayOf(new Date());
   return {
     channel: "SHOPIFY",
     customerAccess: hasShopifyCustomerScope(conn?.scope),
     connected: conn?.status === "connected",
     ordersWithoutCustomer,
-    report: buildLtvReport({ orders: ltvOrders, adSpendByMonth: Object.fromEntries(ads.map((a) => [a.month, a.spend])), now: Date.now() }),
+    wholesale: { orders: wholesale.orders, sources: [...wholesale.sources].sort() },
+    wire: encodeLtvOrders(ltvOrders),
+    adSpendByMonth: Object.fromEntries(ads.map((a) => [a.month, Math.round(a.spend * 100) / 100])),
+    newest: today,
+    oldest: ltvOrders.length ? ltvOrders.reduce((d, o) => (o.day < d ? o.day : d), today) : today,
     computedAt: new Date().toISOString(),
   };
 }
@@ -118,7 +137,7 @@ export async function loadLtv(tz: string): Promise<LtvPayload> {
   const orgId = await getCurrentOrgId();
   if (!orgId) return computeLtv(tz);
   try {
-    const fingerprint = `${await pnlFingerprint(orgId, tz)}:${dayIn(tz)(new Date())}:ltv1`;
+    const fingerprint = `${await pnlFingerprint(orgId, tz)}:${dayIn(tz)(new Date())}:ltv2`;
     const stored = await prismaBase.ltvSnapshot.findUnique({ where: { orgId } });
     if (stored?.fingerprint === fingerprint) return stored.payload as unknown as LtvPayload;
     const t0 = Date.now();

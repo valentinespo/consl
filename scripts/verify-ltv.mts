@@ -1,10 +1,10 @@
 /** Run with: node --import tsx scripts/verify-ltv.mts */
 import assert from "node:assert/strict";
-import { buildLtvReport, type LtvOrder } from "../lib/ltv.js";
+import { buildLtvReport, decodeLtvOrders, encodeLtvOrders, isWholesaleSource, type LtvOrder } from "../lib/ltv.js";
 
 const at = (day: string) => new Date(`${day}T12:00:00Z`).getTime();
 const o = (customerId: string, day: string, revenue: number, profit: number, product = "Tea"): LtvOrder => ({ customerId, at: at(day), day, revenue, profit, product });
-const cell = (cells: { horizon: number; revenue: number | null; profit: number | null; customers: number; complete: boolean }[], h: number) => cells.find((c) => c.horizon === h)!;
+const cell = (cells: { horizon: number | "all"; revenue: number | null; profit: number | null; customers: number; complete: boolean }[], h: number | "all") => cells.find((c) => c.horizon === h)!;
 
 // Two January customers and one March customer, read on 2026-04-15.
 //  anna:  Jan 10 $50 (profit 20), Feb 1 (+22 days) $40 (15), Jun … none
@@ -51,5 +51,28 @@ assert.deepEqual([r.firstDay, r.lastDay], ["2026-01-10", "2026-04-05"]);
 const r2 = buildLtvReport({ orders: [o("x", "2026-01-01", 0, -4)], now: at("2026-03-01") });
 assert.deepEqual([cell(r2.overall, 30).revenue, cell(r2.overall, 30).profit, r2.cohorts[0].cac, r2.cohorts[0].paybackDays], [0, -4, null, null]);
 assert.equal(buildLtvReport({ orders: [], now }).customers, 0);
+
+// ALL TIME: everything each customer has ordered so far, everyone counted, never partial.
+assert.deepEqual([cell(jan.cells, "all").revenue, cell(jan.cells, "all").profit, cell(jan.cells, "all").customers, cell(jan.cells, "all").complete], [60, 22.5, 2, true]);
+assert.deepEqual([cell(mar.cells, "all").revenue, cell(mar.cells, "all").profit], [100, 35]);
+assert.deepEqual([cell(r.overall, "all").revenue, cell(r.overall, "all").customers], [73.33, 3]);
+
+// A date range keeps the customers who FIRST ordered inside it — and everything they ordered
+// afterwards still counts (anna's February order is part of a January customer's value).
+const janOnly = buildLtvReport({ orders, now, firstOrderFrom: "2026-01-01", firstOrderTo: "2026-01-31" });
+assert.deepEqual([janOnly.customers, janOnly.orders, janOnly.repeaters, janOnly.cohorts.length], [2, 3, 1, 1]);
+assert.equal(cell(janOnly.overall, "all").revenue, 60);
+// …and a customer is never "new" in a later range just because they ordered again in it
+const febOnly = buildLtvReport({ orders, now, firstOrderFrom: "2026-02-01", firstOrderTo: "2026-02-28" });
+assert.equal(febOnly.customers, 0);
+assert.deepEqual([febOnly.firstDay, cell(febOnly.overall, "all").revenue], [null, null]);
+
+// The compact form the page receives gives back the very same report.
+const round = buildLtvReport({ orders: decodeLtvOrders(encodeLtvOrders(orders)), now, adSpendByMonth: { "2026-01": 40, "2026-03": 100 } });
+assert.deepEqual(round.cohorts, r.cohorts);
+assert.deepEqual(round.overall, r.overall);
+assert.deepEqual(round.byFirstProduct, r.byFirstProduct);
+
+assert.deepEqual([isWholesaleSource("faire"), isWholesaleSource("Faire Wholesale"), isWholesaleSource("web"), isWholesaleSource(null)], [true, true, false, false]);
 
 console.log("ltv: all checks passed");
