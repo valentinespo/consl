@@ -198,6 +198,7 @@ export function foldPnl(history: PnlHistory, from: string, to: string, channels:
   const importProgress = wanted.has("AMAZON") ? history.importProgress : null;
   return {
     ...s,
+    adsReconnect: wanted.has("AMAZON") && !!history.adsReconnect,
     pending: history.channels.filter((c) => wanted.has(c) && (fold.pending.get(c) ?? 0) > 0).map((c) => ({ channel: c, sales: fold.pending.get(c)! })),
     unmatchedSkus: [...fold.unmatched].sort(),
     preHistoryUnits: fold.preHistoryUnits,

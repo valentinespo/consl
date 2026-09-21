@@ -1,6 +1,6 @@
 /** Run with: node --import tsx scripts/verify-ads-waterfill.mts */
 import assert from "node:assert/strict";
-import { HELD_SUFFIX, UNTYPED_AD_SPEND, adProgramLabel, coveredFromFor, daysBetween, unifyAdInvoices, waterfillAdInvoices, type AdSpendByDay, type FeedAdInvoice, type LedgerAdCharge } from "../lib/ads-waterfill.js";
+import { HELD_SUFFIX, UNTYPED_AD_SPEND, addDayRange, adProgramLabel, coveredFromFor, coveredRangesFor, dayRangesOf, daysBetween, unifyAdInvoices, waterfillAdInvoices, type AdSpendByDay, type FeedAdInvoice, type LedgerAdCharge } from "../lib/ads-waterfill.js";
 
 const SP = "Sponsored Products";
 const SB = "Sponsored Brands";
@@ -291,6 +291,46 @@ const total = (rows: { amount: number; held: boolean }[], held = false) => Math.
   //    guessed period; a feed invoice from before the company's Amazon history is left out
   u = unifyAdInvoices({ ledger: [L("old", "2025-02-01", 300)], feed: [F("ancient", "2024-03-25", "2024-03-26", 2.37, "card")], floorDay: "2025-01-31" });
   assert.deepEqual(u.invoices.map((x) => [x.id, x.from ?? null]), [["old", null]]);
+}
+
+// 11. A connection down for longer than Amazon keeps daily data leaves a HOLE. Its days are not
+//     "days without spend": they are not covered, so their invoices spread over their own periods,
+//     nothing piles up as a surplus, nothing in the hole shows as "not invoiced yet", and both
+//     sides of the hole keep following the API's daily figures.
+{
+  let sp: [string, string][] = [];
+  sp = addDayRange(sp, "2026-01-01", "2026-01-31");
+  sp = addDayRange(sp, "2026-02-01", "2026-02-10"); // touches the first: one range
+  sp = addDayRange(sp, "2026-07-01", "2026-07-20"); // five months later
+  sp = addDayRange(sp, "2026-07-18", "2026-07-25"); // the 3-day re-read overlaps: merged
+  assert.deepEqual(sp, [["2026-01-01", "2026-02-10"], ["2026-07-01", "2026-07-25"]]);
+  assert.deepEqual(dayRangesOf("2026-06-20", "2026-09-21"), [["2026-06-20", "2026-09-21"]]); // the shape stored before ranges
+  const coverage = { SPONSORED_PRODUCTS: sp, SPONSORED_BRANDS: [["2026-01-10", "2026-02-10"], ["2026-07-05", "2026-07-25"]], SPONSORED_DISPLAY: [["2026-07-01", "2026-07-25"]] };
+  assert.deepEqual(coveredRangesFor(coverage, ["SPONSORED_PRODUCTS"], null, []), sp);
+  assert.deepEqual(coveredRangesFor(coverage, ["SPONSORED_PRODUCTS", "SPONSORED_BRANDS"], null, []), [["2026-01-10", "2026-02-10"], ["2026-07-05", "2026-07-25"]]);
+  assert.deepEqual(coveredRangesFor({}, ["SPONSORED_PRODUCTS"], null, [["2026-03-01", "2026-03-02"]]), [["2026-03-01", "2026-03-02"]]);
+
+  const spend: Record<string, number> = {};
+  for (const d of [...daysBetween("2026-02-06", "2026-02-10"), ...daysBetween("2026-07-01", "2026-07-06")]) spend[d] = 100;
+  const r = waterfillAdInvoices({
+    invoices: [
+      { id: "before", from: "2026-02-07", day: "2026-02-09", amount: 290 },
+      { id: "straddle", from: "2026-02-09", day: "2026-02-12", amount: 400 }, // 9th has 10 left, 10th 100, then the hole
+      { id: "hole", from: "2026-04-01", day: "2026-04-04", amount: 400 },
+      { id: "after", from: "2026-07-01", day: "2026-07-03", amount: 250 },
+    ],
+    spend: flat(spend),
+    covered: [["2026-02-06", "2026-02-10"], ["2026-07-01", "2026-07-06"]],
+  });
+  const of = (id: string) => Object.fromEntries([...r.perInvoice.find((p) => p.id === id)!.placed].map(([d, c]) => [d.slice(5), c / 100]).sort());
+  assert.deepEqual(of("before"), { "02-07": 100, "02-08": 100, "02-09": 90 });
+  assert.deepEqual(of("straddle"), { "02-09": 10, "02-10": 100, "02-11": 145, "02-12": 145 });
+  assert.deepEqual(of("hole"), { "04-01": 100, "04-02": 100, "04-03": 100, "04-04": 100 });
+  assert.deepEqual(of("after"), { "07-01": 100, "07-02": 100, "07-03": 50 });
+  assert.ok(r.perInvoice.every((p) => p.surplus === 0));
+  // held: only on and after the last cut (Jul 3) — never the 6th of February, long since billed
+  assert.deepEqual(dayTotals(r.rows, true), { "2026-07-03": 50, "2026-07-04": 100, "2026-07-05": 100, "2026-07-06": 100 });
+  assert.equal(total(r.rows), 1340);
 }
 
 console.log("ads water-fill: all checks passed");

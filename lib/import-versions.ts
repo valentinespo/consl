@@ -15,8 +15,13 @@
  *                    from the API once connected, so every order carries TikTok's own version.
  *  tiktokFinance  1 — first API generation of the settlement ledger (statements, per-order SKU
  *                    split, unsettled money).
+ *  amazonAdsSpend 1 — daily spend per ad type in the ad profile's own currency, with the covered
+ *                    day ranges recorded per ad type. A re-read can only reach as far back as
+ *                    Amazon still keeps daily data; days already on record stay.
+ *  amazonAdsInvoices 1 — Amazon Ads' invoice feed: every invoice with its period, payment record
+ *                    and split by ad program. A re-read lists the whole history again.
  */
-export const IMPORTER_VERSIONS = { amazonFinance: 3, shopifyFinance: 3, shopifyOrders: 2, tiktokOrders: 1, tiktokFinance: 1 } as const;
+export const IMPORTER_VERSIONS = { amazonFinance: 3, shopifyFinance: 3, shopifyOrders: 2, tiktokOrders: 1, tiktokFinance: 1, amazonAdsSpend: 1, amazonAdsInvoices: 1 } as const;
 export type ImporterKey = keyof typeof IMPORTER_VERSIONS;
 
 /** The generation a company's ledger was written with (0 = before generations were tracked). */

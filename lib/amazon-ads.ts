@@ -63,10 +63,27 @@ export function exchangeAdsCode(code: string): Promise<Tokens> {
 type AdsIntegration = { id: string; refreshTokenEnc: string | null; accessTokenEnc: string | null; accessTokenExpiresAt: Date | null };
 
 /** A live access token for the connection — the cached one while it has minutes left, else a fresh one. */
+/** Only a dead sign-in takes the connection out of service (the owner must reconnect): the grant
+ *  was revoked at Amazon, or expired. A throttle, a timeout or an outage is transient — the next
+ *  pass simply tries again, and nothing is skipped meanwhile (see the markers in Settings). */
+export function isAdsAuthFailure(message: string): boolean {
+  return /invalid_grant|unauthorized_client|invalid_client|access.?denied|\b401\b|Unauthorized/i.test(message);
+}
+
+/** Take the connection out of service until the owner reconnects; the Integrations card says so. */
+export async function flagAdsReconnect(integrationId: string, detail: string): Promise<void> {
+  await prismaBase.integration
+    .update({ where: { id: integrationId }, data: { status: "error", lastError: `Amazon Ads sign-in expired. Reconnect Amazon Ads to resume. (${detail.slice(0, 140)})` } })
+    .catch(() => {});
+}
+
 export async function getAdsAccessToken(i: AdsIntegration): Promise<string> {
   if (i.accessTokenEnc && i.accessTokenExpiresAt && i.accessTokenExpiresAt.getTime() - Date.now() > ACCESS_MARGIN_MS) return decryptSecret(i.accessTokenEnc);
   if (!i.refreshTokenEnc) throw new Error("Amazon Ads is not connected");
-  const t = await tokenRequest({ grant_type: "refresh_token", refresh_token: decryptSecret(i.refreshTokenEnc) });
+  const t = await tokenRequest({ grant_type: "refresh_token", refresh_token: decryptSecret(i.refreshTokenEnc) }).catch(async (e) => {
+    if (isAdsAuthFailure((e as Error).message)) await flagAdsReconnect(i.id, (e as Error).message);
+    throw e;
+  });
   await prismaBase.integration.update({
     where: { id: i.id },
     data: {
@@ -163,6 +180,7 @@ export async function completeAmazonAdsConnection(orgId: string, tokens: Tokens)
     timezone: profile.timezone ?? null,
     adsProfileId: String(profile.profileId),
     adsAccountId: accountId,
+    adsCurrency: profile.currencyCode ?? null,
     connectedAt: new Date(),
     lastError: null,
   };
@@ -174,9 +192,16 @@ export async function completeAmazonAdsConnection(orgId: string, tokens: Tokens)
 }
 
 /** The org's live Ads connection with a usable token, or null. */
-export async function adsClient(): Promise<{ host: string; headers: Record<string, string>; timezone: string | null; integrationId: string } | null> {
+export async function adsClient(): Promise<{ host: string; headers: Record<string, string>; timezone: string | null; currency: string; integrationId: string } | null> {
   const i = await prisma.integration.findFirst({ where: { provider: "amazon_ads", status: "connected" } });
   if (!i?.refreshTokenEnc || !i.adsProfileId) return null;
   const token = await getAdsAccessToken(i);
-  return { host: REGION_HOST[i.region ?? "na"] ?? REGION_HOST.na, headers: adsHeaders(token, i.adsProfileId, i.adsAccountId), timezone: i.timezone, integrationId: i.id };
+  // A connection made before the profile's currency was recorded learns it once, from Amazon.
+  let currency = i.adsCurrency;
+  if (!currency) {
+    const profile = (await listAdsProfiles(token, i.region ?? "na").catch(() => [])).find((p) => String(p.profileId) === i.adsProfileId);
+    currency = profile?.currencyCode ?? null;
+    if (currency) await prismaBase.integration.update({ where: { id: i.id }, data: { adsCurrency: currency } }).catch(() => {});
+  }
+  return { host: REGION_HOST[i.region ?? "na"] ?? REGION_HOST.na, headers: adsHeaders(token, i.adsProfileId, i.adsAccountId), timezone: i.timezone, currency: currency ?? "USD", integrationId: i.id };
 }

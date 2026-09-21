@@ -428,6 +428,12 @@ export function PnlClient({ history, initial }: { history: PnlHistory; initial: 
             {pnl.importProgress.stalled && <span className="pill-amber inline-flex items-center rounded-full border px-2 py-px text-[11px] font-medium">paused — consl keeps retrying</span>}
           </span>
         )}
+        {pnl.adsReconnect && (
+          <a href="/settings/integrations" className="inline-flex items-center gap-1.5 text-[12px] text-muted hover:text-ink-soft" title="Ad invoices paid from your Amazon balance keep counting, to the cent. Their day by day split, and any ad spend paid by card, resume as soon as Amazon Ads is reconnected. Nothing from the gap is lost.">
+            <span className="h-1.5 w-1.5 rounded-full bg-warn" aria-hidden />
+            Amazon Ads needs a reconnect. Daily ad spend is on hold until then.
+          </a>
+        )}
         {pnl.importing.length > 0 && (
           <span className="inline-flex items-center gap-1.5 text-[12px] text-muted" title="A freshly connected channel: its orders and money are being read from the platform. Figures fill in as they land.">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />

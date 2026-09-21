@@ -91,6 +91,9 @@ export type PnlHistory = {
   importProgress: Pnl["importProgress"];
   /** Channels whose first history pull hasn't finished, by channel. */
   importing: Partial<Record<PnlChannel, boolean>>;
+  /** Amazon Ads has data on this statement but its connection is down (expired sign-in, or
+   *  disconnected): balance-paid invoices still count, the daily split and card-paid spend wait. */
+  adsReconnect?: boolean;
 };
 export const sourceBits = (sources: PnlSource[]) => sources.reduce((bits, s) => bits | (1 << PNL_SOURCE_ORDER.indexOf(s)), 0);
 export const sourcesFromBits = (bits: number): PnlSource[] => PNL_SOURCE_ORDER.filter((_, i) => bits & (1 << i));
@@ -136,6 +139,8 @@ export type Pnl = {
   } | null;
   /** Channels (labels) whose first history pull hasn't finished — figures fill in as it lands. */
   importing: string[];
+  /** Amazon Ads feeds this statement but needs a reconnect (shown while Amazon is in view). */
+  adsReconnect?: boolean;
   hasData: boolean;
 };
 

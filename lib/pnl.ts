@@ -802,7 +802,7 @@ function dayFormatter(tz: string): (at: number | Date) => string {
 
 /** The part of the history that is cheap and must always be fresh: today, the first dated money,
  *  and the import notices. The cached part (days, lots, channels) is joined to this on every read. */
-export async function pnlMeta(tz: string): Promise<Pick<PnlHistory, "newest" | "oldest" | "importProgress" | "importing">> {
+export async function pnlMeta(tz: string): Promise<Pick<PnlHistory, "newest" | "oldest" | "importProgress" | "importing" | "adsReconnect">> {
   const newest = todayIn(tz);
   const [oldest, settings, connections] = await Promise.all([
     oldestFinanceDate(tz),
@@ -810,7 +810,13 @@ export async function pnlMeta(tz: string): Promise<Pick<PnlHistory, "newest" | "
     prisma.integration.findMany({ where: { status: "connected" }, select: { provider: true } }),
   ]);
   const connected = new Set(connections.map((c) => c.provider));
+  // Amazon Ads feeds the statement (its spend or invoices are on record) but is not connected now.
+  const adsDown =
+    !connected.has("amazon_ads") &&
+    !!(await prisma.integration.findFirst({ where: { provider: "amazon_ads" }, select: { id: true } })) &&
+    !!((await prisma.settings.findFirst({ select: { amazonAdsSince: true } }))?.amazonAdsSince || (await prisma.adInvoice.findFirst({ where: { provider: "amazon_ads" }, select: { id: true } })));
   return {
+    adsReconnect: adsDown,
     newest,
     oldest: oldest ?? newest,
     importProgress: connected.has("amazon") ? amazonImportProgress(settings) : null,

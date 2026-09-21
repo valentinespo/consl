@@ -6,8 +6,10 @@ import { getCurrentOrgId } from "@/lib/tenant";
 import { getCurrentOrg } from "@/lib/org";
 import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
 import { fxRate } from "@/lib/fx";
-import { adsClient } from "@/lib/amazon-ads";
+import { adsClient, flagAdsReconnect, isAdsAuthFailure } from "@/lib/amazon-ads";
 import { zonedDayStart } from "@/lib/pnl";
+import { addDayRange, dayRangesOf, type DayRanges } from "@/lib/ads-waterfill";
+import { IMPORTER_VERSIONS, importerVersion, stampImporterVersion } from "@/lib/import-versions";
 
 /**
  * Daily Amazon ad spend → the P&L's Advertising bucket, one ledger row per day per ad type
@@ -27,6 +29,14 @@ import { zonedDayStart } from "@/lib/pnl";
  * These rows are the SHAPE of ad spend, never its amount: the statement does not sum them. The ad
  * INVOICE payments in Amazon's money report (`ProductAdsPayment`) stay the amount of record and
  * are placed day by day along this spend — see lib/ads-waterfill and lib/amazon-ads-statement.
+ *
+ * OUTAGES. The markers live in Settings, not on the connection, so a disconnect, an expired
+ * sign-in or a reconnect never loses the place: the next pass resumes from the last day read, or
+ * from as far back as Amazon still keeps each ad type when the gap was longer. What Amazon no
+ * longer has can never be read — so the days each ad type WAS read for are recorded as ranges
+ * (`amazonAdsCoverage`), and a hole is known to be a hole: the statement spreads that stretch's
+ * invoices over their own periods instead of mistaking it for days without spend. Invoices are
+ * never lost to an outage at all (the money report and the invoice feed both keep the history).
  */
 
 type AdProduct = "SPONSORED_PRODUCTS" | "SPONSORED_BRANDS" | "SPONSORED_DISPLAY";
@@ -38,7 +48,10 @@ const AD_PRODUCTS: { adProduct: AdProduct; reportTypeId: string; label: string; 
 const WINDOW_DAYS = 31;
 const OVERLAP_DAYS = 3;
 
-type Pending = { id: string; adProduct: AdProduct; from: string; to: string };
+type Pending = { id: string; adProduct: AdProduct; from: string; to: string; at?: string };
+/** Amazon builds a report in minutes, at most a few hours. One still not done after this long is
+ *  given up on, so it cannot block every later request forever; its days are simply asked again. */
+const REPORT_GIVE_UP_MS = 8 * 60 * 60_000;
 const REPORT_CT = "application/vnd.createasyncreportrequest.v3+json";
 
 const day = (d: Date) => d.toISOString().slice(0, 10);
@@ -92,7 +105,7 @@ export async function requestAmazonAdsReports(): Promise<{ requested: number }> 
         console.warn(`[amazon-ads] ${p.label} ${from}..${to}: ${r.status} ${JSON.stringify(j).slice(0, 160)}`);
         break;
       }
-      requested.push({ id: j.reportId, adProduct: p.adProduct, from, to });
+      requested.push({ id: j.reportId, adProduct: p.adProduct, from, to, at: new Date().toISOString() });
       from = addDays(to, 1);
     }
   }
@@ -117,8 +130,11 @@ export async function collectAmazonAdsReports(): Promise<{ collected: number; ro
   let rows = 0;
   let newestDay: string | null = s.amazonAdsSyncedThrough ? day(s.amazonAdsSyncedThrough) : null;
   let oldestDay: string | null = s.amazonAdsSince ? day(s.amazonAdsSince) : null;
-  // First day each ad type is covered from — only ad types whose reports actually come back.
-  const coverage: Record<string, string> = s.amazonAdsCoverage && typeof s.amazonAdsCoverage === "object" && !Array.isArray(s.amazonAdsCoverage) ? { ...(s.amazonAdsCoverage as Record<string, string>) } : {};
+  // The day ranges each ad type has been read for — only ad types whose reports actually come
+  // back. Ranges, not a first day: an outage longer than Amazon keeps data leaves a hole.
+  const stored = s.amazonAdsCoverage && typeof s.amazonAdsCoverage === "object" && !Array.isArray(s.amazonAdsCoverage) ? (s.amazonAdsCoverage as Record<string, unknown>) : {};
+  const legacyTo = s.amazonAdsSyncedThrough ? day(s.amazonAdsSyncedThrough) : null;
+  const coverage: Record<string, DayRanges> = Object.fromEntries(Object.entries(stored).map(([k, v]) => [k, dayRangesOf(v, legacyTo)]));
 
   for (const p of pending) {
     const r = await fetch(`${client.host}/reporting/reports/${p.id}`, { headers: { ...client.headers, "Content-Type": REPORT_CT, Accept: REPORT_CT } });
@@ -126,6 +142,11 @@ export async function collectAmazonAdsReports(): Promise<{ collected: number; ro
     if (r.status === 429) {
       still.push(p);
       continue;
+    }
+    if (r.status === 401 && isAdsAuthFailure(`401 ${JSON.stringify(j)}`)) {
+      // Nothing is dropped: the pending list stays as it is for after the reconnect.
+      await flagAdsReconnect(client.integrationId, "Amazon refused the stored sign-in");
+      return { collected, rows, waiting: pending.length };
     }
     if (!r.ok) {
       console.warn(`[amazon-ads] report ${p.id}: ${r.status} ${JSON.stringify(j).slice(0, 120)}`);
@@ -136,7 +157,8 @@ export async function collectAmazonAdsReports(): Promise<{ collected: number; ro
       continue;
     }
     if (j.status !== "COMPLETED" || !j.url) {
-      still.push(p);
+      if (p.at && Date.now() - new Date(p.at).getTime() > REPORT_GIVE_UP_MS) console.warn(`[amazon-ads] report ${p.id} (${p.adProduct} ${p.from}..${p.to}) still ${j.status ?? "pending"} after hours; asking again`);
+      else still.push(p);
       continue;
     }
     const file = await fetch(j.url);
@@ -165,7 +187,7 @@ export async function collectAmazonAdsReports(): Promise<{ collected: number; ro
     const days: string[] = [];
     for (let d = p.from; d <= p.to; d = addDays(d, 1)) days.push(d);
     const txIds = days.map((d) => `ads:${p.adProduct}:${d}`);
-    const currency = "USD"; // the profile's currency — US marketplace profiles report in USD
+    const currency = client.currency; // the ad profile's own currency: the report rows carry none
     const created: Array<{ channel: string; postedAt: Date; eventAt: Date; group: string; type: string; amount: number; currency: string; baseAmount: number; txId: string; status: string }> = [];
     for (const [d, cost] of byDay) {
       if (cost === 0) continue;
@@ -183,7 +205,7 @@ export async function collectAmazonAdsReports(): Promise<{ collected: number; ro
     collected++;
     if (!newestDay || p.to > newestDay) newestDay = p.to;
     if (!oldestDay || p.from < oldestDay) oldestDay = p.from;
-    if (!coverage[p.adProduct] || p.from < coverage[p.adProduct]) coverage[p.adProduct] = p.from;
+    coverage[p.adProduct] = addDayRange(coverage[p.adProduct] ?? [], p.from, p.to);
   }
 
   const update: Record<string, unknown> = { amazonAdsPendingReports: still.length ? still : null };
@@ -206,7 +228,37 @@ export async function collectAmazonAdsReports(): Promise<{ collected: number; ro
 }
 
 /** One scheduler pass: finish what's generating, then ask for the days not yet covered. */
+/** A newer importer generation: every company's Amazon Ads data is read again on its own — the
+ *  spend as far back as Amazon still keeps it (days on record beyond that stay), the invoice feed
+ *  in full. The markers are reset and the generation stamped in ONE write, so a crash in between
+ *  cannot strand a half re-read: the reset markers themselves make the next pass do the work. */
+async function rereadIfImporterChanged(): Promise<void> {
+  const s = await getOrgSettings();
+  const spendBehind = importerVersion(s.importerVersions, "amazonAdsSpend") < IMPORTER_VERSIONS.amazonAdsSpend;
+  const invoicesBehind = importerVersion(s.importerVersions, "amazonAdsInvoices") < IMPORTER_VERSIONS.amazonAdsInvoices;
+  if (!spendBehind && !invoicesBehind) return;
+  let versions: Record<string, number> = (s.importerVersions as Record<string, number> | null) ?? {};
+  const update: Record<string, unknown> = {};
+  // Generation 1 is the first there ever was: data with no stamp was written by it, and is only
+  // stamped. From generation 2 on, a company behind is read again.
+  if (spendBehind) {
+    const rereads = importerVersion(s.importerVersions, "amazonAdsSpend") > 0 || IMPORTER_VERSIONS.amazonAdsSpend > 1;
+    versions = stampImporterVersion(versions, "amazonAdsSpend");
+    if (rereads && s.amazonAdsSyncedThrough) Object.assign(update, { amazonAdsSyncedThrough: null, amazonAdsPendingReports: null });
+  }
+  if (invoicesBehind) {
+    const rereads = importerVersion(s.importerVersions, "amazonAdsInvoices") > 0 || IMPORTER_VERSIONS.amazonAdsInvoices > 1;
+    versions = stampImporterVersion(versions, "amazonAdsInvoices");
+    if (rereads) {
+      Object.assign(update, { amazonAdsInvoicesFullAt: null, amazonAdsInvoicesSyncedAt: null });
+      await prisma.adInvoice.updateMany({ where: { provider: "amazon_ads" }, data: { detailAt: null } });
+    }
+  }
+  await saveOrgSettings({ ...update, importerVersions: versions });
+}
+
 export async function amazonAdsTick(): Promise<{ collected: number; rows: number; waiting: number; requested: number; invoices: number }> {
+  await rereadIfImporterChanged();
   // Invoices first: they are ready at once, while the spend reports take Amazon a while to build.
   let invoices = 0;
   try {

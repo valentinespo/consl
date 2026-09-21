@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { zonedDayStart } from "@/lib/pnl-periods";
-import { HELD_SUFFIX, coveredFromFor, unifyAdInvoices, waterfillAdInvoices, type AdFillResult, type AdSpendByDay } from "@/lib/ads-waterfill";
+import { HELD_SUFFIX, coveredRangesFor, unifyAdInvoices, waterfillAdInvoices, type AdFillResult, type AdSpendByDay, type DayRanges } from "@/lib/ads-waterfill";
 import type { PnlSource } from "@/lib/pnl-shared";
 
 /**
@@ -86,9 +86,13 @@ export async function amazonAdsStatementRows(): Promise<{
     if (!lastSpendDay || day > lastSpendDay) lastSpendDay = day;
   }
 
-  const coveredFrom = settings.amazonAdsSince ? coveredFromFor(settings.amazonAdsCoverage, usedAdProducts, dayOf(settings.amazonAdsSince)) : null;
+  // The days the API's figures are complete for, as ranges: an outage longer than Amazon keeps
+  // daily data leaves a hole, and a hole is not "days without spend".
   const syncedDay = settings.amazonAdsSyncedThrough ? settings.amazonAdsSyncedThrough.toISOString().slice(0, 10) : null;
-  const coveredTo = syncedDay && lastSpendDay ? (syncedDay > lastSpendDay ? syncedDay : lastSpendDay) : (syncedDay ?? lastSpendDay);
+  const lastDay = syncedDay && lastSpendDay ? (syncedDay > lastSpendDay ? syncedDay : lastSpendDay) : (syncedDay ?? lastSpendDay);
+  const sinceDay = settings.amazonAdsSince ? dayOf(settings.amazonAdsSince) : null;
+  const unbroken: DayRanges = sinceDay && lastDay && sinceDay <= lastDay ? [[sinceDay, lastDay]] : [];
+  const covered = settings.amazonAdsSince ? coveredRangesFor(settings.amazonAdsCoverage, usedAdProducts, lastDay, unbroken) : [];
 
   const unified = unifyAdInvoices({
     ledger: invoiceRows.filter((r) => r.amount < 0).map((r) => ({ id: r.id, day: dayOf(r.postedAt), amount: -(r.baseAmount ?? r.amount) })),
@@ -106,7 +110,12 @@ export async function amazonAdsStatementRows(): Promise<{
     })),
     floorDay: floor ? dayOf(floor.eventAt) : null,
   });
-  const fill = waterfillAdInvoices({ invoices: unified.invoices, spend, coveredFrom, coveredTo });
+  const fill = waterfillAdInvoices({ invoices: unified.invoices, spend, covered });
+  // The one thing this must never get wrong: what it books is the invoices, to the cent.
+  const cents = (n: number) => Math.round(n * 100);
+  const owed = unified.invoices.reduce((t, x) => t + cents(x.amount), 0);
+  const booked = fill.rows.filter((r) => !r.held).reduce((t, r) => t + cents(r.amount), 0);
+  if (owed !== booked) console.error(`[amazon-ads] INVARIANT BROKEN: invoices ${owed / 100} vs booked ${booked / 100}`);
 
   // An account Amazon bills by card never shows an ad invoice in its money report: its API spend
   // is simply its ad spend, and "not invoiced yet" would be a promise that never comes true.

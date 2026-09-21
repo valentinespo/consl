@@ -127,6 +127,7 @@ model Integration {
   // connected marketplace) and its advertising account id, both from the Ads API at connect.
   adsProfileId    String?
   adsAccountId    String?
+  adsCurrency     String? // the advertising profile's currency (its spend reports carry no currency)
   // Ad platforms that aren't a sales channel (Meta): which P&L channel their spend counts
   // against — AMAZON | SHOPIFY | TIKTOK. Meta ads mostly send buyers to the store, so Shopify
   // is the default when it is connected.
@@ -527,8 +528,10 @@ model Settings {
   // keeps each ad type for a different number of days, and a day only some of them reach back to
   // would understate that day's spend, so the fill treats it as not covered.
   amazonAdsCoverage Json?
-  // When the Amazon Ads invoice feed was last listed (the list is re-read about hourly).
+  // When the Amazon Ads invoice feed was last listed (recent invoices about hourly) and last
+  // listed IN FULL (daily: an old invoice can still change — written off months later).
   amazonAdsInvoicesSyncedAt DateTime?
+  amazonAdsInvoicesFullAt   DateTime?
   // Reports requested from Amazon Ads still generating (they are built asynchronously):
   // [{ id, adProduct, from, to }] — collected on later ticks, then the marker moves.
   amazonAdsPendingReports Json?

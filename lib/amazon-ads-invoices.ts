@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentOrg } from "@/lib/org";
 import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
 import { fxRate } from "@/lib/fx";
-import { adsClient } from "@/lib/amazon-ads";
+import { adsClient, flagAdsReconnect } from "@/lib/amazon-ads";
 import { adProgramLabel } from "@/lib/ads-waterfill";
 
 /**
@@ -12,13 +12,19 @@ import { adProgramLabel } from "@/lib/ads-waterfill";
  * program. The statement books ad spend from the money report plus these (lib/ads-waterfill
  * `unifyAdInvoices`): a company paying by card has no ad charge in its money report at all.
  *
- * Two steps, both cheap: LIST (100 per page; the whole history once, then the last two months,
- * about hourly) and DETAIL (one call per invoice, read once — and again only while the invoice's
- * status can still change). A login without billing rights gets 401/403: the import is skipped
- * and the statement keeps working from the money report alone, as before.
+ * Two steps, both cheap: LIST (100 per page) and DETAIL (one call per invoice, read once — and
+ * again only while the invoice's status can still change). A login without billing rights gets
+ * 403: the import is skipped and the statement keeps working from the money report alone.
+ *
+ * OUTAGES AND LATE CHANGES. The recent list starts two months before the NEWEST INVOICE ON RECORD
+ * — not before today — so a connection that was down for one month or for five lists everything
+ * issued meanwhile the first time it is back; nothing depends on how long it was away. And the
+ * whole history is listed again once a day, because an old invoice can still change: Amazon wrote
+ * one of Herbl's off four months after issuing it.
  */
 const PROVIDER = "amazon_ads";
 const LIST_EVERY_MS = 55 * 60_000;
+const FULL_LIST_EVERY_MS = 23 * 60 * 60_000;
 const RECENT_DAYS = 62;
 const DETAILS_PER_PASS = 60;
 const DETAIL_PARALLEL = 3;
@@ -44,19 +50,26 @@ export async function syncAmazonAdsInvoices(): Promise<{ listed: number; detaile
   let listed = 0;
   const due = !settings.amazonAdsInvoicesSyncedAt || Date.now() - settings.amazonAdsInvoicesSyncedAt.getTime() > LIST_EVERY_MS;
   if (due) {
-    const first = !settings.amazonAdsInvoicesSyncedAt;
-    const since = new Date(Date.now() - RECENT_DAYS * 86_400_000).toISOString().slice(0, 10);
+    const newest = (await prisma.adInvoice.findFirst({ where: { provider: PROVIDER, invoiceDay: { not: null } }, orderBy: { invoiceDay: "desc" }, select: { invoiceDay: true } }))?.invoiceDay ?? null;
+    const first = !newest || !settings.amazonAdsInvoicesFullAt || Date.now() - settings.amazonAdsInvoicesFullAt.getTime() > FULL_LIST_EVERY_MS;
+    const since = newest ? new Date(new Date(`${newest}T00:00:00Z`).getTime() - RECENT_DAYS * 86_400_000).toISOString().slice(0, 10) : "";
+    let complete = false;
     let cursor: string | null = null;
     for (let page = 0; page < 80; page++) {
       const url = new URL(`${client.host}/invoices`);
       if (cursor) url.searchParams.set("cursor", cursor);
       else {
         url.searchParams.set("count", "100");
-        if (!first) url.searchParams.set("startDate", since);
+        // Amazon's reference says ISO-8601; the API itself only takes yyyyMMdd (checked live).
+        if (!first) url.searchParams.set("startDate", since.replaceAll("-", ""));
       }
       const r = await fetch(url, { headers });
-      if (r.status === 401 || r.status === 403) {
-        console.warn(`[amazon-ads] invoices: ${r.status} — this login has no billing access; the statement keeps using the money report alone`);
+      if (r.status === 401) {
+        await flagAdsReconnect(client.integrationId, "Amazon refused the stored sign-in");
+        return { listed, detailed: 0, skipped: "sign-in expired" };
+      }
+      if (r.status === 403) {
+        console.warn("[amazon-ads] invoices: 403, this login has no billing access; the statement keeps using the money report alone");
         await saveOrgSettings({ amazonAdsInvoicesSyncedAt: new Date() });
         return { listed: 0, detailed: 0, skipped: "no billing access" };
       }
@@ -82,9 +95,13 @@ export async function syncAmazonAdsInvoices(): Promise<{ listed: number; detaile
         listed++;
       }
       cursor = j.payload?.nextCursor ?? j.nextCursor ?? null;
-      if (!cursor || list.length === 0) break;
+      if (!cursor || list.length === 0) {
+        complete = true;
+        break;
+      }
     }
-    await saveOrgSettings({ amazonAdsInvoicesSyncedAt: new Date() });
+    // Only a list read to its end moves the markers: one cut short is simply read again.
+    if (complete) await saveOrgSettings({ amazonAdsInvoicesSyncedAt: new Date(), ...(first ? { amazonAdsInvoicesFullAt: new Date() } : {}) });
   }
 
   // Details: never-read invoices first (newest first), then the ones whose status can still move.

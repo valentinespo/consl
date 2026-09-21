@@ -90,6 +90,63 @@ export function coveredFromFor(coverage: unknown, used: Iterable<string>, fallba
   return days.length ? days.sort().at(-1)! : fallback;
 }
 
+/** Inclusive [from, to] day ranges, sorted, never touching or overlapping. */
+export type DayRanges = [string, string][];
+const isDay = (d: unknown): d is string => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d);
+
+/** Add one range to a list, merging whatever it touches (a range ending the day before another joins it). */
+export function addDayRange(ranges: DayRanges, from: string, to: string): DayRanges {
+  if (!isDay(from) || !isDay(to) || from > to) return ranges;
+  const out: DayRanges = [];
+  let cur: [string, string] = [from, to];
+  for (const [a, b] of [...ranges].sort((x, y) => x[0].localeCompare(y[0]))) {
+    if (nextDay(b) < cur[0]) out.push([a, b]);
+    else if (nextDay(cur[1]) < a) {
+      out.push(cur);
+      cur = [a, b];
+    } else cur = [a < cur[0] ? a : cur[0], b > cur[1] ? b : cur[1]];
+  }
+  out.push(cur);
+  return out.sort((x, y) => x[0].localeCompare(y[0]));
+}
+
+/** One ad type's covered ranges as stored: a list of ranges, or (before ranges were recorded) its
+ *  first covered day alone — which ran unbroken up to `legacyTo`. */
+export function dayRangesOf(value: unknown, legacyTo: string | null): DayRanges {
+  if (isDay(value)) return legacyTo && value <= legacyTo ? [[value, legacyTo]] : [];
+  if (!Array.isArray(value)) return [];
+  let out: DayRanges = [];
+  for (const r of value) if (Array.isArray(r) && isDay(r[0]) && isDay(r[1])) out = addDayRange(out, r[0], r[1]);
+  return out;
+}
+
+function intersectDayRanges(a: DayRanges, b: DayRanges): DayRanges {
+  const out: DayRanges = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    const from = a[i][0] > b[j][0] ? a[i][0] : b[j][0];
+    const to = a[i][1] < b[j][1] ? a[i][1] : b[j][1];
+    if (from <= to) out.push([from, to]);
+    if (a[i][1] < b[j][1]) i++;
+    else j++;
+  }
+  return out;
+}
+
+/**
+ * The days the API's figures are COMPLETE for — as ranges, because a connection that was down
+ * for longer than Amazon keeps daily data leaves a hole nothing can ever fill. A day counts only
+ * when every ad type the company spends on covers it; a hole's days are simply not covered, so
+ * their invoices spread evenly over their own (exact) periods instead of finding "no spend".
+ */
+export function coveredRangesFor(coverage: unknown, used: Iterable<string>, legacyTo: string | null, fallback: DayRanges): DayRanges {
+  const map = coverage && typeof coverage === "object" && !Array.isArray(coverage) ? (coverage as Record<string, unknown>) : {};
+  const lists = [...new Set(used)].map((k) => dayRangesOf(map[k], legacyTo)).filter((l) => l.length);
+  if (!lists.length) return fallback;
+  return lists.reduce((acc, l) => intersectDayRanges(acc, l));
+}
+
 export function daysBetween(from: string, to: string): string[] {
   const out: string[] = [];
   for (let d = from; d <= to; d = nextDay(d)) out.push(d);
@@ -120,12 +177,17 @@ export function waterfillAdInvoices(input: {
   /** In posting order (oldest first). */
   invoices: AdInvoice[];
   spend: AdSpendByDay;
-  /** First and last day the API's figures are complete for; null = no API data at all. */
-  coveredFrom: string | null;
-  coveredTo: string | null;
+  /** The days the API's figures are complete for, as ranges (see `coveredRangesFor`)… */
+  covered?: DayRanges;
+  /** …or one unbroken range: its first and last day; null = no API data at all. */
+  coveredFrom?: string | null;
+  coveredTo?: string | null;
 }): AdFillResult {
-  const { invoices, spend, coveredFrom, coveredTo } = input;
-  const covered = (d: string) => !!coveredFrom && !!coveredTo && d >= coveredFrom && d <= coveredTo;
+  const { invoices, spend } = input;
+  const ranges: DayRanges = input.covered ?? (input.coveredFrom && input.coveredTo && input.coveredFrom <= input.coveredTo ? [[input.coveredFrom, input.coveredTo]] : []);
+  const covered = (d: string) => ranges.some(([a, b]) => d >= a && d <= b);
+  const coveredFrom = ranges.length ? ranges[0][0] : null;
+  const coveredTo = ranges.length ? ranges[ranges.length - 1][1] : null;
   const apiCents = (d: string) => [...(spend.get(d)?.values() ?? [])].reduce((t, v) => t + Math.max(0, cents(v)), 0);
 
   const room = new Map<string, number>(); // R(d), in cents, for covered days
@@ -225,9 +287,9 @@ export function waterfillAdInvoices(input: {
   }
 
   // 4. the held tail: API spend on and after the last cut that no invoice has claimed
-  if (coveredFrom && coveredTo) {
-    const start = prev && prev > coveredFrom ? prev : coveredFrom;
-    for (const d of daysBetween(start, coveredTo)) book(d, roomOf(d), true);
+  for (const [a, b] of ranges) {
+    const start = prev && prev > a ? prev : a;
+    if (start <= b) for (const d of daysBetween(start, b)) book(d, roomOf(d), true);
   }
 
   // The audit compares like with like: covered days strictly before the last cut are final.
@@ -235,11 +297,8 @@ export function waterfillAdInvoices(input: {
   let apiSpend = 0;
   let invoiced = 0;
   if (coveredFrom && auditTo && coveredFrom < auditTo) {
-    for (const d of daysBetween(coveredFrom, auditTo)) {
-      if (d === auditTo) break;
-      apiSpend += apiCents(d);
-    }
-    for (const p of perInvoice) for (const [d, c] of p.placed) if (d >= coveredFrom && d < auditTo) invoiced += c;
+    for (const [a, b] of ranges) for (const d of daysBetween(a, b)) if (d < auditTo) apiSpend += apiCents(d);
+    for (const p of perInvoice) for (const [d, c] of p.placed) if (covered(d) && d < auditTo) invoiced += c;
   }
 
   const rows = [...booked.values()]
