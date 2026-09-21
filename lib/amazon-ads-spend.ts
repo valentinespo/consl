@@ -189,7 +189,9 @@ export async function collectAmazonAdsReports(): Promise<{ collected: number; ro
   const update: Record<string, unknown> = { amazonAdsPendingReports: still.length ? still : null };
   // The marker moves only once a pass is fully in, so a window still generating is never skipped.
   if (still.length === 0 && newestDay) update.amazonAdsSyncedThrough = new Date(`${newestDay}T00:00:00Z`);
-  if (oldestDay && !s.amazonAdsSince) update.amazonAdsSince = zonedDayStart(oldestDay, tz);
+  // The first day on record: set once data lands, and moved back if an older window arrives later
+  // (Amazon finishes the windows of a first pull in no particular order).
+  if (oldestDay && (!s.amazonAdsSince || zonedDayStart(oldestDay, tz) < s.amazonAdsSince)) update.amazonAdsSince = zonedDayStart(oldestDay, tz);
   if (collected) update.amazonAdsCoverage = coverage;
   await saveOrgSettings(update);
   if (collected) await prismaBase.integration.update({ where: { id: client.integrationId }, data: { lastSyncAt: new Date(), lastError: null } });
