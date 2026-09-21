@@ -79,10 +79,18 @@ export function normalizeShopDomain(raw: string): string | null {
 }
 
 /** The consent URL on the merchant's own shop. */
+/** What each app asks a store for. The private app also reads WHICH CUSTOMER placed an order (the
+ *  customer id only, never a name or an email) for the lifetime-value view; a private app may
+ *  always do so. The public app's list is what Shopify reviewed and stays exactly that until an
+ *  update is approved — so a store connected through it simply has no customer ids. */
+export function shopifyScopesFor(kind: ShopifyAppKind): string {
+  return kind === "public" ? SHOPIFY_SCOPES : `${SHOPIFY_SCOPES},read_customers`;
+}
+
 export function authorizeUrl(shop: string, orgId: string, kind: ShopifyAppKind = "default"): string {
   const params = new URLSearchParams({
     client_id: shopifyAppCredentials(kind).key,
-    scope: SHOPIFY_SCOPES,
+    scope: shopifyScopesFor(kind),
     redirect_uri: SHOPIFY_REDIRECT_URI,
     state: makeState(orgId),
   });
