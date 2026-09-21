@@ -1239,6 +1239,16 @@ model AccessApplication {
 /// of every table it reads (lib/pnl-cache.ts). The P&L page serves it only while the fingerprint
 /// still matches — any change to the inputs makes it recompute — and the scheduler refreshes it
 /// after data changes so the page rarely has to. Unscoped: read and written by orgId explicitly.
+/// The computed lifetime-value report per company, kept under the fingerprint of everything it
+/// was computed from plus the company's calendar day (ages move with the date) — see lib/ltv-data.
+model LtvSnapshot {
+  orgId       String   @id
+  fingerprint String
+  payload     Json
+  computedAt  DateTime @default(now())
+  durationMs  Int      @default(0)
+}
+
 model PnlSnapshot {
   orgId       String   @id
   fingerprint String
