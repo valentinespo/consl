@@ -60,7 +60,7 @@ export const PROVIDERS: Record<
   },
   amazon_ads: {
     label: "Amazon Ads",
-    blurb: "Daily ad spend by ad type, straight from Amazon Ads — real advertising cost on the P&L instead of invoice payments.",
+    blurb: "Your real ad spend day by day and by ad type on the P&L, always adding up to your Amazon ad invoices to the cent.",
     facilities: [],
   },
   meta_ads: {

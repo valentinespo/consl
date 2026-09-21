@@ -45,16 +45,16 @@ const INPUT_TABLES = [
  * One statement: a change marker per input table, the company row itself, and the global FX
  * table. The Settings row is deliberately NOT fingerprinted as a row — the scheduler rewrites its
  * sync cursors every few minutes, which would invalidate a perfectly good snapshot each time —
- * only the settings the statement actually reads go in, by value (the timezone, and the day the
- * Amazon Ads import takes over ad spend).
+ * only the settings the statement actually reads go in, by value (the timezone, and what the
+ * Amazon ad-invoice fill reads: the days the Ads import covers).
  */
 export async function pnlFingerprint(orgId: string, tz: string): Promise<string> {
   const parts = INPUT_TABLES.map((t, i) => `(SELECT count(*)::text || ':' || COALESCE(max(xmin::text::bigint), 0)::text FROM "${t}" WHERE "orgId" = $1) AS t${i}`);
   parts.push(`(SELECT xmin::text || ':' || "currencyCode" FROM "Organization" WHERE id = $1) AS org`);
   parts.push(`(SELECT count(*)::text || ':' || COALESCE(max(xmin::text::bigint), 0)::text FROM "FxRate") AS fx`);
-  parts.push(`(SELECT COALESCE("amazonAdsSince"::text, '') FROM "Settings" WHERE "orgId" = $1 LIMIT 1) AS ads`);
+  parts.push(`(SELECT COALESCE("amazonAdsSince"::text, '') || '|' || COALESCE("amazonAdsSyncedThrough"::text, '') || '|' || COALESCE("amazonAdsCoverage"::text, '') FROM "Settings" WHERE "orgId" = $1 LIMIT 1) AS ads`);
   const [row] = await prismaBase.$queryRawUnsafe<Record<string, string | null>[]>(`SELECT ${parts.join(", ")}`, orgId);
-  return createHash("sha1").update(JSON.stringify({ ...row, tz, v: 2 })).digest("hex");
+  return createHash("sha1").update(JSON.stringify({ ...row, tz, v: 3 })).digest("hex");
 }
 
 type Cached = Pick<PnlHistory, "days" | "lots" | "channels">;

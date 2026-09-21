@@ -22,8 +22,11 @@ import { zonedDayStart } from "@/lib/pnl";
  *
  * The row's day is Amazon's: the report is cut in the advertising profile's own timezone, so a
  * day's spend is booked at the start of that calendar day in that zone. Spend is negative, like
- * every cost row. From the first day this import covers, the P&L drops the ad INVOICE payments in
- * Amazon's money report (`ProductAdsPayment`) — same money, now day by day instead of by bill.
+ * every cost row.
+ *
+ * These rows are the SHAPE of ad spend, never its amount: the statement does not sum them. The ad
+ * INVOICE payments in Amazon's money report (`ProductAdsPayment`) stay the amount of record and
+ * are placed day by day along this spend — see lib/ads-waterfill and lib/amazon-ads-statement.
  */
 
 type AdProduct = "SPONSORED_PRODUCTS" | "SPONSORED_BRANDS" | "SPONSORED_DISPLAY";
@@ -114,6 +117,8 @@ export async function collectAmazonAdsReports(): Promise<{ collected: number; ro
   let rows = 0;
   let newestDay: string | null = s.amazonAdsSyncedThrough ? day(s.amazonAdsSyncedThrough) : null;
   let oldestDay: string | null = s.amazonAdsSince ? day(s.amazonAdsSince) : null;
+  // First day each ad type is covered from — only ad types whose reports actually come back.
+  const coverage: Record<string, string> = s.amazonAdsCoverage && typeof s.amazonAdsCoverage === "object" && !Array.isArray(s.amazonAdsCoverage) ? { ...(s.amazonAdsCoverage as Record<string, string>) } : {};
 
   for (const p of pending) {
     const r = await fetch(`${client.host}/reporting/reports/${p.id}`, { headers: { ...client.headers, "Content-Type": REPORT_CT, Accept: REPORT_CT } });
@@ -178,14 +183,22 @@ export async function collectAmazonAdsReports(): Promise<{ collected: number; ro
     collected++;
     if (!newestDay || p.to > newestDay) newestDay = p.to;
     if (!oldestDay || p.from < oldestDay) oldestDay = p.from;
+    if (!coverage[p.adProduct] || p.from < coverage[p.adProduct]) coverage[p.adProduct] = p.from;
   }
 
   const update: Record<string, unknown> = { amazonAdsPendingReports: still.length ? still : null };
   // The marker moves only once a pass is fully in, so a window still generating is never skipped.
   if (still.length === 0 && newestDay) update.amazonAdsSyncedThrough = new Date(`${newestDay}T00:00:00Z`);
   if (oldestDay && !s.amazonAdsSince) update.amazonAdsSince = zonedDayStart(oldestDay, tz);
+  if (collected) update.amazonAdsCoverage = coverage;
   await saveOrgSettings(update);
   if (collected) await prismaBase.integration.update({ where: { id: client.integrationId }, data: { lastSyncAt: new Date(), lastError: null } });
+  if (collected) {
+    // The standing audit: over the days the API fully covers, invoices placed vs the API's spend.
+    const { amazonAdsStatementRows } = await import("@/lib/amazon-ads-statement");
+    const audit = (await amazonAdsStatementRows().catch(() => null))?.audit;
+    if (audit?.from) console.log(`[amazon-ads] audit ${audit.from}..${audit.to}: API ${audit.apiSpend.toFixed(2)} vs invoiced ${audit.invoiced.toFixed(2)} (${(audit.invoiced - audit.apiSpend).toFixed(2)})`);
+  }
   return { collected, rows, waiting: still.length };
 }
 

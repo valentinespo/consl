@@ -518,10 +518,14 @@ model Settings {
   tiktokFinanceSyncedThrough DateTime? // last TikTok settlement-ledger pass (statements re-read from 30 days before it)
   amazonReportSyncedThrough DateTime?
   // Amazon Ads daily spend: the last day read (walks forward; the refresh re-reads a few days of
-  // overlap) and the first day covered — from that day on, the P&L shows real daily spend instead
-  // of the ad invoice payments in Amazon's money report.
+  // overlap) and the first day covered. Once there is data, the P&L places the ad INVOICES day by
+  // day along this spend (lib/ads-waterfill) — the invoices stay the amount of record.
   amazonAdsSyncedThrough DateTime?
   amazonAdsSince DateTime?
+  // First day each ad type's reports cover, e.g. {"SPONSORED_PRODUCTS":"2026-06-20",…} — Amazon
+  // keeps each ad type for a different number of days, and a day only some of them reach back to
+  // would understate that day's spend, so the fill treats it as not covered.
+  amazonAdsCoverage Json?
   // Reports requested from Amazon Ads still generating (they are built asynchronously):
   // [{ id, adProduct, from, to }] — collected on later ticks, then the marker moves.
   amazonAdsPendingReports Json?

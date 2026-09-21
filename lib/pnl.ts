@@ -1,7 +1,8 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrgId } from "@/lib/tenant";
-import { AMAZON_ADS_DAILY_ON_PNL, sourceBits, type Pnl, type PnlChannel, type PnlDay, type PnlHistory, type PnlPeriod, type PnlPeriodRange, type PnlSource } from "@/lib/pnl-shared";
+import { amazonAdsStatementRows } from "@/lib/amazon-ads-statement";
+import { sourceBits, type Pnl, type PnlChannel, type PnlDay, type PnlHistory, type PnlPeriod, type PnlPeriodRange, type PnlSource } from "@/lib/pnl-shared";
 import { addPnlAmount, createPnlPeriods, pnlGroups } from "@/lib/pnl-periods";
 import { todayIn } from "@/lib/channel-tz";
 import { getCurrentOrg } from "@/lib/org";
@@ -564,16 +565,13 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
   const selected = (channels ?? present).filter((c) => present.includes(c));
   const selectedSet = new Set(selected);
   if (!orgId || selected.length === 0) return { ...EMPTY, periods: periods.finish() };
-  const [scope, org, exclusions, facilities, adsSettings] = await Promise.all([
+  const [scope, org, exclusions, facilities, adsFill] = await Promise.all([
     loadScope(),
     getCurrentOrg(),
     activeExclusions(),
     prisma.facility.findMany({ select: { id: true, channel: true } }),
-    prisma.settings.findFirst({ select: { amazonAdsSince: true } }),
+    amazonAdsStatementRows(),
   ]);
-  // From the first day the Amazon Ads import covers, ad spend is on the statement day by day —
-  // the ad invoice payments in Amazon's money report are the same money and step aside.
-  const adsSince = AMAZON_ADS_DAILY_ON_PNL ? (adsSettings?.amazonAdsSince ?? null) : null;
   // The queue an order's facility prices from: a channel facility is that channel's stock
   // (Amazon FBA and AWD share Amazon's), one of the company's own places is its own queue.
   const facilityChannel = new Map(facilities.map((f) => [f.id, f.channel]));
@@ -593,7 +591,9 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
   // are skipped by their order number — and a Shopify order the Orders tab drops as another
   // channel's mirror is dropped here too.
   // Each row also says where its money came from: the channel's own ledger, or the ad platform
-  // whose spend was written onto that channel (Meta and Amazon Ads rows are told apart by txId).
+  // whose spend was written onto that channel (Meta rows are told apart by txId). Amazon's ad
+  // invoices and the Ads API's raw daily rows are both left out here: the statement books them
+  // together below, the invoices placed along the daily spend (lib/ads-waterfill).
   const sums = await prisma.$queryRaw<{ group: string; type: string; source: string; day: string; amount: number }[]>`
     SELECT fe."group", fe."type",
       CASE WHEN fe."txId" LIKE 'meta:%' THEN 'META' WHEN fe."txId" LIKE 'ads:%' THEN 'AMAZON_ADS' ELSE fe.channel END AS source,
@@ -609,8 +609,8 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
         SELECT 1 FROM "SalesOrder" so
         WHERE so."orgId" = fe."orgId" AND so.channel = fe.channel AND so."externalId" = fe."orderId"
           AND (so.voided OR (so.channel = 'SHOPIFY' AND so.source = ANY(${excludedSources}::text[]))))
-      AND NOT (fe.channel = 'AMAZON' AND fe.type = 'ProductAdsPayment' AND ${adsSince}::timestamp IS NOT NULL AND fe."eventAt" >= ${adsSince})
-      AND (${AMAZON_ADS_DAILY_ON_PNL}::boolean OR fe."txId" IS NULL OR fe."txId" NOT LIKE 'ads:%')
+      AND NOT (${adsFill.active}::boolean AND fe.channel = 'AMAZON' AND fe.type = 'ProductAdsPayment' AND fe.amount < 0)
+      AND (fe."txId" IS NULL OR fe."txId" NOT LIKE 'ads:%')
     GROUP BY 1, 2, 3, 4`;
   // One line per type inside a bucket; a type two channels both post keeps both sources.
   const blocks = new Map<string, Map<string, { amount: number; sources: Set<PnlSource> }>>();
@@ -620,6 +620,17 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
   for (const s of sums) {
     add(s.group, s.type, s.amount, s.source as PnlSource);
     periods.addAmount(s.day, s.group, s.type, s.amount, s.source as PnlSource);
+  }
+  // Amazon ad spend: the ad invoices (left out of the sums above), placed day by day along the
+  // Ads API's daily spend, plus the spend not invoiced yet — see lib/ads-waterfill.
+  if (selectedSet.has("AMAZON")) {
+    for (const r of adsFill.rows) {
+      if (r.at < from.getTime() || r.at > to.getTime()) continue;
+      r.sources.forEach((source, i) => {
+        add("advertising", r.type, i === 0 ? r.amount : 0, source);
+        periods.addAmount(r.at, "advertising", r.type, i === 0 ? r.amount : 0, source);
+      });
+    }
   }
 
   // Custom fees the operator attached (by rule or by hand): a cost on the order's own channel. A
@@ -822,14 +833,13 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
   const present = await presentPnlChannels();
   const meta = await pnlMeta(tz);
   if (!orgId || present.length === 0) return { days: [], lots: [], channels: present, ...meta };
-  const [scope, org, exclusions, facilities, adsSettings] = await Promise.all([
+  const [scope, org, exclusions, facilities, adsFill] = await Promise.all([
     loadScope(),
     getCurrentOrg(),
     activeExclusions(),
     prisma.facility.findMany({ select: { id: true, channel: true } }),
-    prisma.settings.findFirst({ select: { amazonAdsSince: true } }),
+    amazonAdsStatementRows(),
   ]);
-  const adsSince = AMAZON_ADS_DAILY_ON_PNL ? (adsSettings?.amazonAdsSince ?? null) : null;
   const facilityChannel = new Map(facilities.map((f) => [f.id, f.channel]));
   const queueOf = (facilityId: string | null): QueueKey | null => {
     if (!facilityId || !facilityChannel.has(facilityId)) return null;
@@ -874,10 +884,16 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
         SELECT 1 FROM "SalesOrder" so
         WHERE so."orgId" = fe."orgId" AND so.channel = fe.channel AND so."externalId" = fe."orderId"
           AND (so.voided OR (so.channel = 'SHOPIFY' AND so.source = ANY(${excludedSources}::text[]))))
-      AND NOT (fe.channel = 'AMAZON' AND fe.type = 'ProductAdsPayment' AND ${adsSince}::timestamp IS NOT NULL AND fe."eventAt" >= ${adsSince})
-      AND (${AMAZON_ADS_DAILY_ON_PNL}::boolean OR fe."txId" IS NULL OR fe."txId" NOT LIKE 'ads:%')
+      AND NOT (${adsFill.active}::boolean AND fe.channel = 'AMAZON' AND fe.type = 'ProductAdsPayment' AND fe.amount < 0)
+      AND (fe."txId" IS NULL OR fe."txId" NOT LIKE 'ads:%')
     GROUP BY 1, 2, 3, 4, 5`;
   for (const r of sums) addPnlAmount(tally(r.channel as PnlChannel, r.day).blocks, r.group, r.type, r.amount, r.source as PnlSource);
+  // Amazon ad spend, placed day by day (the invoices themselves are left out of the sums above).
+  if (selected.includes("AMAZON")) {
+    for (const r of adsFill.rows) {
+      r.sources.forEach((source, i) => addPnlAmount(tally("AMAZON", dayOf(r.at)).blocks, "advertising", r.type, i === 0 ? r.amount : 0, source));
+    }
+  }
   mark("ledger");
 
   // Custom fees, on the order's own channel and day.
