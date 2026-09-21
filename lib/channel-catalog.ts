@@ -87,6 +87,13 @@ type FetchedListing = {
 
 async function upsertListings(channel: ChannelKey, fetched: FetchedListing[]): Promise<{ seen: number }> {
   const existing = await prisma.channelListing.findMany({ where: { channel } });
+  // A platform that answers with NOTHING while listings are on file has not said they are all
+  // gone — Amazon's inventory call does this now and then. Taking it at its word emptied the
+  // mapping screen (and forgot which listings were set to ignore) until the next refresh.
+  if (fetched.length === 0 && existing.length > 0) {
+    console.warn(`[catalog] ${channel}: the platform returned no listings; keeping the ${existing.length} on file`);
+    return { seen: 0 };
+  }
   const byExternal = new Map(existing.map((l) => [l.externalId, l]));
   const now = new Date();
 

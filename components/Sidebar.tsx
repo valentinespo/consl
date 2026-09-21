@@ -16,7 +16,6 @@ import {
   ReorderFilled,
   OrdersFilled,
   PnlFilled,
-  LtvFilled,
   ChevronDown,
   Plug,
   Settings,
@@ -31,7 +30,6 @@ type NavItem = { href: string; label: string; icon: LucideIcon; exact?: boolean;
 const FINANCES_NAV: NavItem[] = [
   { href: "/pnl", label: "P&L", icon: PnlFilled, resource: "dashboard" },
   { href: "/orders", label: "Orders", icon: OrdersFilled, resource: "dashboard" },
-  { href: "/ltv", label: "LTV", icon: LtvFilled, resource: "dashboard" },
 ];
 
 // Production — the day-to-day operational tabs. Collapsible as a group.

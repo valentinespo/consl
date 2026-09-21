@@ -92,7 +92,7 @@ type QueueKey = string;
 /** `mcf`: an MCF order counted while Amazon is the only channel. `unreported`: an Amazon order
  *  that shipped but Amazon posted no money for (a free unit, a replacement) — units from the
  *  Orders tab. Both are reported as their own lines under cost of goods. */
-type Sale = { productId: string; units: number; at: number | null; channel: PnlChannel; queue: QueueKey | null; mcf?: boolean; unreported?: boolean; periodAt?: number; /** The consl order the units belong to, when the sale comes from an order's own lines (Shopify, TikTok). */ orderId?: string };
+type Sale = { productId: string; units: number; at: number | null; channel: PnlChannel; queue: QueueKey | null; mcf?: boolean; unreported?: boolean; periodAt?: number };
 type Cogs = {
   cogs: number;
   units: number;
@@ -520,14 +520,14 @@ async function allSales(
     const queue = r.placed ? queueOf(r.facility) : r.fbaFee ? "AMAZON" : null;
     sales.push({ productId: p.id, units: r.units, at: r.at.getTime(), channel: "AMAZON", queue });
   }
-  const lineRows = await prisma.$queryRaw<{ channel: string; productId: string; units: number; at: Date; facility: string | null; orderId: string }[]>`
-    SELECT o.channel, l."productId", l.quantity::int AS units, o."orderedAt" AS at, o.id AS "orderId",
+  const lineRows = await prisma.$queryRaw<{ channel: string; productId: string; units: number; at: Date; facility: string | null }[]>`
+    SELECT o.channel, l."productId", l.quantity::int AS units, o."orderedAt" AS at,
       COALESCE(o."fulfillmentOverrideFacilityId", o."fulfillmentFacilityId") AS facility
     FROM "SalesOrderLine" l JOIN "SalesOrder" o ON o.id = l."orderId"
     WHERE o."orgId" = ${orgId} AND o.channel IN ('SHOPIFY', 'TIKTOK') AND l."productId" IS NOT NULL
       AND o.cancelled = false AND o.voided = false
       AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excludedSources}::text[]))`;
-  for (const r of lineRows) sales.push({ productId: r.productId, units: r.units, at: r.at.getTime(), channel: r.channel as PnlChannel, queue: queueOf(r.facility), orderId: r.orderId });
+  for (const r of lineRows) sales.push({ productId: r.productId, units: r.units, at: r.at.getTime(), channel: r.channel as PnlChannel, queue: queueOf(r.facility) });
   // Amazon orders that shipped but Amazon posted no money for — a free unit, a replacement: no
   // sale row, so nothing above saw the unit leave. Their units come from the Orders tab instead,
   // one source per order: an order with a sale row in the money report is never read here, and
@@ -827,12 +827,7 @@ export async function pnlMeta(tz: string): Promise<Pick<PnlHistory, "newest" | "
   };
 }
 
-export async function getPnlHistory(
-  tz: string,
-  /** Also told what each ORDER cost (negative), priced by this very walk — the lifetime-value view
-   *  reads its per-order cost here so it can never disagree with the statement's COGS. */
-  hooks: { onOrderCost?: (orderId: string, cogs: number) => void } = {},
-): Promise<PnlHistory> {
+export async function getPnlHistory(tz: string): Promise<PnlHistory> {
   const t0 = Date.now();
   let last = t0;
   const marks: string[] = [];
@@ -987,7 +982,6 @@ export async function getPnlHistory(
   const sales = await allSales(orgId, scope, amazonSkus, excludedSources, exclusions.mcf, queueOf);
   mark("load sales");
   await fifoCogs([...sales, ...pendingSales], allTime.from, allTime.to, new Set(selected), scope, (sale, cogs, detail) => {
-    if (sale.orderId) hooks.onOrderCost?.(sale.orderId, cogs);
     const at = sale.periodAt ?? sale.at;
     if (at == null) return;
     const t = tally(sale.channel, dayOf(at));
