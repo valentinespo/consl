@@ -240,7 +240,7 @@ async function runOrgChannelStockInner(orgId: string): Promise<void> {
       const last = lastOrdersRefresh.get(orgId) ?? 0;
       if (Date.now() - last >= ORDERS_REFRESH_MS) {
         lastOrdersRefresh.set(orgId, Date.now());
-        const { importShopifyOrders, importTikTokOrders } = await import("@/lib/orders");
+        const { importShopifyOrders, importTikTokOrders, hasShopifyCustomerScope } = await import("@/lib/orders");
         const { IMPORTER_VERSIONS, importerVersion, stampImporterVersion } = await import("@/lib/import-versions");
         for (const [provider, channel, recent, full, syncedKey] of [
           ["shopify", "SHOPIFY", (since: Date) => importShopifyOrders(since), () => importShopifyOrders(), "shopifySyncedThrough"],
@@ -256,9 +256,16 @@ async function runOrgChannelStockInner(orgId: string): Promise<void> {
             // too, then carries the current generation.
             const existing = await prisma.salesOrder.count({ where: { channel } });
             const settingsNow = await getOrgSettings();
+            // A Shopify connection that may read customers, on a ledger that was never read with
+            // that permission: one full re-read puts the customer id on every order.
+            const customersDue =
+              provider === "shopify" &&
+              importerVersion(settingsNow.importerVersions, "shopifyCustomers") < IMPORTER_VERSIONS.shopifyCustomers &&
+              hasShopifyCustomerScope((await prisma.integration.findFirst({ where: { provider: "shopify", status: "connected" }, select: { scope: true } }))?.scope);
             const behind =
               provider === "shopify"
-                ? importerVersion(settingsNow.importerVersions, "shopifyFinance") < IMPORTER_VERSIONS.shopifyFinance ||
+                ? customersDue ||
+                  importerVersion(settingsNow.importerVersions, "shopifyFinance") < IMPORTER_VERSIONS.shopifyFinance ||
                   importerVersion(settingsNow.importerVersions, "shopifyOrders") < IMPORTER_VERSIONS.shopifyOrders
                 : importerVersion(settingsNow.importerVersions, "tiktokOrders") < IMPORTER_VERSIONS.tiktokOrders;
             const sweepStart = new Date();
@@ -270,7 +277,8 @@ async function runOrgChannelStockInner(orgId: string): Promise<void> {
             await saveOrgSettings({ [syncedKey]: r.coveredThrough ?? sweepStart });
             if (existing === 0) console.log(`[scheduler] ${provider} full order history imported for org ${orgId}`);
             if (behind && provider === "shopify") {
-              await saveOrgSettings({ importerVersions: stampImporterVersion(stampImporterVersion(settingsNow.importerVersions, "shopifyFinance"), "shopifyOrders") });
+              const stamped = stampImporterVersion(stampImporterVersion(settingsNow.importerVersions, "shopifyFinance"), "shopifyOrders");
+              await saveOrgSettings({ importerVersions: customersDue ? stampImporterVersion(stamped, "shopifyCustomers") : stamped });
               console.log(`[scheduler] shopify ledger re-read for ${orgId}: on the current importer`);
             } else if (behind) {
               await saveOrgSettings({ importerVersions: stampImporterVersion(settingsNow.importerVersions, "tiktokOrders") });

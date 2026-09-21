@@ -945,6 +945,10 @@ model SalesOrder {
   // does. What fee rules keyed on a payment method match on.
   paymentMethod String?
   paymentDetail String?
+  // WHO bought, as the platform's own opaque customer id (Shopify: the Customer gid) — never a
+  // name, an email or an address. Only a connection allowed to read customers fills it; it is
+  // what the lifetime-value view groups a person's orders by.
+  customerId   String?
   total        Float           @default(0) // order revenue in `currency`, for profit later
   currency     String          @default("USD")
   // ---- Full money split + dimensions, for the P&L and metrics to come. Stored, not shown.
@@ -989,6 +993,7 @@ model SalesOrder {
   @@index([orgId, fulfillmentFacilityId])
   @@index([orgId, paymentMethod])
   @@index([orgId, shipFromKey])
+  @@index([orgId, channel, customerId])
 }
 
 /// A cost the operator attaches to every order a rule matches — a marketplace commission consl

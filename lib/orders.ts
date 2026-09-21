@@ -58,6 +58,8 @@ type Fetched = {
   // say (Amazon), so an existing value is left alone.
   paymentMethod?: string | null;
   paymentDetail?: string | null;
+  // The platform's opaque customer id. Undefined = this source can't say, so nothing is touched.
+  customerId?: string | null;
   // Merchant-fulfilled Amazon only: the ship-from place (see SalesOrder). Undefined = this source
   // (the orders report) doesn't carry it, so what the live record wrote is left alone.
   shipFromKey?: string | null;
@@ -135,6 +137,7 @@ async function persist(
         fulfillmentLabel: o.fulfillmentLabel,
         ...(o.paymentMethod !== undefined ? { paymentMethod: o.paymentMethod } : {}),
         ...(o.paymentDetail !== undefined ? { paymentDetail: o.paymentDetail } : {}),
+        ...(o.customerId !== undefined ? { customerId: o.customerId } : {}),
         ...(o.shipFromKey !== undefined ? { shipFromKey: o.shipFromKey } : {}),
         ...(o.shipFromLabel !== undefined ? { shipFromLabel: o.shipFromLabel } : {}),
         ...(keepTotal ? {} : { total: o.total }),
@@ -206,6 +209,8 @@ const money = (v?: string | null) => (v != null && v !== "" && !Number.isNaN(Num
 type ShopifyOrderNode = {
   id: string;
   name: string | null;
+  /** Only asked for when the connection may read customers (see shopifyOrderFields). */
+  customer?: { id: string } | null;
   createdAt: string;
   updatedAt: string | null;
   sourceName: string | null;
@@ -265,6 +270,18 @@ type ShopifyOrderNode = {
   }> | null;
   disputes?: Array<{ id: string; status: string | null; initiatedAs: string | null }> | null;
 };
+
+/** A connection that may read customers (the private app today; the public app once Shopify has
+ *  approved it) — asking for the field without the permission fails the whole query. */
+export function hasShopifyCustomerScope(scope: string | null | undefined): boolean {
+  return (scope ?? "").split(",").map((s) => s.trim()).includes("read_customers");
+}
+
+/** The order fields for a connection: the shared list, plus WHO bought when it may be read — the
+ *  customer's id only, never a name, an email or an address. */
+export function shopifyOrderFields(scope: string | null | undefined): string {
+  return hasShopifyCustomerScope(scope) ? `${SHOPIFY_ORDER_FIELDS}\n  customer { id }` : SHOPIFY_ORDER_FIELDS;
+}
 
 // One field list shared by the paged importer and the webhook's single-order refetch, so the two
 // can never drift apart on what an order means.
@@ -329,10 +346,12 @@ function shopifyPayment(o: ShopifyOrderNode): { paymentMethod: string | null; pa
   return { paymentMethod: key, paymentDetail: detail };
 }
 
-function mapShopifyOrder(o: ShopifyOrderNode): Fetched {
+function mapShopifyOrder(o: ShopifyOrderNode, withCustomer = false): Fetched {
   const location = o.fulfillments.map((f) => f.location?.name).find(Boolean);
   return {
     ...shopifyPayment(o),
+    // Undefined when the connection can't read customers: what is on record stays.
+    ...(withCustomer ? { customerId: o.customer?.id ?? null } : {}),
     externalId: o.id,
     orderNumber: o.name || null,
     orderedAt: new Date(o.createdAt),
@@ -405,12 +424,12 @@ export async function importShopifyOrders(since?: number | Date): Promise<OrderI
       `query($cursor: String, $q: String) {
         orders(first: 100, after: $cursor, sortKey: ${sinceAt ? "UPDATED_AT" : "CREATED_AT"}, query: $q) {
           pageInfo { hasNextPage endCursor }
-          nodes { ${SHOPIFY_ORDER_FIELDS} }
+          nodes { ${shopifyOrderFields(conn.scope)} }
         }
       }`,
       { cursor, q: filter },
     );
-    fetched.push(...data.orders.nodes.map(mapShopifyOrder));
+    fetched.push(...data.orders.nodes.map((n) => mapShopifyOrder(n, hasShopifyCustomerScope(conn.scope))));
     nodes.push(...data.orders.nodes);
     if (!data.orders.pageInfo.hasNextPage) break;
     truncated = page === 59;
@@ -442,12 +461,12 @@ export async function importShopifyOrderById(orderGid: string): Promise<OrderImp
   const data: { node: ShopifyOrderNode | null } = await shopifyGraphQL(
     conn.sellerId,
     token,
-    `query($id: ID!) { node(id: $id) { ... on Order { ${SHOPIFY_ORDER_FIELDS} } } }`,
+    `query($id: ID!) { node(id: $id) { ... on Order { ${shopifyOrderFields(conn.scope)} } } }`,
     { id: orderGid },
   );
   if (!data.node?.id) return { channel: "SHOPIFY", orders: 0, lines: 0 };
   const map = await productMap("SHOPIFY");
-  const result = await persist("SHOPIFY", [mapShopifyOrder(data.node)], shopifyResolver(map));
+  const result = await persist("SHOPIFY", [mapShopifyOrder(data.node, hasShopifyCustomerScope(conn.scope))], shopifyResolver(map));
   const ledger = hasShopifyPaymentsScope(conn.scope);
   await upsertShopifyFinanceEvents([data.node], shopifyResolver(map), ledger);
   if (ledger) await importShopifyPaymentsLedger(conn.sellerId, token, 3);
