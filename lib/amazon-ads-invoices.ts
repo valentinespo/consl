@@ -19,8 +19,8 @@ import { adProgramLabel } from "@/lib/ads-waterfill";
  * OUTAGES AND LATE CHANGES. The recent list starts two months before the NEWEST INVOICE ON RECORD
  * — not before today — so a connection that was down for one month or for five lists everything
  * issued meanwhile the first time it is back; nothing depends on how long it was away. And the
- * whole history is listed again once a day, because an old invoice can still change: Amazon wrote
- * one of Herbl's off four months after issuing it.
+ * whole history is listed again once a day, because an old invoice can still change: Amazon has
+ * written one off four months after issuing it.
  */
 const PROVIDER = "amazon_ads";
 const LIST_EVERY_MS = 55 * 60_000;

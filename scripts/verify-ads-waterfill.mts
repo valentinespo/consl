@@ -226,7 +226,7 @@ const total = (rows: { amount: number; held: boolean }[], held = false) => Math.
   const L = (id: string, day: string, amount: number): LedgerAdCharge => ({ id, day, amount });
   const sum = (xs: { amount: number }[]) => Math.round(xs.reduce((t, x) => t + x.amount, 0) * 100) / 100;
 
-  // a. always from the balance (Herbl): the money report is the amount, the feed lends the period
+  // a. always from the balance: the money report is the amount, the feed lends the period
   let u = unifyAdInvoices({ ledger: [L("l1", "2026-09-13", 500.43), L("l2", "2026-09-15", 504.73)], feed: [F("f1", "2026-09-12", "2026-09-13", 500.43, "balance"), F("f2", "2026-09-13", "2026-09-14", 504.73, "balance")], floorDay: "2025-01-31" });
   assert.deepEqual(u.invoices.map((x) => [x.id, x.from, x.day, x.amount]), [["l1", "2026-09-12", "2026-09-13", 500.43], ["l2", "2026-09-13", "2026-09-14", 504.73]]);
   assert.deepEqual([u.matched, u.fromFeed, u.fromLedgerOnly], [2, 0, 0]);
@@ -268,7 +268,7 @@ const total = (rows: { amount: number; held: boolean }[], held = false) => Math.
   u = unifyAdInvoices({ ledger: [L("w", "2025-11-02", 490.34)], feed: [{ ...F("wo", "2025-10-27", "2025-11-01", 490.34, "balance", "WRITTEN_OFF") }, F("wc", "2025-11-01", "2025-11-05", 120, "card", "WRITTEN_OFF")], floorDay: "2025-01-31" });
   assert.deepEqual(u.invoices.map((x) => [x.id, x.from, x.day, x.amount]), [["w", "2025-10-27", "2025-11-01", 490.34]]);
 
-  // f2. …and once Amazon has refunded it and re-issued it corrected (Herbl, Nov 2025 → Feb 2026):
+  // f2. …and once Amazon has refunded it and re-issued it corrected, months later (seen in real data):
   //     the charge and its refund leave together, the re-issue lands on the period of the spend
   u = unifyAdInvoices({
     ledger: [L("w", "2025-11-02", 490.34), L("re", "2026-02-24", 489.34)],
@@ -282,6 +282,21 @@ const total = (rows: { amount: number; held: boolean }[], held = false) => Math.
   u = unifyAdInvoices({ ledger: [L("w", "2025-11-02", 490.34)], credits: [], feed: [F("wo", "2025-10-27", "2025-11-01", 490.34, "balance", "WRITTEN_OFF")], floorDay: "2025-01-31" });
   assert.equal(u.invoices.length, 1);
   assert.deepEqual(u.cancelledCreditIds, []);
+
+  // f3. the rule is nobody's special case: two write-offs of the SAME amount, one refunded and one
+  //     not yet, plus an unrelated credit of that same amount posted BEFORE either charge — only
+  //     the refunded write-off leaves, with a refund posted after it; everything else stays put
+  u = unifyAdInvoices({
+    ledger: [L("c1", "2026-03-04", 250), L("c2", "2026-05-09", 250)],
+    credits: [L("early", "2026-01-15", 250), L("refund1", "2026-04-20", 250)],
+    feed: [F("w1", "2026-03-01", "2026-03-04", 250, "balance", "WRITTEN_OFF"), F("w2", "2026-05-06", "2026-05-09", 250, "balance", "WRITTEN_OFF")],
+    floorDay: "2025-01-01",
+  });
+  assert.deepEqual(u.cancelledCreditIds, ["refund1"]);
+  assert.deepEqual(u.invoices.map((x) => x.id), ["c2"]); // c1 left with its refund; c2 waits for its own
+  //     a partial credit is not a write-off refund: it stays where Amazon posted it
+  u = unifyAdInvoices({ ledger: [L("c", "2026-03-04", 250)], credits: [L("part", "2026-03-20", 40)], feed: [F("w", "2026-03-01", "2026-03-04", 250, "balance", "WRITTEN_OFF")], floorDay: "2025-01-01" });
+  assert.deepEqual([u.invoices.length, u.cancelledCreditIds.length], [1, 0]);
 
   // g. paid part from the balance, part by card: each part once
   u = unifyAdInvoices({ ledger: [L("half", "2026-07-02", 200)], feed: [{ ...F("mix", "2026-06-28", "2026-07-01", 500, "card"), balancePaid: 200 }], floorDay: "2026-01-01" });
