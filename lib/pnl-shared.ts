@@ -140,6 +140,13 @@ export type Pnl = {
 };
 
 /** Sellerise-shaped ordering; "sales" first, computed COGS is inserted by the UI right after. */
+/** While false, a connected Amazon Ads account's daily spend is imported and stored but the
+ *  statement does not read it: the ad invoice payments stay the amount on the P&L, exactly as
+ *  before connecting. It flips to true together with the invoice water-fill (invoices stay the
+ *  amount of record and the API's daily spend only shapes them). A plain switch date between
+ *  invoice rows and daily rows would lose or double count part of a day, so there is none. */
+export const AMAZON_ADS_DAILY_ON_PNL = false;
+
 export const GROUP_ORDER = ["sales", "taxes", "fba_fees", "referral_fees", "payment_fees", "custom_fees", "storage_fees", "advertising", "refunds", "other"] as const;
 
 export const GROUP_LABEL: Record<string, string> = {

@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrgId } from "@/lib/tenant";
-import { sourceBits, type Pnl, type PnlChannel, type PnlDay, type PnlHistory, type PnlPeriod, type PnlPeriodRange, type PnlSource } from "@/lib/pnl-shared";
+import { AMAZON_ADS_DAILY_ON_PNL, sourceBits, type Pnl, type PnlChannel, type PnlDay, type PnlHistory, type PnlPeriod, type PnlPeriodRange, type PnlSource } from "@/lib/pnl-shared";
 import { addPnlAmount, createPnlPeriods, pnlGroups } from "@/lib/pnl-periods";
 import { todayIn } from "@/lib/channel-tz";
 import { getCurrentOrg } from "@/lib/org";
@@ -573,7 +573,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
   ]);
   // From the first day the Amazon Ads import covers, ad spend is on the statement day by day —
   // the ad invoice payments in Amazon's money report are the same money and step aside.
-  const adsSince = adsSettings?.amazonAdsSince ?? null;
+  const adsSince = AMAZON_ADS_DAILY_ON_PNL ? (adsSettings?.amazonAdsSince ?? null) : null;
   // The queue an order's facility prices from: a channel facility is that channel's stock
   // (Amazon FBA and AWD share Amazon's), one of the company's own places is its own queue.
   const facilityChannel = new Map(facilities.map((f) => [f.id, f.channel]));
@@ -610,6 +610,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
         WHERE so."orgId" = fe."orgId" AND so.channel = fe.channel AND so."externalId" = fe."orderId"
           AND (so.voided OR (so.channel = 'SHOPIFY' AND so.source = ANY(${excludedSources}::text[]))))
       AND NOT (fe.channel = 'AMAZON' AND fe.type = 'ProductAdsPayment' AND ${adsSince}::timestamp IS NOT NULL AND fe."eventAt" >= ${adsSince})
+      AND (${AMAZON_ADS_DAILY_ON_PNL}::boolean OR fe."txId" IS NULL OR fe."txId" NOT LIKE 'ads:%')
     GROUP BY 1, 2, 3, 4`;
   // One line per type inside a bucket; a type two channels both post keeps both sources.
   const blocks = new Map<string, Map<string, { amount: number; sources: Set<PnlSource> }>>();
@@ -828,7 +829,7 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
     prisma.facility.findMany({ select: { id: true, channel: true } }),
     prisma.settings.findFirst({ select: { amazonAdsSince: true } }),
   ]);
-  const adsSince = adsSettings?.amazonAdsSince ?? null;
+  const adsSince = AMAZON_ADS_DAILY_ON_PNL ? (adsSettings?.amazonAdsSince ?? null) : null;
   const facilityChannel = new Map(facilities.map((f) => [f.id, f.channel]));
   const queueOf = (facilityId: string | null): QueueKey | null => {
     if (!facilityId || !facilityChannel.has(facilityId)) return null;
@@ -874,6 +875,7 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
         WHERE so."orgId" = fe."orgId" AND so.channel = fe.channel AND so."externalId" = fe."orderId"
           AND (so.voided OR (so.channel = 'SHOPIFY' AND so.source = ANY(${excludedSources}::text[]))))
       AND NOT (fe.channel = 'AMAZON' AND fe.type = 'ProductAdsPayment' AND ${adsSince}::timestamp IS NOT NULL AND fe."eventAt" >= ${adsSince})
+      AND (${AMAZON_ADS_DAILY_ON_PNL}::boolean OR fe."txId" IS NULL OR fe."txId" NOT LIKE 'ads:%')
     GROUP BY 1, 2, 3, 4, 5`;
   for (const r of sums) addPnlAmount(tally(r.channel as PnlChannel, r.day).blocks, r.group, r.type, r.amount, r.source as PnlSource);
   mark("ledger");
