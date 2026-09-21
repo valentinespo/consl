@@ -54,7 +54,7 @@ export async function amazonAdsStatementRows(): Promise<{
     prisma.integration.findFirst({ where: { provider: "amazon_ads" }, select: { timezone: true } }),
     prisma.financeEvent.findMany({
       where: { channel: "AMAZON", type: "ProductAdsPayment", amount: { not: 0 } },
-      select: { id: true, postedAt: true, amount: true, baseAmount: true },
+      select: { id: true, postedAt: true, amount: true, baseAmount: true, currency: true },
       orderBy: [{ postedAt: "asc" }, { id: "asc" }],
     }),
     prisma.financeEvent.findMany({
@@ -63,7 +63,7 @@ export async function amazonAdsStatementRows(): Promise<{
     }),
     prisma.adInvoice.findMany({
       where: { provider: "amazon_ads" },
-      select: { externalId: true, status: true, fromDay: true, toDay: true, invoiceDay: true, amount: true, baseAmount: true, balancePaid: true, programs: true, detailAt: true },
+      select: { externalId: true, status: true, fromDay: true, toDay: true, invoiceDay: true, amount: true, currency: true, baseAmount: true, balancePaid: true, programs: true, detailAt: true },
     }),
     // The company's first Amazon money: an invoice that ended before it is outside its books.
     prisma.financeEvent.findFirst({ where: { channel: "AMAZON", NOT: { txId: { startsWith: "ads:" } } }, orderBy: { eventAt: "asc" }, select: { eventAt: true } }),
@@ -95,14 +95,17 @@ export async function amazonAdsStatementRows(): Promise<{
   const covered = settings.amazonAdsSince ? coveredRangesFor(settings.amazonAdsCoverage, usedAdProducts, lastDay, unbroken) : [];
 
   const unified = unifyAdInvoices({
-    ledger: invoiceRows.filter((r) => r.amount < 0).map((r) => ({ id: r.id, day: dayOf(r.postedAt), amount: -(r.baseAmount ?? r.amount) })),
-    credits: invoiceRows.filter((r) => r.amount > 0).map((r) => ({ id: r.id, day: dayOf(r.postedAt), amount: r.baseAmount ?? r.amount })),
+    // Booked in the company's currency; recognised as the same bill by the amount as Amazon
+    // stated it (converted figures drift with the day's rate).
+    ledger: invoiceRows.filter((r) => r.amount < 0).map((r) => ({ id: r.id, day: dayOf(r.postedAt), amount: -(r.baseAmount ?? r.amount), native: { amount: -r.amount, currency: r.currency } })),
+    credits: invoiceRows.filter((r) => r.amount > 0).map((r) => ({ id: r.id, day: dayOf(r.postedAt), amount: r.baseAmount ?? r.amount, native: { amount: r.amount, currency: r.currency } })),
     feed: feedRows.map((f) => ({
       id: f.externalId,
       from: f.fromDay,
       to: f.toDay,
       invoiceDay: f.invoiceDay,
       amount: f.baseAmount ?? f.amount,
+      native: { amount: f.amount, currency: f.currency },
       status: f.status,
       detail: !!f.detailAt,
       balancePaid: f.balancePaid ?? 0,

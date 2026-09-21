@@ -298,6 +298,21 @@ const total = (rows: { amount: number; held: boolean }[], held = false) => Math.
   u = unifyAdInvoices({ ledger: [L("c", "2026-03-04", 250)], credits: [L("part", "2026-03-20", 40)], feed: [F("w", "2026-03-01", "2026-03-04", 250, "balance", "WRITTEN_OFF")], floorDay: "2025-01-01" });
   assert.deepEqual([u.invoices.length, u.cancelledCreditIds.length], [1, 0]);
 
+  // f4. another currency: a Canadian ad account on a US-dollar company. The charge posts the day
+  //     after the invoice, so the two CONVERTED figures differ by that day's rate — they are still
+  //     one bill (CAD 500.00 = CAD 500.00), booked once, at the money report's converted amount;
+  //     and a USD invoice of the same number is NOT that bill
+  u = unifyAdInvoices({
+    ledger: [{ ...L("cad", "2026-06-03", 365.1), native: { amount: 500, currency: "CAD" } }],
+    feed: [
+      { ...F("cad-inv", "2026-06-01", "2026-06-02", 364.8, "balance"), native: { amount: 500, currency: "CAD" } },
+      { ...F("usd-inv", "2026-06-01", "2026-06-02", 500, "card"), native: { amount: 500, currency: "USD" } },
+    ],
+    floorDay: "2025-01-01",
+  });
+  assert.deepEqual(u.invoices.map((x) => [x.id, x.from, x.day, x.amount]), [["cad", "2026-06-01", "2026-06-02", 365.1], ["usd-inv", "2026-06-01", "2026-06-02", 500]]);
+  assert.equal(u.matched, 1);
+
   // g. paid part from the balance, part by card: each part once
   u = unifyAdInvoices({ ledger: [L("half", "2026-07-02", 200)], feed: [{ ...F("mix", "2026-06-28", "2026-07-01", 500, "card"), balancePaid: 200 }], floorDay: "2026-01-01" });
   assert.equal(sum(u.invoices), 500);

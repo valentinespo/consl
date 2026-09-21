@@ -333,12 +333,18 @@ export function waterfillAdInvoices(input: {
  * another. Both are taken off the statement together (only once the refund has actually posted);
  * the re-issued invoice is an ordinary invoice and lands on the period the spend happened in.
  */
+/** An amount as Amazon stated it, in the ad account's own currency. */
+export type NativeAmount = { amount: number; currency: string };
+
 export type LedgerAdCharge = {
   id: string;
   /** Posted day on the ads account's calendar. */
   day: string;
   /** Positive cost, company currency. */
   amount: number;
+  /** The same as posted. A charge and its invoice are the same bill when THESE agree to the cent:
+   *  converted figures differ by the day's exchange rate (a charge often posts the day after). */
+  native?: NativeAmount | null;
 };
 
 export type FeedAdInvoice = {
@@ -348,6 +354,8 @@ export type FeedAdInvoice = {
   invoiceDay: string | null;
   /** Total charged, positive, company currency. */
   amount: number;
+  /** The same as invoiced, in the ad account's currency (see LedgerAdCharge.native). */
+  native?: NativeAmount | null;
   status: string;
   /** Whether the detail (payments, lines) has been read. */
   detail: boolean;
@@ -361,6 +369,8 @@ const MATCH_DAYS_BEFORE = 1;
 const MATCH_DAYS_AFTER = 7;
 const BOOKABLE = new Set(["ISSUED", "PAID_IN_PART", "PAID_IN_FULL"]);
 const dayNumber = (day: string) => Math.round(new Date(`${day}T00:00:00Z`).getTime() / 86_400_000);
+/** What two records of the same bill share: the amount as Amazon stated it, currency included. */
+const billKey = (x: { amount: number; native?: NativeAmount | null }) => (x.native ? `${x.native.currency}:${cents(x.native.amount)}` : `:${cents(x.amount)}`);
 
 export function unifyAdInvoices(input: {
   ledger: LedgerAdCharge[];
@@ -375,9 +385,9 @@ export function unifyAdInvoices(input: {
   const cancelledCreditIds: string[] = [];
   // Feed invoices a balance charge may belong to: anything not known to be paid wholly elsewhere.
   const lendable = feed.filter((f) => f.to && f.invoiceDay && f.status !== "ACCUMULATING" && f.status !== "PROCESSING" && (!f.detail || f.balancePaid > 0.004));
-  const byCents = new Map<number, FeedAdInvoice[]>();
+  const byCents = new Map<string, FeedAdInvoice[]>();
   for (const f of lendable) {
-    const k = cents(f.amount);
+    const k = billKey(f);
     byCents.set(k, [...(byCents.get(k) ?? []), f]);
   }
   const taken = new Set<string>();
@@ -386,7 +396,7 @@ export function unifyAdInvoices(input: {
   for (const l of [...ledger].sort((a, b) => a.day.localeCompare(b.day) || a.id.localeCompare(b.id))) {
     let best: FeedAdInvoice | null = null;
     let bestLag = Infinity;
-    for (const f of byCents.get(cents(l.amount)) ?? []) {
+    for (const f of byCents.get(billKey(l)) ?? []) {
       if (taken.has(f.id)) continue;
       const lag = dayNumber(l.day) - dayNumber(f.invoiceDay!);
       if (lag < -MATCH_DAYS_BEFORE || lag > MATCH_DAYS_AFTER) continue;
@@ -400,7 +410,7 @@ export function unifyAdInvoices(input: {
       matched++;
       if (best.status === "WRITTEN_OFF") {
         // Refunded to the balance already? Then the charge and its refund leave together.
-        const k = freeCredits.findIndex((c) => cents(c.amount) === cents(l.amount) && c.day >= l.day);
+        const k = freeCredits.findIndex((c) => billKey(c) === billKey(l) && c.day >= l.day);
         if (k >= 0) {
           cancelledCreditIds.push(freeCredits[k].id);
           freeCredits.splice(k, 1);
