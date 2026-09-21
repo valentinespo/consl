@@ -1,6 +1,6 @@
 /** Run with: node --import tsx scripts/verify-ads-waterfill.mts */
 import assert from "node:assert/strict";
-import { HELD_SUFFIX, UNTYPED_AD_SPEND, coveredFromFor, daysBetween, waterfillAdInvoices, type AdSpendByDay } from "../lib/ads-waterfill.js";
+import { HELD_SUFFIX, UNTYPED_AD_SPEND, adProgramLabel, coveredFromFor, daysBetween, unifyAdInvoices, waterfillAdInvoices, type AdSpendByDay, type FeedAdInvoice, type LedgerAdCharge } from "../lib/ads-waterfill.js";
 
 const SP = "Sponsored Products";
 const SB = "Sponsored Brands";
@@ -189,6 +189,108 @@ const total = (rows: { amount: number; held: boolean }[], held = false) => Math.
   assert.equal(coveredFromFor(coverage, [], "2026-06-20"), "2026-06-20"); // no spend at all: the import's own first day
   assert.equal(coveredFromFor(null, ["SPONSORED_PRODUCTS"], "2026-06-22"), "2026-06-22");
   assert.equal(coveredFromFor({ SPONSORED_PRODUCTS: "garbage" }, ["SPONSORED_PRODUCTS"], null), null);
+}
+
+// 9. Exact periods from the invoice feed, the invoice's own ad-type split on days the API doesn't
+//    cover, and what it bills outside the API's ad types (Creator Connections) under its own name.
+{
+  const r = waterfillAdInvoices({
+    invoices: [
+      { id: "old", day: "2026-05-03", from: "2026-05-02", amount: 100, mix: { "Sponsored Products": 80, "Sponsored Brands": 20 } },
+      { id: "cc", day: "2026-08-02", from: "2026-08-01", amount: 120, mix: { "Sponsored Products": 100, "Creator Connections": 20 } },
+    ],
+    spend: flat({ "2026-08-01": 70, "2026-08-02": 70 }),
+    coveredFrom: "2026-08-01",
+    coveredTo: "2026-08-02",
+  });
+  const get = (day: string, type: string) => r.rows.find((x) => x.day === day && x.type === type && !x.held)?.amount ?? 0;
+  assert.equal(get("2026-05-02", "Sponsored Products"), 40);
+  assert.equal(get("2026-05-02", "Sponsored Brands"), 10);
+  assert.equal(get("2026-05-03", "Sponsored Products"), 40);
+  assert.equal(get("2026-08-01", "Creator Connections"), 10);
+  assert.equal(get("2026-08-02", "Creator Connections"), 10);
+  assert.equal(get("2026-08-01", SP), 70);
+  assert.equal(get("2026-08-02", SP), 30);
+  assert.equal(r.perInvoice[1].surplus, 0);
+  assert.deepEqual(dayTotals(r.rows, true), { "2026-08-02": 40 });
+  assert.equal(total(r.rows), 220);
+  assert.equal(adProgramLabel("SPONSORED PRODUCT"), "Sponsored Products");
+  assert.equal(adProgramLabel("SPONSORED DISPLAY FOR FIRE TV"), "Sponsored Display");
+  assert.equal(adProgramLabel("CREATOR CONNECTIONS"), "Creator Connections");
+}
+
+// 10. Every billing history books each invoice exactly once.
+{
+  const F = (id: string, from: string, to: string, amount: number, method: "balance" | "card" | "unknown", status = "PAID_IN_FULL"): FeedAdInvoice =>
+    ({ id, from, to, invoiceDay: to, amount, status, detail: method !== "unknown", balancePaid: method === "balance" ? amount : 0 });
+  const L = (id: string, day: string, amount: number): LedgerAdCharge => ({ id, day, amount });
+  const sum = (xs: { amount: number }[]) => Math.round(xs.reduce((t, x) => t + x.amount, 0) * 100) / 100;
+
+  // a. always from the balance (Herbl): the money report is the amount, the feed lends the period
+  let u = unifyAdInvoices({ ledger: [L("l1", "2026-09-13", 500.43), L("l2", "2026-09-15", 504.73)], feed: [F("f1", "2026-09-12", "2026-09-13", 500.43, "balance"), F("f2", "2026-09-13", "2026-09-14", 504.73, "balance")], floorDay: "2025-01-31" });
+  assert.deepEqual(u.invoices.map((x) => [x.id, x.from, x.day, x.amount]), [["l1", "2026-09-12", "2026-09-13", 500.43], ["l2", "2026-09-13", "2026-09-14", 504.73]]);
+  assert.deepEqual([u.matched, u.fromFeed, u.fromLedgerOnly], [2, 0, 0]);
+
+  // b. always by card: nothing in the money report, every invoice comes from the feed
+  u = unifyAdInvoices({ ledger: [], feed: [F("c1", "2026-08-01", "2026-08-31", 1830.12, "card"), F("c2", "2026-09-01", "2026-09-30", 1710, "card", "ISSUED")], floorDay: "2026-01-01" });
+  assert.equal(sum(u.invoices), 3540.12);
+  assert.equal(u.fromFeed, 2);
+
+  // c. balance, then card, then balance again, then card — with a card invoice of the very same
+  //    amount as a balance one issued days apart
+  const feed = [
+    F("b1", "2026-06-01", "2026-06-03", 500.1, "balance"), F("b2", "2026-06-03", "2026-06-05", 500.2, "balance"),
+    F("k1", "2026-06-05", "2026-06-08", 500.2, "card"), F("k2", "2026-06-08", "2026-06-10", 501, "card"),
+    F("b3", "2026-06-10", "2026-06-12", 501, "balance"), F("k3", "2026-06-12", "2026-06-15", 499.99, "card"),
+  ];
+  const ledger = [L("x1", "2026-06-03", 500.1), L("x2", "2026-06-06", 500.2), L("x3", "2026-06-13", 501)];
+  u = unifyAdInvoices({ ledger, feed, floorDay: "2026-01-01" });
+  assert.equal(sum(u.invoices), sum(feed), "six invoices, six amounts, once each");
+  assert.deepEqual(u.invoices.map((x) => x.id), ["x1", "x2", "k1", "k2", "x3", "k3"]);
+  assert.deepEqual(u.invoices.map((x) => x.day), ["2026-06-03", "2026-06-05", "2026-06-08", "2026-06-10", "2026-06-12", "2026-06-15"]);
+
+  // d. details not read yet: balance charges still get their periods, card invoices wait (never
+  //    double counted meanwhile), and count once their detail says how they were paid
+  const unread = feed.map((f) => ({ ...f, detail: false, balancePaid: 0 }));
+  u = unifyAdInvoices({ ledger, feed: unread, floorDay: "2026-01-01" });
+  assert.equal(sum(u.invoices), sum(ledger));
+  assert.equal(u.waitingDetail, 3);
+
+  // e. a balance invoice whose deduction hasn't posted yet is not booked from the feed (its spend
+  //    shows as not invoiced yet until the money report has it) — and is when it posts
+  u = unifyAdInvoices({ ledger: [], feed: [F("late", "2026-09-19", "2026-09-20", 508.88, "balance")], floorDay: "2026-01-01" });
+  assert.equal(u.invoices.length, 0);
+  u = unifyAdInvoices({ ledger: [L("p", "2026-09-21", 508.88)], feed: [F("late", "2026-09-19", "2026-09-20", 508.88, "balance")], floorDay: "2026-01-01" });
+  assert.deepEqual(u.invoices.map((x) => [x.id, x.from, x.day]), [["p", "2026-09-19", "2026-09-20"]]);
+
+  // f. written off after being charged to the balance: the charge is in the money report (and its
+  //    credit stays where Amazon posted it); a written-off card invoice is not booked
+  u = unifyAdInvoices({ ledger: [L("w", "2025-11-02", 490.34)], feed: [{ ...F("wo", "2025-10-27", "2025-11-01", 490.34, "balance", "WRITTEN_OFF") }, F("wc", "2025-11-01", "2025-11-05", 120, "card", "WRITTEN_OFF")], floorDay: "2025-01-31" });
+  assert.deepEqual(u.invoices.map((x) => [x.id, x.from, x.day, x.amount]), [["w", "2025-10-27", "2025-11-01", 490.34]]);
+
+  // f2. …and once Amazon has refunded it and re-issued it corrected (Herbl, Nov 2025 → Feb 2026):
+  //     the charge and its refund leave together, the re-issue lands on the period of the spend
+  u = unifyAdInvoices({
+    ledger: [L("w", "2025-11-02", 490.34), L("re", "2026-02-24", 489.34)],
+    credits: [L("refund", "2026-02-24", 490.34), L("other-credit", "2026-03-01", 12)],
+    feed: [F("wo", "2025-10-27", "2025-11-01", 490.34, "balance", "WRITTEN_OFF"), { ...F("reissue", "2025-10-27", "2025-11-01", 489.34, "balance"), invoiceDay: "2026-02-24" }],
+    floorDay: "2025-01-31",
+  });
+  assert.deepEqual(u.invoices.map((x) => [x.id, x.from, x.day, x.amount]), [["re", "2025-10-27", "2025-11-01", 489.34]]);
+  assert.deepEqual(u.cancelledCreditIds, ["refund"]);
+  //     …but not before the refund has posted: until then the charge stays, cash-true
+  u = unifyAdInvoices({ ledger: [L("w", "2025-11-02", 490.34)], credits: [], feed: [F("wo", "2025-10-27", "2025-11-01", 490.34, "balance", "WRITTEN_OFF")], floorDay: "2025-01-31" });
+  assert.equal(u.invoices.length, 1);
+  assert.deepEqual(u.cancelledCreditIds, []);
+
+  // g. paid part from the balance, part by card: each part once
+  u = unifyAdInvoices({ ledger: [L("half", "2026-07-02", 200)], feed: [{ ...F("mix", "2026-06-28", "2026-07-01", 500, "card"), balancePaid: 200 }], floorDay: "2026-01-01" });
+  assert.equal(sum(u.invoices), 500);
+
+  // h. older than the feed or the money report reach: a charge with no feed invoice keeps its
+  //    guessed period; a feed invoice from before the company's Amazon history is left out
+  u = unifyAdInvoices({ ledger: [L("old", "2025-02-01", 300)], feed: [F("ancient", "2024-03-25", "2024-03-26", 2.37, "card")], floorDay: "2025-01-31" });
+  assert.deepEqual(u.invoices.map((x) => [x.id, x.from ?? null]), [["old", null]]);
 }
 
 console.log("ads water-fill: all checks passed");

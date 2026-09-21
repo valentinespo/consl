@@ -196,14 +196,24 @@ export async function collectAmazonAdsReports(): Promise<{ collected: number; ro
   if (collected) {
     // The standing audit: over the days the API fully covers, invoices placed vs the API's spend.
     const { amazonAdsStatementRows } = await import("@/lib/amazon-ads-statement");
-    const audit = (await amazonAdsStatementRows().catch(() => null))?.audit;
-    if (audit?.from) console.log(`[amazon-ads] audit ${audit.from}..${audit.to}: API ${audit.apiSpend.toFixed(2)} vs invoiced ${audit.invoiced.toFixed(2)} (${(audit.invoiced - audit.apiSpend).toFixed(2)})`);
+    const st = await amazonAdsStatementRows().catch(() => null);
+    const audit = st?.audit;
+    if (audit?.from) console.log(`[amazon-ads] audit ${audit.from}..${audit.to}: API ${audit.apiSpend.toFixed(2)} vs invoiced ${audit.invoiced.toFixed(2)} (${(audit.invoiced - audit.apiSpend).toFixed(2)})${st?.invoices ? ` | invoices: ${st.invoices.matched} with exact periods, ${st.invoices.moneyReportOnly} money report only, ${st.invoices.fromFeed} paid outside the balance, ${st.invoices.waitingDetail} waiting for detail` : ""}`);
   }
   return { collected, rows, waiting: still.length };
 }
 
 /** One scheduler pass: finish what's generating, then ask for the days not yet covered. */
-export async function amazonAdsTick(): Promise<{ collected: number; rows: number; waiting: number; requested: number }> {
+export async function amazonAdsTick(): Promise<{ collected: number; rows: number; waiting: number; requested: number; invoices: number }> {
+  // Invoices first: they are ready at once, while the spend reports take Amazon a while to build.
+  let invoices = 0;
+  try {
+    const { syncAmazonAdsInvoices } = await import("@/lib/amazon-ads-invoices");
+    const r = await syncAmazonAdsInvoices();
+    invoices = r.listed + r.detailed;
+  } catch (e) {
+    console.warn("[amazon-ads] invoices failed:", (e as Error).message);
+  }
   const c = await collectAmazonAdsReports();
   const s = await getOrgSettings();
   const client = await adsClient();
@@ -217,5 +227,5 @@ export async function amazonAdsTick(): Promise<{ collected: number; rows: number
     const fresh = lastSync && Date.now() - lastSync.getTime() < 6 * 60 * 60_000;
     if (!(upToDate && fresh)) requested = (await requestAmazonAdsReports()).requested;
   }
-  return { ...c, requested };
+  return { ...c, requested, invoices };
 }

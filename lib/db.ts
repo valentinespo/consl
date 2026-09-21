@@ -33,6 +33,7 @@ export const TENANT_MODELS = new Set([
   "ChannelStock",
   "SalesOrder",
   "FinanceEvent",
+  "AdInvoice",
   "SalesOrderLine",
   "OrderFeeRule",
   "OrderFee",

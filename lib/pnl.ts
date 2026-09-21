@@ -610,6 +610,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
         WHERE so."orgId" = fe."orgId" AND so.channel = fe.channel AND so."externalId" = fe."orderId"
           AND (so.voided OR (so.channel = 'SHOPIFY' AND so.source = ANY(${excludedSources}::text[]))))
       AND NOT (${adsFill.active}::boolean AND fe.channel = 'AMAZON' AND fe.type = 'ProductAdsPayment' AND fe.amount < 0)
+      AND NOT (fe.id = ANY(${adsFill.excludeIds}::text[]))
       AND (fe."txId" IS NULL OR fe."txId" NOT LIKE 'ads:%')
     GROUP BY 1, 2, 3, 4`;
   // One line per type inside a bucket; a type two channels both post keeps both sources.
@@ -885,6 +886,7 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
         WHERE so."orgId" = fe."orgId" AND so.channel = fe.channel AND so."externalId" = fe."orderId"
           AND (so.voided OR (so.channel = 'SHOPIFY' AND so.source = ANY(${excludedSources}::text[]))))
       AND NOT (${adsFill.active}::boolean AND fe.channel = 'AMAZON' AND fe.type = 'ProductAdsPayment' AND fe.amount < 0)
+      AND NOT (fe.id = ANY(${adsFill.excludeIds}::text[]))
       AND (fe."txId" IS NULL OR fe."txId" NOT LIKE 'ads:%')
     GROUP BY 1, 2, 3, 4, 5`;
   for (const r of sums) addPnlAmount(tally(r.channel as PnlChannel, r.day).blocks, r.group, r.type, r.amount, r.source as PnlSource);

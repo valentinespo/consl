@@ -385,7 +385,7 @@ async function runOrgChannelStockInner(orgId: string): Promise<void> {
           try {
             const { amazonAdsTick } = await import("@/lib/amazon-ads-spend");
             const r = await amazonAdsTick();
-            if (r.collected || r.requested) console.log(`[scheduler] amazon ads for ${orgId}: ${r.collected} reports in (${r.rows} day rows), ${r.requested} requested, ${r.waiting} still generating`);
+            if (r.collected || r.requested || r.invoices) console.log(`[scheduler] amazon ads for ${orgId}: ${r.collected} reports in (${r.rows} day rows), ${r.requested} requested, ${r.waiting} still generating, ${r.invoices} invoice reads`);
           } catch (e) {
             console.error(`[scheduler] amazon ads failed for org ${orgId}:`, (e as Error).message);
           }

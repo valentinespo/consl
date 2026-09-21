@@ -130,13 +130,24 @@ export async function findAdsAccountId(accessToken: string, profile: AdsProfile,
 export async function completeAmazonAdsConnection(orgId: string, tokens: Tokens): Promise<void> {
   const region = "na";
   const profiles = await listAdsProfiles(tokens.access_token, region);
-  const selling = await prismaBase.integration.findFirst({ where: { orgId, provider: "amazon" }, select: { marketplaceId: true } });
+  const selling = await prismaBase.integration.findFirst({ where: { orgId, provider: "amazon" }, select: { marketplaceId: true, sellerId: true } });
   const sellers = profiles.filter((p) => (p.accountInfo?.type ?? "").toLowerCase() === "seller");
-  const profile =
-    sellers.find((p) => selling?.marketplaceId && p.accountInfo.marketplaceStringId === selling.marketplaceId) ??
-    sellers.find((p) => p.countryCode === "US") ??
-    sellers[0] ??
-    profiles[0];
+  // A login can run several brands (an agency, a founder with two stores). A seller's ad account
+  // carries the same seller id as its store, so the company's own connected store decides which
+  // one this is — exactly, and with no list to pick from. Only a company with no store connected
+  // falls back to the marketplace guess.
+  let profile: AdsProfile | undefined;
+  if (selling?.sellerId) {
+    const own = sellers.filter((p) => p.accountInfo?.id === selling.sellerId);
+    profile = own.find((p) => selling.marketplaceId && p.accountInfo.marketplaceStringId === selling.marketplaceId) ?? own.find((p) => p.countryCode === "US") ?? own[0];
+    if (!profile) throw new Error("This Amazon login doesn't run the ads of the Amazon store connected here. Sign in with the login that manages this store's advertising.");
+  } else {
+    profile =
+      sellers.find((p) => selling?.marketplaceId && p.accountInfo.marketplaceStringId === selling.marketplaceId) ??
+      sellers.find((p) => p.countryCode === "US") ??
+      sellers[0] ??
+      profiles[0];
+  }
   if (!profile) throw new Error("This Amazon login has no advertising profile. Sign in with the account that runs your Amazon Ads.");
   const accountId = await findAdsAccountId(tokens.access_token, profile, region);
 

@@ -1,18 +1,21 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { zonedDayStart } from "@/lib/pnl-periods";
-import { HELD_SUFFIX, coveredFromFor, waterfillAdInvoices, type AdFillResult, type AdSpendByDay } from "@/lib/ads-waterfill";
+import { HELD_SUFFIX, coveredFromFor, unifyAdInvoices, waterfillAdInvoices, type AdFillResult, type AdSpendByDay } from "@/lib/ads-waterfill";
 import type { PnlSource } from "@/lib/pnl-shared";
 
 /**
  * Amazon ad spend as the statement books it, for the company in context (see lib/ads-waterfill):
- * the ad invoices from Amazon's money report, placed day by day along the Ads API's daily spend,
- * plus the spend no invoice has claimed yet. Computed on every read from the raw ledger rows —
- * nothing derived is stored, so it can never disagree with the invoices or the API rows under it.
+ * every ad invoice exactly once — the charges in Amazon's money report, plus from Amazon's invoice
+ * feed whatever was paid some other way — placed day by day along the Ads API's daily spend, plus
+ * the spend no invoice has claimed yet. Computed on every read from the raw rows — nothing
+ * derived is stored, so it can never disagree with the invoices or the API rows under it.
  *
- * It takes over a company's ad lines once its Amazon Ads import has data (`amazonAdsSince`);
- * before that — and for a company that never connects Amazon Ads — invoices stay where Amazon
- * posted them, exactly as they always were. Ad credits (positive rows) always stay as posted.
+ * It takes over a company's ad lines once its Amazon Ads connection has data — daily spend
+ * (`amazonAdsSince`) or invoices from the feed; before that, and for a company that never
+ * connects Amazon Ads, invoices stay where Amazon posted them, exactly as they always were. Ad
+ * credits (positive rows) stay as posted — except the refund of a written-off invoice, which
+ * leaves together with the charge it cancels.
  */
 export const AMAZON_ADS_WATERFILL = true;
 
@@ -32,16 +35,25 @@ function dayIn(tz: string): (at: Date) => string {
   return (at) => f.format(at);
 }
 
-export async function amazonAdsStatementRows(): Promise<{ active: boolean; rows: AdStatementRow[]; audit: AdFillResult["audit"] | null }> {
-  const off = { active: false, rows: [], audit: null };
+export async function amazonAdsStatementRows(): Promise<{
+  active: boolean;
+  rows: AdStatementRow[];
+  audit: AdFillResult["audit"] | null;
+  /** Ledger rows the statement must leave out besides the ad charges themselves: the refund of a written-off invoice, which cancels a charge this fill already dropped. */
+  excludeIds: string[];
+  /** How the invoices came together: charges given their exact period by the feed, charges the feed doesn't reach, invoices paid outside the balance, and invoices whose detail isn't read yet. */
+  invoices: { matched: number; moneyReportOnly: number; fromFeed: number; waitingDetail: number } | null;
+}> {
+  const off = { active: false, rows: [], audit: null, excludeIds: [], invoices: null };
   if (!AMAZON_ADS_WATERFILL) return off;
   const settings = await prisma.settings.findFirst({ select: { amazonAdsSince: true, amazonAdsSyncedThrough: true, amazonAdsCoverage: true } });
-  if (!settings?.amazonAdsSince) return off;
+  if (!settings) return off;
+  if (!settings.amazonAdsSince && !(await prisma.adInvoice.findFirst({ where: { provider: "amazon_ads" }, select: { id: true } }))) return off;
 
-  const [integration, invoiceRows, spendRows] = await Promise.all([
+  const [integration, invoiceRows, spendRows, feedRows, floor] = await Promise.all([
     prisma.integration.findFirst({ where: { provider: "amazon_ads" }, select: { timezone: true } }),
     prisma.financeEvent.findMany({
-      where: { channel: "AMAZON", type: "ProductAdsPayment", amount: { lt: 0 } },
+      where: { channel: "AMAZON", type: "ProductAdsPayment", amount: { not: 0 } },
       select: { id: true, postedAt: true, amount: true, baseAmount: true },
       orderBy: [{ postedAt: "asc" }, { id: "asc" }],
     }),
@@ -49,6 +61,12 @@ export async function amazonAdsStatementRows(): Promise<{ active: boolean; rows:
       where: { channel: "AMAZON", txId: { startsWith: "ads:" } },
       select: { txId: true, type: true, amount: true, baseAmount: true },
     }),
+    prisma.adInvoice.findMany({
+      where: { provider: "amazon_ads" },
+      select: { externalId: true, status: true, fromDay: true, toDay: true, invoiceDay: true, amount: true, baseAmount: true, balancePaid: true, programs: true, detailAt: true },
+    }),
+    // The company's first Amazon money: an invoice that ended before it is outside its books.
+    prisma.financeEvent.findFirst({ where: { channel: "AMAZON", NOT: { txId: { startsWith: "ads:" } } }, orderBy: { eventAt: "asc" }, select: { eventAt: true } }),
   ]);
   const tz = integration?.timezone || DEFAULT_ADS_TZ;
   const dayOf = dayIn(tz);
@@ -68,20 +86,31 @@ export async function amazonAdsStatementRows(): Promise<{ active: boolean; rows:
     if (!lastSpendDay || day > lastSpendDay) lastSpendDay = day;
   }
 
-  const coveredFrom = coveredFromFor(settings.amazonAdsCoverage, usedAdProducts, dayOf(settings.amazonAdsSince));
+  const coveredFrom = settings.amazonAdsSince ? coveredFromFor(settings.amazonAdsCoverage, usedAdProducts, dayOf(settings.amazonAdsSince)) : null;
   const syncedDay = settings.amazonAdsSyncedThrough ? settings.amazonAdsSyncedThrough.toISOString().slice(0, 10) : null;
   const coveredTo = syncedDay && lastSpendDay ? (syncedDay > lastSpendDay ? syncedDay : lastSpendDay) : (syncedDay ?? lastSpendDay);
 
-  const fill = waterfillAdInvoices({
-    invoices: invoiceRows.map((r) => ({ id: r.id, day: dayOf(r.postedAt), amount: -(r.baseAmount ?? r.amount) })),
-    spend,
-    coveredFrom,
-    coveredTo,
+  const unified = unifyAdInvoices({
+    ledger: invoiceRows.filter((r) => r.amount < 0).map((r) => ({ id: r.id, day: dayOf(r.postedAt), amount: -(r.baseAmount ?? r.amount) })),
+    credits: invoiceRows.filter((r) => r.amount > 0).map((r) => ({ id: r.id, day: dayOf(r.postedAt), amount: r.baseAmount ?? r.amount })),
+    feed: feedRows.map((f) => ({
+      id: f.externalId,
+      from: f.fromDay,
+      to: f.toDay,
+      invoiceDay: f.invoiceDay,
+      amount: f.baseAmount ?? f.amount,
+      status: f.status,
+      detail: !!f.detailAt,
+      balancePaid: f.balancePaid ?? 0,
+      mix: f.programs && typeof f.programs === "object" && !Array.isArray(f.programs) ? (f.programs as Record<string, number>) : null,
+    })),
+    floorDay: floor ? dayOf(floor.eventAt) : null,
   });
+  const fill = waterfillAdInvoices({ invoices: unified.invoices, spend, coveredFrom, coveredTo });
 
   // An account Amazon bills by card never shows an ad invoice in its money report: its API spend
   // is simply its ad spend, and "not invoiced yet" would be a promise that never comes true.
-  const billedHere = invoiceRows.length > 0;
+  const billedHere = unified.invoices.length > 0;
   const rows: AdStatementRow[] = fill.rows.map((r) => ({
     at: zonedDayStart(r.day, tz).getTime() + 12 * 3_600_000,
     type: billedHere || !r.held ? r.type : r.type.slice(0, -HELD_SUFFIX.length),
@@ -89,5 +118,5 @@ export async function amazonAdsStatementRows(): Promise<{ active: boolean; rows:
     // The amount is the invoice's (Amazon's money report); the day and ad type are Amazon Ads'.
     sources: r.held ? ["AMAZON_ADS"] : r.shaped ? ["AMAZON", "AMAZON_ADS"] : ["AMAZON"],
   }));
-  return { active: true, rows, audit: fill.audit };
+  return { active: true, rows, audit: fill.audit, excludeIds: unified.cancelledCreditIds, invoices: { matched: unified.matched, moneyReportOnly: unified.fromLedgerOnly, fromFeed: unified.fromFeed, waitingDetail: unified.waitingDetail } };
 }

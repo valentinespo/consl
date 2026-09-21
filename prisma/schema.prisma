@@ -93,6 +93,7 @@ model Organization {
   integrations            Integration[]
   metaAdAccounts          MetaAdAccount[]
   orderFeeRules           OrderFeeRule[]
+  adInvoices              AdInvoice[]
   orderFees               OrderFee[]
   channelLocations        ChannelLocation[]
   accessApplications      AccessApplication[]
@@ -526,6 +527,8 @@ model Settings {
   // keeps each ad type for a different number of days, and a day only some of them reach back to
   // would understate that day's spend, so the fill treats it as not covered.
   amazonAdsCoverage Json?
+  // When the Amazon Ads invoice feed was last listed (the list is re-read about hourly).
+  amazonAdsInvoicesSyncedAt DateTime?
   // Reports requested from Amazon Ads still generating (they are built asynchronously):
   // [{ id, adProduct, from, to }] — collected on later ticks, then the marker moves.
   amazonAdsPendingReports Json?
@@ -1234,4 +1237,34 @@ model PnlSnapshot {
   payload     Json
   computedAt  DateTime @default(now())
   durationMs  Int      @default(0)
+}
+
+/// An ad platform's own invoice, from its billing feed (Amazon Ads: GET /invoices). It exists for
+/// every payment method and carries the exact period; the money report only has the ones taken
+/// from the seller's balance. lib/ads-waterfill `unifyAdInvoices` decides what the statement books
+/// from which list — each invoice exactly once.
+model AdInvoice {
+  id           String        @id @default(cuid())
+  orgId        String?
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  provider     String // "amazon_ads"
+  externalId   String // the platform's invoice id
+  status       String // ACCUMULATING | PROCESSING | ISSUED | PAID_IN_PART | PAID_IN_FULL | WRITTEN_OFF
+  fromDay      String? // YYYY-MM-DD, on the ad account's own calendar
+  toDay        String?
+  invoiceDay   String?
+  amount       Float         @default(0) // what it charges, as invoiced
+  tax          Float         @default(0)
+  currency     String        @default("USD")
+  baseAmount   Float? // `amount` in the company's currency at the invoice day's rate
+  // From the invoice's detail (read once per invoice; again while its status can still change):
+  paymentMethod String? // UNIFIED_BILLING | DEDUCT_FROM_PAYMENT | CREDIT_CARD | DIRECT_DEBIT | …
+  balancePaid   Float? // of `amount`, what was taken from the seller's balance — that money is in the money report
+  programs      Json? // { "Sponsored Products": cost, "Creator Connections": cost, … }
+  detailAt      DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@unique([orgId, provider, externalId])
+  @@index([orgId, provider, toDay])
 }
