@@ -58,14 +58,23 @@ The existing start command applies migrations before starting Next.js.
 The scheduler checks Shopify's **granted** scopes and refreshes the stored scope list. It needs
 `read_customers` and `read_all_orders`; it does not change either app's requested scopes. The
 public app without approved access shows an access message. The custom app can use its existing
-grants. Protected-customer-data API errors leave the import incomplete, with a retry control.
+grants. Protected-customer-data API errors leave preparation incomplete and explain the missing
+access. Checks retry automatically; there are no manual start, continue or retry controls.
 
 `shopifyLtvState` stores the shop, snapshot cutoff, cursor, imported count and completion/error.
-Five bounded pages are processed per step. The cursor advances only after all orders and finance
-rows have been persisted. An expiring database lease prevents simultaneous history workers.
+Five bounded pages are processed per step on a dedicated minute loop, independent of slower
+stock, ads and Amazon import jobs. The first check starts shortly after server startup; no page
+visit is needed. The cursor advances only after all orders and finance rows have been persisted.
+An expiring database lease prevents simultaneous history workers.
 The report stays hidden until every page completes, so partial history cannot create false
-acquisition cohorts. Retry resumes from the last successful page. Switching shops resets the
+acquisition cohorts. Automatic retries resume from the last successful page. Switching shops resets the
 history state and filters out facts from the old store.
+
+LTV uses the same SalesOrder records as Orders. The initial history check updates those records
+with newly needed payment/refund, original-total, test-order and stable channel identity fields;
+it also checks that older first purchases were not missed by the previous capped order pull.
+The unique shop order key prevents duplicates. Once the history check completes, it does not
+repeat on visits or server restarts; live order updates keep the stored facts current.
 
 Live order/refund webhooks and the existing updated-at reconciliation keep `SalesOrder.ltvData`
 fresh. Scalar payment and tax totals avoid line-item and shipping/refund pagination limits.
@@ -83,8 +92,8 @@ active again. A minute tick also advances age-dependent cells and date presets w
 change, and bounds recovery from timestamp ties or out-of-order transaction commits. This is
 automatic polling after Shopify data reaches Consl, not a guarantee of instant Shopify delivery.
 
-Views require `dashboard:view`; changing LTV settings or starting an import requires
-`settings:edit`. Database reads and writes use the tenant-scoped Prisma client. The browser gets
+Views require `dashboard:view`; changing LTV settings requires `settings:edit`. History preparation
+runs automatically for active companies with syncing enabled. Database reads and writes use the tenant-scoped Prisma client. The browser gets
 aggregated cohort statistics, never customer IDs or raw order payloads.
 
 ## Validation

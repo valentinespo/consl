@@ -496,7 +496,7 @@ export async function importShopifyLtvHistoryPage(cursor: string | null, before:
     { cursor, q: `created_at:<=${before}` },
   );
   const nodes = data.orders.nodes;
-  if (data.orders.pageInfo.hasNextPage && (!nodes.length || !data.orders.pageInfo.endCursor || data.orders.pageInfo.endCursor === cursor)) throw new Error("Shopify returned an incomplete history page. Try again.");
+  if (data.orders.pageInfo.hasNextPage && (!nodes.length || !data.orders.pageInfo.endCursor || data.orders.pageInfo.endCursor === cursor)) throw new Error("Shopify returned an incomplete history page. The check will retry automatically.");
   const map = await productMap("SHOPIFY");
   const result = await persist("SHOPIFY", nodes.map((n) => mapShopifyOrder(n, true, conn.sellerId!)), shopifyResolver(map));
   if (result.orders !== nodes.length) throw new Error("Some Shopify orders could not be saved. This page will be retried.");

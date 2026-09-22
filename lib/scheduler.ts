@@ -210,16 +210,6 @@ async function runOrgChannelStockInner(orgId: string): Promise<void> {
         where: { provider: { in: ["amazon", "shopify", "tiktok", "amazon_ads", "meta_ads"] }, status: "connected" },
         select: { provider: true },
       });
-      // LTV needs a verified first purchase across all history. Its durable cursor advances
-      // every tick independently of the 15-minute recent-order reconciliation below.
-      if (conns.some((c) => c.provider === "shopify")) {
-        try {
-          const { syncShopifyLtvHistory } = await import("@/lib/shopify-ltv");
-          await syncShopifyLtvHistory();
-        } catch (e) {
-          console.error(`[scheduler] Shopify LTV history failed for ${orgId}:`, (e as Error).message);
-        }
-      }
       // The platforms' PLACES first, every quarter hour: a location or warehouse added, renamed or
       // retired over there becomes (or updates) its facility before any order or stock names it.
       // Shopify also pushes these the moment they happen (location webhooks); TikTok has no push.
@@ -556,7 +546,29 @@ async function tick(): Promise<void> {
 
 let started = false;
 
-/** Start the in-process daily scheduler. Safe to call multiple times (starts once). */
+// History preparation must not wait behind stock, ads or a long-running Amazon report.
+// Its database lease also prevents another process from advancing the same cursor at once.
+let ltvHistoryRunning = false;
+async function ltvHistoryTick(): Promise<void> {
+  if (ltvHistoryRunning) return;
+  ltvHistoryRunning = true;
+  try {
+    const { syncShopifyLtvHistory } = await import("@/lib/shopify-ltv");
+    const orgs = await prismaBase.organization.findMany({ where: { deactivatedAt: null }, select: { id: true } });
+    await Promise.allSettled(orgs.map(async ({ id }) => {
+      try {
+        await runWithOrg(id, async () => {
+          if ((await getOrgSettings()).syncEnabled) await syncShopifyLtvHistory();
+        });
+      } catch (e) {
+        console.error(`[scheduler] Shopify LTV history failed for ${id}:`, (e as Error).message);
+      }
+    }));
+  } finally {
+    ltvHistoryRunning = false;
+  }
+}
+
 async function pnlSnapshotTick(): Promise<void> {
   const { refreshPnlSnapshotIfStale } = await import("@/lib/pnl-cache");
   const orgs = await prismaBase.organization.findMany({ where: { deactivatedAt: null }, select: { id: true } });
@@ -571,6 +583,7 @@ async function pnlSnapshotTick(): Promise<void> {
   }
 }
 
+/** Start the in-process daily scheduler. Safe to call multiple times (starts once). */
 export function startDailyScheduler(): void {
   if (started) return;
   started = true;
@@ -581,6 +594,8 @@ export function startDailyScheduler(): void {
   const TICK_MS = 60 * 1000;
   setInterval(() => void tick().catch(() => {}), TICK_MS);
   setTimeout(() => void tick().catch(() => {}), 30_000); // catch-up shortly after boot
+  setInterval(() => void ltvHistoryTick().catch((e: Error) => console.error("[scheduler] LTV preparation tick failed:", e.message)), TICK_MS);
+  setTimeout(() => void ltvHistoryTick().catch((e: Error) => console.error("[scheduler] LTV preparation tick failed:", e.message)), 10_000);
   // The Amazon order backfill runs on its own guarded loop so a slow order report never stalls the
   // stock tick; it self-terminates once every org has walked back to the retention floor.
   setInterval(() => void backfillTick().catch(() => {}), TICK_MS);

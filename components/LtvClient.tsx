@@ -10,7 +10,7 @@ import { useMoney } from "@/components/CurrencyProvider";
 import { useLtvLiveData } from "@/components/useLtvLiveData";
 import { LTV_METRICS, ltvValue, type LtvCell, type LtvCohort, type LtvMetric } from "@/lib/ltv";
 import type { LtvPageData } from "@/lib/ltv-data";
-import { importLtvHistory, saveLtvSettings } from "@/app/(app)/ltv/actions";
+import { saveLtvSettings } from "@/app/(app)/ltv/actions";
 
 const button = "inline-flex h-9 items-center justify-center gap-2 rounded-[10px] border border-border bg-surface px-3 text-[12.5px] font-medium text-ink-soft transition-colors hover:border-ink/25 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:cursor-not-allowed disabled:opacity-50";
 const field = "h-9 rounded-[10px] border border-border bg-surface px-3 text-[13px] text-ink outline-none focus:border-ink/40";
@@ -45,7 +45,6 @@ export function LtvClient({ data, canEdit }: { data: LtvPageData; canEdit: boole
   const { locale } = useMoney();
   const [pending, startTransition] = useTransition();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const { filters, horizons, report } = data;
   const excluded = data.channels.filter((c) => c.excluded);
   const fmt = (cell: LtvCell | null, metric = filters.metric) => formatValue(ltvValue(cell, metric), metric, filters.currency, locale);
@@ -69,15 +68,6 @@ export function LtvClient({ data, canEdit }: { data: LtvPageData; canEdit: boole
 
   function setRange(range: Range) {
     update({ range: range.key, from: range.key === "custom" ? range.from : null, to: range.key === "custom" ? range.to : null });
-  }
-
-  function importHistory() {
-    setMessage(null);
-    startTransition(async () => {
-      const result = await importLtvHistory();
-      setMessage(result.error || ("done" in result && result.done ? "Shopify history is ready." : "Progress saved. Importing continues automatically; use Continue import to advance another batch now."));
-      router.refresh();
-    });
   }
 
   function exportCsv() {
@@ -114,7 +104,6 @@ export function LtvClient({ data, canEdit }: { data: LtvPageData; canEdit: boole
       </div>
 
       {settingsOpen && <LtvSettings data={data} canEdit={canEdit} onClose={() => setSettingsOpen(false)} />}
-      {message && <p role="status" className="rounded-lg border border-border bg-surface-2 px-4 py-3 text-[12px] text-ink-soft">{message}</p>}
 
       {!data.connected ? (
         <div className="rounded-xl border border-border bg-surface p-10 text-center">
@@ -124,12 +113,13 @@ export function LtvClient({ data, canEdit }: { data: LtvPageData; canEdit: boole
         </div>
       ) : !data.ready ? (
         <div className="rounded-xl border border-border bg-surface p-6">
-          <h2 className="text-[15px] font-medium text-ink">{data.sync?.error ? "Customer history needs attention" : "Preparing your customer cohorts"}</h2>
-          <p className="mt-2 max-w-2xl text-[13px] text-muted">{data.sync?.error || "We need your complete Shopify order history to identify each customer’s first purchase. Your cohort report will appear when the import finishes."}</p>
-          <div className="mt-4 flex flex-wrap items-center gap-4">
-            <span className="text-[12px] text-muted">{(data.sync?.orders ?? 0).toLocaleString(locale)} orders imported</span>
-            {canEdit && <button type="button" className={button} disabled={pending} onClick={importHistory}><RefreshCw size={15} className={pending ? "animate-spin" : ""} />{pending ? "Importing…" : data.sync?.error ? "Retry import" : data.sync ? "Continue import" : "Import customer history"}</button>}
+          <h2 className="text-[15px] font-medium text-ink">Preparing your LTV report</h2>
+          <p className="mt-2 max-w-2xl text-[13px] text-muted">{data.sync?.error || "We’re preparing LTV from your Shopify orders. Your report will appear automatically when it’s ready."}</p>
+          <div role="status" className="mt-4 flex flex-wrap items-center gap-4 text-[12px] text-muted">
+            <span>{(data.sync?.orders ?? 0).toLocaleString(locale)} orders checked</span>
+            <span className="inline-flex items-center gap-2"><RefreshCw size={14} className={data.sync?.error ? "" : "animate-spin motion-reduce:animate-none"} />{data.sync?.error ? "Checks resume automatically" : "Updating automatically"}</span>
           </div>
+          <p className="mt-3 text-[12px] text-muted">You can leave this page. Preparation continues in the background.</p>
         </div>
       ) : (
         <>

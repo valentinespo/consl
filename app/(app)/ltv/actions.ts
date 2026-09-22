@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/membership";
 import { saveOrgSettings } from "@/lib/settings";
-import { syncShopifyLtvHistory } from "@/lib/shopify-ltv";
 
 export async function saveLtvSettings(input: { overrides: Record<string, boolean> }) {
   const gate = await requirePermission("settings", "edit");
@@ -15,17 +14,5 @@ export async function saveLtvSettings(input: { overrides: Record<string, boolean
     return { ok: true as const };
   } catch {
     return { ok: false as const, error: "The settings could not be saved. Please try again." };
-  }
-}
-
-export async function importLtvHistory() {
-  const gate = await requirePermission("settings", "edit");
-  if (!gate.ok) return { ok: false as const, error: gate.error };
-  try {
-    const result = await syncShopifyLtvHistory(true);
-    revalidatePath("/ltv");
-    return { ok: !result.error, ...result };
-  } catch {
-    return { ok: false as const, error: "The import could not complete. Please try again." };
   }
 }
