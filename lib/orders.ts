@@ -8,6 +8,7 @@ import { applyFeeRulesToOrders } from "@/lib/order-fees";
 import { resolveFulfillmentFacilities, ensureAmazonShipFromPlaces } from "@/lib/fulfillment";
 import { paymentMethodKey, paymentMethodLabel, walletLabel } from "@/lib/payment-methods";
 import { shopifyAccessToken } from "@/lib/shopify-oauth";
+import { SHOPIFY_LTV_FIELDS, shopifyLtvFacts, type ShopifyLtvNode } from "@/lib/ltv-shopify";
 
 /**
  * Pull orders from the connected channels into SalesOrder/SalesOrderLine — the raw feed for
@@ -60,6 +61,7 @@ type Fetched = {
   paymentDetail?: string | null;
   // The platform's opaque customer id. Undefined = this source can't say, so nothing is touched.
   customerId?: string | null;
+  ltvData?: object;
   // Merchant-fulfilled Amazon only: the ship-from place (see SalesOrder). Undefined = this source
   // (the orders report) doesn't carry it, so what the live record wrote is left alone.
   shipFromKey?: string | null;
@@ -138,6 +140,7 @@ async function persist(
         ...(o.paymentMethod !== undefined ? { paymentMethod: o.paymentMethod } : {}),
         ...(o.paymentDetail !== undefined ? { paymentDetail: o.paymentDetail } : {}),
         ...(o.customerId !== undefined ? { customerId: o.customerId } : {}),
+        ...(o.ltvData !== undefined ? { ltvData: o.ltvData } : {}),
         ...(o.shipFromKey !== undefined ? { shipFromKey: o.shipFromKey } : {}),
         ...(o.shipFromLabel !== undefined ? { shipFromLabel: o.shipFromLabel } : {}),
         ...(keepTotal ? {} : { total: o.total }),
@@ -206,7 +209,7 @@ async function persist(
 
 const money = (v?: string | null) => (v != null && v !== "" && !Number.isNaN(Number(v)) ? Number(v) : 0);
 
-type ShopifyOrderNode = {
+type ShopifyOrderNode = ShopifyLtvNode & {
   id: string;
   name: string | null;
   /** Only asked for when the connection may read customers (see shopifyOrderFields). */
@@ -287,8 +290,9 @@ export function shopifyOrderFields(scope: string | null | undefined): string {
 // can never drift apart on what an order means.
 export const SHOPIFY_ORDER_FIELDS = `
   id name createdAt updatedAt sourceName cancelledAt displayFinancialStatus displayFulfillmentStatus taxesIncluded
-  app { name }
-  channelInformation { channelDefinition { channelName } }
+  app { id name }
+  channelInformation { channelDefinition { id channelName } }
+  ${SHOPIFY_LTV_FIELDS}
   currentTotalPriceSet { shopMoney { amount currencyCode } }
   totalTaxSet { shopMoney { amount } }
   totalShippingPriceSet { shopMoney { amount } }
@@ -346,10 +350,12 @@ function shopifyPayment(o: ShopifyOrderNode): { paymentMethod: string | null; pa
   return { paymentMethod: key, paymentDetail: detail };
 }
 
-function mapShopifyOrder(o: ShopifyOrderNode, withCustomer = false): Fetched {
+function mapShopifyOrder(o: ShopifyOrderNode, withCustomer = false, shop = ""): Fetched {
   const location = o.fulfillments.map((f) => f.location?.name).find(Boolean);
+  const ltv = shop ? shopifyLtvFacts(o, shop) : null;
   return {
     ...shopifyPayment(o),
+    ...(ltv ? { ltvData: ltv } : {}),
     // Undefined when the connection can't read customers: what is on record stays.
     ...(withCustomer ? { customerId: o.customer?.id ?? null } : {}),
     externalId: o.id,
@@ -422,14 +428,14 @@ export async function importShopifyOrders(since?: number | Date): Promise<OrderI
       conn.sellerId,
       token,
       `query($cursor: String, $q: String) {
-        orders(first: 100, after: $cursor, sortKey: ${sinceAt ? "UPDATED_AT" : "CREATED_AT"}, query: $q) {
+        orders(first: 40, after: $cursor, sortKey: ${sinceAt ? "UPDATED_AT" : "CREATED_AT"}, query: $q) {
           pageInfo { hasNextPage endCursor }
           nodes { ${shopifyOrderFields(conn.scope)} }
         }
       }`,
       { cursor, q: filter },
     );
-    fetched.push(...data.orders.nodes.map((n) => mapShopifyOrder(n, hasShopifyCustomerScope(conn.scope))));
+    fetched.push(...data.orders.nodes.map((n) => mapShopifyOrder(n, hasShopifyCustomerScope(conn.scope), conn.sellerId!)));
     nodes.push(...data.orders.nodes);
     if (!data.orders.pageInfo.hasNextPage) break;
     truncated = page === 59;
@@ -466,11 +472,36 @@ export async function importShopifyOrderById(orderGid: string): Promise<OrderImp
   );
   if (!data.node?.id) return { channel: "SHOPIFY", orders: 0, lines: 0 };
   const map = await productMap("SHOPIFY");
-  const result = await persist("SHOPIFY", [mapShopifyOrder(data.node, hasShopifyCustomerScope(conn.scope))], shopifyResolver(map));
+  const result = await persist("SHOPIFY", [mapShopifyOrder(data.node, hasShopifyCustomerScope(conn.scope), conn.sellerId)], shopifyResolver(map));
   const ledger = hasShopifyPaymentsScope(conn.scope);
   await upsertShopifyFinanceEvents([data.node], shopifyResolver(map), ledger);
   if (ledger) await importShopifyPaymentsLedger(conn.sellerId, token, 3);
   return result;
+}
+
+/** One bounded page of LTV history, using the same writer as live orders. The caller stores
+ * the cursor only after every order and its finance rows have been written successfully. */
+export async function importShopifyLtvHistoryPage(cursor: string | null, before: string) {
+  const conn = await prisma.integration.findFirst({ where: { provider: "shopify", status: "connected" } });
+  if (!conn?.sellerId || !conn.refreshTokenEnc || !hasShopifyCustomerScope(conn.scope)) throw new Error("Shopify customer access is required.");
+  const token = await shopifyAccessToken(conn);
+  const data = await shopifyGraphQL<{ orders: { nodes: ShopifyOrderNode[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } }>(
+    conn.sellerId, token,
+    `query LtvHistory($cursor: String, $q: String) {
+      orders(first: 20, after: $cursor, sortKey: CREATED_AT, query: $q) {
+        pageInfo { hasNextPage endCursor }
+        nodes { ${shopifyOrderFields(conn.scope)} }
+      }
+    }`,
+    { cursor, q: `created_at:<=${before}` },
+  );
+  const nodes = data.orders.nodes;
+  if (data.orders.pageInfo.hasNextPage && (!nodes.length || !data.orders.pageInfo.endCursor || data.orders.pageInfo.endCursor === cursor)) throw new Error("Shopify returned an incomplete history page. Try again.");
+  const map = await productMap("SHOPIFY");
+  const result = await persist("SHOPIFY", nodes.map((n) => mapShopifyOrder(n, true, conn.sellerId!)), shopifyResolver(map));
+  if (result.orders !== nodes.length) throw new Error("Some Shopify orders could not be saved. This page will be retried.");
+  await upsertShopifyFinanceEvents(nodes, shopifyResolver(map), hasShopifyPaymentsScope(conn.scope));
+  return { orders: nodes.length, ...data.orders.pageInfo };
 }
 
 /**

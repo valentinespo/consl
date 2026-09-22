@@ -32,6 +32,7 @@ export async function importOrders() {
 const touched = () => {
   revalidatePath("/orders");
   revalidatePath("/pnl");
+  revalidatePath("/ltv");
 };
 
 /** Void/unvoid orders from the row menu or the bulk bar. A decision made here is final for the

@@ -210,6 +210,16 @@ async function runOrgChannelStockInner(orgId: string): Promise<void> {
         where: { provider: { in: ["amazon", "shopify", "tiktok", "amazon_ads", "meta_ads"] }, status: "connected" },
         select: { provider: true },
       });
+      // LTV needs a verified first purchase across all history. Its durable cursor advances
+      // every tick independently of the 15-minute recent-order reconciliation below.
+      if (conns.some((c) => c.provider === "shopify")) {
+        try {
+          const { syncShopifyLtvHistory } = await import("@/lib/shopify-ltv");
+          await syncShopifyLtvHistory();
+        } catch (e) {
+          console.error(`[scheduler] Shopify LTV history failed for ${orgId}:`, (e as Error).message);
+        }
+      }
       // The platforms' PLACES first, every quarter hour: a location or warehouse added, renamed or
       // retired over there becomes (or updates) its facility before any order or stock names it.
       // Shopify also pushes these the moment they happen (location webhooks); TikTok has no push.

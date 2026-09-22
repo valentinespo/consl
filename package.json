@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "prisma generate && next build",
     "start": "prisma migrate deploy && next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:ltv": "node --import tsx --test lib/ltv.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1076.0",

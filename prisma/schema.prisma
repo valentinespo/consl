@@ -464,6 +464,16 @@ model Settings {
   // Which Shopify app this company connects through: null = consl's default app, "public" = the
   // public-distribution app (installable on any store — reviewers' development stores included).
   shopifyApp        String?
+  // LTV uses its own exclusions; these never change the P&L or inventory. Null entries use
+  // the default (Faire / TikTok excluded); explicit false keeps a channel included.
+  ltvExcludedChannels Json?
+  // Retained for compatibility. LTV always excludes originally free orders.
+  ltvIncludeFreeOrders Boolean @default(false)
+  // Retained for compatibility. Cohorts always start with the first included paid purchase.
+  ltvCohortAnchor String @default("included")
+  // Durable, resumable history walk. Completion means every accessible page was persisted.
+  shopifyLtvState Json?
+  shopifyLtvLeaseUntil DateTime?
   stockRoutes       Json?
   // Retired 2026-09-09 (columns kept — migrations are additive): the double-count exclusions are
   // no longer settings. They are derived at read time from which channels are present — see
@@ -949,6 +959,9 @@ model SalesOrder {
   // name, an email or an address. Only a connection allowed to read customers fills it; it is
   // what the lifetime-value view groups a person's orders by.
   customerId   String?
+  // Compact, versioned Shopify LTV facts. Null means this order needs enrichment; never zero.
+  // Contains money + source identity only, no shopper names, emails, or addresses.
+  ltvData      Json?
   total        Float           @default(0) // order revenue in `currency`, for profit later
   currency     String          @default("USD")
   // ---- Full money split + dimensions, for the P&L and metrics to come. Stored, not shown.
@@ -989,6 +1002,7 @@ model SalesOrder {
   @@index([orgId, voidRuleId])
   @@unique([orgId, channel, externalId])
   @@index([orgId, channel, orderedAt])
+  @@index([orgId, channel, updatedAt])
   @@index([orgId, source])
   @@index([orgId, fulfillmentFacilityId])
   @@index([orgId, paymentMethod])

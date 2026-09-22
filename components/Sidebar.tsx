@@ -16,6 +16,7 @@ import {
   ReorderFilled,
   OrdersFilled,
   PnlFilled,
+  SalesProfitFilled,
   ChevronDown,
   Plug,
   Settings,
@@ -29,6 +30,7 @@ type NavItem = { href: string; label: string; icon: LucideIcon; exact?: boolean;
 // Finances — the P&L and the orders underneath it. Collapsible as a group.
 const FINANCES_NAV: NavItem[] = [
   { href: "/pnl", label: "P&L", icon: PnlFilled, resource: "dashboard" },
+  { href: "/ltv", label: "LTV", icon: SalesProfitFilled, resource: "dashboard" },
   { href: "/orders", label: "Orders", icon: OrdersFilled, resource: "dashboard" },
 ];
 

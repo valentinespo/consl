@@ -63,6 +63,15 @@ html[data-theme="dark"] {
   --color-chart-soft: #292347; /* soft violet wash, dark */
 }
 
+/* The LTV heatmap spans the full violet range in each theme; high-value cells use the
+   canvas color for their numbers to retain contrast against the stronger purple. */
+.ltv-heatmap {
+  --ltv-heatmap-color: var(--color-accent-strong);
+}
+html[data-theme="dark"] .ltv-heatmap {
+  --ltv-heatmap-color: var(--color-chart);
+}
+
 /* The iso mark is pure black artwork; flip it to white when the chrome goes dark. */
 html[data-theme="dark"] .iso-invert {
   filter: invert(1);
