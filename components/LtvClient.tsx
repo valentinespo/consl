@@ -5,6 +5,7 @@ import { useState, useTransition, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Download, Settings, RefreshCw } from "@/components/icons";
 import { SelectMenu } from "@/components/SelectMenu";
+import { HoverHint } from "@/components/HoverHint";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
 import { useMoney } from "@/components/CurrencyProvider";
 import { useLtvLiveData } from "@/components/useLtvLiveData";
@@ -179,9 +180,7 @@ export function LtvClient({ data, canEdit }: { data: LtvPageData; canEdit: boole
                     </tbody>
                   </table>
                 </div>
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-3 text-[11px] text-muted">
-                  <span>— Nobody in the cohort has reached this age. A grey figure with a (!) is the value so far: the cohort’s oldest customers have reached that age, its youngest haven’t, so it keeps moving until the whole cohort has. All customers adds up the closed cells of the rows below it.</span>
-                </div>
+                <div className="border-t border-border px-5 py-3 text-[11px] text-muted">— No customer in this row is that old yet.</div>
               </>
             )}
           </section>
@@ -227,10 +226,14 @@ function CohortRow({ cohort, label, summary = false, data, locale }: { cohort: L
       {cohort.cells.map((cell, i) => {
         const last = i === cohort.cells.length - 1;
         if (cell?.partial) {
-          const soFar = `So far: the oldest customers in this cohort have reached ${data.horizons[i]} days, the youngest haven’t yet. This figure keeps moving until the whole cohort has, and is left out of the All customers row.`;
           return (
-            <td key={data.horizons[i]} className={`px-4 py-3.5 text-right text-muted ${last ? "pr-5" : ""}`} style={{ backgroundColor: "color-mix(in srgb, var(--color-ink) 6%, var(--color-surface))" }} title={soFar}>
-              <span className="inline-flex items-center gap-1.5">{fmt(cell)}<span aria-label={soFar} className="inline-flex h-[15px] w-[15px] items-center justify-center rounded-full border border-current text-[10px] font-semibold leading-none">!</span></span>
+            <td key={data.horizons[i]} className={`px-4 py-3.5 text-right text-muted ${last ? "pr-5" : ""}`} style={{ backgroundColor: "color-mix(in srgb, var(--color-ink) 6%, var(--color-surface))" }}>
+              <span className="inline-flex items-center gap-1.5">
+                {fmt(cell)}
+                <HoverHint title="Still counting" body={`Some of these customers are not ${data.horizons[i]} days old yet. They can still buy again, so this number can still go up. It turns solid once all of them are ${data.horizons[i]} days old. Until then it does not count in the All customers row.`} className="align-middle">
+                  <span className="inline-flex h-[15px] w-[15px] cursor-help items-center justify-center rounded-full border border-current text-[10px] font-semibold leading-none">!</span>
+                </HoverHint>
+              </span>
             </td>
           );
         }
