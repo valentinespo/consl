@@ -37,6 +37,8 @@ export type LtvCell = {
   revenue: number;
   orders: number;
   returningCustomers: number;
+  /** Not every customer of the row has reached this age yet: the value so far, still moving. */
+  partial?: boolean;
 };
 export type LtvCohort = {
   key: string;
@@ -99,11 +101,13 @@ function addCell(into: LtvCell, cell: LtvCell) {
  * across all history before applying that range. Unknown customer IDs are never merged into a
  * fictitious guest customer. Refunds restate the value of the original order.
  *
- * A row's Lifetime is everything its customers have spent to date over ALL of them — so it is
- * never below the row's last completed age, and the only thing that separates the two is what
- * was spent after that age. The "All customers" row is the rows below it added together: each
- * age column sums exactly the cohorts whose cell is complete at that age (a weighted average by
- * customer count), and its Lifetime and first-order figures sum every row.
+ * An age the OLDEST customer of a row has reached but the youngest hasn't is shown as the value
+ * so far — everything the row's customers have spent up to that age, over all of them — marked
+ * `partial`: it keeps moving until the whole row is that old. An age nobody in the row has
+ * reached is null. The "All customers" row is the rows below it added together: each age column
+ * sums exactly the cohorts whose cell is complete at that age (a weighted average by customer
+ * count, partial cells left out), and its first-order figures sum every row. `lifetime` is kept
+ * for the metrics that need every purchase to date (repeat rate, orders, returning customers).
  */
 export function buildLtvReport(orders: LtvOrder[], options: LtvOptions): LtvReport {
   const people = new Map<string, LtvOrder[]>();
@@ -142,6 +146,7 @@ export function buildLtvReport(orders: LtvOrder[], options: LtvOptions): LtvRepo
     const lifetime = emptyCell();
     const cells = options.horizons.map(() => emptyCell());
     const latestFirst = people.reduce((latest, p) => Math.max(latest, p.first.orderedAt.getTime()), 0);
+    const earliestFirst = people.reduce((earliest, p) => Math.min(earliest, p.first.orderedAt.getTime()), Infinity);
     for (const person of people) {
       const firstIncluded = person.orders[0];
       addCell(firstOrder, { customers: 1, orders: 1, revenue: revenue(firstIncluded), returningCustomers: 0 });
@@ -156,8 +161,20 @@ export function buildLtvReport(orders: LtvOrder[], options: LtvOptions): LtvRepo
         addCell(cells[i], cell);
       });
     }
-    // A cell is shown only once the whole cohort has reached that age.
-    cohorts.push({ key, customers: people.length, firstOrder, lifetime, cells: cells.map((cell, i) => latestFirst + options.horizons[i] * DAY <= options.asOf.getTime() ? cell : null) });
+    // A cell is final once the whole cohort has reached that age; while only its oldest customers
+    // have, it is the value so far (partial); before anyone has, there is nothing to show.
+    cohorts.push({
+      key,
+      customers: people.length,
+      firstOrder,
+      lifetime,
+      cells: cells.map((cell, i) => {
+        const age = options.horizons[i] * DAY;
+        if (latestFirst + age <= options.asOf.getTime()) return cell;
+        if (earliestFirst + age <= options.asOf.getTime()) return { ...cell, partial: true };
+        return null;
+      }),
+    });
   }
   cohorts.sort((a, b) => b.key.localeCompare(a.key));
   const summary: LtvCohort = { key: "All customers", customers: 0, firstOrder: emptyCell(), lifetime: emptyCell(), cells: options.horizons.map(() => null) };
@@ -166,7 +183,7 @@ export function buildLtvReport(orders: LtvOrder[], options: LtvOptions): LtvRepo
     addCell(summary.firstOrder, cohort.firstOrder);
     addCell(summary.lifetime, cohort.lifetime);
     cohort.cells.forEach((cell, i) => {
-      if (!cell) return;
+      if (!cell || cell.partial) return;
       summary.cells[i] ??= emptyCell();
       addCell(summary.cells[i]!, cell);
     });

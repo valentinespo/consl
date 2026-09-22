@@ -21,11 +21,7 @@ export async function getLtvData(search: Record<string, string | string[] | unde
   const interval = (["week", "month", "quarter", "year"].includes(str("interval")) ? str("interval") : "month") as CohortInterval;
   const metric = (LTV_METRICS.some((m) => m.key === str("metric")) ? str("metric") : "ltv") as LtvMetric;
   const cumulative = str("cumulative") !== "0";
-  const requestedHorizon = Number(str("horizon"));
-  const horizon: number | "lifetime" = Number.isFinite(requestedHorizon) && requestedHorizon > 0
-    ? Math.max(1, Math.min(3650, Math.floor(requestedHorizon)))
-    : "lifetime";
-  const horizons = [...new Set([30, 60, 90, 180, 365, 730, ...(horizon === "lifetime" ? [] : [horizon])])].sort((a, b) => a - b);
+  const horizons = [30, 60, 90, 180, 365, 730];
   const overrides = readChannelOverrides(settings?.ltvExcludedChannels);
   const orders: LtvOrder[] = [];
   const sources = new Map<string, { key: string; label: string; orders: number; excluded: boolean }>();
@@ -59,13 +55,17 @@ export async function getLtvData(search: Record<string, string | string[] | unde
   // Suppress partial-history cohort numbers: without complete history an old customer can be
   // mistaken for a newly acquired one. Progress and channels remain visible while importing.
   const report = buildLtvReport(ready && !filterError ? orders : [], options);
-  // KPI windows always mean cumulative LTV, even when the matrix is showing period-only sales.
+  // The overview always speaks cumulative LTV, even when the matrix is showing period-only sales.
   const cumulativeReport = cumulative ? report : buildLtvReport(ready && !filterError ? orders : [], { ...options, cumulative: true });
+  // The LTV figure: the last age the All customers row has closed, and which age that is.
+  const closed = cumulativeReport.summary.cells.map((cell, i) => ({ cell, days: horizons[i] })).filter((x) => x.cell && !x.cell.partial);
+  const latest = closed.at(-1) ?? null;
   return {
     revision,
     report,
     kpis: cumulativeReport.summary,
-    filters: { range: { key: rangeKey, from, to }, from, to, interval, metric, cumulative, horizon, currency },
+    latestLtv: latest ? { days: latest.days, cell: latest.cell! } : null,
+    filters: { range: { key: rangeKey, from, to }, from, to, interval, metric, cumulative, currency },
     horizons,
     channels: [...sources.values()].sort((a, b) => a.label.localeCompare(b.label)),
     settings: { overrides },

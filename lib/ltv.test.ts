@@ -42,8 +42,9 @@ test("excluded orders have no effect on any report value, cohort date or maturit
     const baseline = buildLtvReport(included, view);
     assert.equal(baseline.cohorts[0].key, "2025-03-01");
     assert.equal(baseline.summary.customers, 2);
-    assert.equal(baseline.cohorts[0].cells[0], null);
-    // The All customers row is the rows below it: a cohort not yet at this age contributes nothing.
+    // The oldest March customer is past 30 days, the youngest isn't: the cell is the value so far,
+    // and the All customers row (closed cells only) has nothing at Day 30.
+    assert.equal(baseline.cohorts[0].cells[0]?.partial, true);
     assert.equal(baseline.summary.cells[0], null);
     assert.deepEqual(buildLtvReport([...included, ...ignored], view), baseline);
   }
@@ -100,7 +101,7 @@ test("row maturity waits for every customer, and the All customers row follows t
   const r = buildLtvReport([order("1", "a", "2025-01-01", 100), order("2", "b", "2025-02-01", 20), order("3", "c", "2025-02-02", 20), order("4", "d", "2025-02-28", 20)], { ...options, asOf: at("2025-03-15") });
   // February's youngest customer is 15 days old: the February row has no Day 30 yet, so only
   // January (1 customer at 100) feeds the All customers Day 30 cell.
-  assert.equal(r.cohorts[0].cells[0], null); assert.equal(r.summary.cells[0]?.customers, 1); assert.equal(ltvValue(r.summary.cells[0], "ltv"), 100);
+  assert.equal(r.cohorts[0].cells[0]?.partial, true); assert.equal(r.summary.cells[0]?.customers, 1); assert.equal(ltvValue(r.summary.cells[0], "ltv"), 100);
   assert.equal(ltvValue(r.summary.firstOrder, "ltv"), 40); assert.equal(r.summary.cells[2], null);
 });
 test("grouping changes cohort rows; first order and Lifetime never change, age cells follow the completed rows", () => {
@@ -128,7 +129,7 @@ test("grouping changes cohort rows; first order and Lifetime never change, age c
     assert.equal(yearly.cohorts.length, 1);
     // The single yearly row holds a 15-day-old customer, so it has no Day 30 — and neither does
     // the All customers row above it: it only ever adds up the rows below.
-    assert.equal(yearly.cohorts[0].cells[0], null);
+    assert.equal(yearly.cohorts[0].cells[0]?.partial, true);
     assert.equal(yearly.summary.cells[0], null);
     assert.equal(ltvValue(yearly.summary.lifetime, "ltv"), ltvValue(monthly.summary.lifetime, "ltv"));
   }
@@ -215,11 +216,31 @@ test("the All customers row is a customer-weighted sum of the completed cohort c
   assert.equal(ltvValue(jan.cells[1], "ltv"), 85);   // (150 + 20) / 2
   assert.equal(ltvValue(jan.lifetime, "ltv"), 85);   // = the last completed age: nothing after day 60
   assert.equal(ltvValue(mar.cells[0], "ltv"), 90);   // 60 + 30 within 30 days (the cohort is 36 days old)
-  assert.equal(mar.cells[1], null);                  // not 60 days old yet
+  assert.equal(mar.cells[1], null);                  // nobody is 60 days old yet
   assert.equal(ltvValue(mar.lifetime, "ltv"), 90);
   // Day 30 = January (2 customers at 60) + March (1 at 90) = 210 / 3; Day 60 = January only = 85
   assert.equal(r.summary.cells[0]?.customers, 3); assert.equal(ltvValue(r.summary.cells[0], "ltv"), 70);
   assert.equal(r.summary.cells[1]?.customers, 2); assert.equal(ltvValue(r.summary.cells[1], "ltv"), 85);
   assert.equal(ltvValue(r.summary.lifetime, "ltv"), (150 + 20 + 90) / 3);
+});
+test("an age only the oldest customers of a row have reached shows the value so far, marked partial, and stays out of the All customers row", () => {
+  const orders = [
+    order("a1", "a", "2025-06-01", 100), order("a2", "a", "2025-08-20", 50),   // June 1 customer: 81 days old on Aug 21, repeat on day 80
+    order("b1", "b", "2025-06-28", 20),                                          // June 28 customer: 54 days old
+    order("c1", "c", "2025-05-05", 10),                                          // May customer: 108 days old
+  ];
+  const r = buildLtvReport(orders, { ...options, from: "2025-05-01", to: "2025-12-31", asOf: at("2025-08-21"), horizons: [30, 60, 90] });
+  const june = r.cohorts.find((c) => c.key === "2025-06-01")!;
+  assert.equal(june.cells[0]?.partial, undefined);   // Day 30: everyone reached it -> final
+  assert.equal(ltvValue(june.cells[0], "ltv"), 60);
+  assert.equal(june.cells[1]?.partial, true);        // Day 60: a reached it (81 days), b hasn't (54) -> so far
+  assert.equal(ltvValue(june.cells[1], "ltv"), 60);  // nothing within 60 days for either
+  assert.equal(june.cells[2], null);                 // Day 90: nobody in June is 90 days old yet
+  const may = r.cohorts.find((c) => c.key === "2025-05-01")!;
+  assert.equal(may.cells[2]?.partial, undefined);    // May's only customer is 108 days old: Day 90 is final
+  assert.equal(ltvValue(may.cells[2], "ltv"), 10);
+  assert.equal(r.summary.cells[1]?.customers, 1);    // Day 60 of All customers: May only (June's is so far)
+  assert.equal(r.summary.cells[0]?.customers, 3);    // Day 30: May + June, both final
+  assert.equal(r.summary.cells[2]?.customers, 1);    // Day 90: May only
 });
 
