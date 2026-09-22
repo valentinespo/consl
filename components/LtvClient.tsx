@@ -15,12 +15,14 @@ import { saveLtvSettings } from "@/app/(app)/ltv/actions";
 const button = "inline-flex h-9 items-center justify-center gap-2 rounded-[10px] border border-border bg-surface px-3 text-[12.5px] font-medium text-ink-soft transition-colors hover:border-ink/25 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:cursor-not-allowed disabled:opacity-50";
 const field = "h-9 rounded-[10px] border border-border bg-surface px-3 text-[13px] text-ink outline-none focus:border-ink/40";
 const horizonPresets = [30, 60, 90, 180, 365, 730];
-const heatmapLevels = [10, 30, 50, 78, 100];
 
-function heatmapStyle(level: number) {
+/** One shade per age column, whatever the numbers: super soft on the first order, deepening
+ *  column by column to the full accent on the last age shown. A blank cell has no shade. */
+function columnStyle(index: number, count: number) {
+  const strength = count > 1 ? 6 + (index / (count - 1)) * 94 : 100;
   return {
-    backgroundColor: `color-mix(in srgb, var(--ltv-heatmap-color) ${heatmapLevels[level]}%, var(--color-surface))`,
-    color: level >= 3 ? "var(--color-bg)" : "var(--color-ink)",
+    backgroundColor: `color-mix(in srgb, var(--ltv-heatmap-color) ${Math.round(strength)}%, var(--color-surface))`,
+    color: strength >= 62 ? "var(--color-bg)" : "var(--color-ink)",
   };
 }
 
@@ -49,8 +51,6 @@ export function LtvClient({ data, canEdit }: { data: LtvPageData; canEdit: boole
   const excluded = data.channels.filter((c) => c.excluded);
   const fmt = (cell: LtvCell | null, metric = filters.metric) => formatValue(ltvValue(cell, metric), metric, filters.currency, locale);
   const horizonCell = filters.horizon === "lifetime" ? data.kpis.lifetime : data.kpis.cells[horizons.indexOf(filters.horizon)];
-  const heatmapValues = report.cohorts.flatMap((c) => c.cells.map((cell) => ltvValue(cell, filters.metric))).filter((value): value is number => value !== null);
-  const heatmapRange = { min: heatmapValues.length ? Math.min(...heatmapValues) : 0, max: Math.max(0, ...heatmapValues) };
   const asOf = new Date(data.asOf).toLocaleDateString(locale, { timeZone: data.timezone, month: "short", day: "numeric", year: "numeric" });
   const metricLabel = !filters.cumulative && filters.metric === "ltv" ? "Revenue per customer" : LTV_METRICS.find((m) => m.key === filters.metric)!.label;
 
@@ -181,14 +181,13 @@ export function LtvClient({ data, canEdit }: { data: LtvPageData; canEdit: boole
                       </tr>
                     </thead>
                     <tbody>
-                      <CohortRow cohort={report.summary} label="All customers" summary data={data} locale={locale} heatmapRange={heatmapRange} />
-                      {report.cohorts.map((cohort) => <CohortRow key={cohort.key} cohort={cohort} label={cohortLabel(cohort.key, filters.interval, locale)} data={data} locale={locale} heatmapRange={heatmapRange} />)}
+                      <CohortRow cohort={report.summary} label="All customers" summary data={data} locale={locale} />
+                      {report.cohorts.map((cohort) => <CohortRow key={cohort.key} cohort={cohort} label={cohortLabel(cohort.key, filters.interval, locale)} data={data} locale={locale} />)}
                     </tbody>
                   </table>
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-3 text-[11px] text-muted">
-                  <span>— The cohort hasn’t reached this age. Overall values include customers who have reached each age.</span>
-                  <span className="flex items-center gap-2" title="Shading compares values across the visible cohort cells.">Lower <span className="flex gap-1" aria-hidden>{heatmapLevels.map((_, level) => <span key={level} className="h-3 w-4 rounded-[2px]" style={heatmapStyle(level)} />)}</span> Higher</span>
+                  <span>— The cohort hasn’t reached this age. Lifetime is everything the row’s customers have spent to date. All customers adds up the rows below it: each age column counts only the cohorts that have reached it.</span>
                 </div>
               </>
             )}
@@ -238,27 +237,21 @@ function HorizonPicker({ value, disabled, onChange }: { value: number | "lifetim
   return <SelectMenu prefix={value === "lifetime" ? "LTV" : "LTV in first"} value={String(value)} options={[{ value: "lifetime", label: "Lifetime" }, ...options, { value: "custom", label: "Custom days…" }]} onChange={(next) => next === "custom" ? setCustom(true) : onChange(next === "lifetime" ? "lifetime" : Number(next))} className="w-[215px]" ariaLabel="LTV time horizon" disabled={disabled} />;
 }
 
-function CohortRow({ cohort, label, summary = false, data, locale, heatmapRange }: { cohort: LtvCohort; label: string; summary?: boolean; data: LtvPageData; locale: string; heatmapRange: { min: number; max: number } }) {
+function CohortRow({ cohort, label, summary = false, data, locale }: { cohort: LtvCohort; label: string; summary?: boolean; data: LtvPageData; locale: string }) {
   const metric = data.filters.metric;
   const fmt = (cell: LtvCell | null) => formatValue(ltvValue(cell, metric), metric, data.filters.currency, locale);
+  const shaded = data.horizons.length + 1; // the first-order column plus every age column
   return (
     <tr className={`border-b border-line last:border-0 ${summary ? "bg-surface-2 font-medium" : "group"}`}>
       <th scope="row" className={`sticky left-0 z-10 px-5 py-3.5 text-left font-medium text-ink ${summary ? "bg-surface-2" : "bg-surface"}`}>{label}</th>
       <td className="px-4 py-3.5 text-right text-muted">{cohort.customers.toLocaleString(locale)}</td>
-      <td className="px-4 py-3.5 text-right text-ink-soft">{fmt(cohort.firstOrder)}</td>
-      {cohort.cells.map((cell, i) => {
-        const value = ltvValue(cell, metric);
-        // Use the same five separated shades as the legend, across the values on screen.
-        // Equal values keep the same shade; immature cells stay uncolored.
-        const level = value === null || value === 0 ? 0 : heatmapRange.max === heatmapRange.min ? 2
-          : Math.min(heatmapLevels.length - 1, Math.max(0, Math.floor((value - heatmapRange.min) / (heatmapRange.max - heatmapRange.min) * heatmapLevels.length)));
-        return (
-          <td key={data.horizons[i]} title={cell ? `${cell.customers.toLocaleString(locale)} customers · ${cell.orders.toLocaleString(locale)} orders${summary ? ` · customers with ${data.horizons[i]} days of history` : ""}` : summary ? "No customers have reached this age." : "This cohort has not fully reached this age."} className={`px-4 py-3.5 text-right ${cell ? "text-ink" : "text-muted/60"}`} style={!summary && cell ? heatmapStyle(level) : undefined}>
-            {fmt(cell)}
-          </td>
-        );
-      })}
-      <td className="px-5 py-3.5 text-right text-ink-soft">{fmt(cohort.lifetime)}</td>
+      <td className="px-4 py-3.5 text-right" style={columnStyle(0, shaded)} title={`${cohort.customers.toLocaleString(locale)} customers · their first order only`}>{fmt(cohort.firstOrder)}</td>
+      {cohort.cells.map((cell, i) => (
+        <td key={data.horizons[i]} className="px-4 py-3.5 text-right" style={cell ? columnStyle(i + 1, shaded) : undefined} title={cell ? `${cell.customers.toLocaleString(locale)} customers · ${cell.orders.toLocaleString(locale)} orders${summary ? ` · the cohorts that have reached ${data.horizons[i]} days` : ""}` : summary ? "No cohort has reached this age yet." : "This cohort has not fully reached this age."}>
+          {fmt(cell)}
+        </td>
+      ))}
+      <td className="px-5 py-3.5 text-right text-ink-soft" title={`${cohort.customers.toLocaleString(locale)} customers · ${cohort.lifetime.orders.toLocaleString(locale)} orders · everything spent to date`}>{fmt(cohort.lifetime)}</td>
     </tr>
   );
 }

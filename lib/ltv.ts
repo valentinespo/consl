@@ -98,6 +98,12 @@ function addCell(into: LtvCell, cell: LtvCell) {
 /** Acquisition dates filter CUSTOMERS, never their later purchases. Identify first purchase
  * across all history before applying that range. Unknown customer IDs are never merged into a
  * fictitious guest customer. Refunds restate the value of the original order.
+ *
+ * A row's Lifetime is everything its customers have spent to date over ALL of them — so it is
+ * never below the row's last completed age, and the only thing that separates the two is what
+ * was spent after that age. The "All customers" row is the rows below it added together: each
+ * age column sums exactly the cohorts whose cell is complete at that age (a weighted average by
+ * customer count), and its Lifetime and first-order figures sum every row.
  */
 export function buildLtvReport(orders: LtvOrder[], options: LtvOptions): LtvReport {
   const people = new Map<string, LtvOrder[]>();
@@ -131,7 +137,6 @@ export function buildLtvReport(orders: LtvOrder[], options: LtvOptions): LtvRepo
 
   const revenue = (o: LtvOrder) => o.facts.revenue;
   const cohorts: LtvCohort[] = [];
-  const summary: LtvCohort = { key: "All customers", customers: 0, firstOrder: emptyCell(), lifetime: emptyCell(), cells: options.horizons.map(() => null) };
   for (const [key, people] of groups) {
     const firstOrder = emptyCell();
     const lifetime = emptyCell();
@@ -149,21 +154,22 @@ export function buildLtvReport(orders: LtvOrder[], options: LtvOptions): LtvRepo
         const returned = inPeriod.some((o) => o.id !== firstIncluded.id);
         const cell = { customers: 1, orders: inPeriod.length, revenue: inPeriod.reduce((s, o) => s + revenue(o), 0), returningCustomers: returned ? 1 : 0 };
         addCell(cells[i], cell);
-        // Overall values use each customer's available history. Changing how rows are grouped
-        // must not drop eligible customers because a newer customer shares their week/year.
-        if (cutoff <= options.asOf.getTime()) {
-          summary.cells[i] ??= emptyCell();
-          addCell(summary.cells[i]!, cell);
-        }
       });
     }
+    // A cell is shown only once the whole cohort has reached that age.
     cohorts.push({ key, customers: people.length, firstOrder, lifetime, cells: cells.map((cell, i) => latestFirst + options.horizons[i] * DAY <= options.asOf.getTime() ? cell : null) });
   }
   cohorts.sort((a, b) => b.key.localeCompare(a.key));
+  const summary: LtvCohort = { key: "All customers", customers: 0, firstOrder: emptyCell(), lifetime: emptyCell(), cells: options.horizons.map(() => null) };
   for (const cohort of cohorts) {
     summary.customers += cohort.customers;
     addCell(summary.firstOrder, cohort.firstOrder);
     addCell(summary.lifetime, cohort.lifetime);
+    cohort.cells.forEach((cell, i) => {
+      if (!cell) return;
+      summary.cells[i] ??= emptyCell();
+      addCell(summary.cells[i]!, cell);
+    });
   }
   return { cohorts, summary, missingCustomers, excludedCurrency };
 }

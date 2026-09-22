@@ -43,7 +43,8 @@ test("excluded orders have no effect on any report value, cohort date or maturit
     assert.equal(baseline.cohorts[0].key, "2025-03-01");
     assert.equal(baseline.summary.customers, 2);
     assert.equal(baseline.cohorts[0].cells[0], null);
-    assert.equal(baseline.summary.cells[0]?.customers, 1);
+    // The All customers row is the rows below it: a cohort not yet at this age contributes nothing.
+    assert.equal(baseline.summary.cells[0], null);
     assert.deepEqual(buildLtvReport([...included, ...ignored], view), baseline);
   }
 });
@@ -95,12 +96,14 @@ test("refunded paid purchases retain their original cohort", () => {
   const r = buildLtvReport([refunded, order("r2", "b", "2025-02-01", 20)], options);
   assert.equal(r.cohorts[0].key, "2025-01-01"); assert.equal(r.summary.lifetime.orders, 2); assert.equal(r.summary.lifetime.revenue, 20);
 });
-test("row maturity waits for every customer while summaries include each eligible customer", () => {
+test("row maturity waits for every customer, and the All customers row follows the completed rows", () => {
   const r = buildLtvReport([order("1", "a", "2025-01-01", 100), order("2", "b", "2025-02-01", 20), order("3", "c", "2025-02-02", 20), order("4", "d", "2025-02-28", 20)], { ...options, asOf: at("2025-03-15") });
-  assert.equal(r.cohorts[0].cells[0], null); assert.equal(r.summary.cells[0]?.customers, 3); assert.equal(ltvValue(r.summary.cells[0], "ltv"), 140 / 3);
+  // February's youngest customer is 15 days old: the February row has no Day 30 yet, so only
+  // January (1 customer at 100) feeds the All customers Day 30 cell.
+  assert.equal(r.cohorts[0].cells[0], null); assert.equal(r.summary.cells[0]?.customers, 1); assert.equal(ltvValue(r.summary.cells[0], "ltv"), 100);
   assert.equal(ltvValue(r.summary.firstOrder, "ltv"), 40); assert.equal(r.summary.cells[2], null);
 });
-test("grouping changes cohort rows without changing overall customer values", () => {
+test("grouping changes cohort rows; first order and Lifetime never change, age cells follow the completed rows", () => {
   const orders = [
     order("a1", "a", "2025-01-05", 100), order("a2", "a", "2025-01-20", 50),
     order("b1", "b", "2025-02-02", 20), order("b2", "b", "2025-03-10", 10),
@@ -111,16 +114,23 @@ test("grouping changes cohort rows without changing overall customer values", ()
     const monthly = buildLtvReport(orders, view);
     for (const interval of ["week", "month", "quarter", "year"] as const) {
       const grouped = buildLtvReport(orders, { ...view, interval });
-      assert.deepEqual(grouped.summary, monthly.summary);
+      assert.deepEqual(grouped.summary.firstOrder, monthly.summary.firstOrder);
+      assert.deepEqual(grouped.summary.lifetime, monthly.summary.lifetime);
+      assert.equal(grouped.summary.customers, monthly.summary.customers);
+      // An age cell of the All customers row sums the rows whose cell is complete, so a wider
+      // grouping (a quarter holding a younger customer) can hold that cell back — never overstate it.
+      grouped.summary.cells.forEach((cell, i) => { if (cell) assert.ok(cell.customers <= (monthly.summary.cells[i]?.customers ?? Infinity)); });
       assert.equal(grouped.cohorts.reduce((sum, c) => sum + c.customers, 0), 3);
     }
     const quarterly = buildLtvReport(orders, { ...view, interval: "quarter" });
     assert.deepEqual(quarterly.cohorts.map((c) => [c.key, c.customers]), [["2025-04-01", 1], ["2025-01-01", 2]]);
     const yearly = buildLtvReport(orders, { ...view, interval: "year" });
     assert.equal(yearly.cohorts.length, 1);
+    // The single yearly row holds a 15-day-old customer, so it has no Day 30 — and neither does
+    // the All customers row above it: it only ever adds up the rows below.
     assert.equal(yearly.cohorts[0].cells[0], null);
-    assert.equal(yearly.summary.cells[0]?.customers, 2);
-    assert.equal(ltvValue(yearly.summary.cells[0], "ltv"), 85);
+    assert.equal(yearly.summary.cells[0], null);
+    assert.equal(ltvValue(yearly.summary.lifetime, "ltv"), ltvValue(monthly.summary.lifetime, "ltv"));
   }
 });
 test("quarter, year and week boundaries group acquisition in the Shopify timezone", () => {
@@ -192,3 +202,24 @@ test("unenriched and malformed money is missing, never a fake zero", () => {
   // Reject the previous shipping-excluded facts, rather than silently reuse them.
   assert.equal(readLtvFacts({ version: 1, shop: "example.myshopify.com", channelKey: "web", channelLabel: "Online Store", test: false, netRevenue: 80, totalRevenue: 97, originalTotal: 97 }), null);
 });
+test("the All customers row is a customer-weighted sum of the completed cohort cells, and Lifetime is never below a row's last completed age", () => {
+  const orders = [
+    order("a1", "a", "2025-01-10", 100), order("a2", "a", "2025-03-01", 50),   // January customer, repeat on day 50
+    order("b1", "b", "2025-01-20", 20),                                          // January customer
+    order("c1", "c", "2025-03-05", 60), order("c2", "c", "2025-03-25", 30),      // March customer, repeat on day 20
+  ];
+  const r = buildLtvReport(orders, { ...options, from: "2025-01-01", to: "2025-12-31", asOf: at("2025-04-10"), horizons: [30, 60] });
+  const jan = r.cohorts.find((c) => c.key === "2025-01-01")!;
+  const mar = r.cohorts.find((c) => c.key === "2025-03-01")!;
+  assert.equal(ltvValue(jan.cells[0], "ltv"), 60);   // (100 + 20) / 2: nothing within 30 days
+  assert.equal(ltvValue(jan.cells[1], "ltv"), 85);   // (150 + 20) / 2
+  assert.equal(ltvValue(jan.lifetime, "ltv"), 85);   // = the last completed age: nothing after day 60
+  assert.equal(ltvValue(mar.cells[0], "ltv"), 90);   // 60 + 30 within 30 days (the cohort is 36 days old)
+  assert.equal(mar.cells[1], null);                  // not 60 days old yet
+  assert.equal(ltvValue(mar.lifetime, "ltv"), 90);
+  // Day 30 = January (2 customers at 60) + March (1 at 90) = 210 / 3; Day 60 = January only = 85
+  assert.equal(r.summary.cells[0]?.customers, 3); assert.equal(ltvValue(r.summary.cells[0], "ltv"), 70);
+  assert.equal(r.summary.cells[1]?.customers, 2); assert.equal(ltvValue(r.summary.cells[1], "ltv"), 85);
+  assert.equal(ltvValue(r.summary.lifetime, "ltv"), (150 + 20 + 90) / 3);
+});
+
