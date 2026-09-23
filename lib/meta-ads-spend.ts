@@ -5,12 +5,13 @@ import { getCurrentOrgId } from "@/lib/tenant";
 import { getCurrentOrg } from "@/lib/org";
 import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
 import { fxRate } from "@/lib/fx";
-import { metaHub, metaGraph, getMetaAccessToken, getMetaAccountToken, describeAdAccount, isMetaAuthError } from "@/lib/meta-ads";
+import { metaHub, metaGraph, getMetaAccessToken, getMetaAccountToken, describeAdAccount, isMetaAuthError, metaAdsChannelFor } from "@/lib/meta-ads";
 import { zonedDayStart } from "@/lib/pnl";
 
 /**
  * Daily Meta ad spend → one ledger row per ad account per day under the P&L's Advertising bucket,
- * on the channel the connection counts against. Every linked ad account is read on its own, with
+ * on the P&L channel the spend counts against (lib/meta-ads `metaAdsChannelFor`: the company's
+ * Shopify store whenever one is connected). Every linked ad account is read on its own, with
  * its own token, calendar and marker: the Insights API answers synchronously, a day per row; the
  * first pull reaches back two years (as far as the sales history goes), later passes re-read the
  * last few days because Meta finalises spend late.
@@ -55,7 +56,7 @@ async function adoptLegacyAccount(hub: Hub): Promise<Account | null> {
   });
 }
 
-async function readAccount(hub: Hub, a: Account, orgId: string, baseCurrency: string): Promise<{ rows: number; since: Date; through: string }> {
+async function readAccount(hub: Hub, a: Account, orgId: string, baseCurrency: string, channel: string): Promise<{ rows: number; since: Date; through: string }> {
   const token = await getMetaAccountToken(a);
   if (a.name === a.accountId) {
     // Adopted without its details (Meta refused them at the time) — fill the card in when it answers.
@@ -105,7 +106,7 @@ async function readAccount(hub: Hub, a: Account, orgId: string, baseCurrency: st
       const at = zonedDayStart(r.date_start, tz);
       const amount = -Math.round(spend * 100) / 100;
       const fx = currency === baseCurrency ? 1 : await fxRate(currency, baseCurrency, at);
-      created.push({ channel: hub.adsChannel ?? "SHOPIFY", postedAt: at, eventAt: at, group: "advertising", type: "Meta ads", amount, currency, baseAmount: Math.round(amount * fx * 100) / 100, txId: `meta:${a.accountId}:${r.date_start}`, status: "released" });
+      created.push({ channel, postedAt: at, eventAt: at, group: "advertising", type: "Meta ads", amount, currency, baseAmount: Math.round(amount * fx * 100) / 100, txId: `meta:${a.accountId}:${r.date_start}`, status: "released" });
     }
     await prisma.$transaction([
       prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`finance:${orgId}`}))`,
@@ -134,13 +135,25 @@ export async function importMetaAdsSpend(): Promise<{ rows: number; accounts: nu
   }
   const baseCurrency = (await getCurrentOrg())?.currencyCode ?? "USD";
   const orgId = (await getCurrentOrgId()) ?? "";
+  // The channel the spend counts against is decided now, not at connect: a store connected since
+  // takes it over, and every day already on the books moves with it (the P&L snapshot follows,
+  // its fingerprint covers these rows and the hub).
+  const channel = await metaAdsChannelFor(orgId);
+  if (channel !== hub.adsChannel) {
+    await prisma.$transaction([
+      prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`finance:${orgId}`}))`,
+      prisma.$executeRaw`UPDATE "FinanceEvent" SET channel = ${channel} WHERE "orgId" = ${orgId} AND "txId" LIKE 'meta:%' AND channel <> ${channel}`,
+    ]);
+    await prismaBase.integration.update({ where: { id: hub.id }, data: { adsChannel: channel } });
+    console.log(`[meta ads] spend now counts against ${channel} for ${orgId}`);
+  }
   let rows = 0;
   let since: Date | null = null;
   let through: string | null = null;
 
   for (const a of accounts) {
     try {
-      const r = await readAccount(hub, a, orgId, baseCurrency);
+      const r = await readAccount(hub, a, orgId, baseCurrency, channel);
       rows += r.rows;
       if (!since || r.since < since) since = r.since;
       if (!through || r.through > through) through = r.through;

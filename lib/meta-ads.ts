@@ -19,8 +19,11 @@ export { makeState, verifyState };
  * Meta's own dialog is where the person ticks the ad accounts to share — each one becomes a
  * `MetaAdAccount` row with that token; the `meta_ads` Integration row is the hub (channel, status).
  *
- * Meta ads aren't a sales channel of their own, so the spend counts against the P&L channel the
- * connection names (`adsChannel`, Shopify by default when it is connected).
+ * Meta ads aren't a sales channel of their own, so the spend counts against a P&L channel:
+ * the company's Shopify store whenever one is connected (Meta ads send buyers to the store),
+ * else Amazon, else TikTok. It is decided again on every import pass, never frozen at connect:
+ * a store connected later takes the spend over, days already on the books included. The hub
+ * row's `adsChannel` records the current choice (`metaAdsChannelFor`).
  */
 
 export const META_GRAPH_VERSION = "v21.0";
@@ -168,6 +171,17 @@ const accountData = (a: MetaAdAccount) => ({
 });
 
 /**
+ * The P&L channel Meta spend counts against: Shopify whenever the company has a store connected
+ * (a store in "error" is still its store; a disconnected one isn't), else Amazon, else TikTok. A
+ * company with no channel yet gets Shopify, the one Meta ads most often sell for.
+ */
+export async function metaAdsChannelFor(orgId: string): Promise<"SHOPIFY" | "AMAZON" | "TIKTOK"> {
+  const live = await prismaBase.integration.findMany({ where: { orgId, provider: { in: ["shopify", "amazon", "tiktok"] }, status: { in: ["connected", "error"] } }, select: { provider: true } });
+  const has = (provider: string) => live.some((c) => c.provider === provider);
+  return has("shopify") ? "SHOPIFY" : has("amazon") ? "AMAZON" : has("tiktok") ? "TIKTOK" : "SHOPIFY";
+}
+
+/**
  * Finish a connection pass: prove the token, record every ad account it grants, keep the hub row.
  * A pass replaces the selection for the portfolios it covers (an account unticked this time drops
  * off together with its spend rows); accounts linked from other portfolios in earlier passes stay.
@@ -175,10 +189,7 @@ const accountData = (a: MetaAdAccount) => ({
 export async function completeMetaAdsConnection(orgId: string, token: Token): Promise<{ accounts: number }> {
   const accounts = await listMetaAdAccounts(token.access_token);
   if (!accounts.length) throw new Error("No ad account was shared. In Meta's dialog, tick at least one ad account for consl.");
-  const [shopify, existing] = await Promise.all([
-    prismaBase.integration.findFirst({ where: { orgId, provider: "shopify", status: "connected" }, select: { id: true } }),
-    prismaBase.integration.findFirst({ where: { orgId, provider: "meta_ads" }, select: { adsChannel: true } }),
-  ]);
+  const adsChannel = await metaAdsChannelFor(orgId);
   const enc = encryptSecret(token.access_token);
   const expiresAt = token.expires_in ? new Date(Date.now() + token.expires_in * 1000) : null;
   const first = accounts[0];
@@ -192,7 +203,7 @@ export async function completeMetaAdsConnection(orgId: string, token: Token): Pr
     region: null,
     scope: SCOPE,
     timezone: first.timezone_name ?? null,
-    adsChannel: existing?.adsChannel ?? (shopify ? "SHOPIFY" : "AMAZON"),
+    adsChannel,
     connectedAt: new Date(),
     lastError: null,
   };
