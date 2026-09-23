@@ -433,13 +433,30 @@ export function OrdersClient({
     });
   const dialogOrder = dialog ? orders.rows.find((r) => r.id === dialog.id) ?? null : null;
 
+  // Every filter or page change stays on screen while the new results load: no loading skeleton,
+  // no jump to the top — the chart and table dim until the results land.
+  const [navPending, startNav] = useTransition();
+  const go = (url: string) => startNav(() => router.push(url, { scroll: false }));
+
+  // A new page of results brings the table's top into view when it had scrolled past it (paging
+  // from the bottom of a long table); a filter change leaves the scroll where it is.
+  const tableTop = useRef<HTMLDivElement>(null);
+  const shownPage = useRef(orders.page);
+  useEffect(() => {
+    if (shownPage.current === orders.page) return;
+    shownPage.current = orders.page;
+    const el = tableTop.current;
+    // Smooth when the tab is on screen; a background tab doesn't animate, so it just jumps.
+    if (el && el.getBoundingClientRect().top < 0) el.scrollIntoView({ behavior: document.visibilityState === "visible" ? "smooth" : "auto", block: "start" });
+  }, [orders.page]);
+
   /** Update one query param and reset to page 1 (a new filter restarts the walk). */
   function setParam(key: string, value: string) {
     const q = new URLSearchParams(params.toString());
     if (value) q.set(key, value);
     else q.delete(key);
     q.delete("page");
-    router.push(`${pathname}?${q.toString()}`);
+    go(`${pathname}?${q.toString()}`);
   }
 
   /** The time window: a preset key, plus concrete from/to only when custom. */
@@ -455,13 +472,13 @@ export function OrdersClient({
       q.delete("to");
     }
     q.delete("page");
-    router.push(`${pathname}?${q.toString()}`);
+    go(`${pathname}?${q.toString()}`);
   }
 
   function goToPage(p: number) {
     const q = new URLSearchParams(params.toString());
     q.set("page", String(p));
-    router.push(`${pathname}?${q.toString()}`);
+    go(`${pathname}?${q.toString()}`);
   }
 
   const filtering = !!(filter.channel || filter.source || filter.fulfilledAt || filter.tag || filter.range.key !== "all" || filter.q);
@@ -514,7 +531,9 @@ export function OrdersClient({
           </div>
       </PageHeader>
     <div className="flex flex-col gap-5">
-      <OrdersChart chart={chart} range={filter.range} />
+      <div aria-busy={navPending} className={`transition-opacity duration-150 ${navPending ? "opacity-60" : ""}`}>
+        <OrdersChart chart={chart} range={filter.range} />
+      </div>
 
       {/* Filters: the one-of pickers on one row, the search on its own row under them. */}
       <div className="flex flex-col gap-2">
@@ -593,7 +612,7 @@ export function OrdersClient({
                 type="button"
                 onClick={() => {
                   setSearch("");
-                  router.push(pathname);
+                  go(pathname);
                 }}
                 className="inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg bg-accent-strong px-3 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90"
               >
@@ -609,6 +628,7 @@ export function OrdersClient({
       {selectedIds.length > 0 && <BulkBar ids={selectedIds} facilities={fees.facilities} onClear={() => setSelected(new Set())} />}
 
       {/* Orders table */}
+      <div ref={tableTop} aria-busy={navPending} className={`scroll-mt-4 transition-opacity duration-150 ${navPending ? "pointer-events-none opacity-60" : ""}`}>
       {orders.rows.length === 0 ? (
         <div className="rounded-[var(--radius-card)] border border-dashed border-border bg-surface-2/40 px-6 py-10 text-center">
           <div className="text-[14px] font-semibold text-ink">No orders found</div>
@@ -798,6 +818,7 @@ export function OrdersClient({
           </div>
         </div>
       )}
+      </div>
 
       {dialogOrder && dialog && <OrderDialog order={dialogOrder} mode={dialog.mode} facilities={fees.facilities} onClose={() => setDialog(null)} />}
     </div>

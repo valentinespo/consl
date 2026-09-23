@@ -126,7 +126,7 @@ export function OrdersChart({ chart, range }: { chart: Chart; range: Range }) {
       })()
     );
 
-  // Channel split: shares of the chosen count; a sliver stays visible however small.
+  // Channel split: shares of the chosen count; a small channel keeps a readable minimum width.
   const segs = chart.channels
     .map((c) => ({ ...c, value: c[metric], share: total > 0 ? c[metric] / total : 0, color: CHANNEL_SHADE[c.channel] ?? "var(--color-chart)" }))
     .filter((c) => c.value > 0)
@@ -275,14 +275,12 @@ export function OrdersChart({ chart, range }: { chart: Chart; range: Range }) {
           <>
             <div className="mt-8 flex gap-1.5">
               {segs.map((s) => (
-                <div key={s.channel} className="min-w-[22px]" style={{ flex: `${s.share} 1 0%` }}>
+                <div key={s.channel} className="min-w-[34px]" style={{ flex: `${s.share} 1 0%` }}>
+                  {/* Every segment carries its share and tick; the minimum width keeps a small
+                      channel's label clear of its neighbour's. */}
                   <div className="h-10">
-                    {s.share >= 0.14 && (
-                      <>
-                        <span className="block text-[12.5px] tabular text-muted">{share(s.share)}</span>
-                        <span className="mt-1.5 block h-3.5 w-px bg-ink/20" />
-                      </>
-                    )}
+                    <span className="block whitespace-nowrap text-[12px] tabular text-muted">{share(s.share)}</span>
+                    <span className="mt-1.5 block h-3.5 w-px bg-ink/20" />
                   </div>
                   <div className="h-3.5 rounded-full" style={{ background: s.color }} />
                 </div>
