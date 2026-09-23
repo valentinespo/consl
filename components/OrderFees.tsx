@@ -85,7 +85,8 @@ function FeeFields({ draft, onChange }: { draft: FeeDraft; onChange: (d: FeeDraf
           {draft.kind === "percent" && <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[12px] text-muted">%</span>}
         </div>
       </div>
-      <div className="grid gap-2 sm:grid-cols-2">
+      {/* The bucket takes the whole row; a percentage's flat amount on top shares it. */}
+      <div className={`grid gap-2 ${draft.kind === "percent" ? "sm:grid-cols-2" : ""}`}>
         <SelectMenu
           value={draft.bucket}
           onChange={(v) => onChange({ ...draft, bucket: v as Bucket })}

@@ -4,7 +4,7 @@ import Image from "next/image";
 import { Fragment, type ReactNode, useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { AlertTriangle, Building2, ChevronDown, ChevronRight, DotsVertical, Layers, Search, Settings, Tag, WarehouseFilled } from "@/components/icons";
+import { AlertTriangle, Building2, ChevronDown, ChevronRight, DotsVertical, Layers, Search, Settings, Tag, WarehouseFilled, X } from "@/components/icons";
 import { SkuAvatar } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
 import { setOrderVoided } from "@/app/(app)/orders/actions";
@@ -500,6 +500,19 @@ export function OrdersClient({
               {unplaced.toLocaleString()} {unplaced === 1 ? "order has" : "orders have"} no facility · click to fix
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setRulesOpen((o) => !o)}
+            aria-pressed={rulesOpen}
+            title="Automatic rules: fees added and orders voided when they match"
+            className={`inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[12.5px] font-medium transition-colors ${
+              rulesOpen ? "bg-surface-2 text-ink" : "bg-surface text-ink-soft hover:text-ink"
+            }`}
+          >
+            <Settings size={15} />
+            Automatic rules
+            {fees.rules.length > 0 && <span className="pill-neutral inline-flex items-center rounded-full border px-1.5 py-px text-[10.5px] font-medium">{fees.rules.length}</span>}
+          </button>
         </div>
       </div>
 
@@ -563,44 +576,51 @@ export function OrdersClient({
               onChange={(v) => setParam("tag", v)}
             />
           )}
-          {filtering && (
-            <button
-              onClick={() => router.push(pathname)}
-              className="text-[12.5px] font-medium text-muted underline-offset-2 hover:text-ink-soft hover:underline"
-            >
-              Clear
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setRulesOpen((o) => !o)}
-            aria-pressed={rulesOpen}
-            title="Automatic rules: fees added and orders voided when they match"
-            className={`ml-auto inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[12.5px] font-medium transition-colors ${
-              rulesOpen ? "bg-surface-2 text-ink" : "bg-surface text-ink-soft hover:text-ink"
+        </div>
+        {/* The search, and — while any filter is on — a Clear button that eases in beside it (the
+            search gives way as it grows) and eases back out once everything is cleared. It stays
+            mounted so both directions animate; hidden, it is inert and out of the tab order. */}
+        <div className="flex items-center">
+          <form
+            className="relative min-w-0 flex-1"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setParam("q", search.trim());
+            }}
+          >
+            <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onBlur={() => search.trim() !== filter.q && setParam("q", search.trim())}
+              placeholder="Search anything — order #, SKU, amount, mcf, pending…"
+              className={`${inputCls} pl-8`}
+            />
+          </form>
+          {/* Width eases from nothing to exactly the button's own width: a one-column grid whose
+              column animates 0fr → 1fr (the inner box clips while it is narrower). */}
+          <div
+            aria-hidden={!filtering}
+            inert={!filtering}
+            className={`grid shrink-0 transition-[grid-template-columns,margin,opacity] duration-300 ease-in-out motion-reduce:transition-none ${
+              filtering ? "ml-2 grid-cols-[1fr] opacity-100" : "ml-0 grid-cols-[0fr] opacity-0"
             }`}
           >
-            <Settings size={15} />
-            Automatic rules
-            {fees.rules.length > 0 && <span className="pill-neutral inline-flex items-center rounded-full border px-1.5 py-px text-[10.5px] font-medium">{fees.rules.length}</span>}
-          </button>
+            <div className="min-w-0 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch("");
+                  router.push(pathname);
+                }}
+                className="inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg bg-accent-strong px-3 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90"
+              >
+                <X size={13} />
+                Clear filters
+              </button>
+            </div>
+          </div>
         </div>
-        <form
-          className="relative w-full"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setParam("q", search.trim());
-          }}
-        >
-          <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onBlur={() => search.trim() !== filter.q && setParam("q", search.trim())}
-            placeholder="Search anything — order #, SKU, amount, mcf, pending…"
-            className={`${inputCls} pl-8`}
-          />
-        </form>
       </div>
 
       {rulesOpen && <RulesDialog options={fees} onClose={() => setRulesOpen(false)} />}
@@ -732,25 +752,22 @@ export function OrdersClient({
                     <td className="px-4 py-2.5">{st ? <span className={`${PILL} ${st.cls}`}>{st.label}</span> : <span className="text-muted">—</span>}</td>
                     <td className="px-4 py-2.5 text-right tabular text-ink-soft">{o.units.toLocaleString()}</td>
                     <td className="px-4 py-2.5 text-right tabular text-ink-soft">
-                      {money(o.total)}
-                      {o.fees.length > 0 && (
-                        <HoverHint
-                          title="Custom fees"
-                          body={o.fees.map((f) => `${f.name}: ${money(f.amount)}`).join(" · ")}
-                          className="block"
-                        >
-                          <span className="block text-[11px] text-muted">−{money(o.feeTotal)} fees</span>
-                        </HoverHint>
-                      )}
-                      {o.credits.length > 0 && (
-                        <HoverHint
-                          title="Credits"
-                          body={o.credits.map((c) => `${c.name}: +${money(c.amount)}`).join(" · ")}
-                          className="block"
-                        >
-                          <span className="block text-[11px] text-positive">+{money(o.creditTotal)} credits</span>
-                        </HoverHint>
-                      )}
+                      {/* The total, then what consl adds to it — each on its own line, whatever the
+                          column's width (the hint's trigger is inline, so a column wrap alone
+                          would leave a short "fees" line sitting beside the total). */}
+                      <div className="flex flex-col items-end">
+                        <span className="whitespace-nowrap">{money(o.total)}</span>
+                        {o.fees.length > 0 && (
+                          <HoverHint title="Custom fees" body={o.fees.map((f) => `${f.name}: ${money(f.amount)}`).join(" · ")}>
+                            <span className="whitespace-nowrap text-[11px] text-muted">−{money(o.feeTotal)} fees</span>
+                          </HoverHint>
+                        )}
+                        {o.credits.length > 0 && (
+                          <HoverHint title="Credits" body={o.credits.map((c) => `${c.name}: +${money(c.amount)}`).join(" · ")}>
+                            <span className="whitespace-nowrap text-[11px] text-positive">+{money(o.creditTotal)} credits</span>
+                          </HoverHint>
+                        )}
+                      </div>
                     </td>
                     <td className="px-2 py-2.5 text-right">
                       <RowMenu id={o.id} voided={o.voided} onManage={(mode) => setDialog({ id: o.id, mode })} />
