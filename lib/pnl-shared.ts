@@ -71,6 +71,9 @@ export type PnlDay = {
   ign?: [string[], number, number];
   /** Revenue from orders the channel hasn't posted the money for yet (already in `rows`). */
   pend?: number;
+  /** Ledger money of this day that the statement neither counted nor named a reason for leaving
+   *  out. Never expected: the page shows it and the build logs it when it isn't zero. */
+  gap?: number;
 };
 
 /**
@@ -125,6 +128,10 @@ export type Pnl = {
   unreported: { units: number; cogs: number };
   /** Listings sold on a channel that the company doesn't manage in consl — left out entirely. */
   ignored: { skus: string[]; units: number; sales: number };
+  /** Ledger money in the window on no line of the statement and with no rule naming why (a
+   *  listing not managed, a duplicate of another channel's order, an ad row the invoice fill
+   *  replaces). Zero unless the statement's rules drifted; the page says so when it isn't. */
+  ledgerGap: number;
   /** Kept for callers that only ask yes/no: an Amazon ledger walk is running (`importProgress` says which and how far). */
   backfillInProgress: boolean;
   /** The running Amazon ledger walk: the first history import, or a re-read with a newer importer. Null = none. */

@@ -534,6 +534,12 @@ export function PnlClient({ history, initial }: { history: PnlHistory; initial: 
           {pnl.ignored.skus.length === 1 ? "it" : "them"}.
         </p>
       )}
+      {pnl.ledgerGap !== 0 && (
+        <p className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted">
+          <span className="pill-amber inline-flex items-center rounded-full px-2 py-[3px] text-[11px] font-medium leading-none">Check</span>
+          {money(Math.abs(pnl.ledgerGap))} in your ledger is on no line of this statement and no rule explains why. consl has logged it for review.
+        </p>
+      )}
     </div>
   );
 }

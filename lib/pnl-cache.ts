@@ -55,7 +55,7 @@ export async function pnlFingerprint(orgId: string, tz: string): Promise<string>
   parts.push(`(SELECT count(*)::text || ':' || COALESCE(max(xmin::text::bigint), 0)::text FROM "FxRate") AS fx`);
   parts.push(`(SELECT COALESCE("amazonAdsSince"::text, '') || '|' || COALESCE("amazonAdsSyncedThrough"::text, '') || '|' || COALESCE("amazonAdsCoverage"::text, '') FROM "Settings" WHERE "orgId" = $1 LIMIT 1) AS ads`);
   const [row] = await prismaBase.$queryRawUnsafe<Record<string, string | null>[]>(`SELECT ${parts.join(", ")}`, orgId);
-  return createHash("sha1").update(JSON.stringify({ ...row, tz, v: 4 })).digest("hex");
+  return createHash("sha1").update(JSON.stringify({ ...row, tz, v: 5 })).digest("hex");
 }
 
 type Cached = Pick<PnlHistory, "days" | "lots" | "channels">;

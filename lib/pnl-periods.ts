@@ -125,6 +125,7 @@ class DayFold {
   unmatched = new Set<string>();
   ignored = { skus: new Set<string>(), units: 0, sales: 0 };
   pending = new Map<PnlChannel, number>();
+  gap = 0;
   seen = false;
 
   add(day: PnlDay) {
@@ -158,6 +159,7 @@ class DayFold {
       this.ignored.sales += day.ign[2];
     }
     if (day.pend) this.pending.set(day.c, (this.pending.get(day.c) ?? 0) + day.pend);
+    this.gap += day.gap ?? 0;
   }
 
   statement(): PnlStatement {
@@ -206,6 +208,7 @@ export function foldPnl(history: PnlHistory, from: string, to: string, channels:
     unplaced: fold.unplaced,
     estimated: { units: fold.estimated.units, cogs: fold.estimated.cogs, lots: [...fold.estimated.lots].map((id) => ({ id, label: lotLabel.get(id) ?? id })) },
     ignored: { skus: [...fold.ignored.skus].sort(), units: fold.ignored.units, sales: fold.ignored.sales },
+    ledgerGap: Math.round(fold.gap * 100) / 100,
     backfillInProgress: importProgress !== null,
     importProgress,
     importing,

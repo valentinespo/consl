@@ -478,7 +478,7 @@ async function tiktokPendingBridge(orgId: string, from: Date, to: Date, baseCurr
 
 const EMPTY: Pnl = {
   groups: [], sales: 0, cogs: 0, unitsSold: 0, netProfit: 0, margin: null, roi: null, pending: [],
-  unmatchedSkus: [], preHistoryUnits: 0, overflowUnits: 0, unplaced: { units: 0, cogs: 0 }, mcf: { units: 0, cogs: 0 }, unreported: { units: 0, cogs: 0 }, ignored: { skus: [], units: 0, sales: 0 }, backfillInProgress: false, importProgress: null, importing: [], estimated: { units: 0, cogs: 0, lots: [] }, hasData: false,
+  unmatchedSkus: [], preHistoryUnits: 0, overflowUnits: 0, unplaced: { units: 0, cogs: 0 }, mcf: { units: 0, cogs: 0 }, unreported: { units: 0, cogs: 0 }, ignored: { skus: [], units: 0, sales: 0 }, ledgerGap: 0, backfillInProgress: false, importProgress: null, importing: [], estimated: { units: 0, cogs: 0, lots: [] }, hasData: false,
 };
 
 /**
@@ -558,6 +558,51 @@ async function allSales(
 }
 
 /** The statement for a window, over the given channels (default: every channel with data). */
+/* ------------------------------- Ledger completeness -------------------------------
+ * The statement's ledger query keeps a row out for exactly three reasons: the listing isn't
+ * managed here (Amazon and TikTok rows are scoped by SKU), the order is a duplicate of another
+ * channel's (voided, or a Shopify mirror), or it is an Amazon ad row the invoice fill books
+ * instead. `ledgerBuckets` places EVERY row of the ledger in one of those buckets or in
+ * `counted`, by its own query; `counted` must then equal what the statement summed. When it
+ * doesn't — a filter added to one query and not the other, a row kind nobody foresaw — the
+ * difference is a gap: logged as an invariant failure and shown on the page, never silent. */
+type LedgerBucket = { channel: string; day: string; bucket: "counted" | "unmanaged" | "duplicate" | "ads"; amount: number };
+
+async function ledgerBuckets(
+  orgId: string,
+  channels: string[],
+  window: { from: Date; to: Date },
+  tz: string | null,
+  scope: { amazonSkus: string[]; tiktokSkus: string[]; excludedSources: string[]; adsFill: { active: boolean; excludeIds: string[] } },
+): Promise<LedgerBucket[]> {
+  const { amazonSkus, tiktokSkus, excludedSources, adsFill } = scope;
+  return prisma.$queryRaw<LedgerBucket[]>`
+    SELECT fe.channel,
+      CASE WHEN ${tz !== null} THEN (fe."eventAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz ?? "UTC"})::date::text ELSE '' END AS day,
+      CASE
+        WHEN fe."txId" LIKE 'ads:%' OR fe.id = ANY(${adsFill.excludeIds}::text[])
+          OR (${adsFill.active}::boolean AND fe.channel = 'AMAZON' AND fe.type = 'ProductAdsPayment' AND fe.amount < 0) THEN 'ads'
+        WHEN EXISTS (
+          SELECT 1 FROM "SalesOrder" so
+          WHERE so."orgId" = fe."orgId" AND so.channel = fe.channel AND so."externalId" = fe."orderId"
+            AND (so.voided OR (so.channel = 'SHOPIFY' AND so.source = ANY(${excludedSources}::text[])))) THEN 'duplicate'
+        WHEN fe.sku IS NOT NULL AND (
+          (fe.channel = 'AMAZON' AND NOT (fe.sku = ANY(${amazonSkus}::text[])))
+          OR (fe.channel = 'TIKTOK' AND NOT (fe.sku = ANY(${tiktokSkus}::text[])))) THEN 'unmanaged'
+        ELSE 'counted' END AS bucket,
+      COALESCE(SUM(fe."baseAmount"), 0)::float8 AS amount
+    FROM "FinanceEvent" fe
+    WHERE fe."orgId" = ${orgId} AND fe.channel = ANY(${channels}::text[])
+      AND fe."eventAt" >= ${window.from} AND fe."eventAt" <= ${window.to}
+    GROUP BY 1, 2, 3`;
+}
+
+/** What `counted` holds beyond what the statement summed — zero unless the two rule sets drifted apart. */
+function gapOf(counted: number, summed: number): number {
+  const gap = Math.round((counted - summed) * 100) / 100;
+  return Math.abs(gap) < 0.005 ? 0 : gap;
+}
+
 export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], breakdown?: { ranges: PnlPeriodRange[]; timeZone: string }): Promise<Pnl & { periods: PnlPeriod[] }> {
   const periods = createPnlPeriods(breakdown?.ranges ?? [], breakdown?.timeZone ?? "UTC");
   const orgId = await getCurrentOrgId();
@@ -622,6 +667,11 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
     add(s.group, s.type, s.amount, s.source as PnlSource);
     periods.addAmount(s.day, s.group, s.type, s.amount, s.source as PnlSource);
   }
+  // Completeness: every ledger dollar in the window is on a line above, or in a bucket with a
+  // reason (see ledgerBuckets). The rest is a gap — logged and shown, never silent.
+  const buckets = await ledgerBuckets(orgId, selected, { from, to }, null, { amazonSkus, tiktokSkus, excludedSources, adsFill });
+  const ledgerGap = gapOf(buckets.filter((b) => b.bucket === "counted").reduce((t, b) => t + b.amount, 0), sums.reduce((t, s) => t + s.amount, 0));
+  if (ledgerGap !== 0) console.error(`[pnl] INVARIANT BROKEN for ${orgId}: ${ledgerGap} of ledger money is on no line of the statement (${from.toISOString().slice(0, 10)}..${to.toISOString().slice(0, 10)}, ${selected.join("+")})`);
   // Amazon ad spend: the ad invoices (left out of the sums above), placed day by day along the
   // Ads API's daily spend, plus the spend not invoiced yet — see lib/ads-waterfill.
   if (selectedSet.has("AMAZON")) {
@@ -671,20 +721,6 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
       ignored.sales += r._sum.baseAmount ?? 0;
     }
   }
-  // TikTok's ledger is scoped the same way: settled money under a SKU the company doesn't manage
-  // (or one the importer couldn't name) is left out of the statement, so it must be said here.
-  if (selectedSet.has("TIKTOK")) {
-    const left = await prisma.financeEvent.groupBy({
-      by: ["sku"],
-      where: { channel: "TIKTOK", eventAt: { gte: from, lte: to }, group: "sales", sku: { notIn: tiktokSkus, not: null } },
-      _sum: { quantity: true, baseAmount: true },
-    });
-    for (const r of left) {
-      if (!ignored.skus.includes(r.sku as string)) ignored.skus.push(r.sku as string);
-      ignored.units += r._sum.quantity ?? 0;
-      ignored.sales += r._sum.baseAmount ?? 0;
-    }
-  }
   if (lineChannels.length) {
     const left = await prisma.$queryRaw<{ sku: string | null; units: number; sales: number }[]>`
       SELECT l.sku, SUM(l.quantity)::int AS units, COALESCE(SUM(l.quantity * l."unitPrice"), 0)::float8 AS sales
@@ -697,6 +733,22 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
       if (r.sku && !ignored.skus.includes(r.sku)) ignored.skus.push(r.sku);
       ignored.units += r.units;
       ignored.sales += r.sales;
+    }
+  }
+  // TikTok's ledger is scoped the same way: settled money under a SKU the company doesn't manage
+  // (or one the importer couldn't name) is left out of the statement, so it must be said here.
+  // A listing the order lines above already reported is not counted twice.
+  if (selectedSet.has("TIKTOK")) {
+    const left = await prisma.financeEvent.groupBy({
+      by: ["sku"],
+      where: { channel: "TIKTOK", eventAt: { gte: from, lte: to }, group: "sales", sku: { notIn: tiktokSkus, not: null } },
+      _sum: { quantity: true, baseAmount: true },
+    });
+    for (const r of left) {
+      if (ignored.skus.includes(r.sku as string)) continue;
+      ignored.skus.push(r.sku as string);
+      ignored.units += r._sum.quantity ?? 0;
+      ignored.sales += r._sum.baseAmount ?? 0;
     }
   }
   ignored.skus.sort();
@@ -779,6 +831,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
     mcf: { units: fifo.mcfUnits, cogs: fifo.mcfCogs },
     unreported: { units: fifo.unreportedUnits, cogs: fifo.unreportedCogs },
     ignored,
+    ledgerGap,
     backfillInProgress: importProgress !== null,
     importProgress,
     importing,
@@ -805,6 +858,8 @@ type DayTally = {
   unplaced: { units: number; cogs: number };
   unmatched: Set<string>;
   ignored: { skus: Set<string>; units: number; sales: number };
+  /** Ledger money of the day on no line of the statement and with no reason — see ledgerBuckets. */
+  gap: number;
   pending: number;
 };
 
@@ -883,7 +938,7 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
       t = {
         blocks: new Map(), cogs: 0, units: 0, mcf: { units: 0, cogs: 0 }, unreported: { units: 0, cogs: 0 },
         estimated: { units: 0, cogs: 0, lots: new Set() }, preHistoryUnits: 0, overflowUnits: 0, unplaced: { units: 0, cogs: 0 },
-        unmatched: new Set(), ignored: { skus: new Set(), units: 0, sales: 0 }, pending: 0,
+        unmatched: new Set(), ignored: { skus: new Set(), units: 0, sales: 0 }, pending: 0, gap: 0,
       };
       tallies.set(k, t);
     }
@@ -910,6 +965,25 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
       AND (fe."txId" IS NULL OR fe."txId" NOT LIKE 'ads:%')
     GROUP BY 1, 2, 3, 4, 5`;
   for (const r of sums) addPnlAmount(tally(r.channel as PnlChannel, r.day).blocks, r.group, r.type, r.amount, r.source as PnlSource);
+  // Completeness, per channel and day: every ledger dollar is on a line above, or in a bucket
+  // with a reason (see ledgerBuckets). The rest is a gap on that day — logged and shown.
+  {
+    const key = (channel: string, day: string) => `${channel}|${day}`;
+    const summed = new Map<string, number>();
+    for (const r of sums) summed.set(key(r.channel, r.day), (summed.get(key(r.channel, r.day)) ?? 0) + r.amount);
+    const counted = new Map<string, number>();
+    const buckets = await ledgerBuckets(orgId, selected, { from: new Date(0), to: new Date(Date.now() + 366 * 86_400_000) }, tz, { amazonSkus, tiktokSkus, excludedSources, adsFill });
+    for (const b of buckets) if (b.bucket === "counted") counted.set(key(b.channel, b.day), (counted.get(key(b.channel, b.day)) ?? 0) + b.amount);
+    const broken: string[] = [];
+    for (const k of new Set([...summed.keys(), ...counted.keys()])) {
+      const gap = gapOf(counted.get(k) ?? 0, summed.get(k) ?? 0);
+      if (gap === 0) continue;
+      const [channel, day] = k.split("|") as [PnlChannel, string];
+      tally(channel, day).gap += gap;
+      broken.push(`${channel} ${day} ${gap}`);
+    }
+    if (broken.length) console.error(`[pnl] INVARIANT BROKEN for ${orgId}: ledger money on no line of the statement — ${broken.slice(0, 8).join(", ")}${broken.length > 8 ? ` (+${broken.length - 8} more days)` : ""}`);
+  }
   // Amazon ad spend, placed day by day (the invoices themselves are left out of the sums above).
   if (selected.includes("AMAZON")) {
     for (const r of adsFill.rows) {
@@ -948,21 +1022,7 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
       t.ignored.sales += r.sales;
     }
   }
-  if (selected.includes("TIKTOK")) {
-    const left = await prisma.$queryRaw<{ sku: string; day: string; units: number; sales: number }[]>`
-      SELECT fe.sku, (fe."eventAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::date::text AS day,
-        COALESCE(SUM(fe.quantity), 0)::int AS units, COALESCE(SUM(fe."baseAmount"), 0)::float8 AS sales
-      FROM "FinanceEvent" fe
-      WHERE fe."orgId" = ${orgId} AND fe.channel = 'TIKTOK' AND fe."group" = 'sales'
-        AND fe.sku IS NOT NULL AND NOT (fe.sku = ANY(${tiktokSkus}::text[]))
-      GROUP BY 1, 2`;
-    for (const r of left) {
-      const t = tally("TIKTOK", r.day);
-      t.ignored.skus.add(r.sku);
-      t.ignored.units += r.units;
-      t.ignored.sales += r.sales;
-    }
-  }
+  const reportedByOrders = new Set<string>();
   if (lineChannels.length) {
     const left = await prisma.$queryRaw<{ channel: string; sku: string | null; day: string; units: number; sales: number }[]>`
       SELECT o.channel, l.sku, (o."orderedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::date::text AS day,
@@ -975,6 +1035,26 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
     for (const r of left) {
       const t = tally(r.channel as PnlChannel, r.day);
       if (r.sku) t.ignored.skus.add(r.sku);
+      if (r.sku && r.channel === "TIKTOK") reportedByOrders.add(r.sku);
+      t.ignored.units += r.units;
+      t.ignored.sales += r.sales;
+    }
+  }
+  // TikTok's settled money under a SKU the company doesn't manage (or one the importer couldn't
+  // name) is left out of the statement too; a listing the order lines already reported is not
+  // counted twice.
+  if (selected.includes("TIKTOK")) {
+    const left = await prisma.$queryRaw<{ sku: string; day: string; units: number; sales: number }[]>`
+      SELECT fe.sku, (fe."eventAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::date::text AS day,
+        COALESCE(SUM(fe.quantity), 0)::int AS units, COALESCE(SUM(fe."baseAmount"), 0)::float8 AS sales
+      FROM "FinanceEvent" fe
+      WHERE fe."orgId" = ${orgId} AND fe.channel = 'TIKTOK' AND fe."group" = 'sales'
+        AND fe.sku IS NOT NULL AND NOT (fe.sku = ANY(${tiktokSkus}::text[]))
+      GROUP BY 1, 2`;
+    for (const r of left) {
+      if (reportedByOrders.has(r.sku)) continue;
+      const t = tally("TIKTOK", r.day);
+      t.ignored.skus.add(r.sku);
       t.ignored.units += r.units;
       t.ignored.sales += r.sales;
     }
@@ -1043,7 +1123,8 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
     if (t.unmatched.size) day.unm = [...t.unmatched].sort();
     if (t.ignored.units || t.ignored.skus.size) day.ign = [[...t.ignored.skus].sort(), t.ignored.units, t.ignored.sales];
     if (t.pending) day.pend = t.pending;
-    if (rows.length || day.units || day.cogs || day.ign || day.pend) days.push(day);
+    if (t.gap) day.gap = Math.round(t.gap * 100) / 100;
+    if (rows.length || day.units || day.cogs || day.ign || day.pend || day.gap) days.push(day);
   }
   days.sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : a.c < b.c ? -1 : a.c > b.c ? 1 : 0));
 
