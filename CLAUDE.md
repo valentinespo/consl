@@ -2,7 +2,7 @@
 
 # consl
 
-> **Brand: consl** (lowercase), domain **consl.ai**. The C-mark is `public/brand/consl-mark.png` (pure black artwork — add `iso-invert` to flip white on dark chrome), shown in `AppHeader`. Favicon is theme-adaptive: `app/icon.svg` inverts black↔white by browser-tab theme via a `prefers-color-scheme` media query (with `icon.png`/`favicon.ico`/`apple-icon.png` fallbacks). GitHub repo is `valentinespo/consl`; Railway project still `herbl-ops-v2` (cosmetic rename pending, tracks by ID).
+> **Brand: consl** (lowercase), domain **consl.ai**. The C-mark is `public/brand/consl-mark.png` (pure black artwork — add `iso-invert` to flip white on dark chrome), shown in `AppHeader`. Favicon is theme-adaptive: `app/icon.svg` inverts black↔white by browser-tab theme via a `prefers-color-scheme` media query (with `icon.png`/`favicon.ico`/`apple-icon.png` fallbacks). GitHub repo is `valentinespo/consl`; Railway project `Consl.ai` (renamed 2026-09-23, was `herbl-ops-v2`; the CLI links by ID, so the name never matters).
 
 A multi-tenant **inventory, production & cost-accounting web app for ecommerce operators** — businesses that manufacture or assemble physical goods and sell them on Amazon (and, soon, Shopify + TikTok Shop). Its differentiator is **true landed cost per unit**: a FIFO costing engine that turns raw-material purchases and per-lot expenses into an accurate cost-of-goods for every finished unit, then layers restock/reorder recommendations and channel inventory on top. It began as an internal tool for one brand (Herbl) and is being generalized into a SaaS where each company is a tenant; **build every change tenant-agnostic** — no hardcoded product names, material codes, or brand assets.
 
@@ -52,7 +52,7 @@ Efferd-inspired, one **violet** accent. Never hardcode a hex where a token exist
 
 ## Deploy & verify
 
-- **Railway production only** (confirmed 2026-09-16): project "Ecom Inventory Management", service
+- **Railway production only** (confirmed 2026-09-16): project "Consl.ai" (id 9e714502-d3aa-4a4e-8da6-0cf6840a71ef), service
   `web`, environment `production`, branch `v2` → **consl.ai**. There is no staging web instance;
   verify locally, then push `origin v2` to deploy when authorized. `start` runs
   `prisma migrate deploy && next start`. A staging database still exists for local development;
