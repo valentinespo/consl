@@ -24,7 +24,13 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const isKey = (v: string | undefined): v is RangeKey => !!v && RANGES.some((r) => r.key === v);
   const rangeKey: RangeKey = isKey(str(sp.range)) ? (str(sp.range) as RangeKey) : "all";
   const newest = new Date().toISOString().slice(0, 10);
-  const oldestRow = await prisma.salesOrder.findFirst({ orderBy: { orderedAt: "asc" }, select: { orderedAt: true } });
+  const [oldestRow, conns] = await Promise.all([
+    prisma.salesOrder.findFirst({ orderBy: { orderedAt: "asc" }, select: { orderedAt: true } }),
+    prisma.integration.findMany({
+      where: { status: "connected", provider: { in: ["amazon", "shopify", "tiktok"] } },
+      select: { provider: true },
+    }),
+  ]);
   const oldest = (oldestRow?.orderedAt ?? new Date()).toISOString().slice(0, 10);
   const b = rangeBounds(rangeKey, newest, str(sp.from), str(sp.to));
 
@@ -38,10 +44,6 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     source: str(sp.source),
   };
 
-  const conns = await prisma.integration.findMany({
-    where: { status: "connected", provider: { in: ["amazon", "shopify", "tiktok"] } },
-    select: { provider: true },
-  });
   const connectedChannels = conns.map((c) => c.provider.toUpperCase());
 
   const [chart, orders, orgSettings, fees, fulfilledOptions, tags, sources, unplaced] = await Promise.all([

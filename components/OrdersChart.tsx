@@ -17,13 +17,13 @@ type Metric = "orders" | "units";
 // Bars fade toward the baseline (fill and stroke alike); the peak stays solid.
 const FADE = "linear-gradient(to bottom, #000 0%, rgba(0,0,0,0.62) 45%, rgba(0,0,0,0.05) 100%)";
 const CHART_H = 220;
-// One shade of the violet per channel, fixed so a channel keeps its colour under any filter. The
-// third leans toward the ink, so it reads darker on a light page and lighter on a dark one.
-const CHANNEL_SHADE: Record<string, string> = {
-  AMAZON: "var(--color-chart)",
-  SHOPIFY: "var(--color-accent-strong)",
-  TIKTOK: "color-mix(in srgb, var(--color-chart) 55%, var(--color-ink))",
-};
+// Shades by rank: the channel with the most gets the deepest violet, each smaller one a lighter
+// step (toward the card's own colour, so on a dark page "lighter" reads as fainter, not brighter).
+const RANK_SHADE = [
+  "var(--color-accent-strong)",
+  "color-mix(in srgb, var(--color-accent-strong) 66%, var(--color-surface))",
+  "color-mix(in srgb, var(--color-accent-strong) 38%, var(--color-surface))",
+];
 
 const day = (s: string) => new Date(`${s}T00:00:00Z`);
 
@@ -128,9 +128,10 @@ export function OrdersChart({ chart, range }: { chart: Chart; range: Range }) {
 
   // Channel split: shares of the chosen count; a small channel keeps a readable minimum width.
   const segs = chart.channels
-    .map((c) => ({ ...c, value: c[metric], share: total > 0 ? c[metric] / total : 0, color: CHANNEL_SHADE[c.channel] ?? "var(--color-chart)" }))
+    .map((c) => ({ ...c, value: c[metric], share: total > 0 ? c[metric] / total : 0 }))
     .filter((c) => c.value > 0)
-    .sort((a, b) => b.value - a.value);
+    .sort((a, b) => b.value - a.value)
+    .map((c, rank) => ({ ...c, color: RANK_SHADE[Math.min(rank, RANK_SHADE.length - 1)] }));
   const share = (s: number) => (s >= 0.1 ? `${Math.round(s * 100)}%` : `${(s * 100).toLocaleString(locale, { maximumFractionDigits: 1 })}%`);
 
   const bar = (p: OrdersChartPoint, i: number) => {

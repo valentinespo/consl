@@ -1002,6 +1002,9 @@ model SalesOrder {
   @@index([orgId, voidRuleId])
   @@unique([orgId, channel, externalId])
   @@index([orgId, channel, orderedAt])
+  // Newest-first across every channel (the Orders list's default), date-range filters without a
+  // channel, and the "oldest order" lookups — without it each of those sorts every order.
+  @@index([orgId, orderedAt])
   @@index([orgId, channel, updatedAt])
   @@index([orgId, source])
   @@index([orgId, fulfillmentFacilityId])

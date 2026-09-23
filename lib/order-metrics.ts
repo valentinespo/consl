@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { getOrgSettings } from "@/lib/settings";
@@ -261,7 +262,9 @@ export type Exclusions = { sources: string[]; mcf: boolean };
 
 /** A channel is present once it is connected OR its orders are in the feed (a history load lands
  *  before the connection does). Shared with the P&L, which drops the same orders. */
-export async function activeExclusions(alsoConnected: Iterable<string> = []): Promise<Exclusions> {
+/** Read once per request however many parts of a page ask (the Orders page asks four times) —
+ *  React's per-request memo, so every request still reads the database fresh. */
+export const activeExclusions = cache(async function activeExclusions(alsoConnected: Iterable<string> = []): Promise<Exclusions> {
   const [connections, withOrders, shopifySources] = await Promise.all([
     prisma.integration.findMany({ where: { status: "connected" }, select: { provider: true } }),
     prisma.salesOrder.groupBy({ by: ["channel"] }),
@@ -277,7 +280,7 @@ export async function activeExclusions(alsoConnected: Iterable<string> = []): Pr
     return !!ch && present.has(ch);
   });
   return { sources, mcf: [...present].some((c) => c !== "AMAZON") };
-}
+});
 
 export type OrdersPage = { rows: OrderRow[]; total: number; page: number; pageSize: number; pageCount: number };
 
@@ -458,6 +461,32 @@ function searchWhere(raw: string, ex: Exclusions): Record<string, unknown> {
 
 /** One page of orders, newest first, honouring the filters + search. Excluded/cancelled orders
  *  still show (dimmed) for transparency. */
+/** The columns one Orders table row shows. */
+const ORDER_ROW_SELECT = {
+  id: true,
+  externalId: true,
+  orderNumber: true,
+  channel: true,
+  source: true,
+  sourceLabel: true,
+  fulfillmentLabel: true,
+  shipFromLabel: true,
+  paymentMethod: true,
+  paymentDetail: true,
+  fulfillmentFacility: { select: { id: true, name: true, channel: true } },
+  fulfillmentOverrideFacility: { select: { id: true, name: true, channel: true } },
+  orderedAt: true,
+  total: true,
+  currency: true,
+  status: true,
+  cancelled: true,
+  mcf: true,
+  replacement: true,
+  voided: true,
+  lines: { select: { quantity: true, sku: true, unitPrice: true, product: { select: { code: true, name: true, imageUrl: true } } } },
+  fees: { select: { id: true, name: true, amount: true, ruleId: true, type: true, bucket: true }, orderBy: { createdAt: "asc" } },
+} as const;
+
 /** The Orders filters as one where clause — the table's list and the header chart read the same
  *  orders from it. */
 function ordersWhere(filter: OrdersFilter, ex: Exclusions): Record<string, unknown> {
@@ -484,42 +513,27 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
   const ex: Exclusions = { sources: excluded, mcf: excludeMcf };
   const where = ordersWhere(filter, ex);
 
-  const total = await prisma.salesOrder.count({ where });
+  // The count, the facility names and the requested page's rows are read side by side; a page past
+  // the end (the filter just shrank the list) is read again at the last page.
+  const readPage = (p: number) =>
+    prisma.salesOrder.findMany({
+      where,
+      orderBy: { orderedAt: "desc" },
+      skip: (p - 1) * pageSize,
+      take: pageSize,
+      select: ORDER_ROW_SELECT,
+    });
+  const requested = Math.max(1, page);
+  const [total, facilities, firstTry] = await Promise.all([
+    prisma.salesOrder.count({ where }),
+    prisma.facility.findMany({ select: { id: true, name: true, code: true, channel: true } }),
+    readPage(requested),
+  ]);
   // Display names for the Fulfilled at column: one warehouse two platforms report gets its platform appended.
-  const placeLabel = new Map(distinctFacilityNames(await prisma.facility.findMany({ select: { id: true, name: true, code: true, channel: true } })).map((f) => [f.id, f.label]));
+  const placeLabel = new Map(distinctFacilityNames(facilities).map((f) => [f.id, f.label]));
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  const current = Math.min(Math.max(1, page), pageCount);
-
-  const orders = await prisma.salesOrder.findMany({
-    where,
-    orderBy: { orderedAt: "desc" },
-    skip: (current - 1) * pageSize,
-    take: pageSize,
-    select: {
-      id: true,
-      externalId: true,
-      orderNumber: true,
-      channel: true,
-      source: true,
-      sourceLabel: true,
-      fulfillmentLabel: true,
-      shipFromLabel: true,
-      paymentMethod: true,
-      paymentDetail: true,
-      fulfillmentFacility: { select: { id: true, name: true, channel: true } },
-      fulfillmentOverrideFacility: { select: { id: true, name: true, channel: true } },
-      orderedAt: true,
-      total: true,
-      currency: true,
-      status: true,
-      cancelled: true,
-      mcf: true,
-      replacement: true,
-      voided: true,
-      lines: { select: { quantity: true, sku: true, unitPrice: true, product: { select: { code: true, name: true, imageUrl: true } } } },
-      fees: { select: { id: true, name: true, amount: true, ruleId: true, type: true, bucket: true }, orderBy: { createdAt: "asc" } },
-    },
-  });
+  const current = Math.min(requested, pageCount);
+  const orders = current === requested ? firstTry : await readPage(current);
 
   // What the platform itself charged to process each order on this page — shown beside any
   // manual fee so a processor's charge is never entered twice.
