@@ -127,7 +127,9 @@ export function flattenTikTokStatement(tx: TikTokStatementTransaction): Row[] {
       const part = i === skus.length - 1 ? round2(left) : round2(amount * shares[i]);
       left = round2(left - part);
       const unitDriver = group === "sales" && /gross sales/i.test(type) && num(s.revenue_amount) > 0;
-      rows.push({ ...base, amount: part, sku: s.seller_sku?.trim() || s.sku_id, quantity: unitDriver ? s.quantity : null });
+      // Only a seller SKU can name a product; a bare TikTok SKU id would be money the statement
+      // leaves out, so a split whose SKU is unknown is booked as the order's money without one.
+      rows.push({ ...base, amount: part, sku: s.seller_sku?.trim() || null, quantity: unitDriver ? s.quantity : null });
     });
   };
   for (const l of tx.revenue_breakdown ?? []) push("revenue", l);

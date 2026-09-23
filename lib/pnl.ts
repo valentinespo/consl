@@ -671,6 +671,20 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
       ignored.sales += r._sum.baseAmount ?? 0;
     }
   }
+  // TikTok's ledger is scoped the same way: settled money under a SKU the company doesn't manage
+  // (or one the importer couldn't name) is left out of the statement, so it must be said here.
+  if (selectedSet.has("TIKTOK")) {
+    const left = await prisma.financeEvent.groupBy({
+      by: ["sku"],
+      where: { channel: "TIKTOK", eventAt: { gte: from, lte: to }, group: "sales", sku: { notIn: tiktokSkus, not: null } },
+      _sum: { quantity: true, baseAmount: true },
+    });
+    for (const r of left) {
+      if (!ignored.skus.includes(r.sku as string)) ignored.skus.push(r.sku as string);
+      ignored.units += r._sum.quantity ?? 0;
+      ignored.sales += r._sum.baseAmount ?? 0;
+    }
+  }
   if (lineChannels.length) {
     const left = await prisma.$queryRaw<{ sku: string | null; units: number; sales: number }[]>`
       SELECT l.sku, SUM(l.quantity)::int AS units, COALESCE(SUM(l.quantity * l."unitPrice"), 0)::float8 AS sales
@@ -929,6 +943,21 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
       GROUP BY 1, 2`;
     for (const r of left) {
       const t = tally("AMAZON", r.day);
+      t.ignored.skus.add(r.sku);
+      t.ignored.units += r.units;
+      t.ignored.sales += r.sales;
+    }
+  }
+  if (selected.includes("TIKTOK")) {
+    const left = await prisma.$queryRaw<{ sku: string; day: string; units: number; sales: number }[]>`
+      SELECT fe.sku, (fe."eventAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::date::text AS day,
+        COALESCE(SUM(fe.quantity), 0)::int AS units, COALESCE(SUM(fe."baseAmount"), 0)::float8 AS sales
+      FROM "FinanceEvent" fe
+      WHERE fe."orgId" = ${orgId} AND fe.channel = 'TIKTOK' AND fe."group" = 'sales'
+        AND fe.sku IS NOT NULL AND NOT (fe.sku = ANY(${tiktokSkus}::text[]))
+      GROUP BY 1, 2`;
+    for (const r of left) {
+      const t = tally("TIKTOK", r.day);
       t.ignored.skus.add(r.sku);
       t.ignored.units += r.units;
       t.ignored.sales += r.sales;

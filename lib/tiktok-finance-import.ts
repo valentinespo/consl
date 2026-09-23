@@ -255,14 +255,32 @@ export function moneyLines(t: StatementTx, totals: { revenue: unknown; shipping:
 
 type OrderLines = { sku_id: string; seller_sku: string | null; quantity: number; revenue: number }[];
 
-/** The stored order's lines (seller SKU, units, net revenue) — the SKU split when TikTok gives none. */
+type StoredOrder = { externalId: string; sourceData: unknown; lines: { sku: string | null; quantity: number; unitPrice: number }[] };
+
+/**
+ * The stored order's lines (seller SKU, units, net revenue) — the SKU split when TikTok gives none,
+ * and the only place TikTok's SKU ids get their seller SKU (the P&L knows products by seller SKU;
+ * a row booked under a bare SKU id is money the statement can't place). An order consl doesn't
+ * hold yet — the money read can run before the order read, or reach an order the pull never
+ * saw — is fetched from TikTok first, so the split is never booked blind.
+ */
 async function storedOrderLines(orderIds: string[]): Promise<Map<string, OrderLines>> {
   const out = new Map<string, OrderLines>();
   if (orderIds.length === 0) return out;
-  const orders = await prisma.salesOrder.findMany({
-    where: { channel: "TIKTOK", externalId: { in: orderIds } },
-    select: { externalId: true, sourceData: true, lines: { select: { sku: true, quantity: true, unitPrice: true } } },
-  });
+  const select = { externalId: true, sourceData: true, lines: { select: { sku: true, quantity: true, unitPrice: true } } } as const;
+  let orders: StoredOrder[] = await prisma.salesOrder.findMany({ where: { channel: "TIKTOK", externalId: { in: orderIds } }, select });
+  const missing = orderIds.filter((id) => /^\d+$/.test(id) && !orders.some((o) => o.externalId === id));
+  if (missing.length) {
+    const { importTikTokOrderIds } = await import("@/lib/orders");
+    for (let i = 0; i < missing.length; i += 50) {
+      try {
+        await importTikTokOrderIds(missing.slice(i, i + 50));
+      } catch (e) {
+        console.warn(`[tiktok finance] ${missing.length} order(s) the statements name are not in consl and TikTok did not return them: ${(e as Error).message}`);
+      }
+    }
+    orders = await prisma.salesOrder.findMany({ where: { channel: "TIKTOK", externalId: { in: orderIds } }, select });
+  }
   for (const o of orders) {
     const sd = o.sourceData as { line_items?: Array<{ sku_id?: string | null; seller_sku?: string | null }> } | null;
     const idBySku = new Map<string, string>();
@@ -273,6 +291,18 @@ async function storedOrderLines(orderIds: string[]): Promise<Map<string, OrderLi
     );
   }
   return out;
+}
+
+/** TikTok's SKU id → the seller SKU, from every TikTok order consl holds: the same listing sells
+ *  again and again, so an id TikTok names in a split is almost always known from another order. */
+async function sellerSkuIndex(): Promise<Map<string, string>> {
+  const index = new Map<string, string>();
+  const orders = await prisma.salesOrder.findMany({ where: { channel: "TIKTOK" }, select: { sourceData: true } });
+  for (const o of orders) {
+    const sd = o.sourceData as { line_items?: Array<{ sku_id?: string | null; seller_sku?: string | null }> } | null;
+    for (const li of sd?.line_items ?? []) if (li.seller_sku && li.sku_id && !index.has(li.sku_id)) index.set(li.sku_id, li.seller_sku);
+  }
+  return index;
 }
 
 async function paged<T>(fetchPage: (token: string | null) => Promise<{ items: T[]; next: string | null }>, cap = 400): Promise<T[]> {
@@ -338,13 +368,17 @@ export async function importTikTokFinance(): Promise<TikTokFinanceResult> {
       return { items: d.transactions ?? [], next: d.next_page_token || null };
     });
     const state = (st.payment_status ?? "").toUpperCase() === "PAID" ? "released" : "held";
-    for (const t of txs) if (bookedState.get(t.id) !== state) pending.push({ st, t });
+    // A full pass (first read, or a new importer generation) books every transaction again —
+    // that is how a company's whole ledger moves to the current importer.
+    for (const t of txs) if (full || bookedState.get(t.id) !== state) pending.push({ st, t });
   }
 
   // 2. SKU split for the order transactions to book: TikTok's own per-order split, else the
   //    stored order's lines.
   const orderIds = [...new Set(pending.map((p) => p.t.order_id ?? p.t.associated_order_id ?? p.t.adjustment_order_id).filter((x): x is string => !!x))];
   const stored = await storedOrderLines(orderIds);
+  const skuIndex = pending.length ? await sellerSkuIndex() : new Map<string, string>();
+  const unresolved = new Set<string>();
   const skuSplit = new Map<string, SkuTx[]>(); // order id → TikTok's split (all statements)
   for (const orderId of orderIds) {
     if (!pending.some((p) => (p.t.type ?? "ORDER").toUpperCase() === "ORDER" && p.t.order_id === orderId)) continue;
@@ -373,7 +407,11 @@ export async function importTikTokFinance(): Promise<TikTokFinanceResult> {
     const skus = !isOrderTx
       ? []
       : fromTikTok.length > 0
-        ? fromTikTok.map((s) => ({ sku_id: s.sku_id, seller_sku: sellerSkuById.get(s.sku_id) ?? null, quantity: Math.max(0, Math.round(num(s.quantity))), revenue_amount: String(num(s.revenue_amount)) }))
+        ? fromTikTok.map((s) => {
+            const seller_sku = sellerSkuById.get(s.sku_id) ?? skuIndex.get(s.sku_id) ?? null;
+            if (!seller_sku) unresolved.add(s.sku_id);
+            return { sku_id: s.sku_id, seller_sku, quantity: Math.max(0, Math.round(num(s.quantity))), revenue_amount: String(num(s.revenue_amount)) };
+          })
         : own.map((l) => ({ sku_id: l.sku_id, seller_sku: l.seller_sku, quantity: l.quantity, revenue_amount: String(l.revenue) }));
     settled.push({
       id: t.id,
@@ -391,6 +429,7 @@ export async function importTikTokFinance(): Promise<TikTokFinanceResult> {
       sku_statement_transactions: skus,
     });
   }
+  if (unresolved.size) console.warn(`[tiktok finance] ${unresolved.size} TikTok SKU id(s) have no seller SKU on any order consl holds (${[...unresolved].slice(0, 5).join(", ")}); their money is booked without a SKU so the statement still carries it`);
   if (settled.length > 0) {
     // Settled money replaces the held estimate of the same orders.
     const releasedOrders = settled.filter((s) => s.status === "PAID").map((s) => s.order_id);

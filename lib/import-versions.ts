@@ -15,6 +15,10 @@
  *                    from the API once connected, so every order carries TikTok's own version.
  *  tiktokFinance  1 — first API generation of the settlement ledger (statements, per-order SKU
  *                    split, unsettled money).
+ *  tiktokFinance  2 — every SKU split booked under the seller SKU (the order is fetched first
+ *                    when consl doesn't hold it; an id no order explains is booked without a
+ *                    SKU). Generation 1 could book a split under TikTok's bare SKU id when the
+ *                    money read ran before the order read, and the P&L left that money out.
  *  shopifyCustomers 1 — the customer id on every order (what the LTV view groups by). Only a
  *                    connection that may read customers can fill it, so this one is stamped only
  *                    after a full read made WITH that permission: a store that gains it later (a
@@ -25,7 +29,7 @@
  *  amazonAdsInvoices 1 — Amazon Ads' invoice feed: every invoice with its period, payment record
  *                    and split by ad program. A re-read lists the whole history again.
  */
-export const IMPORTER_VERSIONS = { amazonFinance: 3, shopifyFinance: 3, shopifyOrders: 2, shopifyCustomers: 1, tiktokOrders: 1, tiktokFinance: 1, amazonAdsSpend: 1, amazonAdsInvoices: 1 } as const;
+export const IMPORTER_VERSIONS = { amazonFinance: 3, shopifyFinance: 3, shopifyOrders: 2, shopifyCustomers: 1, tiktokOrders: 1, tiktokFinance: 2, amazonAdsSpend: 1, amazonAdsInvoices: 1 } as const;
 export type ImporterKey = keyof typeof IMPORTER_VERSIONS;
 
 /** The generation a company's ledger was written with (0 = before generations were tracked). */
