@@ -369,6 +369,7 @@ export function OrdersClient({
   unplaced,
   filter,
   dataBounds,
+  timeZone,
 }: {
   /** The header chart: orders and units over the range, and the split by channel. */
   chart: OrdersChartData;
@@ -389,6 +390,8 @@ export function OrdersClient({
   unplaced: number;
   filter: { channel: string; range: Range; q: string; fulfilledAt: string; tag: string; source: string };
   dataBounds: { newest: string; oldest: string };
+  /** The company's time zone: an order's date is its day there, the same day the filters and the P&L use. */
+  timeZone: string;
 }) {
   const connected = connectedChannels.length > 0;
   const router = useRouter();
@@ -482,7 +485,7 @@ export function OrdersClient({
   }
 
   const filtering = !!(filter.channel || filter.source || filter.fulfilledAt || filter.tag || filter.range.key !== "all" || filter.q);
-  const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(locale, { month: "short", day: "numeric", year: "numeric", timeZone });
   const { page, pageCount, total, pageSize } = orders;
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const to = Math.min(page * pageSize, total);

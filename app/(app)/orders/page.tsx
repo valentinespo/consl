@@ -1,5 +1,6 @@
 import { requireView } from "@/lib/membership";
-import { getOrdersChart, getOrdersPage, fulfilledAtOptions, feeRuleOptions, tagOptions, salesChannelOptions, unplacedOrderCount, isOrderTag, type OrdersFilter } from "@/lib/order-metrics";
+import { getOrdersChart, getOrdersPage, fulfilledAtOptions, feeRuleOptions, tagOptions, salesChannelOptions, unplacedOrderCount, isOrderTag, companyTimeZone, type OrdersFilter } from "@/lib/order-metrics";
+import { dayIn, todayIn } from "@/lib/channel-tz";
 import { prisma } from "@/lib/prisma";
 import { OrdersClient } from "@/components/OrdersClient";
 import { rangeBounds, RANGES, type RangeKey } from "@/lib/chart";
@@ -21,17 +22,19 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const tag = isOrderTag(str(sp.tag)) ? str(sp.tag) : undefined;
 
   // The same range vocabulary as the dashboard chart: a preset key, or "custom" + from/to days.
+  // Days are the company's (its time zone setting), as on the P&L: "today" is today there.
   const isKey = (v: string | undefined): v is RangeKey => !!v && RANGES.some((r) => r.key === v);
   const rangeKey: RangeKey = isKey(str(sp.range)) ? (str(sp.range) as RangeKey) : "all";
-  const newest = new Date().toISOString().slice(0, 10);
-  const [oldestRow, conns] = await Promise.all([
+  const [tz, oldestRow, conns] = await Promise.all([
+    companyTimeZone(),
     prisma.salesOrder.findFirst({ orderBy: { orderedAt: "asc" }, select: { orderedAt: true } }),
     prisma.integration.findMany({
       where: { status: "connected", provider: { in: ["amazon", "shopify", "tiktok"] } },
       select: { provider: true },
     }),
   ]);
-  const oldest = (oldestRow?.orderedAt ?? new Date()).toISOString().slice(0, 10);
+  const newest = todayIn(tz);
+  const oldest = oldestRow ? dayIn(oldestRow.orderedAt, tz) : newest;
   const b = rangeBounds(rangeKey, newest, str(sp.from), str(sp.to));
 
   const filter: OrdersFilter = {
@@ -93,6 +96,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           source: str(sp.source) ?? "",
         }}
         dataBounds={{ newest, oldest }}
+        timeZone={tz}
       />
     </>
   );

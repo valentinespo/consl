@@ -80,11 +80,16 @@ export function describeTimezone(tz: string): string {
   return tz.split("/").pop()?.replace(/_/g, " ") ?? tz;
 }
 
-/** Today's calendar date (YYYY-MM-DD) in `tz`. */
-export function todayIn(tz: string): string {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+/** The calendar date (YYYY-MM-DD) an instant falls on in `tz`. */
+export function dayIn(at: Date, tz: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(at);
   const m = Object.fromEntries(parts.map((p) => [p.type, p.value]));
   return `${m.year}-${m.month}-${m.day}`;
+}
+
+/** Today's calendar date (YYYY-MM-DD) in `tz`. */
+export function todayIn(tz: string): string {
+  return dayIn(new Date(), tz);
 }
 
 /** Amazon marketplace → the currency its ledger settles in. */

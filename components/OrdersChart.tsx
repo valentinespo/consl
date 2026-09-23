@@ -173,7 +173,7 @@ export function OrdersChart({ chart, range }: { chart: Chart; range: Range }) {
     hover !== null && points[hover]
       ? (() => {
           const p = points[hover];
-          const running = p.partial && p.end >= new Date().toISOString().slice(0, 10);
+          const running = p.partial && p.end >= chart.today;
           const right = hover < n / 2;
           return (
             <div

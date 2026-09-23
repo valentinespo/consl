@@ -3,7 +3,8 @@ import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { getOrgSettings } from "@/lib/settings";
-import { todayIn } from "@/lib/channel-tz";
+import { dayIn, todayIn } from "@/lib/channel-tz";
+import { zonedDayBounds, zonedDayStart } from "@/lib/pnl-periods";
 import { paymentMethodLabel } from "@/lib/payment-methods";
 
 /**
@@ -53,8 +54,8 @@ export function distinctFacilityNames<T extends { id: string; name: string; code
 
 export type OrdersFilter = {
   channel?: string; // AMAZON | SHOPIFY | TIKTOK
-  from?: string; // ISO day (inclusive); undefined = beginning of time
-  to?: string; // ISO day (inclusive); undefined = today
+  from?: string; // company-calendar day, YYYY-MM-DD (inclusive); undefined = beginning of time
+  to?: string; // company-calendar day, YYYY-MM-DD (inclusive); undefined = today
   q?: string; // free-text search — order #, amount, SKU, or words like "mcf" / "pending" / "free"
   fulfilledAt?: string; // a facility id, or "none" for orders with no facility yet
   tag?: string; // one of ORDER_TAGS — the pill an order wears (mcf, voided, …)
@@ -90,10 +91,17 @@ export async function fulfilledAtOptions(): Promise<{ id: string; name: string; 
   return out;
 }
 
-function bounds(f: OrdersFilter): { since: Date | null; until: Date | null } {
+/** The company's business time zone: the clock the P&L cuts its days on, so a day on Orders is
+ *  the same day there, whoever is looking and from wherever. Read once per request. */
+export const companyTimeZone = cache(async function companyTimeZone(): Promise<string> {
+  return (await getOrgSettings()).syncTz;
+});
+
+/** The filter's days as instants: a day runs from the company's midnight to the next. */
+function bounds(f: OrdersFilter, tz: string): { since: Date | null; until: Date | null } {
   return {
-    since: f.from ? new Date(`${f.from}T00:00:00Z`) : null,
-    until: f.to ? new Date(`${f.to}T23:59:59.999Z`) : null,
+    since: f.from ? zonedDayStart(f.from, tz) : null,
+    until: f.to ? zonedDayBounds(f.to, f.to, tz).to : null,
   };
 }
 
@@ -184,9 +192,6 @@ export type FeeRuleOptions = {
   /** Today and the oldest order, as company-calendar days — the period picker's bounds. */
   days: { today: string; oldest: string };
 };
-
-/** A date as a YYYY-MM-DD day in a time zone. */
-const dayIn = (d: Date, tz: string) => new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
 
 /** The fee rules plus the vocab the rule form offers: known Shopify sources, payment methods and the facilities. */
 export async function feeRuleOptions(): Promise<FeeRuleOptions> {
@@ -296,8 +301,8 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
       currency: "USD",
     };
   }
-  const { sources: excluded, mcf: excludeMcf } = await activeExclusions(connectedChannels);
-  const { since, until } = bounds(filter);
+  const [{ sources: excluded, mcf: excludeMcf }, tz] = await Promise.all([activeExclusions(connectedChannels), companyTimeZone()]);
+  const { since, until } = bounds(filter, tz);
   const channelFilter = filter.channel ?? null;
 
   // Two aggregations: revenue/orders straight off SalesOrder (joining lines would multiply an
@@ -489,8 +494,8 @@ const ORDER_ROW_SELECT = {
 
 /** The Orders filters as one where clause — the table's list and the header chart read the same
  *  orders from it. */
-function ordersWhere(filter: OrdersFilter, ex: Exclusions): Record<string, unknown> {
-  const { since, until } = bounds(filter);
+function ordersWhere(filter: OrdersFilter, ex: Exclusions, tz: string): Record<string, unknown> {
+  const { since, until } = bounds(filter, tz);
   const q = filter.q?.trim();
   // The tag filter and the search both narrow the list; each is one clause of the AND.
   const narrow = [...(isOrderTag(filter.tag) ? [tagWhere(filter.tag, ex)] : []), ...(q ? [searchWhere(q, ex)] : [])];
@@ -509,9 +514,9 @@ function ordersWhere(filter: OrdersFilter, ex: Exclusions): Record<string, unkno
 }
 
 export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilter = {}): Promise<OrdersPage> {
-  const { sources: excluded, mcf: excludeMcf } = await activeExclusions();
+  const [{ sources: excluded, mcf: excludeMcf }, tz] = await Promise.all([activeExclusions(), companyTimeZone()]);
   const ex: Exclusions = { sources: excluded, mcf: excludeMcf };
-  const where = ordersWhere(filter, ex);
+  const where = ordersWhere(filter, ex, tz);
 
   // The count, the facility names and the requested page's rows are read side by side; a page past
   // the end (the filter just shrank the list) is read again at the last page.
@@ -594,7 +599,8 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
 /* ------------------------------------------------------------------------------------------------
  * The Orders header chart: orders and units over the range, bucketed so a lifetime never becomes
  * hundreds of hairlines — by day up to ~6 weeks, by week up to ~9 months, then by month (by
- * quarter past five years). Days are UTC calendar days, the same calendar the Orders filters use.
+ * quarter past five years). Days are the company's business days (its time zone setting): the
+ * calendar the Orders filters and the P&L cut on, so a day holds the same orders on every page.
  * ---------------------------------------------------------------------------------------------- */
 
 export type ChartBucket = "day" | "week" | "month" | "quarter";
@@ -617,11 +623,18 @@ export type OrdersChart = {
   totals: { orders: number; units: number };
   /** The same filters over the equally long window just before the range — null for All time. */
   previous: { orders: number; units: number; days: number } | null;
+  /** Today on the company's calendar — a bar reaching it is still running. */
+  today: string;
 };
 
 const DAY_MS = 86_400_000;
+// Day LABELS (YYYY-MM-DD) ride on UTC midnights so calendar arithmetic can't drift; which instants
+// a day covers is decided by the company's time zone (`zonedDayStart`), never by these.
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 const utcDay = (s: string) => new Date(`${s}T00:00:00Z`);
+const nextDay = (s: string) => isoDay(new Date(utcDay(s).getTime() + DAY_MS));
+/** An instant as the UTC wall time the timestamp columns hold, for a `::timestamp` parameter. */
+const pgTimestamp = (d: Date) => d.toISOString().slice(0, 23).replace("T", " ");
 
 function chartBucketFor(days: number): ChartBucket {
   if (days <= 45) return "day";
@@ -657,10 +670,14 @@ function nextBucket(d: Date, b: ChartBucket): Date {
  * the first order the filters match.
  */
 export async function getOrdersChart(filter: OrdersFilter, range: { from: string; to: string; allTime: boolean }): Promise<OrdersChart> {
-  const empty: OrdersChart = { bucket: "day", from: range.from, to: range.to, points: [], channels: [], totals: { orders: 0, units: 0 }, previous: null };
   const orgId = await getCurrentOrgId();
-  if (!orgId) return empty;
-  const ex = await activeExclusions();
+  if (!orgId) return { bucket: "day", from: range.from, to: range.to, points: [], channels: [], totals: { orders: 0, units: 0 }, previous: null, today: range.to };
+  const [ex, tz] = await Promise.all([activeExclusions(), companyTimeZone()]);
+  const today = todayIn(tz);
+  const empty: OrdersChart = { bucket: "day", from: range.from, to: range.to, points: [], channels: [], totals: { orders: 0, units: 0 }, previous: null, today };
+  // A company day starts at the company's midnight; `endOf` is the (exclusive) start of the next.
+  const startOf = (day: string) => zonedDayStart(day, tz);
+  const endOf = (day: string) => zonedDayStart(nextDay(day), tz);
 
   const q = (filter.q ?? "").trim();
   // A filter that asks for orders the count normally leaves out (voided, cancelled, MCF copies, a
@@ -678,7 +695,6 @@ export async function getOrdersChart(filter: OrdersFilter, range: { from: string
   // The window read: the range, plus the equally long stretch before it for the comparison.
   const prevFrom = range.allTime ? null : new Date(from.getTime() - spanOf(from) * DAY_MS);
   const windowStart = isoDay(prevFrom ?? from);
-  const toEndStr = `${range.to} 23:59:59.999`;
 
   // Which orders: a search or a tag goes through the table's own where clause (it reaches into
   // lines, facilities and tags, and narrows to few orders); plain filters are read in SQL directly.
@@ -689,10 +705,10 @@ export async function getOrdersChart(filter: OrdersFilter, range: { from: string
       ...(ex.mcf ? [{ channel: "AMAZON", mcf: true }] : []),
     ];
     const counting = wantsUncounted ? {} : { cancelled: false, voided: false, ...(dropped.length ? { NOT: dropped } : {}) };
-    const base = ordersWhere({ ...filter, from: undefined, to: undefined }, ex);
+    const base = ordersWhere({ ...filter, from: undefined, to: undefined }, ex, tz);
     ids = (
       await prisma.salesOrder.findMany({
-        where: { AND: [base, counting, { orderedAt: { gte: utcDay(windowStart), lte: new Date(to.getTime() + DAY_MS - 1) } }] },
+        where: { AND: [base, counting, { orderedAt: { gte: startOf(windowStart), lt: endOf(range.to) } }] },
         select: { id: true },
       })
     ).map((o) => o.id);
@@ -701,33 +717,46 @@ export async function getOrdersChart(filter: OrdersFilter, range: { from: string
   const channel = narrowed ? null : (filter.channel ?? null);
   const source = narrowed ? null : (filter.source ?? null);
   const place = narrowed ? null : (filter.fulfilledAt ?? null);
-  // Buckets are cut on the finest grain the range could need; `first` finds where All time starts.
-  const scan = (bucket: ChartBucket, lo: string, hi: string) => prisma.$queryRaw<{ b: string; channel: string; orders: number; units: number; first: string }[]>`
-    SELECT to_char(date_trunc(${bucket}::text, o."orderedAt"), 'YYYY-MM-DD') AS b, o.channel,
-      COUNT(DISTINCT o.id)::int AS orders, COALESCE(SUM(l.quantity), 0)::int AS units,
-      to_char(MIN(o."orderedAt"), 'YYYY-MM-DD') AS first
-    FROM "SalesOrder" o
-    LEFT JOIN "SalesOrderLine" l ON l."orderId" = o.id
-    WHERE o."orgId" = ${orgId}
-      AND o."orderedAt" >= ${lo}::timestamp AND o."orderedAt" <= ${hi}::timestamp
-      AND (${ids}::text[] IS NULL OR o.id = ANY(${ids}::text[]))
-      AND (${ids}::text[] IS NOT NULL OR (
-        (${wantsUncounted}::boolean OR (
-          o.cancelled = false AND o.voided = false
-          AND NOT (o.channel = 'SHOPIFY' AND COALESCE(o.source, '') = ANY(${ex.sources}::text[]))
-          AND NOT (${ex.mcf}::boolean AND o.channel = 'AMAZON' AND o.mcf)))
-        AND (${channel}::text IS NULL OR o.channel = ${channel})
-        AND (${source}::text IS NULL OR o.source = ${source})
-        AND (${place}::text IS NULL
-          OR (${place} = 'none' AND o."fulfillmentOverrideFacilityId" IS NULL AND o."fulfillmentFacilityId" IS NULL)
-          OR (${place} <> 'none' AND (o."fulfillmentOverrideFacilityId" = ${place}
-            OR (o."fulfillmentOverrideFacilityId" IS NULL AND o."fulfillmentFacilityId" = ${place}))))))
-    GROUP BY 1, 2`;
+  // Orders per bucket and channel over the company days lo..hi. Each bucket starts at the company's
+  // midnight on its first day; `width_bucket` files an order under the last edge at or before it,
+  // so the SQL holds no time-zone rule of its own. `first` finds where All time starts.
+  const scan = async (bucket: ChartBucket, lo: string, hi: string) => {
+    const labels: string[] = [];
+    const edges: string[] = [];
+    let s = bucketStart(utcDay(lo), bucket);
+    for (; isoDay(s) <= hi; s = nextBucket(s, bucket)) {
+      labels.push(isoDay(s));
+      edges.push(pgTimestamp(startOf(isoDay(s))));
+    }
+    edges.push(pgTimestamp(startOf(isoDay(s))));
+    const found = await prisma.$queryRaw<{ i: number; channel: string; orders: number; units: number; first: string }[]>`
+      SELECT width_bucket(o."orderedAt", ${edges}::timestamp[]) AS i, o.channel,
+        COUNT(DISTINCT o.id)::int AS orders, COALESCE(SUM(l.quantity), 0)::int AS units,
+        to_char(MIN(o."orderedAt"), 'YYYY-MM-DD"T"HH24:MI:SS.MS') AS first
+      FROM "SalesOrder" o
+      LEFT JOIN "SalesOrderLine" l ON l."orderId" = o.id
+      WHERE o."orgId" = ${orgId}
+        AND o."orderedAt" >= ${pgTimestamp(startOf(lo))}::timestamp AND o."orderedAt" < ${pgTimestamp(endOf(hi))}::timestamp
+        AND (${ids}::text[] IS NULL OR o.id = ANY(${ids}::text[]))
+        AND (${ids}::text[] IS NOT NULL OR (
+          (${wantsUncounted}::boolean OR (
+            o.cancelled = false AND o.voided = false
+            AND NOT (o.channel = 'SHOPIFY' AND COALESCE(o.source, '') = ANY(${ex.sources}::text[]))
+            AND NOT (${ex.mcf}::boolean AND o.channel = 'AMAZON' AND o.mcf)))
+          AND (${channel}::text IS NULL OR o.channel = ${channel})
+          AND (${source}::text IS NULL OR o.source = ${source})
+          AND (${place}::text IS NULL
+            OR (${place} = 'none' AND o."fulfillmentOverrideFacilityId" IS NULL AND o."fulfillmentFacilityId" IS NULL)
+            OR (${place} <> 'none' AND (o."fulfillmentOverrideFacilityId" = ${place}
+              OR (o."fulfillmentOverrideFacilityId" IS NULL AND o."fulfillmentFacilityId" = ${place}))))))
+      GROUP BY 1, 2`;
+    return found.map((r) => ({ b: labels[r.i - 1], channel: r.channel, orders: r.orders, units: r.units, first: dayIn(new Date(`${r.first}Z`), tz) }));
+  };
 
   // All time: find the first matching order, then cut buckets for the span it gives.
   let probe: Awaited<ReturnType<typeof scan>> | null = null;
   if (range.allTime) {
-    probe = await scan("month", windowStart, toEndStr);
+    probe = await scan("month", windowStart, range.to);
     const first = probe.reduce<string | null>((m, r) => (!m || r.first < m ? r.first : m), null);
     if (!first) return empty;
     from = utcDay(first);
@@ -736,8 +765,8 @@ export async function getOrdersChart(filter: OrdersFilter, range: { from: string
   const bucket = chartBucketFor(days);
   const fromDay = isoDay(from);
   const [rows, prevRows] = await Promise.all([
-    probe && bucket === "month" ? Promise.resolve(probe) : scan(bucket, fromDay, toEndStr),
-    prevFrom ? scan("month", isoDay(prevFrom), `${isoDay(new Date(from.getTime() - DAY_MS))} 23:59:59.999`) : Promise.resolve([]),
+    probe && bucket === "month" ? Promise.resolve(probe) : scan(bucket, fromDay, range.to),
+    prevFrom ? scan("month", isoDay(prevFrom), isoDay(new Date(from.getTime() - DAY_MS))) : Promise.resolve([]),
   ]);
   const previous: OrdersChart["previous"] = prevFrom
     ? { orders: prevRows.reduce((t, r) => t + r.orders, 0), units: prevRows.reduce((t, r) => t + r.units, 0), days }
@@ -756,7 +785,6 @@ export async function getOrdersChart(filter: OrdersFilter, range: { from: string
     byChannel.set(r.channel, c);
   }
 
-  const today = isoDay(new Date());
   const points: OrdersChartPoint[] = [];
   for (let s = bucketStart(from, bucket); s <= to; s = nextBucket(s, bucket)) {
     const last = new Date(nextBucket(s, bucket).getTime() - DAY_MS);
@@ -780,5 +808,6 @@ export async function getOrdersChart(filter: OrdersFilter, range: { from: string
     channels,
     totals: { orders: channels.reduce((t, c) => t + c.orders, 0), units: channels.reduce((t, c) => t + c.units, 0) },
     previous,
+    today,
   };
 }
