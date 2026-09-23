@@ -458,15 +458,14 @@ function searchWhere(raw: string, ex: Exclusions): Record<string, unknown> {
 
 /** One page of orders, newest first, honouring the filters + search. Excluded/cancelled orders
  *  still show (dimmed) for transparency. */
-export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilter = {}): Promise<OrdersPage> {
-  const { sources: excluded, mcf: excludeMcf } = await activeExclusions();
+/** The Orders filters as one where clause — the table's list and the header chart read the same
+ *  orders from it. */
+function ordersWhere(filter: OrdersFilter, ex: Exclusions): Record<string, unknown> {
   const { since, until } = bounds(filter);
-
   const q = filter.q?.trim();
-  const ex: Exclusions = { sources: excluded, mcf: excludeMcf };
   // The tag filter and the search both narrow the list; each is one clause of the AND.
   const narrow = [...(isOrderTag(filter.tag) ? [tagWhere(filter.tag, ex)] : []), ...(q ? [searchWhere(q, ex)] : [])];
-  const where = {
+  return {
     ...(filter.channel ? { channel: filter.channel } : {}),
     ...(filter.source ? { source: filter.source } : {}),
     ...(since || until ? { orderedAt: { ...(since ? { gte: since } : {}), ...(until ? { lte: until } : {}) } } : {}),
@@ -478,6 +477,12 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
         : {}),
     ...(narrow.length ? { AND: narrow } : {}),
   };
+}
+
+export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilter = {}): Promise<OrdersPage> {
+  const { sources: excluded, mcf: excludeMcf } = await activeExclusions();
+  const ex: Exclusions = { sources: excluded, mcf: excludeMcf };
+  const where = ordersWhere(filter, ex);
 
   const total = await prisma.salesOrder.count({ where });
   // Display names for the Fulfilled at column: one warehouse two platforms report gets its platform appended.
@@ -570,4 +575,196 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
   }));
 
   return { rows, total, page: current, pageSize, pageCount };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * The Orders header chart: orders and units over the range, bucketed so a lifetime never becomes
+ * hundreds of hairlines — by day up to ~6 weeks, by week up to ~9 months, then by month (by
+ * quarter past five years). Days are UTC calendar days, the same calendar the Orders filters use.
+ * ---------------------------------------------------------------------------------------------- */
+
+export type ChartBucket = "day" | "week" | "month" | "quarter";
+
+export type OrdersChartPoint = {
+  start: string; // first day the bar covers (YYYY-MM-DD), clipped to the range
+  end: string; // last day it covers, clipped to the range
+  orders: number;
+  units: number;
+  /** The bar is short of a whole bucket: the range starts or ends inside it, or it is still running. */
+  partial: boolean;
+};
+
+export type OrdersChart = {
+  bucket: ChartBucket;
+  from: string;
+  to: string;
+  points: OrdersChartPoint[];
+  channels: { channel: string; label: string; orders: number; units: number }[];
+  totals: { orders: number; units: number };
+  /** The same filters over the equally long window just before the range — null for All time. */
+  previous: { orders: number; units: number; days: number } | null;
+};
+
+const DAY_MS = 86_400_000;
+const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+const utcDay = (s: string) => new Date(`${s}T00:00:00Z`);
+
+function chartBucketFor(days: number): ChartBucket {
+  if (days <= 45) return "day";
+  if (days <= 270) return "week";
+  if (days <= 1830) return "month";
+  return "quarter";
+}
+
+/** The first day of the bucket holding `d` — weeks start on Monday, as Postgres' date_trunc does. */
+function bucketStart(d: Date, b: ChartBucket): Date {
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth();
+  if (b === "day") return new Date(Date.UTC(y, m, d.getUTCDate()));
+  if (b === "week") return new Date(Date.UTC(y, m, d.getUTCDate() - ((d.getUTCDay() + 6) % 7)));
+  if (b === "month") return new Date(Date.UTC(y, m, 1));
+  return new Date(Date.UTC(y, m - (m % 3), 1));
+}
+
+function nextBucket(d: Date, b: ChartBucket): Date {
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth();
+  if (b === "day") return new Date(Date.UTC(y, m, d.getUTCDate() + 1));
+  if (b === "week") return new Date(Date.UTC(y, m, d.getUTCDate() + 7));
+  if (b === "month") return new Date(Date.UTC(y, m + 1, 1));
+  return new Date(Date.UTC(y, m + 3, 1));
+}
+
+/**
+ * The header chart for the Orders tab under the page's filters. It counts the orders the table
+ * lists, less the ones that count nowhere (cancelled, voided, a mirrored copy of another channel's
+ * sale) — unless the filter asks for exactly those (the Voided or MCF tag, a mirrored sales
+ * channel, a search for cancelled/voided/MCF), when it counts what is listed. All time starts at
+ * the first order the filters match.
+ */
+export async function getOrdersChart(filter: OrdersFilter, range: { from: string; to: string; allTime: boolean }): Promise<OrdersChart> {
+  const empty: OrdersChart = { bucket: "day", from: range.from, to: range.to, points: [], channels: [], totals: { orders: 0, units: 0 }, previous: null };
+  const orgId = await getCurrentOrgId();
+  if (!orgId) return empty;
+  const ex = await activeExclusions();
+
+  const q = (filter.q ?? "").trim();
+  // A filter that asks for orders the count normally leaves out (voided, cancelled, MCF copies, a
+  // mirrored sales channel) gets exactly what the table lists — a chart of zeros would say nothing.
+  const wantsUncounted =
+    filter.tag === "voided" ||
+    filter.tag === "mcf" ||
+    ["cancelled", "canceled", "voided", "void", "excluded", "mcf", "multichannel", "multi-channel"].includes(q.toLowerCase()) ||
+    (!!filter.source && ex.sources.includes(filter.source));
+  const narrowed = !!q || isOrderTag(filter.tag);
+
+  let from = utcDay(range.from);
+  const to = utcDay(range.to);
+  const spanOf = (a: Date) => Math.max(1, Math.round((to.getTime() - a.getTime()) / DAY_MS) + 1);
+  // The window read: the range, plus the equally long stretch before it for the comparison.
+  const prevFrom = range.allTime ? null : new Date(from.getTime() - spanOf(from) * DAY_MS);
+  const windowStart = isoDay(prevFrom ?? from);
+  const toEndStr = `${range.to} 23:59:59.999`;
+
+  // Which orders: a search or a tag goes through the table's own where clause (it reaches into
+  // lines, facilities and tags, and narrows to few orders); plain filters are read in SQL directly.
+  let ids: string[] | null = null;
+  if (narrowed) {
+    const dropped = [
+      ...(ex.sources.length ? [{ channel: "SHOPIFY", source: { in: ex.sources } }] : []),
+      ...(ex.mcf ? [{ channel: "AMAZON", mcf: true }] : []),
+    ];
+    const counting = wantsUncounted ? {} : { cancelled: false, voided: false, ...(dropped.length ? { NOT: dropped } : {}) };
+    const base = ordersWhere({ ...filter, from: undefined, to: undefined }, ex);
+    ids = (
+      await prisma.salesOrder.findMany({
+        where: { AND: [base, counting, { orderedAt: { gte: utcDay(windowStart), lte: new Date(to.getTime() + DAY_MS - 1) } }] },
+        select: { id: true },
+      })
+    ).map((o) => o.id);
+    if (ids.length === 0) return empty;
+  }
+  const channel = narrowed ? null : (filter.channel ?? null);
+  const source = narrowed ? null : (filter.source ?? null);
+  const place = narrowed ? null : (filter.fulfilledAt ?? null);
+  // Buckets are cut on the finest grain the range could need; `first` finds where All time starts.
+  const scan = (bucket: ChartBucket, lo: string, hi: string) => prisma.$queryRaw<{ b: string; channel: string; orders: number; units: number; first: string }[]>`
+    SELECT to_char(date_trunc(${bucket}::text, o."orderedAt"), 'YYYY-MM-DD') AS b, o.channel,
+      COUNT(DISTINCT o.id)::int AS orders, COALESCE(SUM(l.quantity), 0)::int AS units,
+      to_char(MIN(o."orderedAt"), 'YYYY-MM-DD') AS first
+    FROM "SalesOrder" o
+    LEFT JOIN "SalesOrderLine" l ON l."orderId" = o.id
+    WHERE o."orgId" = ${orgId}
+      AND o."orderedAt" >= ${lo}::timestamp AND o."orderedAt" <= ${hi}::timestamp
+      AND (${ids}::text[] IS NULL OR o.id = ANY(${ids}::text[]))
+      AND (${ids}::text[] IS NOT NULL OR (
+        (${wantsUncounted}::boolean OR (
+          o.cancelled = false AND o.voided = false
+          AND NOT (o.channel = 'SHOPIFY' AND COALESCE(o.source, '') = ANY(${ex.sources}::text[]))
+          AND NOT (${ex.mcf}::boolean AND o.channel = 'AMAZON' AND o.mcf)))
+        AND (${channel}::text IS NULL OR o.channel = ${channel})
+        AND (${source}::text IS NULL OR o.source = ${source})
+        AND (${place}::text IS NULL
+          OR (${place} = 'none' AND o."fulfillmentOverrideFacilityId" IS NULL AND o."fulfillmentFacilityId" IS NULL)
+          OR (${place} <> 'none' AND (o."fulfillmentOverrideFacilityId" = ${place}
+            OR (o."fulfillmentOverrideFacilityId" IS NULL AND o."fulfillmentFacilityId" = ${place}))))))
+    GROUP BY 1, 2`;
+
+  // All time: find the first matching order, then cut buckets for the span it gives.
+  let probe: Awaited<ReturnType<typeof scan>> | null = null;
+  if (range.allTime) {
+    probe = await scan("month", windowStart, toEndStr);
+    const first = probe.reduce<string | null>((m, r) => (!m || r.first < m ? r.first : m), null);
+    if (!first) return empty;
+    from = utcDay(first);
+  }
+  const days = spanOf(from);
+  const bucket = chartBucketFor(days);
+  const fromDay = isoDay(from);
+  const [rows, prevRows] = await Promise.all([
+    probe && bucket === "month" ? Promise.resolve(probe) : scan(bucket, fromDay, toEndStr),
+    prevFrom ? scan("month", isoDay(prevFrom), `${isoDay(new Date(from.getTime() - DAY_MS))} 23:59:59.999`) : Promise.resolve([]),
+  ]);
+  const previous: OrdersChart["previous"] = prevFrom
+    ? { orders: prevRows.reduce((t, r) => t + r.orders, 0), units: prevRows.reduce((t, r) => t + r.units, 0), days }
+    : null;
+
+  const byBucket = new Map<string, { orders: number; units: number }>();
+  const byChannel = new Map<string, { orders: number; units: number }>();
+  for (const r of rows) {
+    const b = byBucket.get(r.b) ?? { orders: 0, units: 0 };
+    b.orders += r.orders;
+    b.units += r.units;
+    byBucket.set(r.b, b);
+    const c = byChannel.get(r.channel) ?? { orders: 0, units: 0 };
+    c.orders += r.orders;
+    c.units += r.units;
+    byChannel.set(r.channel, c);
+  }
+
+  const today = isoDay(new Date());
+  const points: OrdersChartPoint[] = [];
+  for (let s = bucketStart(from, bucket); s <= to; s = nextBucket(s, bucket)) {
+    const last = new Date(nextBucket(s, bucket).getTime() - DAY_MS);
+    const v = byBucket.get(isoDay(s)) ?? { orders: 0, units: 0 };
+    points.push({
+      start: isoDay(s < from ? from : s),
+      end: isoDay(last > to ? to : last),
+      orders: v.orders,
+      units: v.units,
+      partial: s < from || last > to || isoDay(last) >= today,
+    });
+  }
+  const channels = [...byChannel.entries()]
+    .map(([channel, v]) => ({ channel, label: CHANNEL_LABEL[channel] ?? channel, ...v }))
+    .sort((a, b) => b.orders - a.orders);
+  return {
+    bucket,
+    from: fromDay,
+    to: range.to,
+    points,
+    channels,
+    totals: { orders: channels.reduce((t, c) => t + c.orders, 0), units: channels.reduce((t, c) => t + c.units, 0) },
+    previous,
+  };
 }

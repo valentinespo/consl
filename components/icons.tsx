@@ -140,5 +140,8 @@ export const ChevronUp = regular(P.CaretUp);
 export const ChevronsUpDown = regular(P.CaretUpDown);
 export const ArrowUpDown = regular(P.ArrowsDownUp);
 export const ArrowRight = regular(P.ArrowRight);
+/** Change arrows for period-over-period chips. */
+export const ArrowUp = regular(P.ArrowUp);
+export const ArrowDown = regular(P.ArrowDown);
 export const TrendingUp = regular(P.TrendUp);
 export const TrendingDown = regular(P.TrendDown);

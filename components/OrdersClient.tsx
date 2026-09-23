@@ -5,10 +5,11 @@ import { Fragment, type ReactNode, useEffect, useRef, useState, useTransition } 
 import { createPortal } from "react-dom";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { AlertTriangle, Building2, ChevronDown, ChevronRight, DotsVertical, Layers, Search, Settings, Tag, WarehouseFilled, X } from "@/components/icons";
-import { SkuAvatar } from "@/components/ui";
+import { PageHeader, SkuAvatar } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
 import { setOrderVoided } from "@/app/(app)/orders/actions";
-import type { OrdersSummary, OrdersPage, OrderRow } from "@/lib/order-metrics";
+import type { OrdersChart as OrdersChartData, OrdersPage, OrderRow } from "@/lib/order-metrics";
+import { OrdersChart } from "@/components/OrdersChart";
 import { inputCls } from "@/components/FormKit";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
 import { HoverHint } from "@/components/HoverHint";
@@ -357,7 +358,7 @@ function OptionSelect({
 }
 
 export function OrdersClient({
-  summary,
+  chart,
   orders,
   connectedChannels,
   importing = [],
@@ -369,7 +370,8 @@ export function OrdersClient({
   filter,
   dataBounds,
 }: {
-  summary: OrdersSummary;
+  /** The header chart: orders and units over the range, and the split by channel. */
+  chart: OrdersChartData;
   orders: OrdersPage;
   /** Connected channels (AMAZON/SHOPIFY/TIKTOK) — the filter offers exactly these; empty = none. */
   connectedChannels: string[];
@@ -469,70 +471,50 @@ export function OrdersClient({
   const to = Math.min(page * pageSize, total);
 
   return (
-    <div className="flex flex-col gap-5">
-      {/* Header: totals. No manual import — orders arrive on their own (webhooks, live polls,
+    <>
+      {/* Page actions sit beside the title; the chart below replaces the old totals — revenue
+          belongs to the P&L. No manual import: orders arrive on their own (webhooks, live polls,
           report refreshes) per the always-live rule. */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="flex flex-wrap gap-6">
-          <Stat label="Orders" value={summary.totalOrders.toLocaleString()} />
-          <Stat label="Units sold" value={summary.totalUnits.toLocaleString()} />
-          <Stat label="Revenue" value={money(summary.totalRevenue)} />
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          {importing.length > 0 && (
-            <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />
-              Importing your {listOf(importing)} order history in the background — new sales stay live while it fills.
-            </span>
-          )}
-          {/* Orders consl can't place count in no place: Reorder 2.0 leaves them out and the P&L
-              prices their units at average cost. One click lists them so they can be selected and
-              given a "Fulfilled at". */}
-          {unplaced > 0 && (
+      <PageHeader title="Orders" subtitle="Every sale across your connected channels.">
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            {importing.length > 0 && (
+              <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />
+                Importing your {listOf(importing)} order history in the background — new sales stay live while it fills.
+              </span>
+            )}
+            {/* Orders consl can't place count in no place: Reorder 2.0 leaves them out and the P&L
+                prices their units at average cost. One click lists them so they can be selected and
+                given a "Fulfilled at". */}
+            {unplaced > 0 && (
+              <button
+                type="button"
+                onClick={() => setParam("fulfilled", "none")}
+                aria-pressed={filter.fulfilledAt === "none"}
+                title="consl can't tell where these orders shipped from, so they count in no place: Reorder 2.0 leaves them out and the P&L prices their units at average cost. Click to list them, select them, then use “Fulfilled at…” to place them."
+                className="pill-amber inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[11.5px] font-medium transition-opacity hover:opacity-80"
+              >
+                <AlertTriangle size={13} />
+                {unplaced.toLocaleString()} {unplaced === 1 ? "order has" : "orders have"} no facility · click to fix
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => setParam("fulfilled", "none")}
-              aria-pressed={filter.fulfilledAt === "none"}
-              title="consl can't tell where these orders shipped from, so they count in no place: Reorder 2.0 leaves them out and the P&L prices their units at average cost. Click to list them, select them, then use “Fulfilled at…” to place them."
-              className="pill-amber inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[11.5px] font-medium transition-opacity hover:opacity-80"
+              onClick={() => setRulesOpen((o) => !o)}
+              aria-pressed={rulesOpen}
+              title="Automatic rules: fees added and orders voided when they match"
+              className={`inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[12.5px] font-medium transition-colors ${
+                rulesOpen ? "bg-surface-2 text-ink" : "bg-surface text-ink-soft hover:text-ink"
+              }`}
             >
-              <AlertTriangle size={13} />
-              {unplaced.toLocaleString()} {unplaced === 1 ? "order has" : "orders have"} no facility · click to fix
+              <Settings size={15} />
+              Automatic rules
+              {fees.rules.length > 0 && <span className="pill-neutral inline-flex items-center rounded-full border px-1.5 py-px text-[10.5px] font-medium">{fees.rules.length}</span>}
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setRulesOpen((o) => !o)}
-            aria-pressed={rulesOpen}
-            title="Automatic rules: fees added and orders voided when they match"
-            className={`inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[12.5px] font-medium transition-colors ${
-              rulesOpen ? "bg-surface-2 text-ink" : "bg-surface text-ink-soft hover:text-ink"
-            }`}
-          >
-            <Settings size={15} />
-            Automatic rules
-            {fees.rules.length > 0 && <span className="pill-neutral inline-flex items-center rounded-full border px-1.5 py-px text-[10.5px] font-medium">{fees.rules.length}</span>}
-          </button>
-        </div>
-      </div>
-
-      {/* Per-channel split */}
-      {summary.channels.length > 0 && (
-        <div className="grid gap-3 sm:grid-cols-3">
-          {summary.channels.map((c) => (
-            <div key={c.channel} className="rounded-[var(--radius-card)] border border-border bg-surface-2/40 p-4">
-              <div className="mb-2 flex items-center gap-2">
-                {CHANNEL_LOGO[c.channel] && <Image src={CHANNEL_LOGO[c.channel]} alt="" width={18} height={18} className="rounded-[4px]" />}
-                <span className="text-[13px] font-medium text-ink">{c.label}</span>
-              </div>
-              <div className="text-[19px] font-semibold text-ink">{money(c.revenue)}</div>
-              <div className="mt-0.5 text-[12px] text-muted">
-                {c.orders.toLocaleString()} orders · {c.units.toLocaleString()} units
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+          </div>
+      </PageHeader>
+    <div className="flex flex-col gap-5">
+      <OrdersChart chart={chart} range={filter.range} />
 
       {/* Filters: the one-of pickers on one row, the search on its own row under them. */}
       <div className="flex flex-col gap-2">
@@ -819,6 +801,7 @@ export function OrdersClient({
 
       {dialogOrder && dialog && <OrderDialog order={dialogOrder} mode={dialog.mode} facilities={fees.facilities} onClose={() => setDialog(null)} />}
     </div>
+    </>
   );
 }
 
@@ -904,11 +887,3 @@ function listOf(xs: string[]): string {
   return xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-[11px] font-medium uppercase tracking-wide text-muted">{label}</div>
-      <div className="mt-0.5 text-[22px] font-semibold tabular text-ink">{value}</div>
-    </div>
-  );
-}

@@ -1,6 +1,5 @@
-import { PageHeader } from "@/components/ui";
 import { requireView } from "@/lib/membership";
-import { getOrdersSummary, getOrdersPage, fulfilledAtOptions, feeRuleOptions, tagOptions, salesChannelOptions, unplacedOrderCount, isOrderTag, type OrdersFilter } from "@/lib/order-metrics";
+import { getOrdersChart, getOrdersPage, fulfilledAtOptions, feeRuleOptions, tagOptions, salesChannelOptions, unplacedOrderCount, isOrderTag, type OrdersFilter } from "@/lib/order-metrics";
 import { prisma } from "@/lib/prisma";
 import { OrdersClient } from "@/components/OrdersClient";
 import { rangeBounds, RANGES, type RangeKey } from "@/lib/chart";
@@ -45,8 +44,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   });
   const connectedChannels = conns.map((c) => c.provider.toUpperCase());
 
-  const [summary, orders, orgSettings, fees, fulfilledOptions, tags, sources, unplaced] = await Promise.all([
-    getOrdersSummary(connectedChannels, { channel: filter.channel, from: filter.from, to: filter.to }),
+  const [chart, orders, orgSettings, fees, fulfilledOptions, tags, sources, unplaced] = await Promise.all([
+    getOrdersChart(filter, { from: b.from ?? oldest, to: b.to ?? newest, allTime: rangeKey === "all" }),
     getOrdersPage(page, 50, filter),
     prisma.settings.findFirst({ select: { ordersBackfillCursor: true, ordersBackfillPass: true, shopifySyncedThrough: true, tiktokSyncedThrough: true } }),
     feeRuleOptions(),
@@ -73,9 +72,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   ];
   return (
     <>
-      <PageHeader title="Orders" subtitle="Every sale across your connected channels." />
       <OrdersClient
-        summary={summary}
+        chart={chart}
         orders={orders}
         connectedChannels={connectedChannels}
         importing={importing}
