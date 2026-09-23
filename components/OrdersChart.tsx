@@ -17,13 +17,16 @@ type Metric = "orders" | "units";
 // Bars fade toward the baseline (fill and stroke alike); the peak stays solid.
 const FADE = "linear-gradient(to bottom, #000 0%, rgba(0,0,0,0.62) 45%, rgba(0,0,0,0.05) 100%)";
 const CHART_H = 220;
-// Shades by rank: the channel with the most gets the deepest violet, each smaller one a lighter
-// step (toward the card's own colour, so on a dark page "lighter" reads as fainter, not brighter).
-const RANK_SHADE = [
-  "var(--color-accent-strong)",
-  "color-mix(in srgb, var(--color-accent-strong) 66%, var(--color-surface))",
-  "color-mix(in srgb, var(--color-accent-strong) 38%, var(--color-surface))",
-];
+// Shades by rank, darkest for the channel with the most, lighter for each smaller one — the same
+// three violets on both themes' own tokens (accent-strong, chart, then chart toward white), so the
+// order never flips in dark mode. More channels get evenly spaced steps along the same scale.
+const LIGHTEST = "color-mix(in srgb, var(--color-chart) 55%, #fff)";
+function rankShade(rank: number, count: number): string {
+  if (count <= 1) return "var(--color-accent-strong)";
+  const t = rank / (count - 1); // 0 = most, 1 = least
+  if (t <= 0.5) return `color-mix(in srgb, var(--color-accent-strong) ${Math.round((1 - t * 2) * 100)}%, var(--color-chart))`;
+  return `color-mix(in srgb, var(--color-chart) ${Math.round((2 - t * 2) * 100)}%, ${LIGHTEST})`;
+}
 
 const day = (s: string) => new Date(`${s}T00:00:00Z`);
 
@@ -131,7 +134,7 @@ export function OrdersChart({ chart, range }: { chart: Chart; range: Range }) {
     .map((c) => ({ ...c, value: c[metric], share: total > 0 ? c[metric] / total : 0 }))
     .filter((c) => c.value > 0)
     .sort((a, b) => b.value - a.value)
-    .map((c, rank) => ({ ...c, color: RANK_SHADE[Math.min(rank, RANK_SHADE.length - 1)] }));
+    .map((c, rank, all) => ({ ...c, color: rankShade(rank, all.length) }));
   const share = (s: number) => (s >= 0.1 ? `${Math.round(s * 100)}%` : `${(s * 100).toLocaleString(locale, { maximumFractionDigits: 1 })}%`);
 
   const bar = (p: OrdersChartPoint, i: number) => {
