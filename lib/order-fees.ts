@@ -21,6 +21,10 @@ export const FEE_TAGS: Record<string, string> = { mcf: "MCF", free_sample: "Free
 export type FeeKind = "fixed" | "percent";
 export type FeeBucket = "custom_fees" | "payment_fees";
 export const FEE_BUCKETS: FeeBucket[] = ["custom_fees", "payment_fees"];
+/** Where a CREDIT (money added to an order by hand) lands on the P&L: as revenue under Sales, or
+ *  netted against one of the fee buckets. */
+export type CreditBucket = "sales" | "custom_fees" | "payment_fees";
+export const CREDIT_BUCKETS: CreditBucket[] = ["sales", "custom_fees", "payment_fees"];
 
 type Rule = {
   id: string; name: string; action: string; kind: string; value: number; extraFixed: number | null; bucket: string;

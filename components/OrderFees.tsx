@@ -10,13 +10,14 @@ import { DatePicker } from "@/components/DatePicker";
 import { rangeBounds } from "@/lib/chart";
 import { useMoney } from "@/components/CurrencyProvider";
 import { paymentMethodLabel } from "@/lib/payment-methods";
-import { addOrderFees, removeOrderFee, setFulfillmentOverride, setFulfillmentOverrides, setOrdersVoided, createFeeRule, deleteFeeRule, setFeeRuleActive } from "@/app/(app)/orders/actions";
+import { addOrderFees, addOrderCredits, removeOrderFee, setFulfillmentOverride, setFulfillmentOverrides, setOrdersVoided, createFeeRule, deleteFeeRule, setFeeRuleActive } from "@/app/(app)/orders/actions";
 import type { OrderRow, FeeRuleRow, FeeRuleOptions } from "@/lib/order-metrics";
 
 /**
- * Custom fees on orders: the bulk bar over a selection, the per-order "Fees & fulfillment"
- * dialog, and the fee-rules panel behind the Orders tab's gear. All writes go through the
- * server actions and refresh the page; nothing is kept locally beyond the form drafts.
+ * Custom fees and credits on orders: the bulk bar over a selection, the per-order dialog (one of
+ * three — Custom fees, Shipped from, Credits — from the row's ⋮ menu), and the fee-rules panel
+ * behind the Orders tab's gear. All writes go through the server actions and refresh the page;
+ * nothing is kept locally beyond the form drafts.
  */
 
 export type FeeOptions = FeeRuleOptions;
@@ -33,6 +34,11 @@ type Result = { ok: boolean; error?: string };
 type Bucket = "custom_fees" | "payment_fees";
 type FeeDraft = { name: string; kind: "fixed" | "percent"; value: string; extra: string; bucket: Bucket };
 const emptyFee: FeeDraft = { name: "", kind: "fixed", value: "", extra: "", bucket: "custom_fees" };
+type CreditBucket = "sales" | "custom_fees" | "payment_fees";
+type CreditDraft = { name: string; kind: "fixed" | "percent"; value: string; bucket: CreditBucket };
+const emptyCredit: CreditDraft = { name: "", kind: "fixed", value: "", bucket: "sales" };
+const CREDIT_BUCKET_LABEL: Record<CreditBucket, string> = { sales: "Sales", custom_fees: "Custom fees", payment_fees: "Payment processing" };
+export type DialogMode = "fees" | "shipped" | "credits";
 const num = (s: string) => Number(s.replace(",", "."));
 const parseFee = (d: FeeDraft) => ({
   name: d.name.trim(),
@@ -41,6 +47,8 @@ const parseFee = (d: FeeDraft) => ({
   extraFixed: d.kind === "percent" && d.extra.trim() ? num(d.extra) : null,
   bucket: d.bucket,
 });
+
+const parseCredit = (d: CreditDraft) => ({ name: d.name.trim(), kind: d.kind, value: num(d.value), bucket: d.bucket });
 
 /** "Processing fee", "Chargeback fee" — a ledger type as words. */
 const spell = (t: string) => t.replace(/[_-]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^\w/, (c) => c.toUpperCase());
@@ -103,14 +111,60 @@ function FeeFields({ draft, onChange }: { draft: FeeDraft; onChange: (d: FeeDraf
   );
 }
 
-/** Actions over the ticked rows: void, unvoid, or put the same fee on each. */
+/** Name + type + amount + where it lands on the P&L — for money ADDED to an order. */
+function CreditFields({ draft, onChange }: { draft: CreditDraft; onChange: (d: CreditDraft) => void }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="grid gap-2 sm:grid-cols-[1fr_170px_110px]">
+        <input
+          value={draft.name}
+          onChange={(e) => onChange({ ...draft, name: e.target.value })}
+          placeholder="Credit name, e.g. Shipping charged to the customer"
+          className={inputCls}
+          maxLength={60}
+        />
+        <SelectMenu
+          value={draft.kind}
+          onChange={(v) => onChange({ ...draft, kind: v as CreditDraft["kind"] })}
+          options={[
+            { value: "fixed", label: "Fixed amount" },
+            { value: "percent", label: "% of amount paid" },
+          ]}
+        />
+        <div className="relative">
+          <input
+            value={draft.value}
+            onChange={(e) => onChange({ ...draft, value: e.target.value })}
+            inputMode="decimal"
+            placeholder={draft.kind === "percent" ? "5" : "12.37"}
+            className={`${inputCls} ${draft.kind === "percent" ? "pr-7" : ""}`}
+          />
+          {draft.kind === "percent" && <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[12px] text-muted">%</span>}
+        </div>
+      </div>
+      <SelectMenu
+        value={draft.bucket}
+        onChange={(v) => onChange({ ...draft, bucket: v as CreditBucket })}
+        options={[
+          { value: "sales", label: "Counts as revenue — on the P&L under Sales" },
+          { value: "custom_fees", label: "Nets against Custom fees on the P&L" },
+          { value: "payment_fees", label: "Nets against Payment processing on the P&L" },
+        ]}
+      />
+    </div>
+  );
+}
+
+/** Actions over the ticked rows: void, unvoid, or put the same fee or credit on each. */
 export function BulkBar({ ids, facilities, onClear }: { ids: string[]; facilities: { id: string; name: string }[]; onClear: () => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [feeOpen, setFeeOpen] = useState(false);
+  const [creditOpen, setCreditOpen] = useState(false);
   const [placeOpen, setPlaceOpen] = useState(false);
   const [place, setPlace] = useState("");
   const [draft, setDraft] = useState<FeeDraft>(emptyFee);
+  const [credit, setCredit] = useState<CreditDraft>(emptyCredit);
   const [error, setError] = useState<string | null>(null);
   const run = (fn: () => Promise<Result>) =>
     start(async () => {
@@ -118,8 +172,10 @@ export function BulkBar({ ids, facilities, onClear }: { ids: string[]; facilitie
       if (!r.ok) return setError(r.error ?? "Something went wrong.");
       setError(null);
       setFeeOpen(false);
+      setCreditOpen(false);
       setPlaceOpen(false);
       setDraft(emptyFee);
+      setCredit(emptyCredit);
       onClear();
       router.refresh();
     });
@@ -134,11 +190,14 @@ export function BulkBar({ ids, facilities, onClear }: { ids: string[]; facilitie
       <button className={btnSecondary} disabled={pending} onClick={() => run(() => setOrdersVoided(ids, false))}>
         Unvoid
       </button>
-      <button className={btnSecondary} disabled={pending} onClick={() => { setFeeOpen((o) => !o); setPlaceOpen(false); }}>
+      <button className={btnSecondary} disabled={pending} onClick={() => { setFeeOpen((o) => !o); setCreditOpen(false); setPlaceOpen(false); }}>
         <Plus size={13} /> Add fee
       </button>
-      <button className={btnSecondary} disabled={pending} onClick={() => { setPlaceOpen((o) => !o); setFeeOpen(false); }}>
-        Fulfilled at…
+      <button className={btnSecondary} disabled={pending} onClick={() => { setCreditOpen((o) => !o); setFeeOpen(false); setPlaceOpen(false); }}>
+        <Plus size={13} /> Add credit
+      </button>
+      <button className={btnSecondary} disabled={pending} onClick={() => { setPlaceOpen((o) => !o); setFeeOpen(false); setCreditOpen(false); }}>
+        Shipped from…
       </button>
       {error && <span className="text-[12px] text-negative">{error}</span>}
       <button className="ml-auto text-[12px] text-muted hover:text-ink" onClick={onClear}>
@@ -174,16 +233,33 @@ export function BulkBar({ ids, facilities, onClear }: { ids: string[]; facilitie
           </div>
         </div>
       )}
+      {creditOpen && (
+        <div className="basis-full">
+          <div className="mt-1 flex flex-col gap-2 rounded-lg border border-border bg-surface p-3">
+            <CreditFields draft={credit} onChange={setCredit} />
+            <div className="flex items-center gap-2">
+              <button className={btnPrimary} disabled={pending} onClick={() => run(() => addOrderCredits(ids, parseCredit(credit)))}>
+                <Check size={13} /> {pending ? "Adding…" : `Add to ${ids.length} order${ids.length === 1 ? "" : "s"}`}
+              </button>
+              <button className={btnSecondary} onClick={() => setCreditOpen(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-/** One order's custom fees, the fees its platform reported, and its fulfilled-at correction. */
-export function OrderDialog({ order, facilities, onClose }: { order: OrderRow; facilities: { id: string; name: string }[]; onClose: () => void }) {
+/** One order, one job at a time from the row's ⋮ menu: its custom fees (with the fees its platform
+ *  reported), where it shipped from, or the credits added to it. */
+export function OrderDialog({ order, mode, facilities, onClose }: { order: OrderRow; mode: DialogMode; facilities: { id: string; name: string }[]; onClose: () => void }) {
   const router = useRouter();
   const { money } = useMoney();
   const [pending, start] = useTransition();
   const [draft, setDraft] = useState<FeeDraft>(emptyFee);
+  const [credit, setCredit] = useState<CreditDraft>(emptyCredit);
   const [error, setError] = useState<string | null>(null);
   const detected = order.fulfilledAtDetected ?? (order.fulfilledAt && !order.fulfilledAtDetected ? order.fulfilledAt : null);
   const [loc, setLoc] = useState(order.fulfilledAtDetected ? (order.fulfilledAt?.id ?? "") : "");
@@ -210,7 +286,9 @@ export function OrderDialog({ order, facilities, onClose }: { order: OrderRow; f
       >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[15px] font-semibold text-ink">Order {order.orderNumber ?? ""}</div>
+            <div className="text-[15px] font-semibold text-ink">
+              {mode === "fees" ? "Custom fees" : mode === "credits" ? "Credits" : "Shipped from"} · Order {order.orderNumber ?? ""}
+            </div>
             <div className="text-[12px] text-muted">
               {channelName} · {money(order.total)} paid
               {order.paymentMethod && (
@@ -226,7 +304,7 @@ export function OrderDialog({ order, facilities, onClose }: { order: OrderRow; f
           </button>
         </div>
 
-        {order.channel !== "AMAZON" && (
+        {mode === "fees" && order.channel !== "AMAZON" && (
           <section className="mt-4">
             <div className="text-[11px] font-medium uppercase tracking-wide text-muted">Fees read from {channelName}</div>
             {order.platformFees.length === 0 ? (
@@ -247,6 +325,7 @@ export function OrderDialog({ order, facilities, onClose }: { order: OrderRow; f
           </section>
         )}
 
+        {mode === "fees" && (
         <section className="mt-4">
           <div className="text-[11px] font-medium uppercase tracking-wide text-muted">Custom fees</div>
           {order.fees.length === 0 ? (
@@ -288,9 +367,57 @@ export function OrderDialog({ order, facilities, onClose }: { order: OrderRow; f
             </button>
           </div>
         </section>
+        )}
 
-        <section className="mt-5">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-muted">Fulfilled at</div>
+        {mode === "credits" && (
+        <section className="mt-4">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-muted">Credits</div>
+          <p className="mt-1 text-[12.5px] text-muted">
+            Money this order brought in that {channelName}&apos;s record doesn&apos;t show — a shipping charge the customer paid, a reimbursement.
+            Each credit lands on the P&amp;L where you put it: as revenue under Sales, or netted against a fee bucket.
+          </p>
+          {order.credits.length === 0 ? (
+            <p className="mt-1 text-[12.5px] text-muted">No credits on this order.</p>
+          ) : (
+            <ul className="mt-1 divide-y divide-line rounded-lg border border-border">
+              {order.credits.map((c) => (
+                <li key={c.id} className="flex items-center justify-between gap-2 px-3 py-2 text-[13px]">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-ink">{c.name}</span>
+                    <span className="pill-neutral inline-flex items-center rounded-full border px-1.5 py-px text-[10.5px] font-medium">{CREDIT_BUCKET_LABEL[c.bucket as CreditBucket] ?? c.bucket}</span>
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="tabular text-positive">+{money(c.amount)}</span>
+                    <button className={iconBtn} disabled={pending} onClick={() => act(() => removeOrderFee(c.id))} aria-label="Remove credit">
+                      <X size={13} />
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="mt-2 flex flex-col gap-2">
+            <CreditFields draft={credit} onChange={setCredit} />
+            <button
+              className={`${btnPrimary} self-start`}
+              disabled={pending}
+              onClick={() =>
+                act(async () => {
+                  const r = await addOrderCredits([order.id], parseCredit(credit));
+                  if (r.ok) setCredit(emptyCredit);
+                  return r;
+                })
+              }
+            >
+              <Plus size={13} /> Add credit
+            </button>
+          </div>
+        </section>
+        )}
+
+        {mode === "shipped" && (
+        <section className="mt-4">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-muted">Shipped from</div>
           <p className="mt-1 text-[12.5px] text-muted">
             {channelName} says &ldquo;{order.fulfillmentLabel ?? "unknown"}&rdquo;
             {detected ? `, which consl reads as ${detected.name}` : ", which consl can't place yet"}. Pick the facility it really shipped from — the
@@ -307,6 +434,7 @@ export function OrderDialog({ order, facilities, onClose }: { order: OrderRow; f
             </button>
           </div>
         </section>
+        )}
 
         {error && <p className="mt-3 text-[12px] text-negative">{error}</p>}
       </div>

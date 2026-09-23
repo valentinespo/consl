@@ -16,7 +16,7 @@ export const PNL_SOURCE_LABEL: Record<PnlSource, string> = {
   TIKTOK: "From TikTok Shop",
   AMAZON_ADS: "From Amazon Ads",
   META: "From Meta Ads",
-  CUSTOM: "A fee you set up in consl",
+  CUSTOM: "A fee or credit you set up in consl",
   CONSL: "Computed by consl",
 };
 

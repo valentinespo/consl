@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requirePermission, requireView } from "@/lib/membership";
 import { importAllOrders } from "@/lib/orders";
 import { prisma } from "@/lib/prisma";
-import { applyFeeRule, applyFeeRulesToOrders, releaseVoidRule, feeAmount, FEE_TAGS, FEE_BUCKETS, type FeeKind, type FeeBucket } from "@/lib/order-fees";
+import { applyFeeRule, applyFeeRulesToOrders, releaseVoidRule, feeAmount, FEE_TAGS, FEE_BUCKETS, CREDIT_BUCKETS, type FeeKind, type FeeBucket, type CreditBucket } from "@/lib/order-fees";
 import { getOrgSettings } from "@/lib/settings";
 import { zonedDayBounds } from "@/lib/pnl";
 
@@ -83,6 +83,38 @@ export async function addOrderFees(orderIds: string[], fee: FeeInput) {
   return { ok: true as const, count: orders.length };
 }
 
+type CreditInput = { name: string; kind: FeeKind; value: number; bucket: CreditBucket };
+
+function checkCredit(c: CreditInput): string | null {
+  const name = c.name.trim();
+  if (!name) return "Give the credit a name.";
+  if (name.length > 60) return "Keep the name under 60 characters.";
+  if (!Number.isFinite(c.value) || c.value <= 0) return "Enter an amount above zero.";
+  if (c.kind === "percent" && c.value > 100) return "A percentage can't exceed 100.";
+  if (c.kind !== "percent" && c.kind !== "fixed") return "Choose a credit type.";
+  if (!CREDIT_BUCKETS.includes(c.bucket)) return "Choose where the credit shows on the P&L.";
+  return null;
+}
+
+/** Money ADDED to an order by hand — a shipping charge the platform's record doesn't show, a
+ *  reimbursement — on one order or a selection. It lands on the P&L where the operator says: as
+ *  revenue under Sales, or netted against Custom fees / Payment processing. A percentage is of
+ *  what each customer paid, like a fee. */
+export async function addOrderCredits(orderIds: string[], credit: CreditInput) {
+  const gate = await requirePermission("inventory", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  const bad = checkCredit(credit);
+  if (bad) return { ok: false as const, error: bad };
+  const orders = await prisma.salesOrder.findMany({ where: { id: { in: orderIds } }, select: { id: true, total: true } });
+  if (orders.length === 0) return { ok: false as const, error: "No orders selected." };
+  await prisma.orderFee.createMany({
+    data: orders.map((o) => ({ orderId: o.id, ruleId: null, type: "credit", name: credit.name.trim(), amount: feeAmount(credit.kind, credit.value, o.total, null), bucket: credit.bucket })),
+  });
+  touched();
+  return { ok: true as const, count: orders.length };
+}
+
+/** Removes a hand-written fee or credit. */
 export async function removeOrderFee(feeId: string) {
   const gate = await requirePermission("inventory", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };

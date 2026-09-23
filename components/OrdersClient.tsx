@@ -14,7 +14,7 @@ import { DateRangePicker, type Range } from "@/components/DateRangePicker";
 import { HoverHint } from "@/components/HoverHint";
 import { useExitAnimation } from "@/components/animate";
 import { ROOT_LOGO } from "@/lib/channel-logos";
-import { BulkBar, OrderDialog, RulesDialog, type FeeOptions } from "@/components/OrderFees";
+import { BulkBar, OrderDialog, RulesDialog, type FeeOptions, type DialogMode } from "@/components/OrderFees";
 import { paymentMethodLabel } from "@/lib/payment-methods";
 
 // Channel marks come from the shared map — Orders always talks about a whole channel.
@@ -40,9 +40,9 @@ function statusPill(o: OrderRow): { label: string; cls: string } | null {
   return { label: s.charAt(0).toUpperCase() + s.slice(1), cls: "pill-neutral" };
 }
 
-/** The row's overflow menu (⋮): void/unvoid today, more settings later. Portalled — the table's
- *  scroll container would clip an inline popover. */
-function RowMenu({ id, voided, onManage }: { id: string; voided: boolean; onManage: () => void }) {
+/** The row's overflow menu (⋮): custom fees, where it shipped from, credits, void/unvoid.
+ *  Portalled — the table's scroll container would clip an inline popover. */
+function RowMenu({ id, voided, onManage }: { id: string; voided: boolean; onManage: (mode: DialogMode) => void }) {
   const router = useRouter();
   const btn = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -73,7 +73,7 @@ function RowMenu({ id, voided, onManage }: { id: string; voided: boolean; onMana
   function toggle() {
     if (open) return setBox(null);
     const r = btn.current!.getBoundingClientRect();
-    setBox({ top: r.bottom + 4, left: Math.max(8, r.right - 160) });
+    setBox({ top: r.bottom + 4, left: Math.max(8, r.right - 172) });
   }
 
   return (
@@ -93,19 +93,28 @@ function RowMenu({ id, voided, onManage }: { id: string; voided: boolean; onMana
           <div
             ref={menu}
             role="menu"
-            style={{ position: "fixed", top: box.top, left: box.left, width: 160 }}
+            style={{ position: "fixed", top: box.top, left: box.left, width: 172 }}
             className="dropdown-in z-[300] rounded-xl border border-border bg-surface p-1 shadow-xl"
           >
-            <button
-              role="menuitem"
-              onClick={() => {
-                setBox(null);
-                onManage();
-              }}
-              className="w-full rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink-soft hover:bg-surface-2 hover:text-ink"
-            >
-              Fees &amp; fulfillment…
-            </button>
+            {(
+              [
+                ["fees", "Custom fees…"],
+                ["shipped", "Shipped from…"],
+                ["credits", "Credits…"],
+              ] as [DialogMode, string][]
+            ).map(([mode, label]) => (
+              <button
+                key={mode}
+                role="menuitem"
+                onClick={() => {
+                  setBox(null);
+                  onManage(mode);
+                }}
+                className="w-full rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink-soft hover:bg-surface-2 hover:text-ink"
+              >
+                {label}
+              </button>
+            ))}
             <button
               role="menuitem"
               disabled={pending}
@@ -386,7 +395,7 @@ export function OrdersClient({
   const { money, locale } = useMoney();
   const [search, setSearch] = useState(filter.q);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [dialogId, setDialogId] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<{ id: string; mode: DialogMode } | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
   // Rows opened to show their units (per page; a page change starts closed).
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -420,7 +429,7 @@ export function OrdersClient({
       else next.add(id);
       return next;
     });
-  const dialogOrder = dialogId ? orders.rows.find((r) => r.id === dialogId) ?? null : null;
+  const dialogOrder = dialog ? orders.rows.find((r) => r.id === dialog.id) ?? null : null;
 
   /** Update one query param and reset to page 1 (a new filter restarts the walk). */
   function setParam(key: string, value: string) {
@@ -733,9 +742,18 @@ export function OrdersClient({
                           <span className="block text-[11px] text-muted">−{money(o.feeTotal)} fees</span>
                         </HoverHint>
                       )}
+                      {o.credits.length > 0 && (
+                        <HoverHint
+                          title="Credits"
+                          body={o.credits.map((c) => `${c.name}: +${money(c.amount)}`).join(" · ")}
+                          className="block"
+                        >
+                          <span className="block text-[11px] text-positive">+{money(o.creditTotal)} credits</span>
+                        </HoverHint>
+                      )}
                     </td>
                     <td className="px-2 py-2.5 text-right">
-                      <RowMenu id={o.id} voided={o.voided} onManage={() => setDialogId(o.id)} />
+                      <RowMenu id={o.id} voided={o.voided} onManage={(mode) => setDialog({ id: o.id, mode })} />
                     </td>
                   </tr>
                   {open && (
@@ -782,7 +800,7 @@ export function OrdersClient({
         </div>
       )}
 
-      {dialogOrder && <OrderDialog order={dialogOrder} facilities={fees.facilities} onClose={() => setDialogId(null)} />}
+      {dialogOrder && dialog && <OrderDialog order={dialogOrder} mode={dialog.mode} facilities={fees.facilities} onClose={() => setDialog(null)} />}
     </div>
   );
 }

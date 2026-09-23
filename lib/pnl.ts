@@ -187,6 +187,15 @@ type SaleDetail = {
   unmatched: string | null; // the product code, when it has no cost on record
 };
 
+/** A hand-written or rule-made row on an order, as a signed P&L amount in its bucket: a fee is a
+ *  cost (negative) under Custom fees or Payment processing; a credit is money in (positive) under
+ *  Sales, or netted against one of those fee buckets. */
+function customLine(f: { bucket: string; type: string; amount: number }): { bucket: string; signed: number } {
+  const credit = f.type === "credit";
+  const bucket = credit && f.bucket === "sales" ? "sales" : f.bucket === "payment_fees" ? "payment_fees" : "custom_fees";
+  return { bucket, signed: credit ? f.amount : -f.amount };
+}
+
 async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlChannel>, scope: Scope, onCost: (sale: Sale, cogs: number, detail: SaleDetail) => void): Promise<Cogs> {
   const tq = Date.now();
   const { queues, fallback } = await loadQueues();
@@ -688,22 +697,23 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
   // fee counts whenever its order counts; on an MCF order it always counts (the fee is a real
   // cost even though that order's revenue lives on another channel); on a Shopify order the
   // double-count rule drops, only a hand-written fee counts.
-  const feeRows = await prisma.$queryRaw<{ name: string; bucket: string; currency: string; amount: number; orderedAt: Date }[]>`
-    SELECT f.name, f.bucket, o.currency, f.amount::float8 AS amount, o."orderedAt"
+  const feeRows = await prisma.$queryRaw<{ name: string; bucket: string; type: string; currency: string; amount: number; orderedAt: Date }[]>`
+    SELECT f.name, f.bucket, f.type, o.currency, f.amount::float8 AS amount, o."orderedAt"
     FROM "OrderFee" f JOIN "SalesOrder" o ON o.id = f."orderId"
     WHERE o."orgId" = ${orgId} AND o.channel = ANY(${selected}::text[])
       AND o."orderedAt" >= ${from} AND o."orderedAt" <= ${to}
       AND o.cancelled = false AND o.voided = false
       AND (f."ruleId" IS NULL OR o.mcf OR NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excludedSources}::text[])))`;
   // Each fee lands in the bucket its rule chose — a processor's charge under Payment processing,
-  // everything else under Custom fees — as its own line.
+  // everything else under Custom fees — as its own line. A CREDIT (money added by hand) counts
+  // the other way, where the operator put it: as revenue under Sales, or against a fee bucket.
   const feeByName = new Map<string, { bucket: string; name: string; amount: number }>();
   for (const f of feeRows) {
     const fx = f.currency === baseCurrency ? 1 : await fxRate(f.currency, baseCurrency, f.orderedAt);
-    const bucket = f.bucket === "payment_fees" ? "payment_fees" : "custom_fees";
+    const { bucket, signed } = customLine(f);
     const k = `${bucket}|${f.name}`;
-    feeByName.set(k, { bucket, name: f.name, amount: (feeByName.get(k)?.amount ?? 0) - f.amount * fx });
-    periods.addAmount(f.orderedAt.getTime(), bucket, f.name, -f.amount * fx, "CUSTOM");
+    feeByName.set(k, { bucket, name: f.name, amount: (feeByName.get(k)?.amount ?? 0) + signed * fx });
+    periods.addAmount(f.orderedAt.getTime(), bucket, f.name, signed * fx, "CUSTOM");
   }
   for (const f of feeByName.values()) add(f.bucket, f.name, f.amount, "CUSTOM");
 
@@ -993,16 +1003,16 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
   mark("ledger");
 
   // Custom fees, on the order's own channel and day.
-  const feeRows = await prisma.$queryRaw<{ channel: string; name: string; bucket: string; currency: string; amount: number; orderedAt: Date }[]>`
-    SELECT o.channel, f.name, f.bucket, o.currency, f.amount::float8 AS amount, o."orderedAt"
+  const feeRows = await prisma.$queryRaw<{ channel: string; name: string; bucket: string; type: string; currency: string; amount: number; orderedAt: Date }[]>`
+    SELECT o.channel, f.name, f.bucket, f.type, o.currency, f.amount::float8 AS amount, o."orderedAt"
     FROM "OrderFee" f JOIN "SalesOrder" o ON o.id = f."orderId"
     WHERE o."orgId" = ${orgId} AND o.channel = ANY(${selected}::text[])
       AND o.cancelled = false AND o.voided = false
       AND (f."ruleId" IS NULL OR o.mcf OR NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excludedSources}::text[])))`;
   for (const f of feeRows) {
     const fx = f.currency === baseCurrency ? 1 : await fxRate(f.currency, baseCurrency, f.orderedAt);
-    const bucket = f.bucket === "payment_fees" ? "payment_fees" : "custom_fees";
-    addPnlAmount(tally(f.channel as PnlChannel, dayOf(f.orderedAt)).blocks, bucket, f.name, -f.amount * fx, "CUSTOM");
+    const { bucket, signed } = customLine(f);
+    addPnlAmount(tally(f.channel as PnlChannel, dayOf(f.orderedAt)).blocks, bucket, f.name, signed * fx, "CUSTOM");
   }
 
   mark("fees");

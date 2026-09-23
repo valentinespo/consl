@@ -140,6 +140,10 @@ export type OrderRow = {
   /** Custom fees on the order — from a rule (fromRule) or written by hand. */
   fees: { id: string; name: string; amount: number; fromRule: boolean }[];
   feeTotal: number;
+  /** Credits written by hand — money added to the order, with the P&L bucket each one lands in
+   *  (sales | custom_fees | payment_fees). */
+  credits: { id: string; name: string; amount: number; bucket: string }[];
+  creditTotal: number;
 };
 
 export type FeeRuleRow = {
@@ -508,7 +512,7 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
       replacement: true,
       voided: true,
       lines: { select: { quantity: true, sku: true, unitPrice: true, product: { select: { code: true, name: true, imageUrl: true } } } },
-      fees: { select: { id: true, name: true, amount: true, ruleId: true }, orderBy: { createdAt: "asc" } },
+      fees: { select: { id: true, name: true, amount: true, ruleId: true, type: true, bucket: true }, orderBy: { createdAt: "asc" } },
     },
   });
 
@@ -559,8 +563,10 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
     freeSample: o.channel === "TIKTOK" && o.total === 0 && !o.cancelled,
     voided: o.voided,
     excluded: (o.channel === "SHOPIFY" && !!o.source && excluded.includes(o.source)) || (excludeMcf && o.mcf),
-    fees: o.fees.map((f) => ({ id: f.id, name: f.name, amount: f.amount, fromRule: f.ruleId !== null })),
-    feeTotal: o.fees.reduce((s, f) => s + f.amount, 0),
+    fees: o.fees.filter((f) => f.type !== "credit").map((f) => ({ id: f.id, name: f.name, amount: f.amount, fromRule: f.ruleId !== null })),
+    feeTotal: o.fees.filter((f) => f.type !== "credit").reduce((s, f) => s + f.amount, 0),
+    credits: o.fees.filter((f) => f.type === "credit").map((f) => ({ id: f.id, name: f.name, amount: f.amount, bucket: f.bucket })),
+    creditTotal: o.fees.filter((f) => f.type === "credit").reduce((s, f) => s + f.amount, 0),
   }));
 
   return { rows, total, page: current, pageSize, pageCount };

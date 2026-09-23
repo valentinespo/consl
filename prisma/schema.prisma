@@ -1065,6 +1065,9 @@ model OrderFee {
   name         String
   amount       Float
   bucket       String        @default("custom_fees") // copied from the rule, or chosen when written by hand
+  // "fee" takes money off the order; "credit" adds money to it (a shipping charge the platform's
+  // record doesn't show, a reimbursement). A credit's bucket may also be "sales".
+  type         String        @default("fee")
   createdAt    DateTime      @default(now())
 
   @@index([orgId, orderId])
