@@ -4,7 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, PnlFilled, Receipt, X } from "@/components/icons";
+import { ChevronDown, PnlFilled, Receipt, X, CurrencyDollar, CreditCard } from "@/components/icons";
 import { useMoney } from "@/components/CurrencyProvider";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
 import { SelectMenu } from "@/components/SelectMenu";
@@ -34,8 +34,22 @@ function humanize(raw: string): string {
   return label.replace(/\bfba\b/gi, "FBA").replace(/\bmcf\b/gi, "MCF");
 }
 
-/** Where a line's money comes from, as the platform's mark — stacked when a line mixes sources. */
-function SourceMarks({ sources, size = 14 }: { sources: PnlSource[]; size?: number }) {
+/** A line's label: a platform's type code spelled out, or — for a line written in consl — the name
+ *  exactly as the operator typed it (an order number or a brand stays as written). */
+function lineLabel(t: { type: string; sources: PnlSource[] }): string {
+  return t.sources.length > 0 && t.sources.every((x) => x === "CUSTOM") ? t.type : humanize(t.type);
+}
+
+/** The mark on a line written in consl (a fee or a credit), by the bucket it sits in: money for a
+ *  credit counted as revenue, a card for a processor's charge, a receipt for everything else. */
+function CustomGlyph({ group, size }: { group?: string; size: number }) {
+  const Glyph = group === "sales" ? CurrencyDollar : group === "payment_fees" ? CreditCard : Receipt;
+  return <Glyph size={size} />;
+}
+
+/** Where a line's money comes from, as the platform's mark — stacked when a line mixes sources.
+ *  `group` is the P&L bucket the line sits in, which picks the glyph for lines written in consl. */
+function SourceMarks({ sources, size = 14, group }: { sources: PnlSource[]; size?: number; group?: string }) {
   if (!sources.length) return null;
   return (
     <span className="inline-flex shrink-0 items-center -space-x-1" aria-label={sources.map((x) => PNL_SOURCE_LABEL[x]).join(", ")}>
@@ -44,10 +58,10 @@ function SourceMarks({ sources, size = 14 }: { sources: PnlSource[]; size?: numb
           <span
             key={x}
             title={PNL_SOURCE_LABEL[x]}
-            className="inline-flex items-center justify-center rounded-[3px] bg-surface-2 text-ink-soft ring-1 ring-surface"
+            className="inline-flex items-center justify-center rounded-[3px] bg-accent-soft text-accent ring-1 ring-surface"
             style={{ width: size, height: size }}
           >
-            <Receipt size={size - 3} />
+            <CustomGlyph group={group} size={size - 3} />
           </span>
         ) : (
           <Image
@@ -94,7 +108,7 @@ function GroupRow({ block, money }: { block: PnlGroupBlock; money: (n: number) =
       >
         <span className="flex items-center gap-2 font-medium text-ink">
           {/* A collapsible group is a subtotal — its lines carry the marks. A single-line group is the line. */}
-          {!expandable && <SourceMarks sources={blockSources(block)} />}
+          {!expandable && <SourceMarks sources={blockSources(block)} group={block.group} />}
           {GROUP_LABEL[block.group] ?? block.group}
           {expandable && <ChevronDown size={13} className={`text-muted transition-transform ${open ? "rotate-180" : ""}`} />}
         </span>
@@ -104,8 +118,8 @@ function GroupRow({ block, money }: { block: PnlGroupBlock; money: (n: number) =
         block.types.map((t) => (
           <div key={t.type} className="dropdown-in flex items-center justify-between gap-3 px-4 py-1.5 pl-8 text-[12.5px] text-ink-soft">
             <span className="flex min-w-0 items-center gap-2">
-              <SourceMarks sources={t.sources} size={13} />
-              <span className="min-w-0 truncate">{humanize(t.type)}</span>
+              <SourceMarks sources={t.sources} size={13} group={block.group} />
+              <span className="min-w-0 truncate">{lineLabel(t)}</span>
             </span>
             <Amount value={t.amount} money={money} />
           </div>
@@ -134,7 +148,7 @@ function PeriodGroupRows({ block, statements, money }: { block: PnlGroupBlock; s
       <tr className={`${periodRowBorder} text-[13px]`}>
         <th scope="row" className={`${periodLabelCell} py-2.5 font-medium text-ink`}>
           <button type="button" onClick={() => expandable && setOpen((value) => !value)} aria-expanded={expandable ? open : undefined} className={`flex w-full items-center gap-2 text-left ${expandable ? "hover:text-accent" : "cursor-default"}`}>
-            {!expandable && <SourceMarks sources={blockSources(block)} />}
+            {!expandable && <SourceMarks sources={blockSources(block)} group={block.group} />}
             {GROUP_LABEL[block.group] ?? block.group}
             {expandable && <ChevronDown size={13} className={`shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`} />}
           </button>
@@ -145,7 +159,7 @@ function PeriodGroupRows({ block, statements, money }: { block: PnlGroupBlock; s
       {open && block.types.map((type) => (
         <tr key={type.type} className="dropdown-in text-[12.5px] text-ink-soft">
           <th scope="row" className={`${periodLabelCell} py-1.5 pl-8 font-normal`}>
-            <span className="flex items-center gap-2"><SourceMarks sources={type.sources} size={13} /><span title={humanize(type.type)} className="truncate">{humanize(type.type)}</span></span>
+            <span className="flex items-center gap-2"><SourceMarks sources={type.sources} size={13} group={block.group} /><span title={lineLabel(type)} className="truncate">{lineLabel(type)}</span></span>
           </th>
           {groups.map((group, index) => <td key={index} className={`${periodValueCell(index)} py-1.5`}><Amount value={group?.types.find((row) => row.type === type.type)?.amount ?? 0} money={money} /></td>)}
           <Filler />
