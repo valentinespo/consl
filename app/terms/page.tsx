@@ -9,11 +9,12 @@ export default function TermsPage() {
       <div className="mx-auto max-w-2xl px-5 py-16">
         <Link href="/home" className="text-[13px] font-medium text-violet-700 hover:underline">← consl.ai</Link>
         <h1 className="mt-4 text-[32px] font-bold tracking-tight">Terms of Service</h1>
-        <p className="mt-1 text-[13px] text-neutral-500">Last updated: August 2026</p>
+        <p className="mt-1 text-[13px] text-neutral-500">Last updated: September 2026</p>
 
         <div className="mt-8 space-y-6 text-[14.5px] leading-relaxed text-neutral-700">
           <p>
-            consl is operated by Bluesteam LLC. By creating an account or using consl you agree to these terms.
+            consl is operated by Bluesteam LLC together with Steamnook S.L., which runs consl&apos;s Meta integration. By
+            creating an account or using consl you agree to these terms.
           </p>
 
           <section>

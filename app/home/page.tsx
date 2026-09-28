@@ -301,7 +301,7 @@ export default async function HomePage() {
             <a href="mailto:admin@consl.ai" className="hover:text-neutral-800">admin@consl.ai</a>
             <Link href="/privacy" className="hover:text-neutral-800">Privacy</Link>
             <Link href="/terms" className="hover:text-neutral-800">Terms</Link>
-            <span>© {new Date().getFullYear()} Bluesteam LLC</span>
+            <span>© {new Date().getFullYear()} Bluesteam LLC · Steamnook S.L.</span>
           </div>
         </div>
       </footer>

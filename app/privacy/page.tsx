@@ -10,12 +10,13 @@ export default function PrivacyPage() {
       <div className="mx-auto max-w-2xl px-5 py-16">
         <Link href="/home" className="text-[13px] font-medium text-violet-700 hover:underline">← consl.ai</Link>
         <h1 className="mt-4 text-[32px] font-bold tracking-tight">Privacy Policy</h1>
-        <p className="mt-1 text-[13px] text-neutral-500">Last updated: August 2026</p>
+        <p className="mt-1 text-[13px] text-neutral-500">Last updated: September 2026</p>
 
         <div className="mt-8 space-y-6 text-[14.5px] leading-relaxed text-neutral-700">
           <p>
-            consl (operated by Bluesteam LLC) is an inventory, production and cost-accounting tool for ecommerce
-            businesses. This policy describes what we collect and how we use it.
+            consl is operated by Bluesteam LLC together with Steamnook S.L., which runs consl&apos;s Meta integration. It is
+            an inventory, production and cost-accounting tool for ecommerce businesses. This policy describes what we collect
+            and how we use it.
           </p>
 
           <section>
@@ -56,7 +57,7 @@ export default function PrivacyPage() {
           <section>
             <h2 className="mb-1.5 text-[17px] font-semibold text-neutral-900">Contact</h2>
             <p>
-              Bluesteam LLC ·{" "}
+              Bluesteam LLC · Steamnook S.L. ·{" "}
               <a href="mailto:admin@consl.ai" className="font-medium text-violet-700 hover:underline">admin@consl.ai</a>
             </p>
           </section>
