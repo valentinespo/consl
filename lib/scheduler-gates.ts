@@ -26,3 +26,5 @@ export function nudgeOrgImports(orgId: string): void {
     clock.delete(orgId);
   }
 }
+/** Last Shopify App Pricing check per company (lib/shopify-billing). */
+export const lastShopifyBillingCheck = new Map<string, number>();

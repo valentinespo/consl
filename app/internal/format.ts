@@ -41,11 +41,17 @@ export const STATUS: Record<string, { label: string; pill: string }> = {
   call_booked: { label: "Call booked", pill: "pill-green" },
 };
 
-export type OrgBilling = { billingExempt: boolean; trialUnlockedAt: Date | null; subscriptionStatus: string | null };
+export type OrgBilling = { billingExempt: boolean; trialUnlockedAt: Date | null; subscriptionStatus: string | null; shopifyPlanStatus?: string | null; shopifyPlanTest?: boolean };
 
 /** Where a company stands with the paywall, in the admin's words. */
 export function billingState(org: OrgBilling | null): { label: string; pill: string } {
   if (!org) return { label: "No company", pill: "pill-neutral" };
+  // Paid through Shopify: a plan from a development store is free by Shopify's rule — flagged in
+  // amber so a test store running a real business stands out.
+  if (org.shopifyPlanStatus) {
+    const label = `Shopify · ${org.shopifyPlanStatus === "trial" ? "trial" : org.shopifyPlanStatus === "cancelling" ? "cancelling" : "active"}`;
+    return org.shopifyPlanTest ? { label: `${label} · test store`, pill: "pill-amber" } : { label, pill: "pill-green" };
+  }
   if (org.billingExempt) return { label: "Exempt", pill: "pill-neutral" };
   if (org.subscriptionStatus === "past_due") return { label: "Past due", pill: "pill-amber" };
   if (LIVE_SUBSCRIPTION.has(org.subscriptionStatus ?? "")) return { label: org.subscriptionStatus === "active" ? "Subscribed" : "In trial", pill: "pill-green" };

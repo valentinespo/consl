@@ -23,6 +23,7 @@ export type OrgProfile = {
   billingExempt: boolean; // never gated (pre-early-access companies, internal)
   trialUnlockedAt: Date | null; // an admin enabled "Start free trial" on the waiting screen
   subscriptionStatus: string | null; // Stripe's word once checkout exists
+  shopifyPlanStatus: string | null; // the Shopify plan of a Shopify-billed company (lib/shopify-billing)
 };
 
 /** The signed-in user's company profile. Cached per request — this is read by the layout,
@@ -52,6 +53,7 @@ export const getCurrentOrg = cache(async (): Promise<OrgProfile | null> => {
     billingExempt: org.billingExempt,
     trialUnlockedAt: org.trialUnlockedAt,
     subscriptionStatus: org.subscriptionStatus,
+    shopifyPlanStatus: org.shopifyPlanStatus,
   };
 });
 

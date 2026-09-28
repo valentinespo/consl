@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function InternalApplicationsPage() {
   const apps = await prismaBase.accessApplication.findMany({
     orderBy: { createdAt: "desc" },
-    include: { organization: { select: { id: true, name: true, billingExempt: true, trialUnlockedAt: true, subscriptionStatus: true, onboardedAt: true } } },
+    include: { organization: { select: { id: true, name: true, billingExempt: true, trialUnlockedAt: true, subscriptionStatus: true, shopifyPlanStatus: true, shopifyPlanTest: true, onboardedAt: true } } },
   });
   const counts = {
     total: apps.length,

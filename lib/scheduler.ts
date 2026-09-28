@@ -20,6 +20,7 @@ import {
   lastAmazonFinanceSweep,
   lastAmazonAdsTick,
   lastMetaAdsTick,
+  lastShopifyBillingCheck,
   nudgeOrgImports,
 } from "@/lib/scheduler-gates";
 import { deleteStored } from "@/lib/storage";
@@ -422,6 +423,44 @@ const META_ADS_TICK_MS = 5 * 60 * 1000;
 let backfilling = false;
 
 /**
+ * Shopify App Pricing: every few hours, ask Shopify which plan each Shopify-billed company's store
+ * holds (a cancellation, a freeze or a trial ending never arrives as a webhook any more). Covers
+ * every company with a store on the public app that isn't on Stripe; cheap — one Partner API call
+ * per company per pass. The waiting screen, the billing page and the plan page's return link also
+ * check on the spot, so this only catches what happens while nobody is looking.
+ */
+const SHOPIFY_BILLING_CHECK_MS = 3 * 60 * 60 * 1000;
+let checkingShopifyBilling = false;
+async function shopifyBillingTick(): Promise<void> {
+  if (checkingShopifyBilling) return;
+  checkingShopifyBilling = true;
+  try {
+    const { shopifyBillingConfigured, syncShopifyBilling } = await import("@/lib/shopify-billing");
+    if (!shopifyBillingConfigured()) return;
+    const orgs = await prismaBase.organization.findMany({
+      where: {
+        deactivatedAt: null,
+        stripeSubscriptionId: null,
+        integrations: { some: { provider: "shopify", status: { in: ["connected", "error"] } } },
+      },
+      select: { id: true },
+    });
+    for (const { id } of orgs) {
+      if (Date.now() - (lastShopifyBillingCheck.get(id) ?? 0) < SHOPIFY_BILLING_CHECK_MS) continue;
+      lastShopifyBillingCheck.set(id, Date.now());
+      try {
+        const status = await syncShopifyBilling(id);
+        if (status !== undefined) console.log(`[scheduler] shopify plan for org ${id}: ${status ?? "none"}`);
+      } catch (e) {
+        console.error(`[scheduler] shopify plan check failed for org ${id}:`, (e as Error).message);
+      }
+    }
+  } finally {
+    checkingShopifyBilling = false;
+  }
+}
+
+/**
  * Walk each org's Amazon order history backward, one window per pass, until it reaches the report's
  * ~2-year retention floor. Runs on its OWN loop with its own guard — decoupled from the 1-minute
  * stock tick so a slow order report (minutes) never stalls stock freshness, and serialized so we
@@ -605,5 +644,8 @@ export function startDailyScheduler(): void {
   // instead of paying the full replay itself. Stale ones are never served either way.
   setInterval(() => void pnlSnapshotTick().catch(() => {}), PNL_SNAPSHOT_TICK_MS);
   setTimeout(() => void pnlSnapshotTick().catch(() => {}), 60_000);
+  // Shopify App Pricing sends no plan-change webhooks: re-read the plans of Shopify-billed companies.
+  setInterval(() => void shopifyBillingTick().catch(() => {}), TICK_MS);
+  setTimeout(() => void shopifyBillingTick().catch(() => {}), 90_000);
   console.log("[scheduler] daily sync scheduler started");
 }

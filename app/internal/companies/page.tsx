@@ -18,6 +18,8 @@ export default async function InternalCompaniesPage() {
       billingExempt: true,
       trialUnlockedAt: true,
       subscriptionStatus: true,
+      shopifyPlanStatus: true,
+      shopifyPlanTest: true,
       _count: { select: { memberships: true, products: true, salesOrders: true } },
     },
   });
@@ -55,7 +57,7 @@ export default async function InternalCompaniesPage() {
                   <td className="px-2 py-3 text-muted">{fmtDate(o.createdAt)}</td>
                   <td className="px-5 py-3">
                     <div className="flex flex-wrap items-center justify-end gap-2">
-                      {!o.billingExempt && !o.subscriptionStatus && <TrialToggle orgId={o.id} unlocked={!!o.trialUnlockedAt} />}
+                      {!o.billingExempt && !o.subscriptionStatus && !o.shopifyPlanStatus && <TrialToggle orgId={o.id} unlocked={!!o.trialUnlockedAt} />}
                       <OpenCompanyButton orgId={o.id} />
                     </div>
                   </td>

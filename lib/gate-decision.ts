@@ -71,7 +71,7 @@ export async function gateDecision(input: GateInput): Promise<string | null> {
 
   const org = await prismaBase.organization.findUnique({
     where: { id: orgId },
-    select: { billingExempt: true, subscriptionStatus: true, onboardedAt: true },
+    select: { billingExempt: true, subscriptionStatus: true, shopifyPlanStatus: true, onboardedAt: true },
   });
   if (!org) return null;
   // The admin opens a waiting company to look at it (or to onboard it on the call) — no paywall.

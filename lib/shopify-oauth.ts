@@ -56,10 +56,15 @@ export function shopifyAppCredentials(kind: ShopifyAppKind): { key: string; secr
   return { key: process.env.SHOPIFY_API_KEY ?? "", secret: process.env.SHOPIFY_API_SECRET ?? "" };
 }
 
-/** The app a company is set to connect through (Settings.shopifyApp = "public", else default). */
+/**
+ * The app a company connects through: the public app, unless the company is pinned to the private
+ * (custom-distribution) app with Settings.shopifyApp = "custom" — Herbl's store, connected before
+ * the public app existed. A custom app installs on one store only, so every other company needs
+ * the public one.
+ */
 export async function shopifyAppFor(orgId: string): Promise<ShopifyAppKind> {
   const s = await prismaBase.settings.findFirst({ where: { orgId }, select: { shopifyApp: true } });
-  return s?.shopifyApp === "public" ? "public" : "default";
+  return s?.shopifyApp === "custom" ? "default" : "public";
 }
 
 /**

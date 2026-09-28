@@ -6,8 +6,10 @@ import { gateRedirect } from "@/lib/gate-redirect";
 import { prismaBase } from "@/lib/prisma-base";
 import { PreOnboarding } from "@/components/apply/PreOnboarding";
 import { calendlyConfigured, recordScheduledCall } from "@/lib/calendly";
-import { LIVE_SUBSCRIPTION } from "@/lib/billing";
+import { LIVE_SUBSCRIPTION, LIVE_SHOPIFY_PLAN_STATES, TRIAL_DAYS } from "@/lib/billing";
 import { stripeConfigured, syncCheckoutSession } from "@/lib/stripe";
+import { shopifyBillingPath, syncShopifyBilling } from "@/lib/shopify-billing";
+import { ShopifyPlanGate } from "@/components/apply/ShopifyPlanGate";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +30,22 @@ export default async function PreOnboardingPage({ searchParams }: { searchParams
   if (sp.checkout === "success" && sessionId && stripeConfigured()) {
     const synced = await syncCheckoutSession(sessionId, org.id).catch(() => ({ status: null }));
     if (synced.status && LIVE_SUBSCRIPTION.has(synced.status)) return gateRedirect("/");
+  }
+
+  // A company that came in through a Shopify install pays through Shopify: its plan is picked on
+  // Shopify's plan page, and this screen asks Shopify first in case it's already live.
+  const shopify = await shopifyBillingPath(org.id);
+  if (shopify) {
+    if (shopify.installed) {
+      const status = await syncShopifyBilling(org.id).catch((e) => {
+        console.error(`[shopify billing] check failed for ${org.id}:`, (e as Error).message);
+        return undefined;
+      });
+      if (status && LIVE_SHOPIFY_PLAN_STATES.has(status)) return gateRedirect("/");
+    }
+    return (
+      <ShopifyPlanGate orgName={org.name} shop={shopify.shop} planUrl={shopify.planUrl} installed={shopify.installed} lapsed={shopify.lapsed} trialDays={TRIAL_DAYS} />
+    );
   }
 
   const app = await prismaBase.accessApplication.findFirst({

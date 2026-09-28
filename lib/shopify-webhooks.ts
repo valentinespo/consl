@@ -26,6 +26,8 @@ const TOPICS = [
   "LOCATIONS_DELETE",
   "LOCATIONS_ACTIVATE",
   "LOCATIONS_DEACTIVATE",
+  // consl removed from the store: the connection ends, and so does a plan paid through Shopify.
+  "APP_UNINSTALLED",
 ] as const;
 
 export async function ensureShopifyWebhooks(): Promise<{ created: number; present: number }> {

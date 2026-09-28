@@ -61,6 +61,19 @@ model Organization {
   trialEndsAt          DateTime?
   currentPeriodEnd     DateTime?
   foundingMember       Boolean   @default(true)
+  // --- Shopify App Pricing. A company that came in through Shopify pays through Shopify: the plan
+  // its store holds for the public app, as Shopify's Partner API last reported it (lib/shopify-
+  // billing). shopifyPlanStatus: trial | active | cancelling (ends with the period) | null (no plan).
+  // shopifyPlanTest = the store is a development store (Shopify never charges those).
+  shopifyPlanStatus    String?
+  shopifyPlanHandle    String?
+  shopifyPlanPrice     Float?
+  shopifyTrialEndsAt   DateTime?
+  shopifyPeriodEnd     DateTime?
+  shopifyPlanTest      Boolean   @default(false)
+  shopifyShopGid       String?   // the store's gid://shopify/Shop/… (what the Partner API asks by)
+  shopifyShopDomain    String?   // the store the fields above belong to (a new store starts afresh)
+  shopifyBillingAt     DateTime? // last time Shopify was asked
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

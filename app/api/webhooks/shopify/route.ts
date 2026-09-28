@@ -3,6 +3,8 @@ import { NextResponse, after } from "next/server";
 import { prismaBase } from "@/lib/prisma-base";
 import { runWithOrg } from "@/lib/tenant";
 import { importShopifyOrderById } from "@/lib/orders";
+import { shopifyAppFor } from "@/lib/shopify-oauth";
+import { clearShopifyPlan } from "@/lib/shopify-billing";
 
 /**
  * Shopify webhooks — the push half of the orders feed, and of the shop's places. Subscribed to
@@ -28,11 +30,14 @@ export async function POST(request: Request) {
   if (!secrets.length || !given) return new NextResponse(null, { status: 401 });
 
   const b = Buffer.from(given);
-  const ok = secrets.some((secret) => {
+  const signedWith = secrets.find((secret) => {
     const a = Buffer.from(createHmac("sha256", secret).update(raw).digest("base64"));
     return a.length === b.length && timingSafeEqual(a, b);
   });
-  if (!ok) return new NextResponse(null, { status: 401 });
+  if (!signedWith) return new NextResponse(null, { status: 401 });
+  // Which of the two apps sent it: the private app signs with SHOPIFY_API_SECRET, the public one
+  // with the other secret. A store can hold both, so an uninstall only ends the matching app's link.
+  const appKind = signedWith === process.env.SHOPIFY_API_SECRET ? "default" : "public";
 
   const shopDomain = request.headers.get("x-shopify-shop-domain");
   const topic = request.headers.get("x-shopify-topic") ?? "";
@@ -41,6 +46,23 @@ export async function POST(request: Request) {
     payload = JSON.parse(raw.toString("utf8"));
   } catch {
     return NextResponse.json({}); // signed but unparseable — acknowledge, nothing to do
+  }
+
+  // consl removed from the store: the connection ends (the token is dead), and a plan paid through
+  // Shopify ends with it — Shopify cancels app charges on uninstall, so the company goes back to
+  // the billing gate, which asks it to reinstall and pick a plan again. Data already imported stays.
+  if (shopDomain && topic === "app/uninstalled") {
+    const conns = await prismaBase.integration.findMany({
+      where: { provider: "shopify", sellerId: shopDomain, status: { in: ["connected", "error"] } },
+      select: { id: true, orgId: true },
+    });
+    for (const c of conns) {
+      if (!c.orgId || (await shopifyAppFor(c.orgId)) !== appKind) continue;
+      await prismaBase.integration.update({ where: { id: c.id }, data: { status: "revoked", lastError: "consl was uninstalled from the Shopify store" } });
+      if (appKind === "public") await clearShopifyPlan(c.orgId);
+      console.log(`[webhook shopify] ${shopDomain} uninstalled consl — connection closed for org ${c.orgId}`);
+    }
+    return NextResponse.json({});
   }
 
   // Location topics: a doorbell for the shop's PLACES — re-read them and their stock. The payload
