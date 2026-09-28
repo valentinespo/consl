@@ -12,8 +12,8 @@ import { CHANNEL_LOGO, ROOT_LOGO } from "@/lib/channel-logos";
 import { buildTimeline, capOn, type AvailabilityEvent } from "@/lib/availability-math";
 import { createMovement } from "@/app/(app)/facilities/actions";
 
-export type MoveProduct = { id: string; code: string; name: string; imageUrl: string | null };
-export type MoveMaterial = { id: string; code: string; name: string; skuSpecific: boolean; imageUrl: string | null };
+export type MoveProduct = { id: string; code: string; name: string; imageUrl: string | null; archivedAt?: Date | null };
+export type MoveMaterial = { id: string; code: string; name: string; skuSpecific: boolean; imageUrl: string | null; archivedAt?: Date | null };
 export type MoveFacility = { id: string; code: string; name: string };
 /** A connected channel's locked facility — an inflow source ("Shopify — 638 Alton Place"). */
 export type MoveChannelFacility = { id: string; name: string; channel: string };
@@ -90,11 +90,15 @@ export function MovementForm({
   availability?: AvailabilityEvent[];
 }) {
   const router = useRouter();
-  const canInflow = facilities.length > 0 && (products.length > 0 || materials.length > 0);
+  // A movement is a new choice: archived products and materials are never offered. The full lists
+  // stay for lookups (names, units, cost hints).
+  const activeProducts = products.filter((p) => !p.archivedAt);
+  const activeMaterials = materials.filter((m) => !m.archivedAt);
+  const canInflow = facilities.length > 0 && (activeProducts.length > 0 || activeMaterials.length > 0);
   const [mode, setMode] = useState<"OUT" | "IN" | null>(null);
 
   // The item is picked as "FINISHED:<productId>" or "RAW:<materialId>".
-  const firstItem = products[0] ? `FINISHED:${products[0].id}` : materials[0] ? `RAW:${materials[0].id}` : "";
+  const firstItem = activeProducts[0] ? `FINISHED:${activeProducts[0].id}` : activeMaterials[0] ? `RAW:${activeMaterials[0].id}` : "";
   const [item, setItem] = useState(firstItem);
   const [poolSku, setPoolSku] = useState(""); // only for sku-specific raw materials
   // OUT: a facility id. IN: "channel:<ROOT>:<facilityId>" or "adj:FOUND" / "adj:RETURN".
@@ -134,8 +138,8 @@ export function MovementForm({
   // there simply isn't offered. Inflows list everything (stock is arriving, not leaving).
   const hasStockAt = (k: "FINISHED" | "RAW", id: string, facilityId: string) =>
     onHand.some((r) => r.kind === k && r.itemId === id && r.facilityId === facilityId && r.units > 1e-9);
-  const pickableProducts = mode === "OUT" ? products.filter((p) => hasStockAt("FINISHED", p.id, fromFacilityId)) : products;
-  const pickableMaterials = mode === "OUT" ? materials.filter((m) => hasStockAt("RAW", m.id, fromFacilityId)) : materials;
+  const pickableProducts = mode === "OUT" ? activeProducts.filter((p) => hasStockAt("FINISHED", p.id, fromFacilityId)) : activeProducts;
+  const pickableMaterials = mode === "OUT" ? activeMaterials.filter((m) => hasStockAt("RAW", m.id, fromFacilityId)) : activeMaterials;
 
   const productOptions = pickableProducts.map((p) => ({
     value: `FINISHED:${p.id}`,
@@ -271,7 +275,7 @@ export function MovementForm({
   // stock is appearing (a found box of pouches may be for a SKU with no recorded stock yet).
   const skuOptions = useMemo(() => {
     if (!needsSku) return [] as { id: string; code: string }[];
-    if (adjReason) return products.map((p) => ({ id: p.id, code: p.code }));
+    if (adjReason) return activeProducts.map((p) => ({ id: p.id, code: p.code }));
     const seen = new Map<string, string>();
     for (const r of onHand) {
       if (r.kind === "RAW" && r.itemId === itemId && r.poolSku && r.facilityId === fromFacilityId && r.units > 1e-9) {
@@ -279,6 +283,7 @@ export function MovementForm({
       }
     }
     return [...seen].map(([id, code]) => ({ id, code }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- activeProducts is derived from products
   }, [needsSku, adjReason, products, onHand, itemId, fromFacilityId]);
 
   function pickMode(next: "OUT" | "IN") {
@@ -289,7 +294,7 @@ export function MovementForm({
       setSource(facilities[0]?.id ?? "");
       setTarget("");
     } else {
-      setItem(products[0] ? `FINISHED:${products[0].id}` : "");
+      setItem(activeProducts[0] ? `FINISHED:${activeProducts[0].id}` : "");
       const f = channelFacilities[0];
       setSource(f ? `channel:${rootOf(f.channel)}:${f.id}` : "adj:FOUND");
       setTarget(facilities[0] ? `facility:${facilities[0].id}` : "");
@@ -300,7 +305,7 @@ export function MovementForm({
   function pickSource(next: string) {
     setSource(next);
     // A customer return (or a channel pull-back) can only be a finished product.
-    if (next !== "adj:FOUND" && isRaw && mode === "IN") setItem(products[0] ? `FINISHED:${products[0].id}` : "");
+    if (next !== "adj:FOUND" && isRaw && mode === "IN") setItem(activeProducts[0] ? `FINISHED:${activeProducts[0].id}` : "");
   }
 
   async function save() {

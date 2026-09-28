@@ -175,6 +175,9 @@ export async function createProduct(input: { code: string; name?: string }) {
   if (!code) return { ok: false as const, error: "Abbreviation required" };
   const name = clampName((input.name ?? "").trim() || code);
   const existing = await prisma.product.findFirst({ where: { code } });
+  // An archived product still owns its code: say so instead of quietly handing back a product the
+  // catalog doesn't show.
+  if (existing?.archivedAt) return { ok: false as const, error: `${code} is an archived product. Unarchive it from Archived, at the top of the catalog.` };
   if (existing) return { ok: true as const, id: existing.id, code: existing.code, name: existing.name, existed: true };
   const p = await prisma.product.create({ data: { code, name } });
   revalidatePath("/", "layout");
@@ -317,6 +320,24 @@ export async function updateProductChannels(input: {
     },
   });
   for (const channel of ["AMAZON", "SHOPIFY", "TIKTOK"] as const) await relinkOrderLines(channel);
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/**
+ * Archive or restore a product or raw material. Archiving only hides it: it leaves the catalog,
+ * every picker, Reorder and the restock alerts, while its history, stock, costs, channel mappings
+ * and any new sales keep counting exactly as before — so nothing is recomputed.
+ */
+export async function setCatalogItemArchived(kind: "product" | "material", id: string, archived: boolean) {
+  const gate = await requirePermission("catalog", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  const data = { archivedAt: archived ? new Date() : null };
+  const updated =
+    kind === "product"
+      ? await prisma.product.updateMany({ where: { id }, data })
+      : await prisma.materialType.updateMany({ where: { id }, data });
+  if (updated.count === 0) return { ok: false as const, error: kind === "product" ? "Product not found" : "Material not found" };
   revalidatePath("/", "layout");
   return { ok: true as const };
 }

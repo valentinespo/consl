@@ -32,7 +32,8 @@ export async function getReorder2(): Promise<Reorder2Data> {
     getRestock(),
     getOrgSettings(),
     getStockRoutes(),
-    prisma.product.findMany({ orderBy: { code: "asc" } }),
+    // Archived products are left off Reorder 2.0 (their stock and sales still count everywhere else).
+    prisma.product.findMany({ where: { archivedAt: null }, orderBy: { code: "asc" } }),
     activeExclusions(),
   ]);
   const tz = settings.syncTz;

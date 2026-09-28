@@ -7,7 +7,8 @@ import { DatePicker } from "@/components/DatePicker";
 import { useMoney } from "@/components/CurrencyProvider";
 import { inflectUnit } from "@/lib/format";
 import { upsertPurchaseInvoice, deletePurchaseInvoice, type PurchaseLineInput } from "@/app/(app)/purchases/actions";
-import { SelectOrCreate, type Opt } from "@/components/SelectOrCreate";
+import { SelectOrCreate } from "@/components/SelectOrCreate";
+import { liveOptions, type ArchivableOption } from "@/components/archived-options";
 import { SearchSelect } from "@/components/SearchSelect";
 import { SelectMenu } from "@/components/SelectMenu";
 import { SkuAvatar, SupplierAvatar } from "@/components/ui";
@@ -40,7 +41,7 @@ export type PurchaseInvoiceRow = {
 export type PurchaseMaterial = { id: string; code: string; name: string; unitLabel: string; skuSpecific: boolean };
 export type PurchaseOptions = {
   facilities: { id: string; code: string; name: string }[];
-  products: { id: string; code: string; name: string; imageUrl: string | null }[];
+  products: { id: string; code: string; name: string; imageUrl: string | null; archived?: boolean }[];
   suppliers: SupplierPick[];
 };
 
@@ -55,7 +56,7 @@ function toEditLines(invoice: PurchaseInvoiceRow | undefined, options: PurchaseO
   if (invoice && invoice.lines.length) {
     return invoice.lines.map((l) => ({ key: newKey(), facilityId: l.facilityId, productId: l.productId ?? "", quantity: String(l.quantity), total: String(l.total) }));
   }
-  return [{ key: newKey(), facilityId: options.facilities[0]?.id ?? "", productId: options.products[0]?.id ?? "", quantity: "", total: "" }];
+  return [{ key: newKey(), facilityId: options.facilities[0]?.id ?? "", productId: options.products.find((p) => !p.archived)?.id ?? "", quantity: "", total: "" }];
 }
 
 export function PurchaseInvoiceForm({
@@ -111,13 +112,13 @@ export function PurchaseInvoiceForm({
   );
   const dirty = !invoice || currentSnapshot !== originalSnapshot;
 
-  const productOpts: Opt[] = options.products.map((p) => ({ value: p.id, label: p.code, hint: p.name, icon: <SkuAvatar code={p.code} imageUrl={p.imageUrl} size={22} /> }));
+  const productOpts: ArchivableOption[] = options.products.map((p) => ({ value: p.id, label: p.code, hint: p.name, icon: <SkuAvatar code={p.code} imageUrl={p.imageUrl} size={22} />, archived: p.archived }));
 
   function patch(key: string, p: Partial<EditLine>) {
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...p } : l)));
   }
   function addLine() {
-    setLines((prev) => [...prev, { key: newKey(), facilityId: options.facilities[0]?.id ?? "", productId: options.products[0]?.id ?? "", quantity: "", total: "" }]);
+    setLines((prev) => [...prev, { key: newKey(), facilityId: options.facilities[0]?.id ?? "", productId: options.products.find((p) => !p.archived)?.id ?? "", quantity: "", total: "" }]);
   }
   function removeLine(key: string) {
     setLines((prev) => (prev.length === 1 ? prev : prev.filter((l) => l.key !== key)));
@@ -216,7 +217,7 @@ export function PurchaseInvoiceForm({
                 </MiniField>
                 {material.skuSpecific && (
                   <MiniField label="SKU" className="min-w-[160px] flex-1">
-                    <SelectOrCreate value={l.productId} onChange={(v) => patch(l.key, { productId: v })} options={productOpts} />
+                    <SelectOrCreate value={l.productId} onChange={(v) => patch(l.key, { productId: v })} options={liveOptions(productOpts, l.productId)} />
                   </MiniField>
                 )}
                 <MiniField label={`Qty (${inflectUnit(material.unitLabel, 2)})`} className="w-[100px]">

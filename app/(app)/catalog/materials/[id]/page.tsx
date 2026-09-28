@@ -16,15 +16,20 @@ export default async function MaterialDetailPage({ params }: { params: Promise<{
   const [detail, materials] = await Promise.all([getMaterialDetail(id), getMaterialTypes()]);
   if (!detail) notFound();
   const { material, usedBy } = detail;
-  const nav = neighbours(materials, id, "/catalog/materials");
+  // An archived material pages through the archived ones, an active one through the active ones.
+  const archived = !!materials.find((m) => m.id === id)?.archivedAt;
+  const nav = neighbours(materials.filter((m) => !!m.archivedAt === archived), id, "/catalog/materials");
 
   return (
     <>
-      <Link href="/catalog" className="mb-3 inline-block text-[12.5px] font-medium text-muted hover:text-ink-soft">
-        ← Catalog
+      <Link href={archived ? "/catalog?view=archived" : "/catalog"} className="mb-3 inline-block text-[12.5px] font-medium text-muted hover:text-ink-soft">
+        ← {archived ? "Archived" : "Catalog"}
       </Link>
       <PageHeader title={material.name} subtitle="Raw material">
-        <PrevNextNav {...nav} />
+        <span className="inline-flex items-center gap-2">
+          {archived && <span className="pill-neutral inline-flex items-center rounded-full px-2 py-[3px] text-[11px] font-medium leading-none">Archived</span>}
+          <PrevNextNav {...nav} />
+        </span>
       </PageHeader>
 
       <MaterialEditor

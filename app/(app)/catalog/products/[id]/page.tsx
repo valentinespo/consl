@@ -17,15 +17,20 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
   const [detail, products] = await Promise.all([getProductDetail(id), getProducts()]);
   if (!detail) notFound();
   const { product, usedBy } = detail;
-  const nav = neighbours(products, id, "/catalog/products");
+  // An archived product pages through the archived ones, an active one through the active ones.
+  const archived = !!product.archivedAt;
+  const nav = neighbours(products.filter((p) => !!p.archivedAt === archived), id, "/catalog/products");
 
   return (
     <>
-      <Link href="/catalog" className="mb-3 inline-block text-[12.5px] font-medium text-muted hover:text-ink-soft">
-        ← Catalog
+      <Link href={archived ? "/catalog?view=archived" : "/catalog"} className="mb-3 inline-block text-[12.5px] font-medium text-muted hover:text-ink-soft">
+        ← {archived ? "Archived" : "Catalog"}
       </Link>
       <PageHeader title={product.code} subtitle={product.name}>
-        <PrevNextNav {...nav} />
+        <span className="inline-flex items-center gap-2">
+          {archived && <span className="pill-neutral inline-flex items-center rounded-full px-2 py-[3px] text-[11px] font-medium leading-none">Archived</span>}
+          <PrevNextNav {...nav} />
+        </span>
       </PageHeader>
 
       <div className="space-y-5">
@@ -51,9 +56,12 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         <Card>
           <div className="mb-3 flex items-center justify-between">
             <div className="text-[12px] font-medium uppercase tracking-wide text-muted">Restock policy</div>
-            <Link href={`/reorder?policy=${product.id}`} className="text-[12.5px] font-medium text-accent hover:underline">
-              Edit on Reorder →
-            </Link>
+            {/* Archived products are off Reorder, so there is nothing to open there. */}
+            {!archived && (
+              <Link href={`/reorder?policy=${product.id}`} className="text-[12.5px] font-medium text-accent hover:underline">
+                Edit on Reorder →
+              </Link>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
             <Ro label="Floor" value={product.minMonths} suffix="mo" />

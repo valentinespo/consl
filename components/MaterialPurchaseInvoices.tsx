@@ -12,7 +12,7 @@ import { Paperclip } from "@/components/icons";
 import { useCan } from "@/components/AccessProvider";
 
 type Group = {
-  material: PurchaseMaterial & { code: string; imageUrl: string | null };
+  material: PurchaseMaterial & { code: string; imageUrl: string | null; archived?: boolean };
   totalQty: number;
   totalSpend: number;
   invoices: PurchaseInvoiceRow[];
@@ -52,12 +52,15 @@ export function MaterialPurchaseInvoices({ group, options }: { group: Group; opt
           )}
           <h2 className="text-[15px] font-semibold text-ink-soft">{material.name} purchases</h2>
           <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-ink-soft">{invoices.length}</span>
+          {material.archived && (
+            <span className="pill-neutral inline-flex items-center rounded-full px-2 py-[3px] text-[11px] font-medium leading-none">Archived</span>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <span className="text-[12.5px] text-muted">
             {qty(group.totalQty)} {inflectUnit(material.unitLabel, group.totalQty)} · {money(group.totalSpend)} spent
           </span>
-          {canCreate && (
+          {canCreate && !material.archived && (
             <button onClick={() => setAdding((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-bg hover:opacity-90">
               <Plus size={15} /> Add purchase
             </button>

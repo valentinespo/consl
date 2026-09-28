@@ -6,7 +6,7 @@ import { SelectMenu } from "@/components/SelectMenu";
 import { inflectUnit } from "@/lib/format";
 import { useMoney } from "@/components/CurrencyProvider";
 
-export type MaterialType = { id: string; code: string; name: string; unitLabel: string };
+export type MaterialType = { id: string; code: string; name: string; unitLabel: string; archivedAt?: Date | null };
 export type Mat = { materialTypeId: string; perUnit: number };
 export type BomLine = { key: string; sku: string; productName: string; imageUrl: string | null; units: number };
 
@@ -145,7 +145,8 @@ function MatCard({
   onAdd: (typeId: string) => void;
 }) {
   const mt = (id: string) => materialTypes.find((m) => m.id === id);
-  const available = materialTypes.filter((m) => !materials.some((x) => x.materialTypeId === m.id));
+  // "+ Add material" offers active materials only; rows already in the recipe keep theirs.
+  const available = materialTypes.filter((m) => !m.archivedAt && !materials.some((x) => x.materialTypeId === m.id));
   return (
     <div className="rounded-[var(--radius-card)] border border-border bg-surface p-4">
       <div className="mb-3 flex items-center gap-3">

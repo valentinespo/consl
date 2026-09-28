@@ -12,10 +12,11 @@ import { useCan } from "@/components/AccessProvider";
 const inputCls = "h-9 w-full rounded-lg border border-border bg-surface px-2.5 text-[13px] text-ink outline-none focus:border-accent-strong";
 
 type Facility = { id: string; code: string; name: string };
-type Product = { id: string; code: string; name: string };
+type Product = { id: string; code: string; name: string; archived?: boolean };
 type Line = { key: number; productId: string; units: string };
 
-const productOpts = (products: Product[]): Opt[] => products.map((p) => ({ value: p.id, label: `${p.code} — ${p.name}` }));
+// A new lot is a new choice: archived products are not offered.
+const productOpts = (products: Product[]): Opt[] => products.filter((p) => !p.archived).map((p) => ({ value: p.id, label: `${p.code} — ${p.name}` }));
 
 export function NewLotButton({ facilities, products }: { facilities: Facility[]; products: Product[] }) {
   const [open, setOpen] = useState(false);

@@ -365,6 +365,9 @@ model Product {
   channelStock       ChannelStock[]
   salesOrderLines    SalesOrderLine[]
   movements          StockMovement[]
+  // Archived: out of the catalog, every picker, Reorder and the restock alerts. Nothing else
+  // changes — history, stock, costs, channel mappings and new sales keep counting as before.
+  archivedAt         DateTime?
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
 
@@ -575,6 +578,9 @@ model MaterialType {
   skuSpecific       Boolean           @default(false) // purchases & pools are per-SKU
   lowStockThreshold Float? // dashboard notifies when available qty drops below this (null = off)
   imageUrl          String?
+  // Archived: out of the catalog, every picker and the low-stock alerts; its stock and costs keep
+  // counting exactly as before.
+  archivedAt        DateTime?
   purchases         Purchase[]
   purchaseInvoices  PurchaseInvoice[]
   lotMaterials      LotMaterial[]

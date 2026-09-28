@@ -5,6 +5,7 @@ import { useExitAnimation } from "@/components/animate";
 import { useRouter } from "next/navigation";
 import { Plus, X, AlertTriangle, Package, Receipt } from "@/components/icons";
 import { SelectMenu } from "@/components/SelectMenu";
+import { liveOptions } from "@/components/archived-options";
 import { DatePicker } from "@/components/DatePicker";
 import { createPurchaseOrder, updatePurchaseOrder, deletePurchaseOrder, type PoLineInput } from "@/app/(app)/purchase-orders/actions";
 import { TwoStepDelete } from "@/components/TwoStepDelete";
@@ -19,6 +20,7 @@ export type PoProduct = {
   imageUrl: string | null;
   lastCost: number | null;
   lastPoNumber: string | null;
+  archived?: boolean;
 };
 
 export type PoRowLine = {
@@ -324,12 +326,16 @@ export function PoForm({
                       onChange={(v) => pickProduct(l.key, v)}
                       placeholder="Select…"
                       ariaLabel="SKU"
-                      options={products.map((p) => ({
-                        value: p.id,
-                        label: p.code,
-                        hint: p.name,
-                        icon: <SkuAvatar code={p.code} imageUrl={p.imageUrl} size={22} />,
-                      }))}
+                      options={liveOptions(
+                        products.map((p) => ({
+                          value: p.id,
+                          label: p.code,
+                          hint: p.name,
+                          icon: <SkuAvatar code={p.code} imageUrl={p.imageUrl} size={22} />,
+                          archived: p.archived,
+                        })),
+                        l.productId,
+                      )}
                     />
                   </MiniField>
                 )}

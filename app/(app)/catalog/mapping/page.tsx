@@ -43,12 +43,15 @@ export default async function MappingPage({ searchParams }: { searchParams: Prom
 
   const [listings, products] = await Promise.all([
     prisma.channelListing.findMany({ where: { channel }, orderBy: { title: "asc" } }),
-    prisma.product.findMany({ select: { ...PRODUCT_MATCH_SELECT, imageUrl: true }, orderBy: { code: "asc" } }),
+    prisma.product.findMany({ select: { ...PRODUCT_MATCH_SELECT, imageUrl: true, archivedAt: true }, orderBy: { code: "asc" } }),
   ]);
 
+  // Every product — archived ones included — still owns the listings mapped to it; only the picker
+  // and the suggestions leave archived products out.
   const byExternal = new Map(products.map((p) => [mappedExternalId(p, channel), p]));
+  const active = products.filter((p) => !p.archivedAt);
   const pending = listings.filter((l) => !l.ignored && !byExternal.has(l.externalId));
-  const suggestions = suggestMappings(channel, pending, products);
+  const suggestions = suggestMappings(channel, pending, active);
 
   const rows = listings.map((l) => {
     const mapped = byExternal.get(l.externalId) ?? null;
@@ -66,7 +69,7 @@ export default async function MappingPage({ searchParams }: { searchParams: Prom
     };
   });
 
-  const pickerProducts = products.map((p) => {
+  const pickerProducts = active.map((p) => {
     const taken = mappedExternalId(p, channel);
     return { id: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl, takenExternalId: taken };
   });

@@ -510,6 +510,7 @@ export async function getMaterialTypes() {
     lowStockThreshold: x.lowStockThreshold,
     skuSpecific: x.skuSpecific,
     imageUrl: x.imageUrl,
+    archivedAt: x.archivedAt,
   }));
 }
 
@@ -658,7 +659,7 @@ export async function getPurchaseInvoicesByMaterial() {
   return materials.map((m) => {
     const invs = invoices.filter((i) => i.materialTypeId === m.id);
     return {
-      material: { id: m.id, code: m.code, name: m.name, unitLabel: m.unitLabel, skuSpecific: m.skuSpecific, imageUrl: m.imageUrl },
+      material: { id: m.id, code: m.code, name: m.name, unitLabel: m.unitLabel, skuSpecific: m.skuSpecific, imageUrl: m.imageUrl, archived: !!m.archivedAt },
       totalQty: invs.reduce((s, i) => s + i.lines.reduce((a, l) => a + l.quantity, 0), 0),
       totalSpend: invs.reduce((s, i) => s + i.invoiceTotal, 0),
       invoices: invs.map((i) => ({
@@ -700,9 +701,9 @@ export async function getPurchaseFormOptions() {
   ]);
   return {
     facilities: facilities.map((f) => ({ id: f.id, code: f.code, name: f.name })),
-    products: products.map((p) => ({ id: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl })),
+    products: products.map((p) => ({ id: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl, archived: !!p.archivedAt })),
     suppliers: suppliers.map((s) => ({ name: s.name, photoUrl: s.photoUrl })),
-    materials: materials.map((m) => ({ id: m.id, code: m.code, name: m.name, skuSpecific: m.skuSpecific, unitLabel: m.unitLabel })),
+    materials: materials.map((m) => ({ id: m.id, code: m.code, name: m.name, skuSpecific: m.skuSpecific, unitLabel: m.unitLabel, archived: !!m.archivedAt })),
   };
 }
 
@@ -791,6 +792,7 @@ export async function getPoFormOptions() {
       imageUrl: p.imageUrl,
       lastCost: lastPrice.get(p.id)?.cost ?? null,
       lastPoNumber: lastPrice.get(p.id)?.poNumber ?? null,
+      archived: !!p.archivedAt,
     })),
     descSeeds, // "facilityId|productId" -> description as printed on the most recent PO
     feeDescs,

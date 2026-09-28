@@ -24,8 +24,11 @@ export async function getAlerts(rows: RestockRow[]): Promise<Alert[]> {
   const { qty: num } = await getFmt(); // counts in the org's locale
   const now = Date.now();
   const alerts: Alert[] = [];
+  // Archived products never ask for a PO, a shipment or an expedite; their stock still counts elsewhere.
+  const archived = new Set((await prisma.product.findMany({ where: { archivedAt: { not: null } }, select: { id: true } })).map((p) => p.id));
 
   for (const r of rows) {
+    if (archived.has(r.id)) continue;
     const win = r.windowDays === 10 || r.windowDays === 30 || r.windowDays === 90 ? r.windowDays : 90;
     const c = computeReorder(r, win, now);
     // Independent, not a chain: a row can need a shipment *and* a PO *and* an expedite, and an
@@ -69,7 +72,7 @@ export async function getAlerts(rows: RestockRow[]): Promise<Alert[]> {
   // Material low-stock (per-material threshold set in Catalog).
   const [inv, materials] = await Promise.all([
     getInventory(),
-    prisma.materialType.findMany({ where: { lowStockThreshold: { not: null } } }),
+    prisma.materialType.findMany({ where: { lowStockThreshold: { not: null }, archivedAt: null } }),
   ]);
   const availByMat = new Map<string, number>();
   for (const p of inv.pools) availByMat.set(p.materialCode, (availByMat.get(p.materialCode) ?? 0) + p.quantityRemaining);

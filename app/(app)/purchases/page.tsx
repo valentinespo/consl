@@ -10,7 +10,10 @@ export const dynamic = "force-dynamic";
 
 export default async function PurchasesPage() {
   await requireView("purchases");
-  const [groups, options] = await Promise.all([getPurchaseInvoicesByMaterial(), getPurchaseFormOptions()]);
+  const [allGroups, options] = await Promise.all([getPurchaseInvoicesByMaterial(), getPurchaseFormOptions()]);
+  // An archived material takes no new purchases: it drops off this page, unless it has purchases
+  // on record — then its history stays, below the active materials, with no "Add purchase".
+  const groups = [...allGroups.filter((g) => !g.material.archived), ...allGroups.filter((g) => g.material.archived && g.invoices.length > 0)];
   const purchaseOptions = { facilities: options.facilities, products: options.products, suppliers: options.suppliers };
 
   return (

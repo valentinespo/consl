@@ -16,7 +16,7 @@ import { LotBom, type MaterialType, type Mat } from "@/components/LotBom";
 import type { CostChip } from "@/lib/lot-costs";
 
 type Facility = { id: string; code: string; name: string };
-type Product = { id: string; code: string; name: string; imageUrl: string | null };
+type Product = { id: string; code: string; name: string; imageUrl: string | null; archived?: boolean };
 type Shortfall = { materialCode: string; shortBy: number; demand: number };
 
 export type EditorLine = {
@@ -149,7 +149,8 @@ export function LotEditor({
   useEffect(() => setPillSlot(document.getElementById(statusSlotId)), [statusSlotId]);
 
   const facility = facilities.find((f) => f.id === facilityId);
-  const availableProducts = products.filter((p) => !lines.some((l) => l.productId === p.id));
+  // "Add SKU" offers active products only; a line already on the lot keeps its product either way.
+  const availableProducts = products.filter((p) => !p.archived && !lines.some((l) => l.productId === p.id));
   const totalUnits = lines.reduce((s, l) => s + (Number(l.units) || 0), 0);
   // Lot-level statuses are DERIVED from the lines — live, so the header pills preview staged edits.
   const derivedProd = deriveProduction(lines);

@@ -68,6 +68,7 @@ export const SalesProfitFilled = regular(P.ChartLineUp);
 export const PnlFilled = regular(P.Scales);
 /** Row overflow menu — three vertical dots. */
 export const DotsVertical = regular(P.DotsThreeVertical);
+export const Archive = regular(P.Archive);
 /** Integrations — two plugs meeting. */
 export const Plug = regular(P.Plugs);
 export const Download = regular(P.DownloadSimple);

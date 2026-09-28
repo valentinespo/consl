@@ -166,8 +166,8 @@ export default async function FacilitiesPage() {
         <div className="flex flex-wrap items-center gap-2">
           {facilities.length > 0 && (products.length > 0 || materials.length > 0) && (
             <NewMovementPanel
-              products={products.map((p) => ({ id: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl }))}
-              materials={materials.map((m) => ({ id: m.id, code: m.code, name: m.name, skuSpecific: m.skuSpecific, imageUrl: m.imageUrl }))}
+              products={products.map((p) => ({ id: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl, archivedAt: p.archivedAt }))}
+              materials={materials.map((m) => ({ id: m.id, code: m.code, name: m.name, skuSpecific: m.skuSpecific, imageUrl: m.imageUrl, archivedAt: m.archivedAt }))}
               facilities={facilityOptions}
               onHand={onHand}
               todayISO={todayISO}

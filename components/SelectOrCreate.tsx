@@ -3,7 +3,8 @@
 import { useState, type ReactNode } from "react";
 import { SelectMenu } from "@/components/SelectMenu";
 
-export type Opt = { value: string; label: string; icon?: ReactNode; hint?: string };
+/** `disabled`: shown but not choosable — e.g. an archived item an existing record still points at. */
+export type Opt = { value: string; label: string; icon?: ReactNode; hint?: string; disabled?: boolean };
 
 const inputCls = "h-9 w-full rounded-lg border border-border bg-surface px-2.5 text-[13px] text-ink outline-none focus:border-accent-strong";
 

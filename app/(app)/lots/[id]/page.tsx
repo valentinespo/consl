@@ -121,7 +121,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ id: 
           }}
           initialLines={initialLines}
           facilities={facilities}
-          products={products.map((p) => ({ id: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl }))}
+          products={products.map((p) => ({ id: p.id, code: p.code, name: p.name, imageUrl: p.imageUrl, archived: !!p.archivedAt }))}
           materialTypes={materialTypes}
           skuTxnCounts={skuTxnCounts}
           totalCog={totalCog}
