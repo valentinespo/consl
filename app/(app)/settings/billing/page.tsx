@@ -184,7 +184,7 @@ async function ShopifyBilling({
           )}
         </dl>
         {status?.note && <p className="mt-3 text-[12.5px] text-muted">{status.note}</p>}
-        {row?.shopifyPlanTest && <p className="mt-2 text-[12.5px] text-muted">Development store: Shopify doesn&apos;t charge this plan.</p>}
+        {row?.shopifyPlanTest && status && <p className="mt-2 text-[12.5px] text-muted">Development store: Shopify doesn&apos;t charge this plan.</p>}
       </Card>
 
       <Card>
