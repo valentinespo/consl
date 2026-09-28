@@ -9,6 +9,7 @@ import { TeamCard } from "@/components/TeamCard";
 import { DeleteOrganization } from "@/components/DeleteOrganization";
 import { date as fmtDate } from "@/lib/format";
 import { fullPermissions, normalizePermissions, MEMBER_DEFAULT } from "@/lib/permissions";
+import { memberProfiles } from "@/lib/member-profiles";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,7 @@ export default async function CompanySettingsPage() {
     prismaBase.membership.findMany({ where: { orgId: org.id }, orderBy: { createdAt: "asc" } }),
     prisma.invite.findMany({ where: { acceptedAt: null }, orderBy: { createdAt: "desc" } }),
   ]);
+  const profiles = await memberProfiles(memberships.map((m) => m.clerkUserId));
 
   return (
     <>
@@ -50,6 +52,8 @@ export default async function CompanySettingsPage() {
         isOwner={role === "owner"}
         members={memberships.map((m) => ({
           clerkUserId: m.clerkUserId,
+          name: profiles.get(m.clerkUserId)?.name ?? null,
+          email: profiles.get(m.clerkUserId)?.email ?? null,
           role: m.role,
           createdAt: fmtDate(m.createdAt, cur),
           isYou: m.clerkUserId === userId,

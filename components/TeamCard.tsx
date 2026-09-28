@@ -11,6 +11,9 @@ import type { Permissions } from "@/lib/permissions";
 
 export type TeamMember = {
   clerkUserId: string;
+  /** From the sign-in account; null when it has none or the lookup failed. */
+  name: string | null;
+  email: string | null;
   role: string;
   createdAt: string;
   isYou: boolean;
@@ -73,10 +76,15 @@ export function TeamCard({
         {members.map((m) => (
           <div key={m.clerkUserId} className="flex items-center gap-3 rounded-xl border border-border bg-surface-2/40 px-3 py-2.5">
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[13px] font-medium text-ink">
-                {m.isYou ? "You" : m.clerkUserId}
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="truncate text-[13px] font-medium text-ink">{m.name ?? m.email ?? (m.isYou ? "You" : m.clerkUserId)}</span>
+                {m.isYou && (m.name || m.email) && (
+                  <span className="shrink-0 rounded-md border border-border bg-surface px-1.5 py-0.5 text-[10.5px] font-medium text-muted">You</span>
+                )}
               </div>
-              <div className="text-[11.5px] text-muted">Joined {m.createdAt}</div>
+              <div className="truncate text-[11.5px] text-muted">
+                {m.name && m.email ? `${m.email} · ` : ""}Joined {m.createdAt}
+              </div>
             </div>
             <span className="rounded-md border border-border bg-surface px-1.5 py-0.5 text-[10.5px] font-medium text-muted">
               {m.role === "owner" ? "Owner" : "Member"}
@@ -192,7 +200,7 @@ export function TeamCard({
 
       {editing && (
         <PermissionsEditor
-          who={editing.isYou ? "you" : editing.clerkUserId}
+          who={editing.isYou ? "you" : (editing.name ?? editing.email ?? "this member")}
           clerkUserId={editing.clerkUserId}
           initial={editing.permissions}
           onClose={() => setEditing(null)}

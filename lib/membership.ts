@@ -75,7 +75,9 @@ export const getMyAccess = cache(async (): Promise<MyAccess | null> => {
     return null;
   }
   const role: Role = m.role === "owner" ? "owner" : "member";
-  const perms = role === "owner" ? null : normalizePermissions(m.permissions);
+  // No grants stored = a member nobody has customized yet (everyone who just joined): null makes
+  // can() use the standard MEMBER_DEFAULT. Normalizing a missing map would give {} = no access.
+  const perms = role === "owner" || m.permissions == null ? null : normalizePermissions(m.permissions);
   return { role, orgId, userId, can: (r, a) => can(role, perms, r, a) };
 });
 
