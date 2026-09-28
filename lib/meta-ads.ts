@@ -26,7 +26,10 @@ export { makeState, verifyState };
  * row's `adsChannel` records the current choice (`metaAdsChannelFor`).
  */
 
-export const META_GRAPH_VERSION = "v21.0";
+// Meta retires ads (Marketing API) versions about a year after release and Graph versions after
+// two; v21.0 lost the ads side on 2025-09-09 and only kept answering through Meta's auto-upgrade.
+// Keep this on a current version (changelog: developers.facebook.com/docs/graph-api/changelog/versions).
+export const META_GRAPH_VERSION = "v26.0";
 const GRAPH = `https://graph.facebook.com/${META_GRAPH_VERSION}`;
 const SCOPE = "ads_read";
 const REFRESH_AHEAD_MS = 10 * 86_400_000;
