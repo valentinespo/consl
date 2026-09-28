@@ -54,6 +54,9 @@ function slugCode(name: string, max = 10): string {
   return name.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, max) || "ITEM";
 }
 
+/** How long a listing picture may take to download before the product is saved without it. */
+const IMAGE_FETCH_MS = 8_000;
+
 /** Create a product (SKU). Returns the created (or existing) product. */
 // Words skipped when building an abbreviation from a product name (so "Liver and Kidney Detox
 // Tea" → LKD, not LAK).
@@ -142,7 +145,8 @@ export async function importAmazonCatalog() {
       try {
         const src = await getCatalogImage(client, r.asin);
         if (src) {
-          const resp = await fetch(src);
+          // Bounded: a slow image host must never hold the save (the picture is decoration).
+          const resp = await fetch(src, { signal: AbortSignal.timeout(IMAGE_FETCH_MS) });
           if (resp.ok) {
             const buf = Buffer.from(await resp.arrayBuffer());
             const ext = (src.split("?")[0].split(".").pop() ?? "jpg").toLowerCase();
@@ -473,7 +477,7 @@ export async function applyChannelMappings(channel: "SHOPIFY" | "AMAZON" | "TIKT
         let imageUrl: string | null = null;
         if (listing.imageUrl) {
           try {
-            const resp = await fetch(listing.imageUrl);
+            const resp = await fetch(listing.imageUrl, { signal: AbortSignal.timeout(IMAGE_FETCH_MS) });
             if (resp.ok) {
               const buf = Buffer.from(await resp.arrayBuffer());
               const ext = (listing.imageUrl.split("?")[0].split(".").pop() ?? "jpg").toLowerCase();

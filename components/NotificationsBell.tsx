@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Bell, CheckCircle2, PackageSearch, ShoppingCart, Truck, X, Zap } from "@/components/icons";
 import type { LucideIcon } from "@/components/icons";
 import type { Alert } from "@/lib/alerts";
-import { getHeaderNotifications, dismissNotification } from "@/app/(app)/settings/actions";
+import { dismissNotification } from "@/app/(app)/settings/actions";
 
 const SEV: Record<Alert["severity"], { bg: string; dot: string }> = {
   critical: { bg: "#fef2f2", dot: "#dc2626" },
@@ -28,14 +28,17 @@ export function NotificationsBell() {
   const [, start] = useTransition();
   const wrap = useRef<HTMLDivElement>(null);
 
+  // A plain GET, never a Server Action: the page's actions run one at a time, and a save made right
+  // after the page opens must not wait for the alerts.
   useEffect(() => {
-    let alive = true;
-    getHeaderNotifications()
-      .then((a) => alive && setAlerts(a))
-      .catch(() => alive && setAlerts([]));
-    return () => {
-      alive = false;
-    };
+    const ctrl = new AbortController();
+    fetch("/api/notifications", { cache: "no-store", signal: ctrl.signal })
+      .then((r) => (r.ok ? r.json() : { alerts: [] }))
+      .then((j: { alerts?: Alert[] }) => setAlerts(Array.isArray(j.alerts) ? j.alerts : []))
+      .catch(() => {
+        if (!ctrl.signal.aborted) setAlerts([]);
+      });
+    return () => ctrl.abort();
   }, []);
 
   // Close on an outside click or Escape.
