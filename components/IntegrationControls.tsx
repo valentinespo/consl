@@ -37,7 +37,13 @@ export function IntegrationControls({
         <button
           type="button"
           disabled={pending}
-          title={provider === "meta_ads" ? "Stops importing; every day of spend already on the P&L stays, and a reconnect resumes where it stopped" : "Stops importing; everything already imported stays, and a reconnect resumes where it stopped"}
+          title={
+            provider === "meta_ads"
+              ? "Stops importing; every day of spend already on the P&L stays, and a reconnect resumes where it stopped"
+              : provider === "xero"
+                ? "Ends the connection at Xero too. Everything already sent to Xero stays in your Xero books."
+                : "Stops importing; everything already imported stays, and a reconnect resumes where it stopped"
+          }
           onClick={() =>
             start(async () => {
               await disconnectIntegration(provider);

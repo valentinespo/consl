@@ -420,6 +420,16 @@ const AMAZON_ADS_TICK_MS = 5 * 60 * 1000; // reports finish in minutes; a quick 
 const META_ADS_TICK_MS = 5 * 60 * 1000;
 // In-process per-org timestamps; a restart just refreshes once immediately, which is harmless.
 
+/** Xero refresh tokens lapse after 60 days unused: look for idle connections a few times a day. */
+const XERO_KEEP_ALIVE_MS = 6 * 60 * 60 * 1000;
+let lastXeroKeepAlive = 0;
+async function xeroKeepAliveTick(): Promise<void> {
+  if (Date.now() - lastXeroKeepAlive < XERO_KEEP_ALIVE_MS) return;
+  lastXeroKeepAlive = Date.now();
+  const { xeroKeepAlive } = await import("@/lib/xero");
+  await xeroKeepAlive();
+}
+
 let backfilling = false;
 
 /**
@@ -647,5 +657,7 @@ export function startDailyScheduler(): void {
   // Shopify App Pricing sends no plan-change webhooks: re-read the plans of Shopify-billed companies.
   setInterval(() => void shopifyBillingTick().catch(() => {}), TICK_MS);
   setTimeout(() => void shopifyBillingTick().catch(() => {}), 90_000);
+  // Xero connections stay alive however rarely a company exports.
+  setInterval(() => void xeroKeepAliveTick().catch(() => {}), TICK_MS);
   console.log("[scheduler] daily sync scheduler started");
 }

@@ -129,7 +129,8 @@ model Integration {
   // its per-request LWA tokens in memory and Shopify's offline token never expires; both stay null.
   accessTokenEnc       String?
   accessTokenExpiresAt DateTime?
-  sellerId        String? // platform's account id (Amazon selling-partner id, Shopify shop, TikTok shop id)
+  sellerId        String? // platform's account id (Amazon selling-partner id, Shopify shop, TikTok shop id, Xero tenant id)
+  accountName     String? // the connected account's own name, for display (Xero: the organisation's name)
   marketplaceId   String? // Amazon: e.g. ATVPDKIKX0DER (US); TikTok: the shop_cipher for shop-scoped calls
   region          String? // Amazon: na | eu | fe (endpoint group); TikTok: shop region (e.g. US)
   scope           String? // granted OAuth scopes, if the platform returns them

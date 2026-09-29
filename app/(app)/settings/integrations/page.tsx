@@ -11,6 +11,9 @@ import { shopifyOAuthConfigured } from "@/lib/shopify-oauth";
 import { tiktokConfigured } from "@/lib/tiktok";
 import { amazonAdsConfigured } from "@/lib/amazon-ads";
 import { metaAdsConfigured } from "@/lib/meta-ads";
+import { xeroConfigured, xeroChoices } from "@/lib/xero";
+import { XeroOrgChooser } from "@/components/XeroOrgChooser";
+import { getCurrentOrgId } from "@/lib/tenant";
 import { getFmt } from "@/lib/fmt-server";
 import { requireView } from "@/lib/membership";
 
@@ -38,12 +41,17 @@ export default async function IntegrationsSettingsPage({
   const haveChannel = new Set(channelFacilities.map((f) => f.channel));
   const amazonReady = amazonOAuthConfigured();
 
+  // A Xero consent that shared several organisations waits for the owner to pick one.
+  const xeroRow = byProvider.get("xero");
+  const orgId = await getCurrentOrgId();
+  const xeroPick = xeroRow?.status === "choose" && orgId ? await xeroChoices(orgId).catch(() => null) : undefined;
+
   const connected = (sp.connected as string) || null;
   const error = (sp.error as string) || null;
 
   // Amazon "live" via a real per-tenant connection, or (legacy) the workspace-key sync that's
   // produced snapshots. Only providers with modelled data can connect.
-  const CONNECTABLE: Record<Provider, boolean> = { amazon: amazonReady, shopify: shopifyOAuthConfigured(), tiktok: tiktokConfigured(), amazon_ads: amazonAdsConfigured(), meta_ads: metaAdsConfigured() };
+  const CONNECTABLE: Record<Provider, boolean> = { amazon: amazonReady, shopify: shopifyOAuthConfigured(), tiktok: tiktokConfigured(), amazon_ads: amazonAdsConfigured(), meta_ads: metaAdsConfigured(), xero: xeroConfigured() };
 
   return (
     <div className="space-y-3">
@@ -98,6 +106,10 @@ export default async function IntegrationsSettingsPage({
                   <span className="pill-green inline-flex items-center gap-1 rounded-full px-2 py-[3px] text-[11px] font-medium leading-none">
                     <Check size={11} /> Active
                   </span>
+                ) : row?.status === "choose" ? (
+                  <span className="pill-amber inline-flex items-center gap-1 rounded-full px-2 py-[3px] text-[11px] font-medium leading-none">
+                    <AlertTriangle size={11} /> Pick an organisation
+                  </span>
                 ) : row?.status === "error" ? (
                   <span className="pill-red inline-flex items-center gap-1 rounded-full px-2 py-[3px] text-[11px] font-medium leading-none" title={row.lastError ?? undefined}>
                     <AlertTriangle size={11} /> Needs reconnect
@@ -109,6 +121,12 @@ export default async function IntegrationsSettingsPage({
                 )}
               </div>
               <div className="mt-0.5 text-[12.5px] text-muted">{def.blurb}</div>
+              {p === "xero" && liveConn && row?.accountName && (
+                <div className="mt-1.5 text-[12.5px] text-ink-soft">
+                  Organisation: <span className="font-medium text-ink">{row.accountName}</span>
+                </div>
+              )}
+              {p === "xero" && row?.status === "choose" && <XeroOrgChooser choices={xeroPick ?? null} />}
               {p === "meta_ads" && liveConn && (
                 <>
                   <MetaAdAccountList accounts={metaAccounts} />

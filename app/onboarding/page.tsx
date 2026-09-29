@@ -74,6 +74,7 @@ export default async function OnboardingPage({
     tiktok: tiktokConfigured(),
     amazon_ads: false, // not a sales channel — connected from Settings → Integrations, not the wizard
     meta_ads: false,
+    xero: false, // accounting, connected from Settings → Integrations
   };
   const providers = CHANNEL_PROVIDERS.map((p) => ({
     key: p,

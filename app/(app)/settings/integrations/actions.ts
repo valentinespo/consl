@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prismaBase } from "@/lib/prisma-base";
 import { requireOwner } from "@/lib/membership";
 import type { Provider } from "@/lib/integrations";
+import { revokeXero, chooseXeroOrganisation } from "@/lib/xero";
 
 /**
  * Disconnect a connection: clear the stored token and mark it revoked. Owner-only. Everything it
@@ -16,6 +17,11 @@ export async function disconnectIntegration(provider: Provider): Promise<{ ok: t
   const gate = await requireOwner();
   if (!gate.ok) return { ok: false, error: gate.error };
   try {
+    // Xero: revoke at Xero first, which ends the connection there too and frees its slot.
+    if (provider === "xero") {
+      const row = await prismaBase.integration.findFirst({ where: { orgId: gate.orgId, provider }, select: { refreshTokenEnc: true } });
+      await revokeXero(row?.refreshTokenEnc ?? null);
+    }
     await prismaBase.integration.updateMany({
       where: { orgId: gate.orgId, provider },
       data: { status: "revoked", refreshTokenEnc: null, accessTokenEnc: null, accessTokenExpiresAt: null, lastError: null },
@@ -91,4 +97,18 @@ async function forgetMetaAdAccounts(orgId: string, accountIds?: string[]) {
     prismaBase.metaAdAccount.deleteMany({ where: { id: { in: accounts.map((a) => a.id) } } }),
     ...(accountIds ? [] : [prismaBase.settings.updateMany({ where: { orgId }, data: { metaAdsSyncedThrough: null, metaAdsSince: null } })]),
   ]);
+}
+
+/** Several Xero organisations were ticked on Xero's screen: connect the one this company exports
+ *  to (the others are disconnected at Xero). Owner-only. */
+export async function chooseXeroOrganisationAction(tenantId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const gate = await requireOwner();
+  if (!gate.ok) return { ok: false, error: gate.error };
+  try {
+    await chooseXeroOrganisation(gate.orgId, tenantId);
+    revalidatePath("/settings/integrations");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not connect that organisation." };
+  }
 }
