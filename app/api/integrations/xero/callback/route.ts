@@ -15,8 +15,13 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
-  const xeroError = url.searchParams.get("error_description") || url.searchParams.get("error");
-  if (xeroError) return back(`error=${encodeURIComponent(xeroError === "access_denied" ? "Xero access wasn't granted." : `Xero: ${xeroError}`)}`);
+  const errorCode = url.searchParams.get("error");
+  const errorText = url.searchParams.get("error_description");
+  if (errorCode || errorText) {
+    // Cancel on Xero's screen comes back as access_denied ("TenantConsent status DENIED").
+    const declined = errorCode === "access_denied" || /denied/i.test(errorText ?? "");
+    return back(`error=${encodeURIComponent(declined ? "Xero access wasn't granted." : `Xero: ${errorText || errorCode}`)}`);
+  }
   if (!code || !state) return back(`error=${encodeURIComponent("Missing authorization code.")}`);
   const stateOrg = verifyState(state);
   if (!stateOrg) return back(`error=${encodeURIComponent("This connection link expired. Try again.")}`);
