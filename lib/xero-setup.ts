@@ -109,8 +109,9 @@ async function allAccounts(c: Conn): Promise<XeroApiAccount[]> {
 
 /** The rows this company's P&L has: its lines per channel, and the balance rows they need. */
 async function companyRows(orgId: string) {
-  const [groups, fees, metaAccounts, adsConn] = await Promise.all([
+  const [groups, stock, fees, metaAccounts, adsConn] = await Promise.all([
     prismaBase.financeEvent.groupBy({ by: ["channel", "group"], where: { orgId } }),
+    prismaBase.stockEvent.groupBy({ by: ["channel"], where: { orgId } }),
     prismaBase.$queryRaw<{ channel: string; bucket: string; type: string }[]>`
       SELECT DISTINCT s.channel, f.bucket, f.type FROM "OrderFee" f JOIN "SalesOrder" s ON s.id = f."orderId" WHERE f."orgId" = ${orgId}`,
     prismaBase.metaAdAccount.count({ where: { orgId } }),
@@ -126,6 +127,7 @@ async function companyRows(orgId: string) {
   for (const g of groups) if ((LINE_ORDER as string[]).includes(g.group)) add(g.channel, g.group as LineKey);
   for (const f of fees) add(f.channel, f.type === "credit" && f.bucket === "sales" ? "sales" : f.bucket === "payment_fees" ? "payment_fees" : "custom_fees");
   for (const [channel, set] of found) if (set.has("sales")) add(channel, "cogs");
+  for (const s of stock) add(s.channel, "removals");
 
   const channels = CHANNEL_ORDER.filter((c) => found.has(c));
   const lines = channels.flatMap((channel) => LINE_ORDER.filter((l) => found.get(channel)!.has(l)).map((line) => ({ channel, line })));

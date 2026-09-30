@@ -50,6 +50,17 @@ export async function setOrderVoided(id: string, voided: boolean) {
   return setOrdersVoided([id], voided);
 }
 
+/** Leave an order's cost of goods out of the P&L (or count it again): for orders whose units left
+ *  a channel's stock another way that's already costed — an Amazon removal order sent straight to
+ *  the buyer. The order's sales and fees still count. */
+export async function setOrderCogsVoided(id: string, cogsVoided: boolean) {
+  const gate = await requirePermission("inventory", "edit");
+  if (!gate.ok) return { ok: false as const, error: gate.error };
+  await prisma.salesOrder.updateMany({ where: { id }, data: { cogsVoided } });
+  touched();
+  return { ok: true as const };
+}
+
 type FeeInput = { name: string; kind: FeeKind; value: number; extraFixed?: number | null; bucket?: FeeBucket };
 
 function checkFee(fee: FeeInput): string | null {

@@ -152,10 +152,11 @@ export type Pnl = {
 };
 
 /** Sellerise-shaped ordering; "sales" first, computed COGS is inserted by the UI right after. */
-export const GROUP_ORDER = ["sales", "taxes", "fba_fees", "referral_fees", "payment_fees", "custom_fees", "storage_fees", "advertising", "refunds", "other"] as const;
+export const GROUP_ORDER = ["sales", "removals", "taxes", "fba_fees", "referral_fees", "payment_fees", "custom_fees", "storage_fees", "advertising", "refunds", "other"] as const;
 
 export const GROUP_LABEL: Record<string, string> = {
   sales: "Sales",
+  removals: "Removals & losses",
   taxes: "Taxes",
   fba_fees: "Fulfillment fees",
   referral_fees: "Referral fees",

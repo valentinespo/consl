@@ -106,6 +106,7 @@ model Organization {
   integrations            Integration[]
   metaAdAccounts          MetaAdAccount[]
   xeroSetup               XeroSetup?
+  stockEvents             StockEvent[]
   orderFeeRules           OrderFeeRule[]
   adInvoices              AdInvoice[]
   orderFees               OrderFee[]
@@ -160,6 +161,29 @@ model Integration {
 // per channel, and the balance-sheet accounts the money waits in (a clearing account per channel,
 // payables for costs paid outside the channel, inventory). Targets are Xero AccountIDs with the
 // code/name/type as last seen, so the screen reads right even before Xero answers.
+/// Units that left a sales channel's stock without a sale, or came back into it — read from the
+/// channel's own reports (Amazon: the FBA inventory ledger and the reimbursements report). The P&L
+/// prices each at first-in-first-out cost under "Removals & losses": a removal order, destroyed,
+/// lost in the warehouse or on the way in, taken out by the channel (reimbursed) cost; found,
+/// credited back and customer returns give their cost back.
+model StockEvent {
+  id           String        @id @default(cuid())
+  orgId        String?
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  channel      String // "AMAZON"
+  source       String // "ledger" | "reimbursement" — each import replaces its own rows by window
+  kind         String // REMOVAL | DESTROYED | LOST | LOST_INBOUND | REIMBURSED | FOUND | CREDITED | RETURNED
+  at           DateTime
+  sku          String // the channel's seller SKU
+  quantity     Int // signed: − left the channel's stock, + came back into it
+  detail       String? // the channel's own words: condition, reason code, reimbursement reason
+  reference    String? // the channel's reference (fulfillment center, reimbursement id)
+  createdAt    DateTime      @default(now())
+
+  @@index([orgId, channel, at])
+  @@index([orgId, source, at])
+}
+
 model XeroSetup {
   id                 String        @id @default(cuid())
   orgId              String?       @unique
@@ -577,6 +601,10 @@ model Settings {
   tiktokSyncedThrough  DateTime?
   tiktokFinanceSyncedThrough DateTime? // last TikTok settlement-ledger pass (statements re-read from 30 days before it)
   amazonReportSyncedThrough DateTime?
+  // Amazon's inventory ledger + reimbursements (units that leave or come back without a sale):
+  // when the first 18-month read finished, and when the last refresh ran.
+  amazonStockEventsBackfilledAt DateTime?
+  amazonStockEventsSyncedAt     DateTime?
   // Amazon Ads daily spend: the last day read (walks forward; the refresh re-reads a few days of
   // overlap) and the first day covered. Once there is data, the P&L places the ad INVOICES day by
   // day along this spend (lib/ads-waterfill) — the invoices stay the amount of record.
@@ -988,6 +1016,9 @@ model SalesOrder {
   // The automatic void rule that voided it (null when voided by hand or not voided). Rules never
   // touch an order decided by hand.
   voidRuleId   String?
+  // The order still counts (revenue, fees), but its units' cost of goods doesn't: they left a
+  // channel's stock another way that's already costed (an Amazon removal order sent to the buyer).
+  cogsVoided   Boolean         @default(false)
   // How it was fulfilled, when the platform tells us — drives which stock pool drains later.
   // Amazon: "Amazon" (FBA) | "Merchant". TikTok: "TIKTOK" | "SELLER". Shopify: null (seller-fulfilled).
   fulfillment  String?

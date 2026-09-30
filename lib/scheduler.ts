@@ -20,6 +20,7 @@ import {
   lastAmazonFinanceSweep,
   lastAmazonAdsTick,
   lastMetaAdsTick,
+  lastAmazonStockEvents,
   lastShopifyBillingCheck,
   nudgeOrgImports,
 } from "@/lib/scheduler-gates";
@@ -519,6 +520,17 @@ async function backfillTick(): Promise<void> {
           // carries the current one — so an importer fix reaches every company on its own.
           const rw = await amazonFinanceRewalkStep();
           if (rw.active) console.log(`[scheduler] amazon finance re-read for ${orgId}: ${rw.done ? "complete — ledger is on the current importer" : `+${rw.rows} rows`}`);
+          // Units that leave Amazon's stock without a sale or come back (removal orders, destroyed,
+          // lost, found, returns, lost on the way in): the first 18 months once, then every six
+          // hours. A failed read waits half an hour before trying again.
+          const syncedAt = s.amazonStockEventsSyncedAt?.getTime() ?? 0;
+          const tried = lastAmazonStockEvents.get(orgId) ?? 0;
+          if ((!s.amazonStockEventsBackfilledAt || Date.now() - syncedAt >= 6 * 3_600_000) && Date.now() - tried >= 30 * 60_000) {
+            lastAmazonStockEvents.set(orgId, Date.now());
+            const { syncAmazonStockEvents } = await import("@/lib/amazon-stock-events");
+            const se = await syncAmazonStockEvents();
+            if (se) console.log(`[scheduler] amazon stock events for ${orgId}: ${se.ledger} ledger + ${se.lostInbound} lost-inbound rows (${se.from}..${se.to})`);
+          }
         });
       } catch (e) {
         console.error(`[scheduler] backfill failed for org ${orgId}:`, (e as Error).message);

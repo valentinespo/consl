@@ -7,7 +7,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { AlertTriangle, Building2, ChevronDown, ChevronRight, DotsVertical, Layers, Search, Settings, Tag, WarehouseFilled, X } from "@/components/icons";
 import { PageHeader, SkuAvatar } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
-import { setOrderVoided } from "@/app/(app)/orders/actions";
+import { setOrderCogsVoided, setOrderVoided } from "@/app/(app)/orders/actions";
 import type { OrdersChart as OrdersChartData, OrdersPage, OrderRow } from "@/lib/order-metrics";
 import { OrdersChart } from "@/components/OrdersChart";
 import { inputCls } from "@/components/FormKit";
@@ -41,9 +41,9 @@ function statusPill(o: OrderRow): { label: string; cls: string } | null {
   return { label: s.charAt(0).toUpperCase() + s.slice(1), cls: "pill-neutral" };
 }
 
-/** The row's overflow menu (⋮): custom fees, where it shipped from, credits, void/unvoid.
- *  Portalled — the table's scroll container would clip an inline popover. */
-function RowMenu({ id, voided, onManage }: { id: string; voided: boolean; onManage: (mode: DialogMode) => void }) {
+/** The row's overflow menu (⋮): custom fees, where it shipped from, credits, cost of goods,
+ *  void/unvoid. Portalled — the table's scroll container would clip an inline popover. */
+function RowMenu({ id, voided, cogsVoided, onManage }: { id: string; voided: boolean; cogsVoided: boolean; onManage: (mode: DialogMode) => void }) {
   const router = useRouter();
   const btn = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -116,6 +116,20 @@ function RowMenu({ id, voided, onManage }: { id: string; voided: boolean; onMana
                 {label}
               </button>
             ))}
+            <button
+              role="menuitem"
+              disabled={pending}
+              onClick={() =>
+                start(async () => {
+                  await setOrderCogsVoided(id, !cogsVoided);
+                  setBox(null);
+                  router.refresh();
+                })
+              }
+              className="w-full rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink-soft hover:bg-surface-2 hover:text-ink disabled:opacity-50"
+            >
+              {cogsVoided ? "Count cost of goods" : "Void cost of goods"}
+            </button>
             <button
               role="menuitem"
               disabled={pending}
@@ -716,6 +730,15 @@ export function OrdersClient({
                             <span className={`${PILL} pill-neutral`}>Voided</span>
                           </HoverHint>
                         )}
+                        {o.cogsVoided && !o.voided && (
+                          <HoverHint
+                            title="Cost of goods voided"
+                            body="The sale and its fees still count, but its units' cost doesn't: they already count on the P&L another way, like an Amazon removal order sent to this buyer. Count it again from the row menu."
+                            className="align-middle"
+                          >
+                            <span className={`${PILL} pill-neutral`}>COGS voided</span>
+                          </HoverHint>
+                        )}
                       </div>
                       <div className="mt-0.5 whitespace-nowrap text-[11.5px] text-muted">{fmtDate(o.orderedAt)}</div>
                     </td>
@@ -775,7 +798,7 @@ export function OrdersClient({
                       </div>
                     </td>
                     <td className="px-2 py-2.5 text-right">
-                      <RowMenu id={o.id} voided={o.voided} onManage={(mode) => setDialog({ id: o.id, mode })} />
+                      <RowMenu id={o.id} voided={o.voided} cogsVoided={o.cogsVoided} onManage={(mode) => setDialog({ id: o.id, mode })} />
                     </td>
                   </tr>
                   {open && (

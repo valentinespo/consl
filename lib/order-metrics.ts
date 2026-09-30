@@ -144,6 +144,8 @@ export type OrderRow = {
   freeSample: boolean;
   /** Manually voided from the row menu — out of every total, washed out with the Voided pill. */
   voided: boolean;
+  /** Counts, but its units' cost of goods doesn't (already costed another way, e.g. a removal order). */
+  cogsVoided: boolean;
   /** Dropped by a double-count toggle (mirrored Shopify source / MCF) — same wash + Voided pill. */
   excluded: boolean;
   /** Custom fees on the order — from a rule (fromRule) or written by hand. */
@@ -488,6 +490,7 @@ const ORDER_ROW_SELECT = {
   mcf: true,
   replacement: true,
   voided: true,
+  cogsVoided: true,
   lines: { select: { quantity: true, sku: true, unitPrice: true, product: { select: { code: true, name: true, imageUrl: true } } } },
   fees: { select: { id: true, name: true, amount: true, ruleId: true, type: true, bucket: true }, orderBy: { createdAt: "asc" } },
 } as const;
@@ -586,6 +589,7 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
       (o.status === "Shipped" || o.status === "PartiallyShipped"),
     freeSample: o.channel === "TIKTOK" && o.total === 0 && !o.cancelled,
     voided: o.voided,
+    cogsVoided: o.cogsVoided,
     excluded: (o.channel === "SHOPIFY" && !!o.source && excluded.includes(o.source)) || (excludeMcf && o.mcf),
     fees: o.fees.filter((f) => f.type !== "credit").map((f) => ({ id: f.id, name: f.name, amount: f.amount, fromRule: f.ruleId !== null })),
     feeTotal: o.fees.filter((f) => f.type !== "credit").reduce((s, f) => s + f.amount, 0),

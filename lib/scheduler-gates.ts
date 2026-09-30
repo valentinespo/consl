@@ -19,10 +19,12 @@ export const lastAmazonOrderReport = new Map<string, number>();
 export const lastAmazonFinanceSweep = new Map<string, number>();
 export const lastAmazonAdsTick = new Map<string, number>();
 export const lastMetaAdsTick = new Map<string, number>();
+/** Last attempt at Amazon's inventory ledger + reimbursements (lib/amazon-stock-events). */
+export const lastAmazonStockEvents = new Map<string, number>();
 
 /** Forget a company's clocks: every pass is due on the next tick. Call it when a connection lands. */
 export function nudgeOrgImports(orgId: string): void {
-  for (const clock of [lastDailyAttempt, lastPlacesRefresh, lastOrdersRefresh, lastTikTokFinance, lastMfnShipFromStep, lastAmazonPoll, lastAmazonOrderHeal, lastAmazonOrderAudit, lastAmazonOrderReport, lastAmazonFinanceSweep, lastAmazonAdsTick, lastMetaAdsTick]) {
+  for (const clock of [lastDailyAttempt, lastPlacesRefresh, lastOrdersRefresh, lastTikTokFinance, lastMfnShipFromStep, lastAmazonPoll, lastAmazonOrderHeal, lastAmazonOrderAudit, lastAmazonOrderReport, lastAmazonFinanceSweep, lastAmazonAdsTick, lastMetaAdsTick, lastAmazonStockEvents]) {
     clock.delete(orgId);
   }
 }

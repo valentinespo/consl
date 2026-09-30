@@ -32,7 +32,7 @@ function humanize(raw: string, group?: string): string {
   let label = spell(rest);
   if (prefix && prefix !== "TaxWithheld" && !(prefix === "Refund" && group === "refunds")) label = `${spell(prefix)} · ${label}`;
   label = label.charAt(0).toUpperCase() + label.slice(1);
-  return label.replace(/\bfba\b/gi, "FBA").replace(/\bmcf\b/gi, "MCF");
+  return label.replace(/\bfba\b/gi, "FBA").replace(/\bmcf\b/gi, "MCF").replace(/\bamazon\b/gi, "Amazon");
 }
 
 /** A line's label: a platform's type code spelled out, or — for a line written in consl — the name

@@ -1,4 +1,5 @@
 import "server-only";
+import { STOCK_EVENT_LABEL } from "@/lib/amazon-stock-events";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { amazonAdsStatementRows } from "@/lib/amazon-ads-statement";
@@ -93,6 +94,25 @@ type QueueKey = string;
  *  that shipped but Amazon posted no money for (a free unit, a replacement) — units from the
  *  Orders tab. Both are reported as their own lines under cost of goods. */
 type Sale = { productId: string; units: number; at: number | null; channel: PnlChannel; queue: QueueKey | null; mcf?: boolean; unreported?: boolean; periodAt?: number };
+/** Units that left Amazon's stock without a sale (negative) or came back into it (positive) —
+ *  removal orders, destroyed, lost, found, customer returns… (lib/amazon-stock-events). Priced on
+ *  the same FIFO walk as the sales, under "Removals & losses", by `label`. */
+type StockMove = { productId: string; units: number; at: number; kind: string; label: string };
+
+/** Every stock event of the company's managed Amazon products. */
+async function loadStockMoves(scope: Scope): Promise<StockMove[]> {
+  const rows = await prisma.stockEvent.findMany({
+    where: { channel: "AMAZON", sku: { in: [...scope.amazon.keys()] } },
+    select: { sku: true, quantity: true, at: true, kind: true },
+  });
+  const moves: StockMove[] = [];
+  for (const r of rows) {
+    const p = scope.amazon.get(r.sku);
+    if (p && r.quantity) moves.push({ productId: p.id, units: r.quantity, at: r.at.getTime(), kind: r.kind, label: STOCK_EVENT_LABEL[r.kind] ?? r.kind });
+  }
+  // Within a day, what left goes before what came back (a unit lost and found the same day).
+  return moves.sort((a, b) => a.at - b.at || a.units - b.units);
+}
 type Cogs = {
   cogs: number;
   units: number;
@@ -196,7 +216,16 @@ function customLine(f: { bucket: string; type: string; amount: number }): { buck
   return { bucket, signed: credit ? f.amount : -f.amount };
 }
 
-async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlChannel>, scope: Scope, onCost: (sale: Sale, cogs: number, detail: SaleDetail) => void): Promise<Cogs> {
+async function fifoCogs(
+  sales: Sale[],
+  from: Date,
+  to: Date,
+  selected: Set<PnlChannel>,
+  scope: Scope,
+  onCost: (sale: Sale, cogs: number, detail: SaleDetail) => void,
+  moves: StockMove[] = [],
+  onMove?: (move: StockMove, amount: number) => void,
+): Promise<Cogs> {
   const tq = Date.now();
   const { queues, fallback } = await loadQueues();
   if ((process.env.PNL_PROFILE === "1" || process.env.NODE_ENV === "development")) console.log(`[pnl history]   loadQueues ${Date.now() - tq}ms`);
@@ -204,20 +233,27 @@ async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlCh
     where: { itemType: "FINISHED", kind: "STANDARD", fromFacilityId: { not: null }, productId: { not: null } },
     select: { productId: true, fromFacilityId: true, quantity: true, date: true },
   });
-  type Draw = { queue: QueueKey | null; productId: string; units: number; at: number | null; sale: Sale | null };
+  type Draw = { queue: QueueKey | null; productId: string; units: number; at: number | null; sale: Sale | null; move?: StockMove };
   const draws: Draw[] = [
     ...exits.map((e) => ({ queue: e.fromFacilityId as string, productId: e.productId as string, units: e.quantity, at: e.date.getTime(), sale: null })),
     ...sales.map((s) => ({ queue: s.queue, productId: s.productId, units: s.units, at: s.at, sale: s })),
+    ...moves.map((m) => ({ queue: "AMAZON", productId: m.productId, units: Math.abs(m.units), at: m.at, sale: null, move: m })),
   ];
   const order = (d: Draw) => d.at ?? Number.MAX_SAFE_INTEGER;
   draws.sort((a, b) => order(a) - order(b));
 
   const tw = Date.now();
   const cursor = new Map<string, { idx: number; left: number }>(); // "queue|product"
+  const recoverable = new Map<string, number>(); // "<kind>|<product>": lost units that can still come back
   const out: Cogs = { cogs: 0, units: 0, estimatedUnits: 0, estimatedCogs: 0, estimatedLots: new Set(), preHistoryUnits: 0, overflowUnits: 0, unplacedUnits: 0, unplacedCogs: 0, mcfUnits: 0, mcfCogs: 0, unreportedUnits: 0, unreportedCogs: 0, unmatchedSkus: new Set() };
   for (const d of draws) {
     const product = scope.byId.get(d.productId);
     if (!product) continue;
+    if (d.move) {
+      const amount = priceMove(d.move, queues.get("AMAZON")?.get(product.id) ?? [], product, cursor, recoverable);
+      if (onMove && amount !== 0 && selected.has("AMAZON") && d.move.at >= from.getTime() && d.move.at <= to.getTime()) onMove(d.move, amount);
+      continue;
+    }
     const qty = d.units;
     const at = d.at;
     const sale = d.sale;
@@ -321,6 +357,79 @@ async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlCh
   return out;
 }
 
+/** A recovery and the loss it can undo: found ← lost in the warehouse; a reversed lost-inbound
+ *  reimbursement ← lost on the way in. */
+const RECOVERS_FROM: Record<string, string> = { FOUND: "LOST", LOST_INBOUND: "LOST_INBOUND" };
+const POOLED = new Set(["LOST", "LOST_INBOUND"]);
+
+/**
+ * One stock move on Amazon's queue, as a signed P&L amount. Units that left take from the front
+ * of the queue, exactly like a sale (before the first recorded layer: the pre-consl cost; beyond
+ * everything recorded: the newest cost). Units that came back give back the cost of the units
+ * most recently taken, and are taken again by whatever leaves next — the walk stays in step with
+ * what is physically there.
+ */
+function priceMove(move: StockMove, layers: Layer[], product: ProductCost, cursor: Map<string, { idx: number; left: number }>, recoverable: Map<string, number>): number {
+  const ck = `AMAZON|${product.id}`;
+  // A found unit, or a reversed lost-on-the-way-in reimbursement, gives back only what was counted
+  // lost: Amazon's reports reach 18 months back, and a unit lost before that was never taken off
+  // the walk, so it isn't put back on.
+  const pool = `${RECOVERS_FROM[move.kind] ?? move.kind}|${product.id}`;
+  if (move.units < 0 && POOLED.has(move.kind)) recoverable.set(pool, (recoverable.get(pool) ?? 0) - move.units);
+  if (move.units > 0 && move.kind in RECOVERS_FROM) {
+    const open = recoverable.get(pool) ?? 0;
+    const back = Math.min(open, move.units);
+    recoverable.set(pool, open - back);
+    if (back <= 0) return 0;
+    if (back < move.units) move = { ...move, units: back };
+  }
+  const preConsl = product.preConslUnitCost ?? product.openingUnitCost ?? layers[0]?.unitCost ?? 0;
+  const before = layers.length === 0 || move.at < layers[0].date;
+  if (move.units < 0) {
+    let want = -move.units;
+    let cost = 0;
+    if (!before) {
+      const c = cursor.get(ck) ?? { idx: 0, left: layers[0].units };
+      while (want > 1e-9 && c.idx < layers.length) {
+        const take = Math.min(c.left, want);
+        cost += take * layers[c.idx].unitCost;
+        c.left -= take;
+        want -= take;
+        if (c.left <= 1e-9) {
+          c.idx++;
+          c.left = c.idx < layers.length ? layers[c.idx].units : 0;
+        }
+      }
+      cursor.set(ck, c);
+    }
+    cost += want * (before ? preConsl : (layers[layers.length - 1]?.unitCost ?? preConsl));
+    return -cost;
+  }
+  let back = move.units;
+  let credit = 0;
+  const c = before ? undefined : cursor.get(ck);
+  if (c) {
+    if (c.idx >= layers.length) {
+      c.idx = layers.length - 1;
+      c.left = 0;
+    }
+    while (back > 1e-9) {
+      const used = layers[c.idx].units - c.left;
+      if (used <= 1e-9) {
+        if (c.idx === 0) break;
+        c.idx--;
+        c.left = 0;
+        continue;
+      }
+      const give = Math.min(used, back);
+      c.left += give;
+      back -= give;
+      credit += give * layers[c.idx].unitCost;
+    }
+  }
+  return credit + back * preConsl;
+}
+
 type Bridge = {
   sales: { type: string; amount: number }[];
   taxes: { type: string; amount: number }[];
@@ -339,9 +448,9 @@ async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurre
   if (!orgId) return none;
 
   const candidates = await prisma.$queryRaw<
-    { id: string; total: number; currency: string; orderedAt: Date; productGross: number | null; discounts: number | null; tax: number | null; shipping: number | null; giftWrap: number | null; facility: string | null }[]
+    { id: string; total: number; currency: string; orderedAt: Date; productGross: number | null; discounts: number | null; tax: number | null; shipping: number | null; giftWrap: number | null; facility: string | null; cogsVoided: boolean }[]
   >`
-    SELECT so.id, so.total, so.currency, so."orderedAt", so."productGross", so.discounts, so.tax, so.shipping, so."giftWrap",
+    SELECT so.id, so.total, so.currency, so."orderedAt", so."productGross", so.discounts, so.tax, so.shipping, so."giftWrap", so."cogsVoided",
       COALESCE(so."fulfillmentOverrideFacilityId", so."fulfillmentFacilityId") AS facility
     FROM "SalesOrder" so
     WHERE so."orgId" = ${orgId} AND so.channel = 'AMAZON'
@@ -363,6 +472,7 @@ async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurre
   const orders = candidates.filter((o) => inScopeOrders.has(o.id));
   if (orders.length === 0) return none;
   const facilityOf = new Map(orders.map((o) => [o.id, o.facility]));
+  const noCogs = new Set(orders.filter((o) => o.cogsVoided).map((o) => o.id));
   const dateOf = new Map(orders.map((o) => [o.id, o.orderedAt]));
   const entries: Bridge["entries"] = [];
   const entry = (at: Date, group: string, type: string, amount: number) => {
@@ -429,7 +539,7 @@ async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurre
     const orderedAt = dateOf.get(l.orderId)!;
     entry(orderedAt, "fba_fees", "FBAPerUnitFulfillmentFee (pending)", l.quantity * fbaPerUnit);
     entry(orderedAt, "referral_fees", "Commission (pending)", gross * commissionRate);
-    pendingLines.push({ sku, units: l.quantity, facility: facilityOf.get(l.orderId) ?? null, orderedAt });
+    if (!noCogs.has(l.orderId)) pendingLines.push({ sku, units: l.quantity, facility: facilityOf.get(l.orderId) ?? null, orderedAt });
   }
 
   const sales = [
@@ -509,7 +619,9 @@ async function allSales(
   queueOf: (facilityId: string | null) => QueueKey | null,
 ): Promise<Sale[]> {
   // Every sale on record, from every channel — the FIFO walk needs all of history. Each carries
-  // the queue of the facility its order shipped from; an order placed nowhere carries none.
+  // the queue of the facility its order shipped from; an order placed nowhere carries none. An
+  // order whose cost of goods is switched off (its units left another way that's already costed,
+  // e.g. an Amazon removal order sent to the buyer) keeps its money but draws no units.
   // Amazon's sale rows don't say where they shipped from, so each is looked up on its order (a
   // voided order's rows are skipped); a row with no order record on file is Amazon's when Amazon
   // charged an FBA fee for that order.
@@ -525,7 +637,7 @@ async function allSales(
     LEFT JOIN "SalesOrder" so ON so."orgId" = fe."orgId" AND so.channel = 'AMAZON' AND so."externalId" = fe."orderId"
     WHERE fe."orgId" = ${orgId} AND fe.channel = 'AMAZON' AND fe."group" = 'sales' AND fe.type = 'Principal'
       AND fe.quantity IS NOT NULL AND fe.sku = ANY(${amazonSkus}::text[])
-      AND (so.id IS NULL OR so.voided = false)
+      AND (so.id IS NULL OR (so.voided = false AND so."cogsVoided" = false))
     ORDER BY fe."eventAt" ASC, fe.id ASC`;
   const sales: Sale[] = [];
   for (const r of amazonRows) {
@@ -539,7 +651,7 @@ async function allSales(
       COALESCE(o."fulfillmentOverrideFacilityId", o."fulfillmentFacilityId") AS facility
     FROM "SalesOrderLine" l JOIN "SalesOrder" o ON o.id = l."orderId"
     WHERE o."orgId" = ${orgId} AND o.channel IN ('SHOPIFY', 'TIKTOK') AND l."productId" IS NOT NULL
-      AND o.cancelled = false AND o.voided = false
+      AND o.cancelled = false AND o.voided = false AND o."cogsVoided" = false
       AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excludedSources}::text[]))`;
   for (const r of lineRows) sales.push({ productId: r.productId, units: r.units, at: r.at.getTime(), channel: r.channel as PnlChannel, queue: queueOf(r.facility) });
   // Amazon orders that shipped but Amazon posted no money for — a free unit, a replacement: no
@@ -552,7 +664,7 @@ async function allSales(
       COALESCE(o."fulfillmentOverrideFacilityId", o."fulfillmentFacilityId") AS facility
     FROM "SalesOrderLine" l JOIN "SalesOrder" o ON o.id = l."orderId"
     WHERE o."orgId" = ${orgId} AND o.channel = 'AMAZON' AND o.mcf = false AND l."productId" IS NOT NULL
-      AND o.cancelled = false AND o.voided = false AND o.total = 0
+      AND o.cancelled = false AND o.voided = false AND o."cogsVoided" = false AND o.total = 0
       AND o.status IN ('Shipped', 'PartiallyShipped')
       AND NOT EXISTS (
         SELECT 1 FROM "FinanceEvent" fe
@@ -565,7 +677,7 @@ async function allSales(
         COALESCE(o."fulfillmentOverrideFacilityId", o."fulfillmentFacilityId") AS facility
       FROM "SalesOrderLine" l JOIN "SalesOrder" o ON o.id = l."orderId"
       WHERE o."orgId" = ${orgId} AND o.channel = 'AMAZON' AND o.mcf = true AND l."productId" IS NOT NULL
-        AND o.cancelled = false AND o.voided = false`;
+        AND o.cancelled = false AND o.voided = false AND o."cogsVoided" = false`;
     for (const r of mcfRows) sales.push({ productId: r.productId, units: r.units, at: r.at.getTime(), channel: "AMAZON", queue: queueOf(r.facility), mcf: true });
   }
   return sales;
@@ -800,12 +912,26 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
     }
   }
 
-  const sales = await allSales(orgId, scope, amazonSkus, excludedSources, exclusions.mcf, queueOf);
+  const [sales, moves] = await Promise.all([allSales(orgId, scope, amazonSkus, excludedSources, exclusions.mcf, queueOf), loadStockMoves(scope)]);
 
-  const fifo = await fifoCogs([...sales, ...pendingSales], from, to, selectedSet, scope, (sale, cogs) => {
-    const at = sale.periodAt ?? sale.at;
-    if (at != null) periods.addCost(at, sale.units, cogs, sale.mcf, sale.unreported);
-  });
+  // Stock moves always ride the walk (they change what every later sale draws); they only show
+  // when Amazon is in view.
+  const fifo = await fifoCogs(
+    [...sales, ...pendingSales],
+    from,
+    to,
+    selectedSet,
+    scope,
+    (sale, cogs) => {
+      const at = sale.periodAt ?? sale.at;
+      if (at != null) periods.addCost(at, sale.units, cogs, sale.mcf, sale.unreported);
+    },
+    moves,
+    (move, amount) => {
+      add("removals", move.label, amount, "AMAZON");
+      periods.addAmount(move.at, "removals", move.label, amount, "AMAZON");
+    },
+  );
   const groups = pnlGroups(blocks);
 
   const salesTotal = groups.find((g) => g.group === "sales")?.total ?? 0;
@@ -1103,8 +1229,9 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
 
   mark("pending bridges");
   // Every sale on record, priced by the same FIFO walk, each landing on its channel and day.
-  const sales = await allSales(orgId, scope, amazonSkus, excludedSources, exclusions.mcf, queueOf);
+  const [sales, moves] = await Promise.all([allSales(orgId, scope, amazonSkus, excludedSources, exclusions.mcf, queueOf), loadStockMoves(scope)]);
   mark("load sales");
+  const onMove = (move: StockMove, amount: number) => addPnlAmount(tally("AMAZON", dayOf(move.at)).blocks, "removals", move.label, amount, "AMAZON");
   await fifoCogs([...sales, ...pendingSales], allTime.from, allTime.to, new Set(selected), scope, (sale, cogs, detail) => {
     const at = sale.periodAt ?? sale.at;
     if (at == null) return;
@@ -1121,7 +1248,7 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
     t.unplaced.units += detail.unplacedUnits;
     t.unplaced.cogs += detail.unplacedCogs;
     if (detail.unmatched) t.unmatched.add(detail.unmatched);
-  });
+  }, moves, onMove);
 
   mark("fifo walk (queues + replay)");
   const lotIds = new Map<string, string>();

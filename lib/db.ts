@@ -11,6 +11,7 @@ export const TENANT_MODELS = new Set([
   "Facility",
   "MetaAdAccount",
   "XeroSetup",
+  "StockEvent",
   "Supplier",
   "Product",
   "SkuSnapshot",

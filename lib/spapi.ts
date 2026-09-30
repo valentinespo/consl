@@ -210,26 +210,27 @@ export async function getAllOrders(client: SpApiClient, startISO: string, endISO
   return merged;
 }
 
-/** Request the All Orders report for a window, poll until ready, download and decompress the TSV.
- *  Shared by the velocity rollup (oneOrdersChunk) and the order-level importer (getAllOrderRows)
- *  so a window is only ever pulled once per caller. */
-async function fetchOrdersReportTsv(client: SpApiClient, startISO: string, endISO: string): Promise<string> {
+/** Request a report for a window, poll until ready, download and decompress it. `label` names it
+ *  in errors; `polls` × `pollMs` bounds the wait (a long history takes Amazon minutes to build). */
+export async function fetchReportText(
+  client: SpApiClient,
+  reportType: string,
+  startISO: string,
+  endISO: string,
+  opts: { label?: string; polls?: number; pollMs?: number } = {},
+): Promise<string> {
+  const label = opts.label ?? reportType;
   let r = await sp(client, "/reports/2021-06-30/reports", {
     method: "POST",
-    body: JSON.stringify({
-      reportType: "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL",
-      marketplaceIds: [client.marketplaceId],
-      dataStartTime: startISO,
-      dataEndTime: endISO,
-    }),
+    body: JSON.stringify({ reportType, marketplaceIds: [client.marketplaceId], dataStartTime: startISO, dataEndTime: endISO }),
   });
   let j = await r.json();
-  if (!r.ok) throw new Error(`orders report create: ${JSON.stringify(j).slice(0, 160)}`);
+  if (!r.ok) throw new Error(`${label} report create: ${JSON.stringify(j).slice(0, 160)}`);
   const reportId = j.reportId;
   let docId = "";
   let status = "";
-  for (let i = 0; i < 60; i++) {
-    await new Promise((res) => setTimeout(res, 4000));
+  for (let i = 0; i < (opts.polls ?? 60); i++) {
+    await new Promise((res) => setTimeout(res, opts.pollMs ?? 4000));
     r = await sp(client, `/reports/2021-06-30/reports/${reportId}`);
     j = await r.json();
     status = j.processingStatus;
@@ -237,15 +238,21 @@ async function fetchOrdersReportTsv(client: SpApiClient, startISO: string, endIS
       docId = j.reportDocumentId;
       break;
     }
-    if (status === "FATAL" || status === "CANCELLED") throw new Error(`orders report ${status}`);
+    if (status === "FATAL" || status === "CANCELLED") throw new Error(`${label} report ${status}`);
   }
-  if (!docId) throw new Error(`orders report timeout (${status})`);
+  if (!docId) throw new Error(`${label} report timeout (${status})`);
 
   r = await sp(client, `/reports/2021-06-30/documents/${docId}`);
   j = await r.json();
   const dl = await fetch(j.url);
   const buf = Buffer.from(await dl.arrayBuffer());
   return j.compressionAlgorithm === "GZIP" ? gunzipSync(buf).toString("utf8") : buf.toString("utf8");
+}
+
+/** The All Orders report for a window, as TSV. Shared by the velocity rollup (oneOrdersChunk) and
+ *  the order-level importer (getAllOrderRows) so a window is only ever pulled once per caller. */
+async function fetchOrdersReportTsv(client: SpApiClient, startISO: string, endISO: string): Promise<string> {
+  return fetchReportText(client, "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL", startISO, endISO, { label: "orders" });
 }
 
 async function oneOrdersChunk(client: SpApiClient, startISO: string, endISO: string): Promise<Record<string, Record<string, number>>> {
