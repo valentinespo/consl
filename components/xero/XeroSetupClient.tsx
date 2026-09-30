@@ -6,7 +6,7 @@ import { SelectMenu, type SelectMenuOption } from "@/components/SelectMenu";
 import { DatePicker } from "@/components/DatePicker";
 import { HoverHint } from "@/components/HoverHint";
 import { useMoney } from "@/components/CurrencyProvider";
-import { AlertTriangle, ArrowRight, Check, Pencil, Plus, RefreshCw, X } from "@/components/icons";
+import { AlertTriangle, ArrowRight, Check, Info, Pencil, Plus, RefreshCw, X } from "@/components/icons";
 import { ROOT_LOGO, SOURCE_LOGO } from "@/lib/channel-logos";
 import { saveXeroSetupAction } from "@/app/(app)/pnl/xero/actions";
 import type { XeroSetupScreen } from "@/lib/xero-setup";
@@ -544,14 +544,16 @@ function MappingRow({
             </span>
           )}
           {isNew && (
-            <span className="inline-flex items-center gap-1">
-              <span className="pill-chart inline-flex items-center rounded-full border px-1.5 py-[1px] text-[10.5px] font-medium">New account</span>
-              <HoverHint
-                title="New account"
-                body="consl adds this account to your Xero chart of accounts when you save. Rename it with the pencil, or pick one of your own Xero accounts from the list instead."
-                size={11}
-              />
-            </span>
+            <HoverHint
+              title="New account"
+              body="consl adds this account to your Xero chart of accounts when you save. Rename it with the pencil, or pick one of your own Xero accounts from the list instead."
+              className="rounded-full"
+            >
+              <span className="pill-chart inline-flex items-center gap-1 rounded-full border py-[1px] pl-1.5 pr-1 text-[10.5px] font-medium">
+                New account
+                <Info size={11} />
+              </span>
+            </HoverHint>
           )}
         </div>
         <div className="mt-0.5 text-[12px] leading-snug text-muted">{hint}</div>

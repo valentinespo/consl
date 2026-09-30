@@ -143,9 +143,6 @@ async function companyRows(orgId: string) {
   if (adsConn) {
     balances.push({ key: "payable:AMAZON_ADS", label: "Amazon Ads payable", hint: "Amazon ad invoices paid by card. Code those card charges here.", suggest: { name: "Amazon Ads Payable", type: "CURRLIAB" } });
   }
-  if (fees.length > 0) {
-    balances.push({ key: "payable:CUSTOM_FEES", label: "Custom fees payable", hint: "Fees and credits you add to orders in consl. Code their payments here.", suggest: { name: "Custom Fees Payable", type: "CURRLIAB" } });
-  }
   balances.push({
     key: "inventory",
     label: "Inventory",
