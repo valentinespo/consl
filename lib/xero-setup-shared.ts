@@ -36,16 +36,16 @@ export const SECTIONS: { key: SectionKey; label: string }[] = [
 export type Suggestion = { names: string[]; type: string };
 
 export const LINES: Record<LineKey, { label: string; hint: string; section: SectionKey; suggest: Suggestion }> = {
-  sales: { label: "Sales", hint: "What customers paid for your products.", section: "revenue", suggest: { names: ["Sales", "Sales Revenue", "Revenue"], type: "REVENUE" } },
-  refunds: { label: "Refunds", hint: "Money returned to customers.", section: "revenue", suggest: { names: ["Refunds", "Sales Returns", "Returns and Refunds"], type: "REVENUE" } },
+  sales: { label: "Sales", hint: "What customers paid for your products.", section: "revenue", suggest: { names: ["Sales", "Sale of Goods", "Sales of Product Income", "Product Sales", "Sales Revenue", "Revenue"], type: "REVENUE" } },
+  refunds: { label: "Refunds", hint: "Money returned to customers.", section: "revenue", suggest: { names: ["Refunds", "Returns and Allowances", "Sales Returns and Allowances", "Sales Returns", "Returns and Refunds"], type: "REVENUE" } },
   taxes: { label: "Taxes", hint: "Sales tax on your orders, as the channel reports it.", section: "revenue", suggest: { names: ["Marketplace Taxes", "Sales Tax Collected"], type: "REVENUE" } },
   cogs: { label: "Cost of goods sold", hint: "The landed cost of every unit sold, from consl.", section: "goods", suggest: { names: ["Cost of Goods Sold", "Cost of Sales", "COGS"], type: "DIRECTCOSTS" } },
-  referral_fees: { label: "Referral fees", hint: "The channel's commission on each sale.", section: "costs", suggest: { names: ["Selling Fees", "Marketplace Fees", "Referral Fees"], type: "DIRECTCOSTS" } },
-  fba_fees: { label: "Fulfillment fees", hint: "Picking, packing and shipping done by the channel.", section: "costs", suggest: { names: ["Fulfillment Fees", "Fulfilment Fees"], type: "DIRECTCOSTS" } },
-  payment_fees: { label: "Payment processing", hint: "Card and payment gateway fees.", section: "costs", suggest: { names: ["Payment Processing Fees", "Merchant Fees"], type: "DIRECTCOSTS" } },
-  storage_fees: { label: "Storage fees", hint: "Warehouse storage the channel charges.", section: "costs", suggest: { names: ["Storage Fees", "Warehouse Storage"], type: "DIRECTCOSTS" } },
+  referral_fees: { label: "Referral fees", hint: "The channel's commission on each sale.", section: "costs", suggest: { names: ["Selling Fees", "Marketplace Fees", "Referral Fees", "Amazon Fees"], type: "DIRECTCOSTS" } },
+  fba_fees: { label: "Fulfillment fees", hint: "Picking, packing and shipping done by the channel.", section: "costs", suggest: { names: ["Fulfillment Fees", "Fulfilment Fees", "FBA Fees"], type: "DIRECTCOSTS" } },
+  payment_fees: { label: "Payment processing", hint: "Card and payment gateway fees.", section: "costs", suggest: { names: ["Payment Processing Fees", "Merchant Fees", "Credit Card Fees", "Merchant Account Fees"], type: "DIRECTCOSTS" } },
+  storage_fees: { label: "Storage fees", hint: "Warehouse storage the channel charges.", section: "costs", suggest: { names: ["Storage Fees", "Warehouse Storage", "FBA Storage Fees"], type: "DIRECTCOSTS" } },
   custom_fees: { label: "Custom fees", hint: "Fees you added to orders in consl.", section: "costs", suggest: { names: ["Other Selling Costs"], type: "DIRECTCOSTS" } },
-  advertising: { label: "Advertising", hint: "Ad spend on the channel and its ad platforms.", section: "marketing", suggest: { names: ["Advertising", "Advertising & Marketing", "Marketing"], type: "EXPENSE" } },
+  advertising: { label: "Advertising", hint: "Ad spend on the channel and its ad platforms.", section: "marketing", suggest: { names: ["Advertising", "Advertising & Marketing", "Advertising and Promotion", "Marketing"], type: "EXPENSE" } },
   other: { label: "Other transactions", hint: "Reimbursements, adjustments and anything else the channel reports.", section: "other", suggest: { names: ["Marketplace Adjustments"], type: "OTHERINCOME" } },
 };
 export const LINE_ORDER: LineKey[] = ["sales", "refunds", "taxes", "cogs", "referral_fees", "fba_fees", "payment_fees", "storage_fees", "custom_fees", "advertising", "other"];

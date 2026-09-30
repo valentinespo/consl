@@ -49,6 +49,17 @@ const CLASS_OF: Record<string, string> = {
   EQUITY: "EQUITY",
 };
 
+/** The account types a new account is numbered next to, closest first (inventory with the current assets, not the fixed ones). */
+const CODE_FAMILY: Record<string, string[]> = {
+  REVENUE: ["REVENUE", "SALES", "OTHERINCOME"],
+  OTHERINCOME: ["OTHERINCOME", "REVENUE", "SALES"],
+  DIRECTCOSTS: ["DIRECTCOSTS"],
+  EXPENSE: ["EXPENSE", "OVERHEADS"],
+  CURRENT: ["CURRENT", "PREPAYMENT", "INVENTORY"],
+  INVENTORY: ["INVENTORY", "CURRENT", "PREPAYMENT"],
+  CURRLIAB: ["CURRLIAB", "LIABILITY"],
+};
+
 /** Where consl numbers the accounts it creates, per type (the first free code in the range). */
 const CODE_RANGE: Record<string, [number, number]> = {
   REVENUE: [210, 299],
@@ -132,15 +143,21 @@ async function companyRows(orgId: string) {
     key: "inventory",
     label: "Inventory",
     hint: "Your stock at landed cost. Book stock purchases here in Xero; cost of goods leaves it each month.",
-    suggest: { names: ["Inventory", "Inventory Asset", "Stock on Hand"], type: "INVENTORY" },
+    suggest: { names: ["Inventory", "Inventory Asset", "Stock on Hand", "Merchandise Inventory"], type: "INVENTORY" },
   });
 
   return { channels, lines, balances, firstEvent: first._min.eventAt };
 }
 
-/** An account already in Xero under one of the suggested names (same class), else a new one. */
-function suggest(s: Suggestion, accounts: XeroAccountOption[]): XeroTarget {
-  for (const name of s.names) {
+/**
+ * An account already in Xero under one of the suggested names (same class), else a new one. For a
+ * channel's line, a channel-specific account ("Amazon Sales", "Sales - Amazon") wins over a shared one.
+ */
+function suggest(s: Suggestion, accounts: XeroAccountOption[], channel?: XeroChannel): XeroTarget {
+  const names = channel
+    ? [...s.names.flatMap((n) => [`${CHANNEL_NAME[channel]} ${n}`, `${n} - ${CHANNEL_NAME[channel]}`]), ...s.names]
+    : s.names;
+  for (const name of names) {
     const hit = accounts.find((a) => norm(a.name) === norm(name) && CLASS_OF[a.type] === CLASS_OF[s.type]);
     if (hit) return { kind: "account", ...hit };
   }
@@ -204,16 +221,20 @@ export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
 
     const targets: Record<string, XeroTarget> = {};
     const stale: string[] = [];
-    const pick = (key: string, stored: Stored | undefined, s: Suggestion) => {
+    const pick = (key: string, stored: Stored | undefined, s: Suggestion, channel?: XeroChannel) => {
       const acc = stored ? live.get(stored.accountId) : undefined;
       if (acc) targets[key] = { kind: "account", ...acc };
       else {
         if (stored) stale.push(key);
-        targets[key] = suggest(s, accounts);
+        targets[key] = suggest(s, accounts, channel);
       }
     };
-    for (const { channel, line } of rows.lines) pick(lineRowKey(channel, line), storedLines[lineRowKey(channel, line)], LINES[line].suggest);
+    for (const { channel, line } of rows.lines) pick(lineRowKey(channel, line), storedLines[lineRowKey(channel, line)], LINES[line].suggest, channel);
     for (const b of rows.balances) pick(b.key, storedBalances[b.key], b.suggest);
+
+    // A chart with accounts per channel opens on the per-channel view the first time.
+    const key = (t: XeroTarget) => (t.kind === "account" ? t.accountId : `new:${t.type}:${t.name}`);
+    const differs = !saved && rows.lines.some(({ line }) => new Set(rows.lines.filter((l) => l.line === line).map((l) => key(targets[lineRowKey(l.channel, l.line)]))).size > 1);
 
     return {
       state: "ready",
@@ -223,7 +244,7 @@ export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
       lines: rows.lines,
       balances: rows.balances,
       targets,
-      sameForAllChannels: saved?.sameForAllChannels ?? true,
+      sameForAllChannels: saved?.sameForAllChannels ?? !differs,
       tagChannels: saved?.tagChannels ?? true,
       startMonth: saved?.startMonth ?? thisMonth(),
       months: monthsSince(rows.firstEvent),
@@ -278,10 +299,36 @@ async function ensureTracking(c: Conn, channels: XeroChannel[]): Promise<{ categ
   return { categoryId: cat.TrackingCategoryID, options };
 }
 
-function nextCode(type: string, used: Set<string>): string {
+/**
+ * A free code in the company's own numbering: right after the accounts of the same type (or class)
+ * — stepping by 10 when the chart counts in tens — and inside their block, so a new revenue account
+ * in a 4000s chart becomes 4310, not 210. A chart with nothing alike gets the usual range, widened
+ * to four digits when the chart uses four.
+ */
+export function nextCode(type: string, raw: XeroApiAccount[], used: Set<string>): string {
+  const numeric = (list: XeroApiAccount[]) => list.map((a) => a.Code ?? "").filter((c) => /^\d+$/.test(c)).map(Number);
+  let siblings: number[] = [];
+  for (const t of CODE_FAMILY[type] ?? [type]) {
+    siblings = numeric(raw.filter((a) => a.Type === t));
+    if (siblings.length) break;
+  }
+  if (!siblings.length) siblings = numeric(raw.filter((a) => CLASS_OF[a.Type] === CLASS_OF[type] && a.Type !== "BANK"));
+  const free = (n: number) => !used.has(String(n));
+  if (siblings.length) {
+    const max = Math.max(...siblings);
+    const width = String(max).length;
+    const block = 10 ** (width - 1); // 1000 in a 4-digit chart, 100 in a 3-digit one
+    const blockEnd = (Math.floor(max / block) + 1) * block - 1;
+    const step = siblings.every((c) => c % 10 === 0) ? 10 : 1;
+    for (let n = Math.ceil((max + 1) / step) * step; n <= blockEnd; n += step) if (free(n)) return String(n);
+    for (let n = max + 1; n <= blockEnd; n++) if (free(n)) return String(n);
+    for (let n = Math.min(...siblings); n < max; n++) if (free(n)) return String(n);
+  }
+  const fourDigit = numeric(raw).filter((c) => c >= 1000).length > numeric(raw).filter((c) => c < 1000).length;
   const [from, to] = CODE_RANGE[type] ?? [1000, 9999];
-  for (let n = from; n <= to; n++) if (!used.has(String(n))) return String(n);
-  for (let n = 1000; n <= 9999; n++) if (!used.has(String(n))) return String(n);
+  const scale = fourDigit ? 10 : 1;
+  for (let n = from * scale; n <= to * scale + (scale - 1); n++) if (free(n)) return String(n);
+  for (let n = 1000; n <= 9999; n++) if (free(n)) return String(n);
   throw new Error("No free account code left in Xero.");
 }
 
@@ -323,7 +370,7 @@ export async function saveXeroSetup(orgId: string, input: XeroSetupInput): Promi
       made.set(key, acc);
       return acc;
     }
-    const code = nextCode(t.type, used);
+    const code = nextCode(t.type, raw, used);
     used.add(code);
     let acc: Stored;
     if (DEV_FIXTURE) {
