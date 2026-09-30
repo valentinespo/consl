@@ -323,7 +323,7 @@ async function fifoCogs(sales: Sale[], from: Date, to: Date, selected: Set<PnlCh
 
 type Bridge = {
   sales: { type: string; amount: number }[];
-  taxes: number;
+  taxes: { type: string; amount: number }[];
   fba: number;
   referral: number;
   /** Units per SKU, with the facility the order was fulfilled from, for the FIFO walk to price. */
@@ -334,7 +334,7 @@ type Bridge = {
 
 /** Orders in range whose shipment money hasn't posted yet → exact revenue + estimated fees. */
 async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurrency: string): Promise<Bridge> {
-  const none: Bridge = { sales: [], taxes: 0, fba: 0, referral: 0, lines: [], entries: [], pendingSales: 0 };
+  const none: Bridge = { sales: [], taxes: [], fba: 0, referral: 0, lines: [], entries: [], pendingSales: 0 };
   const orgId = await getCurrentOrgId();
   if (!orgId) return none;
 
@@ -384,7 +384,7 @@ async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurre
       wrap += (o.giftWrap ?? 0) * fx;
       entry(o.orderedAt, "sales", "Principal (pending)", o.productGross * fx);
       entry(o.orderedAt, "sales", "Promotion (pending)", -(o.discounts ?? 0) * fx);
-      entry(o.orderedAt, "sales", "Tax (pending)", (o.tax ?? 0) * fx);
+      entry(o.orderedAt, "taxes", "Tax (pending)", (o.tax ?? 0) * fx);
       entry(o.orderedAt, "sales", "ShippingCharge (pending)", (o.shipping ?? 0) * fx);
       entry(o.orderedAt, "sales", "GiftWrap (pending)", (o.giftWrap ?? 0) * fx);
       entry(o.orderedAt, "taxes", "TaxWithheld (pending)", -(o.tax ?? 0) * fx);
@@ -435,19 +435,24 @@ async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurre
   const sales = [
     { type: "Principal (pending)", amount: principal },
     { type: "ShippingCharge (pending)", amount: shipping },
-    { type: "Tax (pending)", amount: tax },
     { type: "GiftWrap (pending)", amount: wrap },
     { type: "Promotion (pending)", amount: promo },
+  ].filter((r) => r.amount !== 0);
+  // The tax the buyer paid, and the same amount the marketplace facilitator withholds to pay the
+  // state — under Taxes, like settled rows.
+  const taxes = [
+    { type: "Tax (pending)", amount: tax },
+    { type: "TaxWithheld (pending)", amount: -tax },
   ].filter((r) => r.amount !== 0);
 
   return {
     sales,
-    taxes: -tax, // the marketplace facilitator withholds what it collects — mirrors settled rows
+    taxes,
     fba,
     referral,
     lines: pendingLines,
     entries,
-    pendingSales: principal + promo + tax + shipping + wrap,
+    pendingSales: principal + promo + shipping + wrap,
   };
 }
 
@@ -770,7 +775,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
     const bridge = await pendingBridge(from, to, new Set(amazonSkus), baseCurrency);
     if (bridge.sales.length) {
       for (const s of bridge.sales) add("sales", s.type, s.amount, "AMAZON");
-      if (bridge.taxes !== 0) add("taxes", "TaxWithheld (pending)", bridge.taxes, "AMAZON");
+      for (const t of bridge.taxes) add("taxes", t.type, t.amount, "AMAZON");
       if (bridge.fba !== 0) add("fba_fees", "FBAPerUnitFulfillmentFee (pending)", bridge.fba, "AMAZON");
       if (bridge.referral !== 0) add("referral_fees", "Commission (pending)", bridge.referral, "AMAZON");
       pending.push({ channel: "AMAZON", sales: bridge.pendingSales });

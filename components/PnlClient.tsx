@@ -18,8 +18,9 @@ import { SkuAvatar } from "@/components/ui";
 import { useCan } from "@/components/AccessProvider";
 import { savePreConslCosts } from "@/app/(app)/pnl/actions";
 
-/** "FBAPerUnitFulfillmentFee" → "FBA per unit fulfillment fee"; refund prefixes fold away. */
-function humanize(raw: string): string {
+/** "FBAPerUnitFulfillmentFee" → "FBA per unit fulfillment fee"; a refund prefix folds away inside
+ *  Refunds (elsewhere, e.g. tax handed back under Taxes, it's what tells the line apart). */
+function humanize(raw: string, group?: string): string {
   const [prefix, rest] = raw.includes(":") ? [raw.slice(0, raw.indexOf(":")), raw.slice(raw.indexOf(":") + 1)] : [null, raw];
   const spell = (s: string) =>
     s
@@ -29,15 +30,15 @@ function humanize(raw: string): string {
       .toLowerCase()
       .trim();
   let label = spell(rest);
-  if (prefix && prefix !== "Refund" && prefix !== "TaxWithheld") label = `${spell(prefix)} · ${label}`;
+  if (prefix && prefix !== "TaxWithheld" && !(prefix === "Refund" && group === "refunds")) label = `${spell(prefix)} · ${label}`;
   label = label.charAt(0).toUpperCase() + label.slice(1);
   return label.replace(/\bfba\b/gi, "FBA").replace(/\bmcf\b/gi, "MCF");
 }
 
 /** A line's label: a platform's type code spelled out, or — for a line written in consl — the name
  *  exactly as the operator typed it (an order number or a brand stays as written). */
-function lineLabel(t: { type: string; sources: PnlSource[] }): string {
-  return t.sources.length > 0 && t.sources.every((x) => x === "CUSTOM") ? t.type : humanize(t.type);
+function lineLabel(t: { type: string; sources: PnlSource[] }, group: string): string {
+  return t.sources.length > 0 && t.sources.every((x) => x === "CUSTOM") ? t.type : humanize(t.type, group);
 }
 
 /** The mark on a line written in consl (a fee or a credit), by the bucket it sits in: money for a
@@ -119,7 +120,7 @@ function GroupRow({ block, money }: { block: PnlGroupBlock; money: (n: number) =
           <div key={t.type} className="dropdown-in flex items-center justify-between gap-3 px-4 py-1.5 pl-8 text-[12.5px] text-ink-soft">
             <span className="flex min-w-0 items-center gap-2">
               <SourceMarks sources={t.sources} size={13} group={block.group} />
-              <span className="min-w-0 truncate">{lineLabel(t)}</span>
+              <span className="min-w-0 truncate">{lineLabel(t, block.group)}</span>
             </span>
             <Amount value={t.amount} money={money} />
           </div>
@@ -159,7 +160,7 @@ function PeriodGroupRows({ block, statements, money }: { block: PnlGroupBlock; s
       {open && block.types.map((type) => (
         <tr key={type.type} className="dropdown-in text-[12.5px] text-ink-soft">
           <th scope="row" className={`${periodLabelCell} py-1.5 pl-8 font-normal`}>
-            <span className="flex items-center gap-2"><SourceMarks sources={type.sources} size={13} group={block.group} /><span title={lineLabel(type)} className="truncate">{lineLabel(type)}</span></span>
+            <span className="flex items-center gap-2"><SourceMarks sources={type.sources} size={13} group={block.group} /><span title={lineLabel(type, block.group)} className="truncate">{lineLabel(type, block.group)}</span></span>
           </th>
           {groups.map((group, index) => <td key={index} className={`${periodValueCell(index)} py-1.5`}><Amount value={group?.types.find((row) => row.type === type.type)?.amount ?? 0} money={money} /></td>)}
           <Filler />

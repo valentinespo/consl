@@ -147,14 +147,16 @@ export function flattenShopifyOrder(
   push({ group: "sales", type: "Shipping", amount: Math.max(0, shippingPaid - shippingTax) });
   push({ group: "sales", type: "Tips", amount: num(o.totalTipReceivedSet) });
   const tax = num(o.totalTaxSet);
-  push({ group: "sales", type: "Tax collected", amount: tax });
+  // Tax, duties and collected fees are the state's money, not sales: they sit under Taxes, where
+  // what the store collected and what it pays over cancel out.
+  push({ group: "taxes", type: "Tax collected", amount: tax });
   push({ group: "taxes", type: "Tax remitted", amount: -tax });
   // Duties and other collected fees (a retail delivery fee) pass through like the tax.
   const duties = num(o.originalTotalDutiesSet);
-  push({ group: "sales", type: "Duties collected", amount: duties });
+  push({ group: "taxes", type: "Duties collected", amount: duties });
   push({ group: "taxes", type: "Duties remitted", amount: -duties });
   const extraFees = num(o.originalTotalAdditionalFeesSet);
-  push({ group: "sales", type: "Additional fees collected", amount: extraFees });
+  push({ group: "taxes", type: "Additional fees collected", amount: extraFees });
   push({ group: "taxes", type: "Additional fees remitted", amount: -extraFees });
 
   // What Shopify Payments kept on the capture(s) — only when the ledger isn't the source.
@@ -182,7 +184,7 @@ export function flattenShopifyOrder(
       lineTax += t;
       push({ group: "refunds", type: "Refund:Product sales", amount: -sub, sku: rl.lineItem ? lineKey(rl.lineItem) : null, txId: r.id, postedAt: at, eventAt: at });
     }
-    push({ group: "refunds", type: "Refund:Tax collected", amount: -lineTax, txId: r.id, postedAt: at, eventAt: at });
+    push({ group: "taxes", type: "Refund:Tax collected", amount: -lineTax, txId: r.id, postedAt: at, eventAt: at });
     push({ group: "taxes", type: "Tax remitted", amount: lineTax, txId: r.id, postedAt: at, eventAt: at });
     push({ group: "refunds", type: "Refund:Shipping & other", amount: -(total - lines - lineTax), txId: r.id, postedAt: at, eventAt: at });
   }

@@ -1059,10 +1059,12 @@ export async function healAmazonOrdersFromLedger(limit = 50): Promise<{ missing:
   // posts fees. Only Amazon order ids (3-7-7 digits): storage and subscription rows carry a
   // period key in that column and Amazon rejects the whole batch over one of them. Refunds are
   // left out (they can name orders older than any order history), and so is anything beyond the
-  // two years Amazon keeps orders for.
+  // two years Amazon keeps orders for. (Tax handed back on a refund sits under Taxes, so refunds
+  // are told apart by their kind too.)
   const rows = await prisma.$queryRaw<{ orderId: string }[]>`
     SELECT DISTINCT fe."orderId" FROM "FinanceEvent" fe
     WHERE fe."orgId" = ${orgId} AND fe.channel = 'AMAZON' AND fe."group" <> 'refunds'
+      AND split_part(fe.type, ':', 1) NOT IN ('Refund', 'GuaranteeClaim', 'Chargeback')
       AND fe."orderId" ~ '^[0-9]{3}-[0-9]{7}-[0-9]{7}$'
       AND fe."eventAt" >= NOW() - INTERVAL '730 days'
       AND NOT EXISTS (SELECT 1 FROM "SalesOrder" so WHERE so."orgId" = fe."orgId" AND so.channel = 'AMAZON' AND so."externalId" = fe."orderId")
@@ -1107,7 +1109,8 @@ async function redateShipmentMoney(orgId: string, orderIds: string[]): Promise<v
     FROM "SalesOrder" so
     WHERE fe."orgId" = ${orgId} AND fe.channel = 'AMAZON' AND fe."orderId" = ANY(${orderIds}::text[])
       AND so."orgId" = fe."orgId" AND so.channel = 'AMAZON' AND so."externalId" = fe."orderId"
-      AND fe."group" IN ('sales', 'taxes', 'fba_fees', 'referral_fees') AND fe.type NOT LIKE 'Refund:%'`;
+      AND fe."group" IN ('sales', 'taxes', 'fba_fees', 'referral_fees')
+      AND split_part(fe.type, ':', 1) NOT IN ('Refund', 'GuaranteeClaim', 'Chargeback')`;
 }
 
 // The live Orders API keeps about two years; the audit never asks beyond it. A day per pass; a

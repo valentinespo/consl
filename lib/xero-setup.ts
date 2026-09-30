@@ -137,6 +137,15 @@ async function companyRows(orgId: string) {
     hint: `What ${CHANNEL_NAME[channel]} owes you. Code its payout deposits here.`,
     suggest: { name: `${CHANNEL_NAME[channel]} Clearing`, type: "CURRENT" },
   }));
+  // The P&L's Taxes row is the state's money, not income: it waits here until it's paid over.
+  if (groups.some((g) => g.group === "taxes" && isChannel(g.channel))) {
+    balances.push({
+      key: "sales_tax",
+      label: "Sales tax payable",
+      hint: "Tax your customers paid, until it's paid to the state. Amazon and TikTok pay it for you, so theirs goes straight back out.",
+      suggest: { name: "Sales Tax Payable", type: "CURRLIAB" },
+    });
+  }
   if (metaAccounts > 0) {
     balances.push({ key: "payable:META_ADS", label: "Meta Ads payable", hint: "Meta ad spend as it happens. Code the card charges from Meta here.", suggest: { name: "Meta Ads Payable", type: "CURRLIAB" } });
   }

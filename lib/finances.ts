@@ -99,18 +99,19 @@ function leafName(path: string[]): string {
 
 /** Order-money component → (bucket, label). Labels follow the settlement vocabulary the P&L was
  *  built on (Principal, Tax, ShippingCharge, Promotion, Commission…); `TaxWithheld:` marks what the
- *  marketplace facilitator collected and kept. */
+ *  marketplace facilitator collected and kept. Sales tax is never revenue: what the buyer paid in
+ *  tax and what Amazon withheld to pay the state both sit under Taxes, where they cancel out. */
 function orderComponent(path: string[]): { group: PnlGroup; type: string } {
   const category = path[0] ?? "";
   const name = leafName(path);
-  if (name.startsWith("MarketplaceFacilitatorTax")) return { group: "taxes", type: `TaxWithheld:${name}` };
+  if (name.startsWith("MarketplaceFacilitator")) return { group: "taxes", type: `TaxWithheld:${name}` };
   switch (category) {
     case "ProductCharges":
       return { group: "sales", type: name === "OurPricePrincipal" ? "Principal" : name };
     case "Shipping":
       return { group: "sales", type: name === "ShippingPrincipal" ? "ShippingCharge" : name };
     case "Tax":
-      return { group: "sales", type: name === "OurPriceTax" ? "Tax" : name };
+      return { group: "taxes", type: name === "OurPriceTax" ? "Tax" : name };
     case "PromoRebates":
     case "Promo":
       return { group: "sales", type: "Promotion" };
@@ -210,8 +211,9 @@ export function flattenTransaction(tx: FinanceTransaction, unhandled?: Map<strin
         case "GuaranteeClaim":
         case "Chargeback": {
           const c = orderComponent(leaf.path);
-          const type = c.group === "taxes" ? "TaxWithheld" : c.type;
-          push(rows, { ...base, group: "refunds", type: `${kind}:${type}`, sku: u.sku, quantity: null, amount: leaf.amount });
+          // Tax handed back (to the buyer, and by the facilitator) stays with the taxes, not the refunds.
+          const type = c.type.startsWith("TaxWithheld:") ? "TaxWithheld" : c.type;
+          push(rows, { ...base, group: c.group === "taxes" ? "taxes" : "refunds", type: `${kind}:${type}`, sku: u.sku, quantity: null, amount: leaf.amount });
           break;
         }
         case "ServiceFee":

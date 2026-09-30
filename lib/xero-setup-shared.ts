@@ -3,7 +3,8 @@
  * "server-only"). A company's consl P&L is a set of LINES per channel — the P&L's own groups plus
  * cost of goods — and each line posts to one Xero account. The money those lines move waits in
  * BALANCE rows until the cash moves: a clearing account per channel (payout deposits are coded
- * there), payables for costs paid outside the channel, and inventory (cost of goods leaves it).
+ * there), sales tax payable (the P&L's Taxes row: the state's money, never revenue), payables for
+ * costs paid outside the channel, and inventory (cost of goods leaves it).
  */
 
 export type XeroChannel = "AMAZON" | "SHOPIFY" | "TIKTOK";
@@ -13,7 +14,6 @@ export const CHANNEL_ORDER: XeroChannel[] = ["AMAZON", "SHOPIFY", "TIKTOK"];
 export type LineKey =
   | "sales"
   | "refunds"
-  | "taxes"
   | "cogs"
   | "referral_fees"
   | "fba_fees"
@@ -45,7 +45,6 @@ export const newAccountName = (base: string) => `${NEW_ACCOUNT_PREFIX}${base}`;
 export const LINES: Record<LineKey, { label: string; hint: string; section: SectionKey; suggest: Suggestion }> = {
   sales: { label: "Sales", hint: "What customers paid for your products.", section: "revenue", suggest: { name: "Sales", type: "REVENUE" } },
   refunds: { label: "Refunds", hint: "Money returned to customers.", section: "revenue", suggest: { name: "Refunds", type: "REVENUE" } },
-  taxes: { label: "Taxes", hint: "Sales tax on your orders, as the channel reports it.", section: "revenue", suggest: { name: "Marketplace Taxes", type: "REVENUE" } },
   cogs: { label: "Cost of goods sold", hint: "The landed cost of every unit sold, from consl.", section: "goods", suggest: { name: "Cost of Goods Sold", type: "DIRECTCOSTS" } },
   referral_fees: { label: "Referral fees", hint: "The channel's commission on each sale.", section: "costs", suggest: { name: "Selling Fees", type: "DIRECTCOSTS" } },
   fba_fees: { label: "Fulfillment fees", hint: "Picking, packing and shipping done by the channel.", section: "costs", suggest: { name: "Fulfillment Fees", type: "DIRECTCOSTS" } },
@@ -55,7 +54,7 @@ export const LINES: Record<LineKey, { label: string; hint: string; section: Sect
   advertising: { label: "Advertising", hint: "Ad spend on the channel and its ad platforms.", section: "marketing", suggest: { name: "Advertising", type: "EXPENSE" } },
   other: { label: "Other transactions", hint: "Reimbursements, adjustments and anything else the channel reports.", section: "other", suggest: { name: "Marketplace Adjustments", type: "OTHERINCOME" } },
 };
-export const LINE_ORDER: LineKey[] = ["sales", "refunds", "taxes", "cogs", "referral_fees", "fba_fees", "payment_fees", "storage_fees", "custom_fees", "advertising", "other"];
+export const LINE_ORDER: LineKey[] = ["sales", "refunds", "cogs", "referral_fees", "fba_fees", "payment_fees", "storage_fees", "custom_fees", "advertising", "other"];
 
 export type BalanceRow = { key: string; label: string; hint: string; channel?: XeroChannel; suggest: Suggestion };
 
