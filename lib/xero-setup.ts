@@ -150,17 +150,10 @@ async function companyRows(orgId: string) {
 }
 
 /**
- * An account already in Xero under one of the suggested names (same class), else a new one. For a
- * channel's line, a channel-specific account ("Amazon Sales", "Sales - Amazon") wins over a shared one.
+ * The account consl proposes for a row: always a NEW account under consl's name for the line (the
+ * founder's rule: never auto-pick an existing account; the owner can pick one, or rename the new one).
  */
-function suggest(s: Suggestion, accounts: XeroAccountOption[], channel?: XeroChannel): XeroTarget {
-  const names = channel
-    ? [...s.names.flatMap((n) => [`${CHANNEL_NAME[channel]} ${n}`, `${n} - ${CHANNEL_NAME[channel]}`]), ...s.names]
-    : s.names;
-  for (const name of names) {
-    const hit = accounts.find((a) => norm(a.name) === norm(name) && CLASS_OF[a.type] === CLASS_OF[s.type]);
-    if (hit) return { kind: "account", ...hit };
-  }
+function suggest(s: Suggestion): XeroTarget {
   return { kind: "new", name: s.names[0], type: s.type };
 }
 
@@ -221,20 +214,16 @@ export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
 
     const targets: Record<string, XeroTarget> = {};
     const stale: string[] = [];
-    const pick = (key: string, stored: Stored | undefined, s: Suggestion, channel?: XeroChannel) => {
+    const pick = (key: string, stored: Stored | undefined, s: Suggestion) => {
       const acc = stored ? live.get(stored.accountId) : undefined;
       if (acc) targets[key] = { kind: "account", ...acc };
       else {
         if (stored) stale.push(key);
-        targets[key] = suggest(s, accounts, channel);
+        targets[key] = suggest(s);
       }
     };
-    for (const { channel, line } of rows.lines) pick(lineRowKey(channel, line), storedLines[lineRowKey(channel, line)], LINES[line].suggest, channel);
+    for (const { channel, line } of rows.lines) pick(lineRowKey(channel, line), storedLines[lineRowKey(channel, line)], LINES[line].suggest);
     for (const b of rows.balances) pick(b.key, storedBalances[b.key], b.suggest);
-
-    // A chart with accounts per channel opens on the per-channel view the first time.
-    const key = (t: XeroTarget) => (t.kind === "account" ? t.accountId : `new:${t.type}:${t.name}`);
-    const differs = !saved && rows.lines.some(({ line }) => new Set(rows.lines.filter((l) => l.line === line).map((l) => key(targets[lineRowKey(l.channel, l.line)]))).size > 1);
 
     return {
       state: "ready",
@@ -244,7 +233,7 @@ export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
       lines: rows.lines,
       balances: rows.balances,
       targets,
-      sameForAllChannels: saved?.sameForAllChannels ?? !differs,
+      sameForAllChannels: saved?.sameForAllChannels ?? true,
       tagChannels: saved?.tagChannels ?? true,
       startMonth: saved?.startMonth ?? thisMonth(),
       months: monthsSince(rows.firstEvent),
@@ -254,6 +243,13 @@ export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
   } catch (e) {
     return { state: "error", orgName: c.orgName, message: (e as Error).message };
   }
+}
+
+/** The chart as the setup screen lists it, read live (the screen re-reads it when you come back to it). */
+export async function listUsableXeroAccounts(orgId: string): Promise<XeroAccountOption[]> {
+  const got = await connection(orgId);
+  if (!("conn" in got)) throw new Error(got.state === "not_connected" ? "Connect Xero first." : got.message);
+  return (await allAccounts(got.conn)).filter(usable).map(option).sort(byCode);
 }
 
 export type XeroSetupInput = {
@@ -360,6 +356,7 @@ export async function saveXeroSetup(orgId: string, input: XeroSetupInput): Promi
     }
     const name = t.name.trim();
     if (!name || !CLASS_OF[t.type]) throw new Error("A new account is missing its name or type.");
+    if (name.length > 150) throw new Error(`"${name.slice(0, 40)}…" is too long for a Xero account name (150 characters at most).`);
     const key = `${t.type}|${norm(name)}`;
     const done = made.get(key);
     if (done) return done;

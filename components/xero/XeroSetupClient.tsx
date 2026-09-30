@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SelectMenu, type SelectMenuOption } from "@/components/SelectMenu";
-import { AlertTriangle, ArrowRight, Check, Plus, X } from "@/components/icons";
-import { ROOT_LOGO } from "@/lib/channel-logos";
+import { AlertTriangle, ArrowRight, Check, Pencil, Plus, RefreshCw, X } from "@/components/icons";
+import { ROOT_LOGO, SOURCE_LOGO } from "@/lib/channel-logos";
 import { saveXeroSetupAction } from "@/app/(app)/pnl/xero/actions";
 import type { XeroSetupScreen } from "@/lib/xero-setup";
 import {
@@ -15,13 +15,21 @@ import {
   lineRowKey,
   targetValue,
   type LineKey,
+  type XeroAccountOption,
   type XeroChannel,
   type XeroTarget,
 } from "@/lib/xero-setup-shared";
 
+type Mark = { key: string; src: string; title: string };
+
+const norm = (s: string) => s.trim().toLowerCase();
+/** Re-read the Xero chart when the tab comes back into view, at most this often. */
+const REFRESH_EVERY_MS = 20_000;
+
 /**
  * The Xero export's setup screen: which Xero account every line of the company's consl P&L goes
- * to, and where the money waits on the balance sheet. Everything is staged and only reaches Xero
+ * to, and where the money waits on the balance sheet. consl proposes a new account for every row
+ * (renamable), or the owner picks one already in Xero. Everything is staged and only reaches Xero
  * on Save (new accounts are listed for confirmation first).
  */
 export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canEdit: boolean }) {
@@ -31,6 +39,9 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
   const [targets, setTargets] = useState<Record<string, XeroTarget>>(data.targets);
   const [tag, setTag] = useState(data.tagChannels);
   const [start, setStart] = useState(data.startMonth);
+  const [accounts, setAccounts] = useState<XeroAccountOption[]>(data.accounts);
+  const [refreshing, setRefreshing] = useState(false);
+  const lastRead = useRef(0);
   const snapshot = (s: { same: boolean; targets: Record<string, XeroTarget>; tag: boolean; start: string }) =>
     JSON.stringify({ same: s.same, tag: s.tag, start: s.start, t: Object.entries(s.targets).map(([k, v]) => [k, targetValue(v)]).sort() });
   const [baseline, setBaseline] = useState(() => snapshot({ same: data.sameForAllChannels, targets: data.targets, tag: data.tagChannels, start: data.startMonth }));
@@ -42,6 +53,35 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
 
   const dirty = snapshot({ same, targets, tag, start }) !== baseline;
 
+  // The chart as Xero has it now: re-read on Refresh and whenever the tab comes back into view,
+  // so an account created in Xero a moment ago can be picked (Xero has no webhook for accounts).
+  const refreshAccounts = useCallback(async (quiet: boolean) => {
+    lastRead.current = Date.now();
+    if (!quiet) setRefreshing(true);
+    try {
+      const r = await fetch("/api/integrations/xero/accounts", { cache: "no-store" });
+      const j = (await r.json().catch(() => null)) as { accounts?: XeroAccountOption[]; error?: string } | null;
+      if (r.ok && j?.accounts) setAccounts(j.accounts);
+      else if (!quiet) setError(j?.error ?? "Couldn't read your Xero accounts.");
+    } catch {
+      if (!quiet) setError("Couldn't reach Xero. Try again.");
+    } finally {
+      if (!quiet) setRefreshing(false);
+    }
+  }, []);
+  useEffect(() => {
+    lastRead.current = Date.now();
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && Date.now() - lastRead.current > REFRESH_EVERY_MS) void refreshAccounts(true);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [refreshAccounts]);
+
   // Which channels feed each line, for the "same for every channel" view.
   const channelsOf = useMemo(() => {
     const m = new Map<LineKey, XeroChannel[]>();
@@ -51,19 +91,20 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
 
   const accountOptions: SelectMenuOption[] = useMemo(
     () =>
-      data.accounts.map((a) => ({
+      accounts.map((a) => ({
         value: `acc:${a.accountId}`,
         label: a.code ? `${a.code} · ${a.name}` : a.name,
         hint: XERO_TYPE_LABEL[a.type] ?? a.type,
       })),
-    [data.accounts],
+    [accounts],
   );
+  const existingByName = useMemo(() => new Map(accounts.map((a) => [norm(a.name), a])), [accounts]);
 
-  /** A row's choices: its suggested new account (and any other new one it currently holds), then Xero's chart. */
+  /** A row's choices: a new account (its current name, or consl's), then Xero's chart. */
   function optionsFor(suggested: { name: string; type: string }, current: XeroTarget | null): SelectMenuOption[] {
-    const news = [{ name: suggested.name, type: suggested.type }];
-    if (current?.kind === "new" && !news.some((n) => n.name === current.name && n.type === current.type)) news.unshift({ name: current.name, type: current.type });
-    // An account the page hasn't reloaded yet (just created by a save) still shows by name.
+    const news = current?.kind === "new" ? [{ name: current.name, type: current.type }] : [];
+    if (!news.some((n) => norm(n.name) === norm(suggested.name))) news.push(suggested);
+    // An account the list hasn't caught up with yet (just created by a save) still shows by name.
     const extra: SelectMenuOption[] =
       current?.kind === "account" && !accountOptions.some((o) => o.value === `acc:${current.accountId}`)
         ? [{ value: `acc:${current.accountId}`, label: current.code ? `${current.code} · ${current.name}` : current.name, hint: XERO_TYPE_LABEL[current.type] ?? current.type }]
@@ -86,8 +127,10 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
 
   function decode(value: string): XeroTarget | null {
     if (value.startsWith("acc:")) {
-      const a = data.accounts.find((x) => x.accountId === value.slice(4));
-      return a ? { kind: "account", ...a } : null;
+      const a = accounts.find((x) => x.accountId === value.slice(4));
+      if (a) return { kind: "account", ...a };
+      const cur = Object.values(targets).find((t) => t.kind === "account" && t.accountId === value.slice(4));
+      return cur ?? null;
     }
     if (value.startsWith("new:")) {
       const rest = value.slice(4);
@@ -97,8 +140,7 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
     return null;
   }
 
-  function setRows(keys: string[], value: string) {
-    const t = decode(value);
+  function setRows(keys: string[], t: XeroTarget | null) {
     if (!t) return;
     setTargets((prev) => {
       const next = { ...prev };
@@ -108,12 +150,15 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
     setNotice(null);
   }
 
-  // Distinct new accounts the current choices would create.
+  // New accounts the current choices would create (a name already in Xero is used, not created).
   const newAccounts = useMemo(() => {
     const seen = new Map<string, { name: string; type: string }>();
-    for (const t of Object.values(targets)) if (t.kind === "new") seen.set(`${t.type}|${t.name.toLowerCase()}`, { name: t.name, type: t.type });
+    for (const t of Object.values(targets)) {
+      if (t.kind !== "new" || existingByName.has(norm(t.name))) continue;
+      seen.set(`${t.type}|${norm(t.name)}`, { name: t.name.trim(), type: t.type });
+    }
     return [...seen.values()];
-  }, [targets]);
+  }, [targets, existingByName]);
 
   async function save() {
     setConfirming(false);
@@ -135,6 +180,7 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
           : "Saved.",
       );
       router.refresh();
+      void refreshAccounts(true);
     } catch {
       setError("Couldn't reach the server. Reload to check whether it was saved.");
     } finally {
@@ -150,6 +196,11 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
     setError(null);
   }
 
+  const channelMarks = (channels: XeroChannel[]): Mark[] => channels.map((c) => ({ key: c, src: ROOT_LOGO[c], title: CHANNEL_NAME[c] }));
+  // Custom fees come from consl itself (fees and credits added to orders), as on the P&L.
+  const marksFor = (line: LineKey, channels: XeroChannel[]): Mark[] =>
+    line === "custom_fees" ? [{ key: "consl", src: SOURCE_LOGO.CONSL, title: "Added in consl" }] : same ? channelMarks(channels) : [];
+
   const lineRows = (keys: { line: LineKey; channels: XeroChannel[] }[]) =>
     SECTIONS.map((section) => {
       const rows = keys.filter((k) => LINES[k.line].section === section.key);
@@ -162,19 +213,22 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
               const rowKeys = channels.map((ch) => lineRowKey(ch, line));
               const values = rowKeys.map((k) => targetValue(targets[k]));
               const shared = values.every((v) => v === values[0]) ? targets[rowKeys[0]] : null;
+              const base = LINES[line].suggest;
+              const suggestedName = !same && channels.length === 1 ? `${CHANNEL_NAME[channels[0]]} ${base.names[0]}` : base.names[0];
               return (
                 <MappingRow
                   key={`${line}:${channels.join(",")}`}
                   label={LINES[line].label}
                   hint={LINES[line].hint}
-                  logos={same ? channels : []}
+                  marks={marksFor(line, channels)}
                   stale={rowKeys.some((k) => data.stale.includes(k))}
-                  value={shared ? targetValue(shared) : ""}
+                  target={shared}
                   placeholder="Varies by channel"
-                  options={optionsFor({ name: LINES[line].suggest.names[0], type: LINES[line].suggest.type }, shared)}
-                  isNew={shared?.kind === "new"}
+                  options={optionsFor({ name: suggestedName, type: base.type }, shared)}
+                  existing={shared?.kind === "new" ? (existingByName.get(norm(shared.name)) ?? null) : null}
                   disabled={!canEdit || pending}
-                  onChange={(v) => setRows(rowKeys, v)}
+                  onPick={(v) => setRows(rowKeys, decode(v))}
+                  onRename={(name) => shared?.kind === "new" && setRows(rowKeys, { kind: "new", type: shared.type, name })}
                 />
               );
             })}
@@ -201,28 +255,42 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line px-5 py-4">
           <div>
             <h2 className="text-[15px] font-semibold text-ink">P&amp;L lines</h2>
-            <p className="mt-0.5 text-[12.5px] text-muted">The Xero account each line of your consl P&amp;L posts to.</p>
+            <p className="mt-0.5 text-[12.5px] text-muted">
+              The Xero account each line of your consl P&amp;L posts to. consl proposes a new one for each; rename it or pick one of yours.
+            </p>
           </div>
-          {data.channels.length > 1 && (
-            <div role="tablist" aria-label="Accounts per channel" className="flex h-8 items-center gap-0.5 rounded-lg border border-border bg-surface p-0.5">
-              {[
-                { v: true, label: "Same for every channel" },
-                { v: false, label: "Per channel" },
-              ].map((o) => (
-                <button
-                  key={String(o.v)}
-                  type="button"
-                  role="tab"
-                  aria-selected={same === o.v}
-                  disabled={!canEdit}
-                  onClick={() => setSame(o.v)}
-                  className={`flex h-full items-center rounded-md px-2.5 text-[12px] transition-colors disabled:cursor-default ${same === o.v ? "bg-surface-2 font-medium text-ink" : "text-muted hover:text-ink-soft"}`}
-                >
-                  {o.label}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void refreshAccounts(false)}
+              disabled={refreshing}
+              title="Read your Xero chart of accounts again"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[12px] text-ink-soft hover:bg-surface-2 disabled:opacity-60"
+            >
+              <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
+              {refreshing ? "Reading Xero…" : "Refresh accounts"}
+            </button>
+            {data.channels.length > 1 && (
+              <div role="tablist" aria-label="Accounts per channel" className="flex h-8 items-center gap-0.5 rounded-lg border border-border bg-surface p-0.5">
+                {[
+                  { v: true, label: "Same for every channel" },
+                  { v: false, label: "Per channel" },
+                ].map((o) => (
+                  <button
+                    key={String(o.v)}
+                    type="button"
+                    role="tab"
+                    aria-selected={same === o.v}
+                    disabled={!canEdit}
+                    onClick={() => setSame(o.v)}
+                    className={`flex h-full items-center rounded-md px-2.5 text-[12px] transition-colors disabled:cursor-default ${same === o.v ? "bg-surface-2 font-medium text-ink" : "text-muted hover:text-ink-soft"}`}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {!same && (
@@ -236,7 +304,7 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
                   tab === ch ? "border-ink/20 bg-surface-2 font-medium text-ink" : "border-border text-ink-soft hover:bg-surface-2"
                 }`}
               >
-                <ChannelMark channel={ch} />
+                <MarkTile src={ROOT_LOGO[ch]} />
                 {CHANNEL_NAME[ch]}
               </button>
             ))}
@@ -255,21 +323,25 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
           </p>
         </div>
         <div className="divide-y divide-line pb-1">
-          {data.balances.map((b) => (
-            <MappingRow
-              key={b.key}
-              label={b.label}
-              hint={b.hint}
-              logos={b.channel ? [b.channel] : []}
-              stale={data.stale.includes(b.key)}
-              value={targetValue(targets[b.key])}
-              placeholder="Pick an account"
-              options={optionsFor({ name: b.suggest.names[0], type: b.suggest.type }, targets[b.key] ?? null)}
-              isNew={targets[b.key]?.kind === "new"}
-              disabled={!canEdit || pending}
-              onChange={(v) => setRows([b.key], v)}
-            />
-          ))}
+          {data.balances.map((b) => {
+            const t = targets[b.key] ?? null;
+            return (
+              <MappingRow
+                key={b.key}
+                label={b.label}
+                hint={b.hint}
+                marks={b.channel ? channelMarks([b.channel]) : []}
+                stale={data.stale.includes(b.key)}
+                target={t}
+                placeholder="Pick an account"
+                options={optionsFor({ name: b.suggest.names[0], type: b.suggest.type }, t)}
+                existing={t?.kind === "new" ? (existingByName.get(norm(t.name)) ?? null) : null}
+                disabled={!canEdit || pending}
+                onPick={(v) => setRows([b.key], decode(v))}
+                onRename={(name) => t?.kind === "new" && setRows([b.key], { kind: "new", type: t.type, name })}
+              />
+            );
+          })}
         </div>
       </section>
 
@@ -358,7 +430,7 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
             <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted">
               These go into {data.orgName}&apos;s chart of accounts. Nothing else is posted yet.
             </p>
-            <ul className="mt-3 divide-y divide-line rounded-xl border border-border">
+            <ul className="mt-3 max-h-[50vh] divide-y divide-line overflow-y-auto rounded-xl border border-border">
               {newAccounts.map((a) => (
                 <li key={`${a.type}|${a.name}`} className="flex items-center justify-between gap-3 px-3 py-2 text-[13px]">
                   <span className="truncate text-ink">{a.name}</span>
@@ -384,39 +456,57 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
 function MappingRow({
   label,
   hint,
-  logos,
+  marks,
   stale,
-  value,
+  target,
   placeholder,
   options,
-  isNew,
+  existing,
   disabled,
-  onChange,
+  onPick,
+  onRename,
 }: {
   label: string;
   hint: string;
-  logos: XeroChannel[];
+  marks: Mark[];
   stale: boolean;
-  value: string;
+  target: XeroTarget | null;
   placeholder: string;
   options: SelectMenuOption[];
-  isNew: boolean;
+  /** For a new account: an account already in Xero under the same name (saving uses it). */
+  existing: XeroAccountOption | null;
   disabled: boolean;
-  onChange: (v: string) => void;
+  onPick: (v: string) => void;
+  onRename: (name: string) => void;
 }) {
+  const isNew = target?.kind === "new";
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  function startRename() {
+    if (target?.kind !== "new") return;
+    setDraft(target.name);
+    setEditing(true);
+  }
+  function commit() {
+    const name = draft.trim().slice(0, 150);
+    if (name) onRename(name);
+    setEditing(false);
+  }
+
   return (
     <div className="grid gap-2.5 px-5 py-3.5 sm:grid-cols-[minmax(0,1fr)_16px_minmax(0,340px)] sm:items-center sm:gap-4">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[13.5px] font-medium text-ink">{label}</span>
-          {logos.length > 0 && (
-            <span className="flex items-center gap-1" title={logos.map((c) => CHANNEL_NAME[c]).join(", ")}>
-              {logos.map((c) => (
-                <ChannelMark key={c} channel={c} />
+          {marks.length > 0 && (
+            <span className="flex items-center gap-1" title={marks.map((m) => m.title).join(", ")}>
+              {marks.map((m) => (
+                <MarkTile key={m.key} src={m.src} />
               ))}
             </span>
           )}
-          {isNew && <span className="pill-chart inline-flex items-center rounded-full border px-1.5 py-[1px] text-[10.5px] font-medium">New</span>}
+          {isNew && !existing && <span className="pill-chart inline-flex items-center rounded-full border px-1.5 py-[1px] text-[10.5px] font-medium">New</span>}
         </div>
         <div className="mt-0.5 text-[12px] leading-snug text-muted">{hint}</div>
         {stale && (
@@ -424,18 +514,68 @@ function MappingRow({
             <AlertTriangle size={11} /> The account saved here is gone from Xero. Pick another.
           </div>
         )}
+        {isNew && existing && (
+          <div className="mt-1 text-[11.5px] leading-snug text-warn">
+            {existing.code ? `${existing.code} · ` : ""}
+            {existing.name} is already in Xero, so saving uses it. Rename to create a new account.
+          </div>
+        )}
       </div>
       <ArrowRight size={14} className="hidden text-muted sm:block" />
-      <SelectMenu value={value} onChange={onChange} options={options} placeholder={placeholder} ariaLabel={`Xero account for ${label}`} disabled={disabled} />
+      {editing ? (
+        <div className="flex h-9 items-center gap-2 rounded-[10px] border border-ink/30 bg-surface px-3">
+          <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md bg-chart-soft text-chart">
+            <Plus size={12} />
+          </span>
+          <input
+            autoFocus
+            onFocus={(e) => e.currentTarget.select()}
+            value={draft}
+            maxLength={150}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commit();
+              if (e.key === "Escape") setEditing(false);
+            }}
+            aria-label={`Name of the new account for ${label}`}
+            className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none"
+          />
+        </div>
+      ) : (
+        <div className="flex min-w-0 items-center gap-1.5">
+          <div className="min-w-0 flex-1">
+            <SelectMenu
+              value={target ? targetValue(target) : ""}
+              onChange={onPick}
+              options={options}
+              placeholder={placeholder}
+              ariaLabel={`Xero account for ${label}`}
+              disabled={disabled}
+            />
+          </div>
+          {isNew && !disabled && (
+            <button
+              type="button"
+              onClick={startRename}
+              aria-label={`Rename the new account for ${label}`}
+              title="Rename"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] border border-border text-muted transition-colors hover:border-ink/25 hover:text-ink"
+            >
+              <Pencil size={14} />
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-function ChannelMark({ channel }: { channel: XeroChannel }) {
+function MarkTile({ src }: { src: string }) {
   return (
     <span className="grid h-[18px] w-[18px] place-items-center overflow-hidden rounded-[5px] border border-border bg-white p-[2px]">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={ROOT_LOGO[channel]} alt="" className="max-h-full max-w-full object-contain" />
+      <img src={src} alt="" className="max-h-full max-w-full object-contain" />
     </span>
   );
 }
