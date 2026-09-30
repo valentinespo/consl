@@ -105,6 +105,7 @@ model Organization {
   stockMovements          StockMovement[]
   integrations            Integration[]
   metaAdAccounts          MetaAdAccount[]
+  xeroSetup               XeroSetup?
   orderFeeRules           OrderFeeRule[]
   adInvoices              AdInvoice[]
   orderFees               OrderFee[]
@@ -153,6 +154,30 @@ model Integration {
   updatedAt       DateTime      @updatedAt
 
   @@unique([orgId, provider])
+}
+
+// How a company's P&L goes to Xero (lib/xero-setup): which Xero account each P&L line posts to,
+// per channel, and the balance-sheet accounts the money waits in (a clearing account per channel,
+// payables for costs paid outside the channel, inventory). Targets are Xero AccountIDs with the
+// code/name/type as last seen, so the screen reads right even before Xero answers.
+model XeroSetup {
+  id                 String        @id @default(cuid())
+  orgId              String?       @unique
+  organization       Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  // "<CHANNEL>:<line>" → { accountId, code, name, type }  (line = the P&L group, or "cogs")
+  lines              Json          @default("{}")
+  // "clearing:<CHANNEL>" | "payable:<SOURCE>" | "inventory" → { accountId, code, name, type }
+  balances           Json          @default("{}")
+  sameForAllChannels Boolean       @default(true)
+  // Tag every journal line with its sales channel (a Xero tracking category).
+  tagChannels        Boolean       @default(true)
+  // The tracking category and its options ({ "<CHANNEL>": optionId }) once created in Xero.
+  trackingCategoryId String?
+  trackingOptions    Json          @default("{}")
+  startMonth         String? // "YYYY-MM": the first month consl sends
+  savedAt            DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 }
 
 // Meta Ads: one row per linked ad account. A connection pass (Facebook Login for Business with a

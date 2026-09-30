@@ -5,6 +5,7 @@ import { loadPnlHistory } from "@/lib/pnl-cache";
 import { getOrgSettings } from "@/lib/settings";
 import { prisma } from "@/lib/prisma";
 import { PnlClient, PreConslCostButton } from "@/components/PnlClient";
+import { XeroPnlButton } from "@/components/xero/XeroPnlButton";
 import { rangeBounds, RANGES, type RangeKey } from "@/lib/chart";
 import { parsePnlBreakdown } from "@/lib/pnl-shared";
 import { isPnlDay } from "@/lib/pnl-periods";
@@ -53,7 +54,10 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
   return (
     <>
       <PageHeader title="P&L" subtitle="Every dollar your channels moved, period by period — and what was left.">
-        <PreConslCostButton products={products} />
+        <div className="flex flex-wrap items-center gap-2">
+          <XeroPnlButton />
+          <PreConslCostButton products={products} />
+        </div>
       </PageHeader>
       <PnlClient history={history} initial={{ channel: channel ?? "", range: { key: rangeKey, from, to }, breakdown }} />
     </>

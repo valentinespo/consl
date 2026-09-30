@@ -165,9 +165,19 @@ export async function xeroApi<T>(accessToken: string, tenantId: string, path: st
   });
   if (!r.ok) {
     const text = await r.text().catch(() => "");
-    throw new XeroError(`Xero ${path}: HTTP ${r.status} ${text.slice(0, 300)}`, r.status);
+    throw new XeroError(`Xero: ${readableXeroError(text) ?? `${path} answered HTTP ${r.status}`}`, r.status);
   }
   return (await r.json()) as T;
+}
+
+/** The first human sentence in a Xero error body (validation errors carry one per element). */
+function readableXeroError(body: string): string | null {
+  try {
+    const j = JSON.parse(body) as { Message?: string; Detail?: string; Elements?: Array<{ ValidationErrors?: Array<{ Message?: string }> }> };
+    return j.Elements?.flatMap((e) => e.ValidationErrors ?? []).find((v) => v.Message)?.Message ?? j.Detail ?? j.Message ?? null;
+  } catch {
+    return body.trim() ? body.trim().slice(0, 200) : null;
+  }
 }
 
 export type XeroTenant = { connectionId: string; tenantId: string; name: string; authEventId: string | null };

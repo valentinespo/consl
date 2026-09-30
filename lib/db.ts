@@ -10,6 +10,7 @@ import { prismaBase } from "@/lib/prisma-base";
 export const TENANT_MODELS = new Set([
   "Facility",
   "MetaAdAccount",
+  "XeroSetup",
   "Supplier",
   "Product",
   "SkuSnapshot",
