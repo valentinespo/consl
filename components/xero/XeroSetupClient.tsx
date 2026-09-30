@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SelectMenu, type SelectMenuOption } from "@/components/SelectMenu";
+import { DatePicker } from "@/components/DatePicker";
+import { HoverHint } from "@/components/HoverHint";
+import { useMoney } from "@/components/CurrencyProvider";
 import { AlertTriangle, ArrowRight, Check, Pencil, Plus, RefreshCw, X } from "@/components/icons";
 import { ROOT_LOGO, SOURCE_LOGO } from "@/lib/channel-logos";
 import { saveXeroSetupAction } from "@/app/(app)/pnl/xero/actions";
@@ -13,6 +16,8 @@ import {
   SECTIONS,
   XERO_TYPE_LABEL,
   lineRowKey,
+  monthEnd,
+  newAccountName,
   targetValue,
   type LineKey,
   type XeroAccountOption,
@@ -29,27 +34,44 @@ const REFRESH_EVERY_MS = 20_000;
 /**
  * The Xero export's setup screen: which Xero account every line of the company's consl P&L goes
  * to, and where the money waits on the balance sheet. consl proposes a new account for every row
- * (renamable), or the owner picks one already in Xero. Everything is staged and only reaches Xero
- * on Save (new accounts are listed for confirmation first).
+ * ("consl - …", renamable), or the owner picks one already in Xero. Everything is staged and only
+ * reaches Xero on Save (new accounts are listed for confirmation first).
  */
 export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canEdit: boolean }) {
   const router = useRouter();
+  const { locale } = useMoney();
   const [same, setSame] = useState(data.sameForAllChannels);
   const [tab, setTab] = useState<XeroChannel>(data.channels[0]);
-  const [targets, setTargets] = useState<Record<string, XeroTarget>>(data.targets);
+  const [staged, setStaged] = useState<Record<string, XeroTarget>>(data.targets);
   const [tag, setTag] = useState(data.tagChannels);
-  const [start, setStart] = useState(data.startMonth);
+  const [start, setStart] = useState(data.startDate);
   const [accounts, setAccounts] = useState<XeroAccountOption[]>(data.accounts);
+  const [conslMade, setConslMade] = useState<string[]>(data.conslMade);
   const [refreshing, setRefreshing] = useState(false);
   const lastRead = useRef(0);
   const snapshot = (s: { same: boolean; targets: Record<string, XeroTarget>; tag: boolean; start: string }) =>
     JSON.stringify({ same: s.same, tag: s.tag, start: s.start, t: Object.entries(s.targets).map(([k, v]) => [k, targetValue(v)]).sort() });
-  const [baseline, setBaseline] = useState(() => snapshot({ same: data.sameForAllChannels, targets: data.targets, tag: data.tagChannels, start: data.startMonth }));
+  const [baseline, setBaseline] = useState(() => snapshot({ same: data.sameForAllChannels, targets: data.targets, tag: data.tagChannels, start: data.startDate }));
   const [savedOnce, setSavedOnce] = useState(Boolean(data.savedAt));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+
+  const existingByName = useMemo(() => new Map(accounts.map((a) => [norm(a.name), a])), [accounts]);
+  // A "new" account named like one consl already made in this Xero organisation IS that account
+  // (a save that stopped halfway made it): the row shows it, and saving reuses it.
+  const targets = useMemo(() => {
+    const ours = new Set(conslMade);
+    const out: Record<string, XeroTarget> = {};
+    for (const [k, t] of Object.entries(staged)) {
+      const acc = t.kind === "new" ? existingByName.get(norm(t.name)) : undefined;
+      out[k] = acc && ours.has(acc.accountId) ? { kind: "account", ...acc } : t;
+    }
+    return out;
+  }, [staged, existingByName, conslMade]);
+  /** For a new account: the company's own account that already has its name (Xero names are unique). */
+  const clashOf = (t: XeroTarget | null | undefined) => (t?.kind === "new" ? (existingByName.get(norm(t.name)) ?? null) : null);
 
   const dirty = snapshot({ same, targets, tag, start }) !== baseline;
 
@@ -60,9 +82,11 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
     if (!quiet) setRefreshing(true);
     try {
       const r = await fetch("/api/integrations/xero/accounts", { cache: "no-store" });
-      const j = (await r.json().catch(() => null)) as { accounts?: XeroAccountOption[]; error?: string } | null;
-      if (r.ok && j?.accounts) setAccounts(j.accounts);
-      else if (!quiet) setError(j?.error ?? "Couldn't read your Xero accounts.");
+      const j = (await r.json().catch(() => null)) as { accounts?: XeroAccountOption[]; conslMade?: string[]; error?: string } | null;
+      if (r.ok && j?.accounts) {
+        setAccounts(j.accounts);
+        if (j.conslMade) setConslMade(j.conslMade);
+      } else if (!quiet) setError(j?.error ?? "Couldn't read your Xero accounts.");
     } catch {
       if (!quiet) setError("Couldn't reach Xero. Try again.");
     } finally {
@@ -98,12 +122,13 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
       })),
     [accounts],
   );
-  const existingByName = useMemo(() => new Map(accounts.map((a) => [norm(a.name), a])), [accounts]);
-
   /** A row's choices: a new account (its current name, or consl's), then Xero's chart. */
   function optionsFor(suggested: { name: string; type: string }, current: XeroTarget | null): SelectMenuOption[] {
     const news = current?.kind === "new" ? [{ name: current.name, type: current.type }] : [];
-    if (!news.some((n) => norm(n.name) === norm(suggested.name))) news.push(suggested);
+    // A new account is always on offer, under a name that's still free in Xero ("… 2" once consl's is taken).
+    let name = suggested.name;
+    for (let i = 2; existingByName.has(norm(name)) && i < 100; i++) name = `${suggested.name} ${i}`;
+    if (!news.some((n) => norm(n.name) === norm(name))) news.push({ name, type: suggested.type });
     // An account the list hasn't caught up with yet (just created by a save) still shows by name.
     const extra: SelectMenuOption[] =
       current?.kind === "account" && !accountOptions.some((o) => o.value === `acc:${current.accountId}`)
@@ -142,7 +167,7 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
 
   function setRows(keys: string[], t: XeroTarget | null) {
     if (!t) return;
-    setTargets((prev) => {
+    setStaged((prev) => {
       const next = { ...prev };
       for (const k of keys) next[k] = t;
       return next;
@@ -150,14 +175,16 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
     setNotice(null);
   }
 
-  // New accounts the current choices would create (a name already in Xero is used, not created).
-  const newAccounts = useMemo(() => {
+  // New accounts the current choices would create, and names that are already taken in Xero.
+  const { newAccounts, clashes } = useMemo(() => {
     const seen = new Map<string, { name: string; type: string }>();
+    const taken = new Set<string>();
     for (const t of Object.values(targets)) {
-      if (t.kind !== "new" || existingByName.has(norm(t.name))) continue;
-      seen.set(`${t.type}|${norm(t.name)}`, { name: t.name.trim(), type: t.type });
+      if (t.kind !== "new") continue;
+      if (existingByName.has(norm(t.name))) taken.add(norm(t.name));
+      else seen.set(`${t.type}|${norm(t.name)}`, { name: t.name.trim(), type: t.type });
     }
-    return [...seen.values()];
+    return { newAccounts: [...seen.values()], clashes: taken.size };
   }, [targets, existingByName]);
 
   async function save() {
@@ -166,12 +193,15 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
     setError(null);
     setNotice(null);
     try {
-      const r = await saveXeroSetupAction({ targets, sameForAllChannels: same, tagChannels: tag, startMonth: start });
+      const r = await saveXeroSetupAction({ targets, sameForAllChannels: same, tagChannels: tag, startDate: start });
       if (!r.ok) {
         setError(r.error);
+        // Accounts made before it stopped are real now: show them, so a retry picks them up.
+        if (r.settled) setStaged((prev) => ({ ...prev, ...r.settled }));
+        void refreshAccounts(true);
         return;
       }
-      setTargets(r.targets);
+      setStaged(r.targets);
       setBaseline(snapshot({ same, targets: r.targets, tag, start }));
       setSavedOnce(true);
       setNotice(
@@ -190,9 +220,9 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
 
   function discard() {
     setSame(data.sameForAllChannels);
-    setTargets(data.targets);
+    setStaged(data.targets);
     setTag(data.tagChannels);
-    setStart(data.startMonth);
+    setStart(data.startDate);
     setError(null);
   }
 
@@ -214,7 +244,7 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
               const values = rowKeys.map((k) => targetValue(targets[k]));
               const shared = values.every((v) => v === values[0]) ? targets[rowKeys[0]] : null;
               const base = LINES[line].suggest;
-              const suggestedName = !same && channels.length === 1 ? `${CHANNEL_NAME[channels[0]]} ${base.names[0]}` : base.names[0];
+              const suggestedName = newAccountName(!same && channels.length === 1 ? `${CHANNEL_NAME[channels[0]]} ${base.name}` : base.name);
               return (
                 <MappingRow
                   key={`${line}:${channels.join(",")}`}
@@ -225,7 +255,7 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
                   target={shared}
                   placeholder="Varies by channel"
                   options={optionsFor({ name: suggestedName, type: base.type }, shared)}
-                  existing={shared?.kind === "new" ? (existingByName.get(norm(shared.name)) ?? null) : null}
+                  clash={clashOf(shared)}
                   disabled={!canEdit || pending}
                   onPick={(v) => setRows(rowKeys, decode(v))}
                   onRename={(name) => shared?.kind === "new" && setRows(rowKeys, { kind: "new", type: shared.type, name })}
@@ -293,6 +323,33 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
           </div>
         </div>
 
+        {/* Options for the whole export, right under the chart controls. */}
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border-b border-line bg-surface-2/40 px-5 py-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+            <span className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-ink">
+              Start sending from
+              <HoverHint
+                title="Start date"
+                body="consl sends everything from this day on, one journal per channel for each month, once the month is over. If you don't start on the 1st, the first journal covers the rest of that month only. Anything before this day stays as it is in Xero."
+              />
+            </span>
+            <DatePicker value={start} onChange={(d) => d && setStart(d)} fullWidth={false} className="w-[150px]" disabled={!canEdit || pending} />
+            <span className="text-[12px] text-muted">{firstJournal(start, locale)}</span>
+          </div>
+          {data.channels.length > 0 && (
+            <div className="inline-flex items-center gap-2.5">
+              <span className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-ink">
+                Tag lines by sales channel
+                <HoverHint
+                  title="Sales channel tags"
+                  body="Adds a “Sales channel” tracking category in Xero and tags every line with Amazon, Shopify or TikTok Shop, so you can read the P&L per channel in Xero too."
+                />
+              </span>
+              <Switch checked={tag} onChange={setTag} disabled={!canEdit || pending} label="Tag lines by sales channel" />
+            </div>
+          )}
+        </div>
+
         {!same && (
           <div className="flex flex-wrap gap-1.5 border-b border-line px-5 py-3">
             {data.channels.map((ch) => (
@@ -334,39 +391,14 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
                 stale={data.stale.includes(b.key)}
                 target={t}
                 placeholder="Pick an account"
-                options={optionsFor({ name: b.suggest.names[0], type: b.suggest.type }, t)}
-                existing={t?.kind === "new" ? (existingByName.get(norm(t.name)) ?? null) : null}
+                options={optionsFor({ name: newAccountName(b.suggest.name), type: b.suggest.type }, t)}
+                clash={clashOf(t)}
                 disabled={!canEdit || pending}
                 onPick={(v) => setRows([b.key], decode(v))}
                 onRename={(name) => t?.kind === "new" && setRows([b.key], { kind: "new", type: t.type, name })}
               />
             );
           })}
-        </div>
-      </section>
-
-      {/* Options */}
-      <section className="overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface">
-        <div className="border-b border-line px-5 py-4">
-          <h2 className="text-[15px] font-semibold text-ink">Options</h2>
-        </div>
-        <div className="divide-y divide-line">
-          {data.channels.length > 0 && (
-            <div className="flex items-center justify-between gap-6 px-5 py-4">
-              <div className="min-w-0">
-                <div className="text-[13.5px] font-medium text-ink">Tag lines by sales channel</div>
-                <div className="mt-0.5 text-[12px] text-muted">Adds a &ldquo;Sales channel&rdquo; tracking category in Xero, so you can read the P&amp;L per channel there too.</div>
-              </div>
-              <Switch checked={tag} onChange={setTag} disabled={!canEdit || pending} label="Tag lines by sales channel" />
-            </div>
-          )}
-          <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
-            <div className="min-w-0">
-              <div className="text-[13.5px] font-medium text-ink">First month to send</div>
-              <div className="mt-0.5 text-[12px] text-muted">Earlier months stay as they are in Xero. Each month is sent once it&apos;s complete.</div>
-            </div>
-            <SelectMenu value={start} onChange={setStart} options={data.months} ariaLabel="First month to send" className="w-full sm:w-[220px]" disabled={!canEdit || pending} />
-          </div>
         </div>
       </section>
 
@@ -380,6 +412,11 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
               {error ? (
                 <span className="inline-flex items-center gap-1.5 text-negative">
                   <AlertTriangle size={13} /> {error}
+                </span>
+              ) : clashes ? (
+                <span className="inline-flex items-center gap-1.5 text-negative">
+                  <AlertTriangle size={13} /> {clashes === 1 ? "One new account has a name" : `${clashes} new accounts have names`} already used in Xero. Rename{" "}
+                  {clashes === 1 ? "it" : "them"}, or pick the existing account.
                 </span>
               ) : newAccounts.length ? (
                 <span className="text-ink-soft">
@@ -399,7 +436,7 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
               )}
               <button
                 type="button"
-                disabled={pending}
+                disabled={pending || clashes > 0}
                 onClick={() => (newAccounts.length ? setConfirming(true) : save())}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3.5 py-2 text-[13px] font-medium text-bg hover:opacity-90 disabled:opacity-50"
               >
@@ -461,7 +498,7 @@ function MappingRow({
   target,
   placeholder,
   options,
-  existing,
+  clash,
   disabled,
   onPick,
   onRename,
@@ -473,8 +510,8 @@ function MappingRow({
   target: XeroTarget | null;
   placeholder: string;
   options: SelectMenuOption[];
-  /** For a new account: an account already in Xero under the same name (saving uses it). */
-  existing: XeroAccountOption | null;
+  /** For a new account: the company's account that already has its name (it can't be created). */
+  clash: XeroAccountOption | null;
   disabled: boolean;
   onPick: (v: string) => void;
   onRename: (name: string) => void;
@@ -506,7 +543,16 @@ function MappingRow({
               ))}
             </span>
           )}
-          {isNew && !existing && <span className="pill-chart inline-flex items-center rounded-full border px-1.5 py-[1px] text-[10.5px] font-medium">New</span>}
+          {isNew && (
+            <span className="inline-flex items-center gap-1">
+              <span className="pill-chart inline-flex items-center rounded-full border px-1.5 py-[1px] text-[10.5px] font-medium">New account</span>
+              <HoverHint
+                title="New account"
+                body="consl adds this account to your Xero chart of accounts when you save. Rename it with the pencil, or pick one of your own Xero accounts from the list instead."
+                size={11}
+              />
+            </span>
+          )}
         </div>
         <div className="mt-0.5 text-[12px] leading-snug text-muted">{hint}</div>
         {stale && (
@@ -514,10 +560,13 @@ function MappingRow({
             <AlertTriangle size={11} /> The account saved here is gone from Xero. Pick another.
           </div>
         )}
-        {isNew && existing && (
-          <div className="mt-1 text-[11.5px] leading-snug text-warn">
-            {existing.code ? `${existing.code} · ` : ""}
-            {existing.name} is already in Xero, so saving uses it. Rename to create a new account.
+        {clash && (
+          <div className="mt-1 inline-flex items-start gap-1 text-[11.5px] leading-snug text-negative">
+            <AlertTriangle size={11} className="mt-[2px] shrink-0" />
+            <span>
+              {clash.code ? `${clash.code} · ` : ""}
+              {clash.name} is already in Xero. Rename the new account, or pick that one from the list.
+            </span>
           </div>
         )}
       </div>
@@ -615,4 +664,12 @@ function HowItWorks() {
       ))}
     </div>
   );
+}
+
+/** The first journal's window in words: "March 2026", or "Mar 18 – Mar 31, 2026 (partial month)". */
+function firstJournal(start: string, locale: string): string {
+  if (!start) return "";
+  const fmt = (day: string, o: Intl.DateTimeFormatOptions) => new Date(`${day}T00:00:00Z`).toLocaleDateString(locale, { ...o, timeZone: "UTC" });
+  if (start.endsWith("-01")) return `First journal: ${fmt(start, { month: "long", year: "numeric" })}`;
+  return `First journal: ${fmt(start, { month: "short", day: "numeric" })} – ${fmt(monthEnd(start), { month: "short", day: "numeric", year: "numeric" })} (partial month)`;
 }

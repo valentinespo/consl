@@ -13,7 +13,7 @@ export async function GET() {
   const access = await getMyAccess();
   if (!access?.can("settings", "view")) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
   try {
-    return NextResponse.json({ accounts: await listUsableXeroAccounts(access.orgId) });
+    return NextResponse.json(await listUsableXeroAccounts(access.orgId));
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Couldn't read Xero." }, { status: 502 });
   }

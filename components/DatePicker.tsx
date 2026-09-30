@@ -44,6 +44,7 @@ export function DatePicker({
   className = "",
   isDayDisabled,
   dayTitle,
+  disabled = false,
 }: {
   value: string;
   onChange: (iso: string) => void;
@@ -55,6 +56,7 @@ export function DatePicker({
   isDayDisabled?: (iso: string) => boolean;
   /** Hover text per day — e.g. "Up to 300 units on this day" / "No stock to move on this day". */
   dayTitle?: (iso: string) => string | undefined;
+  disabled?: boolean;
 }) {
   const { locale } = useMoney();
   const btn = useRef<HTMLButtonElement>(null);
@@ -134,9 +136,10 @@ export function DatePicker({
         ref={btn}
         type="button"
         onClick={toggle}
+        disabled={disabled}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className={`inline-flex h-9 items-center justify-between gap-2 rounded-lg border border-border bg-surface px-2.5 text-[13px] outline-none transition-colors hover:border-ink/25 focus-visible:border-accent-strong ${fullWidth ? "w-full" : ""} ${value ? "text-ink" : "text-muted"} ${className}`}
+        className={`inline-flex h-9 items-center justify-between gap-2 rounded-lg border border-border bg-surface px-2.5 text-[13px] outline-none transition-colors hover:border-ink/25 focus-visible:border-accent-strong disabled:cursor-default disabled:opacity-60 disabled:hover:border-border ${fullWidth ? "w-full" : ""} ${value ? "text-ink" : "text-muted"} ${className}`}
       >
         <span className="truncate">{label}</span>
         <CalendarDays size={15} className="shrink-0 text-ink-soft" />

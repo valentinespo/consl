@@ -32,21 +32,28 @@ export const SECTIONS: { key: SectionKey; label: string }[] = [
   { key: "other", label: "Other" },
 ];
 
-/** A suggestion: the first name is what consl creates; any of them counts as a match in Xero. */
-export type Suggestion = { names: string[]; type: string };
+/** The new account consl proposes for a row: its base name (see newAccountName) and Xero type. */
+export type Suggestion = { name: string; type: string };
+
+/**
+ * consl's accounts carry its name up front ("consl - Sales"), so they stand apart from the
+ * company's own in Xero and never collide with them. Renaming can drop it.
+ */
+export const NEW_ACCOUNT_PREFIX = "consl - ";
+export const newAccountName = (base: string) => `${NEW_ACCOUNT_PREFIX}${base}`;
 
 export const LINES: Record<LineKey, { label: string; hint: string; section: SectionKey; suggest: Suggestion }> = {
-  sales: { label: "Sales", hint: "What customers paid for your products.", section: "revenue", suggest: { names: ["Sales", "Sale of Goods", "Sales of Product Income", "Product Sales", "Sales Revenue", "Revenue"], type: "REVENUE" } },
-  refunds: { label: "Refunds", hint: "Money returned to customers.", section: "revenue", suggest: { names: ["Refunds", "Returns and Allowances", "Sales Returns and Allowances", "Sales Returns", "Returns and Refunds"], type: "REVENUE" } },
-  taxes: { label: "Taxes", hint: "Sales tax on your orders, as the channel reports it.", section: "revenue", suggest: { names: ["Marketplace Taxes", "Sales Tax Collected"], type: "REVENUE" } },
-  cogs: { label: "Cost of goods sold", hint: "The landed cost of every unit sold, from consl.", section: "goods", suggest: { names: ["Cost of Goods Sold", "Cost of Sales", "COGS"], type: "DIRECTCOSTS" } },
-  referral_fees: { label: "Referral fees", hint: "The channel's commission on each sale.", section: "costs", suggest: { names: ["Selling Fees", "Marketplace Fees", "Referral Fees", "Amazon Fees"], type: "DIRECTCOSTS" } },
-  fba_fees: { label: "Fulfillment fees", hint: "Picking, packing and shipping done by the channel.", section: "costs", suggest: { names: ["Fulfillment Fees", "Fulfilment Fees", "FBA Fees"], type: "DIRECTCOSTS" } },
-  payment_fees: { label: "Payment processing", hint: "Card and payment gateway fees.", section: "costs", suggest: { names: ["Payment Processing Fees", "Merchant Fees", "Credit Card Fees", "Merchant Account Fees"], type: "DIRECTCOSTS" } },
-  storage_fees: { label: "Storage fees", hint: "Warehouse storage the channel charges.", section: "costs", suggest: { names: ["Storage Fees", "Warehouse Storage", "FBA Storage Fees"], type: "DIRECTCOSTS" } },
-  custom_fees: { label: "Custom fees", hint: "Fees you added to orders in consl.", section: "costs", suggest: { names: ["Other Selling Costs"], type: "DIRECTCOSTS" } },
-  advertising: { label: "Advertising", hint: "Ad spend on the channel and its ad platforms.", section: "marketing", suggest: { names: ["Advertising", "Advertising & Marketing", "Advertising and Promotion", "Marketing"], type: "EXPENSE" } },
-  other: { label: "Other transactions", hint: "Reimbursements, adjustments and anything else the channel reports.", section: "other", suggest: { names: ["Marketplace Adjustments"], type: "OTHERINCOME" } },
+  sales: { label: "Sales", hint: "What customers paid for your products.", section: "revenue", suggest: { name: "Sales", type: "REVENUE" } },
+  refunds: { label: "Refunds", hint: "Money returned to customers.", section: "revenue", suggest: { name: "Refunds", type: "REVENUE" } },
+  taxes: { label: "Taxes", hint: "Sales tax on your orders, as the channel reports it.", section: "revenue", suggest: { name: "Marketplace Taxes", type: "REVENUE" } },
+  cogs: { label: "Cost of goods sold", hint: "The landed cost of every unit sold, from consl.", section: "goods", suggest: { name: "Cost of Goods Sold", type: "DIRECTCOSTS" } },
+  referral_fees: { label: "Referral fees", hint: "The channel's commission on each sale.", section: "costs", suggest: { name: "Selling Fees", type: "DIRECTCOSTS" } },
+  fba_fees: { label: "Fulfillment fees", hint: "Picking, packing and shipping done by the channel.", section: "costs", suggest: { name: "Fulfillment Fees", type: "DIRECTCOSTS" } },
+  payment_fees: { label: "Payment processing", hint: "Card and payment gateway fees.", section: "costs", suggest: { name: "Payment Processing Fees", type: "DIRECTCOSTS" } },
+  storage_fees: { label: "Storage fees", hint: "Warehouse storage the channel charges.", section: "costs", suggest: { name: "Storage Fees", type: "DIRECTCOSTS" } },
+  custom_fees: { label: "Custom fees", hint: "Fees you added to orders in consl.", section: "costs", suggest: { name: "Other Selling Costs", type: "DIRECTCOSTS" } },
+  advertising: { label: "Advertising", hint: "Ad spend on the channel and its ad platforms.", section: "marketing", suggest: { name: "Advertising", type: "EXPENSE" } },
+  other: { label: "Other transactions", hint: "Reimbursements, adjustments and anything else the channel reports.", section: "other", suggest: { name: "Marketplace Adjustments", type: "OTHERINCOME" } },
 };
 export const LINE_ORDER: LineKey[] = ["sales", "refunds", "taxes", "cogs", "referral_fees", "fba_fees", "payment_fees", "storage_fees", "custom_fees", "advertising", "other"];
 
@@ -85,4 +92,36 @@ export const XERO_TYPE_LABEL: Record<string, string> = {
 export function targetValue(t: XeroTarget | null | undefined): string {
   if (!t) return "";
   return t.kind === "account" ? `acc:${t.accountId}` : `new:${t.type}:${t.name}`;
+}
+
+const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+
+/** A real calendar day written "YYYY-MM-DD". */
+export const isIsoDay = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && isoDay(new Date(`${s}T00:00:00Z`)) === s;
+
+/** The last day of the month `day` falls in. */
+export function monthEnd(day: string): string {
+  const [y, m] = day.split("-").map(Number);
+  return isoDay(new Date(Date.UTC(y, m, 0)));
+}
+
+export type JournalWindow = { from: string; to: string; partial: boolean };
+
+/**
+ * The windows consl sends to Xero, one journal per channel each: the start day's month from that
+ * day on (a partial first month unless it starts on the 1st), then whole calendar months. Days are
+ * the company's calendar days, cut the way the P&L cuts them, so a window's numbers are exactly the
+ * P&L for that date range. Only windows whose last day is over (before `today`) are listed.
+ */
+export function journalWindows(start: string, today: string): JournalWindow[] {
+  if (!isIsoDay(start) || !isIsoDay(today)) return [];
+  const out: JournalWindow[] = [];
+  let from = start;
+  while (out.length < 600) {
+    const to = monthEnd(from);
+    if (to >= today) break;
+    out.push({ from, to, partial: from.slice(8) !== "01" });
+    from = isoDay(new Date(Date.UTC(Number(to.slice(0, 4)), Number(to.slice(5, 7)), 1)));
+  }
+  return out;
 }

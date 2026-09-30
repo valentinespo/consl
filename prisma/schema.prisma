@@ -174,7 +174,13 @@ model XeroSetup {
   // The tracking category and its options ({ "<CHANNEL>": optionId }) once created in Xero.
   trackingCategoryId String?
   trackingOptions    Json          @default("{}")
-  startMonth         String? // "YYYY-MM": the first month consl sends
+  startMonth         String? // retired 2026-09-30 for startDate (column kept)
+  // "YYYY-MM-DD" (a company-calendar day): everything dated from this day on goes to Xero; a start
+  // mid-month sends that month from this day only.
+  startDate          String?
+  // AccountIDs of the accounts consl itself created in Xero — the only same-name accounts a save may
+  // reuse (so a save that failed halfway can simply be retried).
+  createdAccountIds  Json          @default("[]")
   savedAt            DateTime?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt

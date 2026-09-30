@@ -2,12 +2,15 @@ import "server-only";
 import { prismaBase } from "@/lib/prisma-base";
 import { xeroAccessToken, xeroApi } from "@/lib/xero";
 import { devAccounts, devFixture, type FixtureAccount } from "@/lib/xero-dev-fixture";
+import { localDay } from "@/lib/tz";
 import {
   CHANNEL_NAME,
   CHANNEL_ORDER,
   LINES,
   LINE_ORDER,
+  isIsoDay,
   lineRowKey,
+  newAccountName,
   type BalanceRow,
   type LineKey,
   type Suggestion,
@@ -21,6 +24,11 @@ import {
  * setup screen and saved from it. Reading never changes anything in Xero; saving creates the new
  * accounts the owner accepted, the "Sales channel" tracking category when channel tags are on, and
  * stores the choices. Journals come later and read the stored setup.
+ *
+ * A new account is always a new account: a name already taken in Xero is refused, never quietly
+ * swapped for the existing account — except accounts consl itself created for this company
+ * (createdAccountIds, recorded the moment each is made), so a save that failed halfway retries
+ * cleanly instead of tripping over its own accounts.
  */
 
 const DEV_FIXTURE = process.env.NODE_ENV !== "production" && process.env.XERO_DEV_FIXTURE === "1";
@@ -101,11 +109,10 @@ async function allAccounts(c: Conn): Promise<XeroApiAccount[]> {
 
 /** The rows this company's P&L has: its lines per channel, and the balance rows they need. */
 async function companyRows(orgId: string) {
-  const [groups, fees, first, metaAccounts, adsConn] = await Promise.all([
+  const [groups, fees, metaAccounts, adsConn] = await Promise.all([
     prismaBase.financeEvent.groupBy({ by: ["channel", "group"], where: { orgId } }),
     prismaBase.$queryRaw<{ channel: string; bucket: string; type: string }[]>`
       SELECT DISTINCT s.channel, f.bucket, f.type FROM "OrderFee" f JOIN "SalesOrder" s ON s.id = f."orderId" WHERE f."orgId" = ${orgId}`,
-    prismaBase.financeEvent.aggregate({ where: { orgId }, _min: { eventAt: true } }),
     prismaBase.metaAdAccount.count({ where: { orgId } }),
     prismaBase.integration.findUnique({ where: { orgId_provider: { orgId, provider: "amazon_ads" } }, select: { id: true } }),
   ]);
@@ -128,49 +135,50 @@ async function companyRows(orgId: string) {
     channel,
     label: `${CHANNEL_NAME[channel]} clearing`,
     hint: `What ${CHANNEL_NAME[channel]} owes you. Code its payout deposits here.`,
-    suggest: { names: [`${CHANNEL_NAME[channel]} Clearing`, `${CHANNEL_NAME[channel]} Receivable`], type: "CURRENT" },
+    suggest: { name: `${CHANNEL_NAME[channel]} Clearing`, type: "CURRENT" },
   }));
   if (metaAccounts > 0) {
-    balances.push({ key: "payable:META_ADS", label: "Meta Ads payable", hint: "Meta ad spend as it happens. Code the card charges from Meta here.", suggest: { names: ["Meta Ads Payable", "Facebook Ads Payable"], type: "CURRLIAB" } });
+    balances.push({ key: "payable:META_ADS", label: "Meta Ads payable", hint: "Meta ad spend as it happens. Code the card charges from Meta here.", suggest: { name: "Meta Ads Payable", type: "CURRLIAB" } });
   }
   if (adsConn) {
-    balances.push({ key: "payable:AMAZON_ADS", label: "Amazon Ads payable", hint: "Amazon ad invoices paid by card. Code those card charges here.", suggest: { names: ["Amazon Ads Payable"], type: "CURRLIAB" } });
+    balances.push({ key: "payable:AMAZON_ADS", label: "Amazon Ads payable", hint: "Amazon ad invoices paid by card. Code those card charges here.", suggest: { name: "Amazon Ads Payable", type: "CURRLIAB" } });
   }
   if (fees.length > 0) {
-    balances.push({ key: "payable:CUSTOM_FEES", label: "Custom fees payable", hint: "Fees and credits you add to orders in consl. Code their payments here.", suggest: { names: ["Custom Fees Payable"], type: "CURRLIAB" } });
+    balances.push({ key: "payable:CUSTOM_FEES", label: "Custom fees payable", hint: "Fees and credits you add to orders in consl. Code their payments here.", suggest: { name: "Custom Fees Payable", type: "CURRLIAB" } });
   }
   balances.push({
     key: "inventory",
     label: "Inventory",
     hint: "Your stock at landed cost. Book stock purchases here in Xero; cost of goods leaves it each month.",
-    suggest: { names: ["Inventory", "Inventory Asset", "Stock on Hand", "Merchandise Inventory"], type: "INVENTORY" },
+    suggest: { name: "Inventory", type: "INVENTORY" },
   });
 
-  return { channels, lines, balances, firstEvent: first._min.eventAt };
+  return { channels, lines, balances };
 }
 
 /**
- * The account consl proposes for a row: always a NEW account under consl's name for the line (the
- * founder's rule: never auto-pick an existing account; the owner can pick one, or rename the new one).
+ * The account consl proposes for a row: always a NEW account, named "consl - <line>" (the
+ * founder's rule: never auto-pick one of the company's accounts; the owner can pick one, or rename
+ * the new one). The one exception is an account consl already created under that very name.
  */
-function suggest(s: Suggestion): XeroTarget {
-  return { kind: "new", name: s.names[0], type: s.type };
+function suggest(s: Suggestion, ours: Map<string, XeroAccountOption>): XeroTarget {
+  const name = newAccountName(s.name);
+  const made = ours.get(norm(name));
+  return made ? { kind: "account", ...made } : { kind: "new", name, type: s.type };
 }
 
-const monthLabel = (ym: string) => new Date(`${ym}-01T12:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
-const thisMonth = () => new Date().toISOString().slice(0, 7);
+/** The company's own clock (the one the P&L cuts its days on). */
+async function companyZone(orgId: string): Promise<string> {
+  const row = await prismaBase.settings.findFirst({ where: { orgId }, select: { syncTz: true } });
+  return row?.syncTz ?? "UTC";
+}
 
-/** Every month from the company's first money event to now, newest first. */
-function monthsSince(first: Date | null): { value: string; label: string }[] {
-  const end = thisMonth();
-  let ym = first ? first.toISOString().slice(0, 7) : end;
-  const out: string[] = [];
-  while (ym <= end && out.length < 120) {
-    out.push(ym);
-    const [y, m] = ym.split("-").map(Number);
-    ym = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
-  }
-  return out.reverse().map((value) => ({ value, label: monthLabel(value) }));
+const idList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+
+/** consl's own accounts in the chart, by name — the only same-name accounts it may reuse. */
+function oursByName(accounts: XeroAccountOption[], createdIds: string[]): Map<string, XeroAccountOption> {
+  const ids = new Set(createdIds);
+  return new Map(accounts.filter((a) => ids.has(a.accountId)).map((a) => [norm(a.name), a]));
 }
 
 export type XeroSetupScreen = {
@@ -183,8 +191,10 @@ export type XeroSetupScreen = {
   targets: Record<string, XeroTarget>;
   sameForAllChannels: boolean;
   tagChannels: boolean;
-  startMonth: string;
-  months: { value: string; label: string }[];
+  /** The first day sent to Xero ("YYYY-MM-DD", the company's calendar). */
+  startDate: string;
+  /** The accounts consl created in this Xero organisation (reusable by name). */
+  conslMade: string[];
   savedAt: string | null;
   /** Rows whose saved account is gone from Xero (archived or deleted there). */
   stale: string[];
@@ -206,11 +216,14 @@ export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
     return { state: "reconnect", orgName: null, message: (e as Error).message };
   }
   try {
-    const [raw, rows, saved] = await Promise.all([allAccounts(c), companyRows(orgId), prismaBase.xeroSetup.findUnique({ where: { orgId } })]);
+    const [raw, rows, saved, tz] = await Promise.all([allAccounts(c), companyRows(orgId), prismaBase.xeroSetup.findUnique({ where: { orgId } }), companyZone(orgId)]);
     const accounts = raw.filter(usable).map(option).sort(byCode);
     const live = new Map(accounts.map((a) => [a.accountId, a]));
     const storedLines = (saved?.lines ?? {}) as Record<string, Stored>;
     const storedBalances = (saved?.balances ?? {}) as Record<string, Stored>;
+    const conslMade = idList(saved?.createdAccountIds);
+    const ours = oursByName(accounts, conslMade);
+    const today = localDay(tz);
 
     const targets: Record<string, XeroTarget> = {};
     const stale: string[] = [];
@@ -219,7 +232,7 @@ export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
       if (acc) targets[key] = { kind: "account", ...acc };
       else {
         if (stored) stale.push(key);
-        targets[key] = suggest(s);
+        targets[key] = suggest(s, ours);
       }
     };
     for (const { channel, line } of rows.lines) pick(lineRowKey(channel, line), storedLines[lineRowKey(channel, line)], LINES[line].suggest);
@@ -235,8 +248,9 @@ export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
       targets,
       sameForAllChannels: saved?.sameForAllChannels ?? true,
       tagChannels: saved?.tagChannels ?? true,
-      startMonth: saved?.startMonth ?? thisMonth(),
-      months: monthsSince(rows.firstEvent),
+      // Not saved yet: the 1st of this month. (Setups saved before start dates had a month.)
+      startDate: saved?.startDate ?? (saved?.startMonth ? `${saved.startMonth}-01` : `${today.slice(0, 8)}01`),
+      conslMade,
       savedAt: saved?.savedAt?.toISOString() ?? null,
       stale,
     };
@@ -246,18 +260,29 @@ export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
 }
 
 /** The chart as the setup screen lists it, read live (the screen re-reads it when you come back to it). */
-export async function listUsableXeroAccounts(orgId: string): Promise<XeroAccountOption[]> {
+export async function listUsableXeroAccounts(orgId: string): Promise<{ accounts: XeroAccountOption[]; conslMade: string[] }> {
   const got = await connection(orgId);
   if (!("conn" in got)) throw new Error(got.state === "not_connected" ? "Connect Xero first." : got.message);
-  return (await allAccounts(got.conn)).filter(usable).map(option).sort(byCode);
+  const [raw, saved] = await Promise.all([allAccounts(got.conn), prismaBase.xeroSetup.findUnique({ where: { orgId }, select: { createdAccountIds: true } })]);
+  return { accounts: raw.filter(usable).map(option).sort(byCode), conslMade: idList(saved?.createdAccountIds) };
 }
 
 export type XeroSetupInput = {
   targets: Record<string, XeroTarget>;
   sameForAllChannels: boolean;
   tagChannels: boolean;
-  startMonth: string;
+  startDate: string;
 };
+
+/** A failed save, with the rows it had already settled (accounts created before it stopped). */
+export class XeroSaveError extends Error {
+  constructor(
+    message: string,
+    readonly settled: Record<string, XeroTarget>,
+  ) {
+    super(message);
+  }
+}
 
 const TRACKING_NAME = "Sales channel";
 
@@ -330,22 +355,23 @@ export function nextCode(type: string, raw: XeroApiAccount[], used: Set<string>)
 
 /**
  * Save the setup: every row needs an account; new ones are created in Xero first (numbered in
- * the usual range for their type), then the choices are stored. Returns the accounts created.
+ * the company's own numbering), then the choices are stored. Returns the accounts created.
  */
 export async function saveXeroSetup(orgId: string, input: XeroSetupInput): Promise<{ created: { code: string; name: string }[]; targets: Record<string, XeroTarget> }> {
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(input.startMonth)) throw new Error("Pick the first month to send.");
+  if (!isIsoDay(input.startDate)) throw new Error("Pick the day to start sending from.");
   const got = await connection(orgId);
   if (!("conn" in got)) throw new Error(got.state === "not_connected" ? "Connect Xero first." : got.message);
   const c = got.conn;
 
-  const [raw, rows] = await Promise.all([allAccounts(c), companyRows(orgId)]);
+  const [raw, rows, saved] = await Promise.all([allAccounts(c), companyRows(orgId), prismaBase.xeroSetup.findUnique({ where: { orgId }, select: { createdAccountIds: true } })]);
   const keys = [...rows.lines.map((l) => lineRowKey(l.channel, l.line)), ...rows.balances.map((b) => b.key)];
   const missing = keys.filter((k) => !input.targets[k]);
   if (missing.length) throw new Error("Pick an account for every line before saving.");
 
   const used = new Set(raw.map((a) => a.Code).filter((code): code is string => Boolean(code)));
   const live = new Map(raw.filter(usable).map((a) => [a.AccountID, option(a)]));
-  const made = new Map<string, Stored>();
+  const conslMade = new Set(idList(saved?.createdAccountIds));
+  const made = new Map<string, Stored>(); // by name: this save's new accounts
   const created: { code: string; name: string }[] = [];
 
   const resolve = async (t: XeroTarget): Promise<Stored> => {
@@ -357,15 +383,28 @@ export async function saveXeroSetup(orgId: string, input: XeroSetupInput): Promi
     const name = t.name.trim();
     if (!name || !CLASS_OF[t.type]) throw new Error("A new account is missing its name or type.");
     if (name.length > 150) throw new Error(`"${name.slice(0, 40)}…" is too long for a Xero account name (150 characters at most).`);
-    const key = `${t.type}|${norm(name)}`;
+    const key = norm(name);
     const done = made.get(key);
-    if (done) return done;
-    // Already in Xero under that name (created elsewhere since the screen loaded): use it.
-    const existing = raw.find((a) => norm(a.Name) === norm(name) && usable(a));
-    if (existing) {
-      const acc = option(existing);
+    if (done) {
+      if (done.type !== t.type) throw new Error(`Two new accounts are both called "${name}". Give one of them another name.`);
+      return done;
+    }
+    // Xero names are unique. consl's own account under this name (a retry) is reused; anyone
+    // else's is refused, so a "new" account never lands on one of the company's accounts.
+    const same = raw.filter((a) => norm(a.Name) === norm(name));
+    const ours = same.find((a) => conslMade.has(a.AccountID) && usable(a));
+    if (ours) {
+      const acc = option(ours);
       made.set(key, acc);
       return acc;
+    }
+    if (same.length) {
+      const archived = same.every((a) => a.Status !== "ACTIVE");
+      throw new Error(
+        archived
+          ? `"${name}" is the name of an archived account in Xero. Give the new account another name.`
+          : `"${name}" is already an account in Xero. Pick it from the list, or give the new account another name.`,
+      );
     }
     const code = nextCode(t.type, raw, used);
     used.add(code);
@@ -383,30 +422,43 @@ export async function saveXeroSetup(orgId: string, input: XeroSetupInput): Promi
     made.set(key, acc);
     created.push({ code: acc.code, name: acc.name });
     console.log(`[xero] org ${orgId}: created account ${acc.code} ${acc.name} (${acc.type})`);
+    // Recorded at once, so a retry after a later failure knows this account is consl's. Best
+    // effort: the final save records the full list again.
+    conslMade.add(acc.accountId);
+    const createdAccountIds = [...conslMade];
+    await prismaBase.xeroSetup
+      .upsert({ where: { orgId }, create: { orgId, createdAccountIds }, update: { createdAccountIds } })
+      .catch((e) => console.error(`[xero] org ${orgId}: couldn't record created account ${acc.accountId}:`, (e as Error).message));
     return acc;
   };
 
   const lines: Record<string, Stored> = {};
-  for (const l of rows.lines) {
-    const k = lineRowKey(l.channel, l.line);
-    lines[k] = await resolve(input.targets[k]);
-  }
   const balances: Record<string, Stored> = {};
-  for (const b of rows.balances) balances[b.key] = await resolve(input.targets[b.key]);
+  try {
+    for (const l of rows.lines) {
+      const k = lineRowKey(l.channel, l.line);
+      lines[k] = await resolve(input.targets[k]);
+    }
+    for (const b of rows.balances) balances[b.key] = await resolve(input.targets[b.key]);
+    const tracking = input.tagChannels && rows.channels.length > 0 ? await ensureTracking(c, rows.channels) : null;
 
-  const tracking = input.tagChannels && rows.channels.length > 0 ? await ensureTracking(c, rows.channels) : null;
-
-  const data = {
-    lines,
-    balances,
-    sameForAllChannels: input.sameForAllChannels,
-    tagChannels: input.tagChannels,
-    trackingCategoryId: tracking?.categoryId ?? null,
-    trackingOptions: tracking?.options ?? {},
-    startMonth: input.startMonth,
-    savedAt: new Date(),
-  };
-  await prismaBase.xeroSetup.upsert({ where: { orgId }, create: { orgId, ...data }, update: data });
+    const data = {
+      lines,
+      balances,
+      sameForAllChannels: input.sameForAllChannels,
+      tagChannels: input.tagChannels,
+      trackingCategoryId: tracking?.categoryId ?? null,
+      trackingOptions: tracking?.options ?? {},
+      startDate: input.startDate,
+      createdAccountIds: [...conslMade],
+      savedAt: new Date(),
+    };
+    await prismaBase.xeroSetup.upsert({ where: { orgId }, create: { orgId, ...data }, update: data });
+  } catch (e) {
+    const settled: Record<string, XeroTarget> = {};
+    for (const [k, v] of Object.entries({ ...lines, ...balances })) settled[k] = { kind: "account", ...v };
+    throw new XeroSaveError((e as Error).message, settled);
+  }
   console.log(`[xero] org ${orgId}: export setup saved (${keys.length} rows, ${created.length} accounts created)`);
   const targets: Record<string, XeroTarget> = {};
   for (const [k, v] of Object.entries({ ...lines, ...balances })) targets[k] = { kind: "account", ...v };
