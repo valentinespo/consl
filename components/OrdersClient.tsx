@@ -7,7 +7,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { AlertTriangle, Building2, ChevronDown, ChevronRight, DotsVertical, Layers, Search, Settings, Tag, WarehouseFilled, X } from "@/components/icons";
 import { PageHeader, SkuAvatar } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
-import { setOrderCogsVoided, setOrderVoided } from "@/app/(app)/orders/actions";
+import { setOrderCogsVoided, setOrderRevenueVoided, setOrderVoided } from "@/app/(app)/orders/actions";
 import type { OrdersChart as OrdersChartData, OrdersPage, OrderRow } from "@/lib/order-metrics";
 import { OrdersChart } from "@/components/OrdersChart";
 import { inputCls } from "@/components/FormKit";
@@ -41,9 +41,10 @@ function statusPill(o: OrderRow): { label: string; cls: string } | null {
   return { label: s.charAt(0).toUpperCase() + s.slice(1), cls: "pill-neutral" };
 }
 
-/** The row's overflow menu (⋮): custom fees, where it shipped from, credits, cost of goods,
- *  void/unvoid. Portalled — the table's scroll container would clip an inline popover. */
-function RowMenu({ id, voided, cogsVoided, onManage }: { id: string; voided: boolean; cogsVoided: boolean; onManage: (mode: DialogMode) => void }) {
+/** The row's overflow menu (⋮): custom fees, where it shipped from, credits, and the three ways to
+ *  void (revenue only, cost of goods only, the whole order — one at a time). Portalled — the
+ *  table's scroll container would clip an inline popover. */
+function RowMenu({ id, voided, revenueVoided, cogsVoided, onManage }: { id: string; voided: boolean; revenueVoided: boolean; cogsVoided: boolean; onManage: (mode: DialogMode) => void }) {
   const router = useRouter();
   const btn = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -116,20 +117,28 @@ function RowMenu({ id, voided, cogsVoided, onManage }: { id: string; voided: boo
                 {label}
               </button>
             ))}
-            <button
-              role="menuitem"
-              disabled={pending}
-              onClick={() =>
-                start(async () => {
-                  await setOrderCogsVoided(id, !cogsVoided);
-                  setBox(null);
-                  router.refresh();
-                })
-              }
-              className="w-full rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink-soft hover:bg-surface-2 hover:text-ink disabled:opacity-50"
-            >
-              {cogsVoided ? "Count cost of goods" : "Void cost of goods"}
-            </button>
+            {(
+              [
+                ["revenue", revenueVoided ? "Count revenue" : "Void revenue", () => setOrderRevenueVoided(id, !revenueVoided)],
+                ["cogs", cogsVoided ? "Count cost of goods" : "Void cost of goods", () => setOrderCogsVoided(id, !cogsVoided)],
+              ] as [string, string, () => Promise<unknown>][]
+            ).map(([key, label, run]) => (
+              <button
+                key={key}
+                role="menuitem"
+                disabled={pending}
+                onClick={() =>
+                  start(async () => {
+                    await run();
+                    setBox(null);
+                    router.refresh();
+                  })
+                }
+                className="w-full rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink-soft hover:bg-surface-2 hover:text-ink disabled:opacity-50"
+              >
+                {label}
+              </button>
+            ))}
             <button
               role="menuitem"
               disabled={pending}
@@ -727,7 +736,16 @@ export function OrdersClient({
                         )}
                         {(o.voided || o.excluded) && (
                           <HoverHint title="Voided" body="Out of every total — a mirrored copy of another channel's sale, an automatic void rule, or voided by hand from the row menu." className="align-middle">
-                            <span className={`${PILL} pill-neutral`}>Voided</span>
+                            <span className={`${PILL} pill-red`}>Voided</span>
+                          </HoverHint>
+                        )}
+                        {o.revenueVoided && !o.voided && (
+                          <HoverHint
+                            title="Revenue voided"
+                            body="Its money (sales, fees, refunds) is left out of the P&L, but its units' cost still counts. Set by hand or by an automatic rule; count it again from the row menu."
+                            className="align-middle"
+                          >
+                            <span className={`${PILL} pill-red`}>Revenue voided</span>
                           </HoverHint>
                         )}
                         {o.cogsVoided && !o.voided && (
@@ -736,7 +754,7 @@ export function OrdersClient({
                             body="The sale and its fees still count, but its units' cost doesn't: they already count on the P&L another way, like an Amazon removal order sent to this buyer. Count it again from the row menu."
                             className="align-middle"
                           >
-                            <span className={`${PILL} pill-neutral`}>COGS voided</span>
+                            <span className={`${PILL} pill-red`}>COGS voided</span>
                           </HoverHint>
                         )}
                       </div>
@@ -798,7 +816,7 @@ export function OrdersClient({
                       </div>
                     </td>
                     <td className="px-2 py-2.5 text-right">
-                      <RowMenu id={o.id} voided={o.voided} cogsVoided={o.cogsVoided} onManage={(mode) => setDialog({ id: o.id, mode })} />
+                      <RowMenu id={o.id} voided={o.voided} revenueVoided={o.revenueVoided} cogsVoided={o.cogsVoided} onManage={(mode) => setDialog({ id: o.id, mode })} />
                     </td>
                   </tr>
                   {open && (

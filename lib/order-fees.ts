@@ -26,21 +26,29 @@ export const FEE_BUCKETS: FeeBucket[] = ["custom_fees", "payment_fees"];
 export type CreditBucket = "sales" | "custom_fees" | "payment_fees";
 export const CREDIT_BUCKETS: CreditBucket[] = ["sales", "custom_fees", "payment_fees"];
 
+/** How an order is voided — one way at a time: out of every total, its revenue only (its money:
+ *  sales, fees, refunds), or its cost of goods only. */
+export type VoidKind = "all" | "revenue" | "cogs";
+export const VOID_KINDS: VoidKind[] = ["all", "revenue", "cogs"];
+export const voidKindOf = (k: string | null | undefined): VoidKind => (k === "revenue" || k === "cogs" ? k : "all");
+/** The order's void switches for a kind (null = not voided). */
+export const voidFlags = (kind: VoidKind | null) => ({ voided: kind === "all", revenueVoided: kind === "revenue", cogsVoided: kind === "cogs" });
+
 type Rule = {
-  id: string; name: string; action: string; kind: string; value: number; extraFixed: number | null; bucket: string;
+  id: string; name: string; action: string; voidKind: string; kind: string; value: number; extraFixed: number | null; bucket: string;
   channel: string | null; source: string | null; paymentMethod: string | null; facilityId: string | null; tag: string | null;
   appliesToPast: boolean; periodFrom: Date | null; periodTo: Date | null; active: boolean; createdAt: Date;
 };
 type Order = {
   id: string; channel: string; source: string | null; paymentMethod: string | null; fulfillmentFacilityId: string | null; fulfillmentOverrideFacilityId: string | null;
   mcf: boolean; replacement: boolean; total: number; cancelled: boolean; status: string | null; orderedAt: Date;
-  voided: boolean; voidedManual: boolean; voidRuleId: string | null;
+  voided: boolean; revenueVoided: boolean; cogsVoided: boolean; voidedManual: boolean; voidRuleId: string | null;
 };
 
 const ORDER_SELECT = {
   id: true, channel: true, source: true, paymentMethod: true, fulfillmentFacilityId: true, fulfillmentOverrideFacilityId: true,
   mcf: true, replacement: true, total: true, cancelled: true, status: true, orderedAt: true,
-  voided: true, voidedManual: true, voidRuleId: true,
+  voided: true, revenueVoided: true, cogsVoided: true, voidedManual: true, voidRuleId: true,
 } as const;
 
 export const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -82,8 +90,9 @@ export function feeAmount(kind: string, value: number, orderTotal: number, extra
 const bucketOf = (b: string | null | undefined): FeeBucket => (b === "payment_fees" ? "payment_fees" : "custom_fees");
 
 /** Recompute the rule-written fees on these orders from today's rules (hand-written fees stay), and
- *  the rule voids: an order a void rule matches is voided under that rule; one no rule matches any
- *  more is un-voided — unless a person decided it from the row menu, which rules never touch. */
+ *  the rule voids: an order a void rule matches is voided under that rule, the way the rule says
+ *  (whole order, revenue or cost of goods); one no rule matches any more is un-voided — unless a
+ *  person decided it from the row menu, which rules never touch. */
 export async function applyFeeRulesToOrders(orderIds: string[]): Promise<number> {
   if (orderIds.length === 0) return 0;
   const allRules = await prisma.orderFeeRule.findMany({ where: { active: true } });
@@ -96,21 +105,22 @@ export async function applyFeeRulesToOrders(orderIds: string[]): Promise<number>
   const ruleVoided = await prisma.salesOrder.count({ where: { id: { in: orderIds }, voidRuleId: { not: null } } });
   if (allRules.length === 0 && existing.length === 0 && ruleVoided === 0) return 0;
   const orders = await prisma.salesOrder.findMany({ where: { id: { in: orderIds } }, select: ORDER_SELECT });
-  const voidChanges = new Map<string, string[]>(); // "voided|ruleId" → order ids
+  const voidChanges = new Map<string, string[]>(); // "kind|ruleId" → order ids
   for (const o of orders) {
     if (o.voidedManual) continue;
     const match = voidRules.find((r) => ruleMatches(r, o)) ?? null;
     // Only a rule's own voids are ever undone here; a legacy void with no rule behind it is left alone.
     if (!match && !o.voidRuleId) continue;
-    const wantVoided = !!match;
+    const kind = match ? voidKindOf(match.voidKind) : null;
+    const want = voidFlags(kind);
     const wantRule = match?.id ?? null;
-    if (o.voided === wantVoided && o.voidRuleId === wantRule) continue;
-    const k = `${wantVoided ? 1 : 0}|${wantRule ?? ""}`;
+    if (o.voided === want.voided && o.revenueVoided === want.revenueVoided && o.cogsVoided === want.cogsVoided && o.voidRuleId === wantRule) continue;
+    const k = `${kind ?? ""}|${wantRule ?? ""}`;
     voidChanges.set(k, [...(voidChanges.get(k) ?? []), o.id]);
   }
   for (const [k, ids] of voidChanges) {
-    const [v, ruleId] = k.split("|");
-    await prisma.salesOrder.updateMany({ where: { id: { in: ids } }, data: { voided: v === "1", voidRuleId: ruleId || null } });
+    const [kind, ruleId] = k.split("|");
+    await prisma.salesOrder.updateMany({ where: { id: { in: ids } }, data: { ...voidFlags(kind ? voidKindOf(kind) : null), voidRuleId: ruleId || null } });
   }
   const toDelete: string[] = [];
   const toCreate: { orderId: string; ruleId: string; name: string; amount: number; bucket: FeeBucket }[] = [];
@@ -136,7 +146,7 @@ export async function applyFeeRulesToOrders(orderIds: string[]): Promise<number>
 export async function releaseVoidRule(ruleId: string): Promise<string[]> {
   const held = await prisma.salesOrder.findMany({ where: { voidRuleId: ruleId, voidedManual: false }, select: { id: true } });
   const ids = held.map((o) => o.id);
-  if (ids.length) await prisma.salesOrder.updateMany({ where: { id: { in: ids } }, data: { voided: false, voidRuleId: null } });
+  if (ids.length) await prisma.salesOrder.updateMany({ where: { id: { in: ids } }, data: { ...voidFlags(null), voidRuleId: null } });
   return ids;
 }
 
@@ -158,7 +168,7 @@ export async function applyFeeRule(ruleId: string): Promise<number> {
       const batch = await prisma.salesOrder.findMany({ where: ruleWhere(rule), select: ORDER_SELECT, orderBy: { id: "asc" }, skip, take: 2000 });
       const ids = batch.filter((o) => ruleMatches(rule, o) && !o.voidedManual && !o.voidRuleId).map((o) => o.id);
       if (ids.length) {
-        await prisma.salesOrder.updateMany({ where: { id: { in: ids } }, data: { voided: true, voidRuleId: rule.id } });
+        await prisma.salesOrder.updateMany({ where: { id: { in: ids } }, data: { ...voidFlags(voidKindOf(rule.voidKind)), voidRuleId: rule.id } });
         voided += ids.length;
       }
       if (batch.length < 2000) break;

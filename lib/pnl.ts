@@ -506,9 +506,9 @@ async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurre
   if (!orgId) return none;
 
   const candidates = await prisma.$queryRaw<
-    { id: string; total: number; currency: string; orderedAt: Date; productGross: number | null; discounts: number | null; tax: number | null; shipping: number | null; giftWrap: number | null; facility: string | null; cogsVoided: boolean }[]
+    { id: string; total: number; currency: string; orderedAt: Date; productGross: number | null; discounts: number | null; tax: number | null; shipping: number | null; giftWrap: number | null; facility: string | null; cogsVoided: boolean; revenueVoided: boolean }[]
   >`
-    SELECT so.id, so.total, so.currency, so."orderedAt", so."productGross", so.discounts, so.tax, so.shipping, so."giftWrap", so."cogsVoided",
+    SELECT so.id, so.total, so.currency, so."orderedAt", so."productGross", so.discounts, so.tax, so.shipping, so."giftWrap", so."cogsVoided", so."revenueVoided",
       COALESCE(so."fulfillmentOverrideFacilityId", so."fulfillmentFacilityId") AS facility
     FROM "SalesOrder" so
     WHERE so."orgId" = ${orgId} AND so.channel = 'AMAZON'
@@ -531,6 +531,8 @@ async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurre
   if (orders.length === 0) return none;
   const facilityOf = new Map(orders.map((o) => [o.id, o.facility]));
   const noCogs = new Set(orders.filter((o) => o.cogsVoided).map((o) => o.id));
+  // A revenue-voided order keeps its units (cost of goods) but none of its money, pending or not.
+  const noMoney = new Set(orders.filter((o) => o.revenueVoided).map((o) => o.id));
   const dateOf = new Map(orders.map((o) => [o.id, o.orderedAt]));
   const entries: Bridge["entries"] = [];
   const entry = (at: Date, group: string, type: string, amount: number) => {
@@ -544,6 +546,7 @@ async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurre
   for (const o of orders) {
     const fx = o.currency === baseCurrency ? 1 : await fxRate(o.currency, baseCurrency, o.orderedAt);
     rateOf.set(o.id, fx);
+    if (noMoney.has(o.id)) continue;
     if (o.productGross != null) {
       principal += o.productGross * fx;
       promo -= (o.discounts ?? 0) * fx;
@@ -592,11 +595,13 @@ async function pendingBridge(from: Date, to: Date, scope: Set<string>, baseCurre
     const fbaPerUnit = hist && hist.units > 0 ? (fbaBySku.get(sku) ?? 0) / hist.units : orgFbaPerUnit;
     const commissionRate = hist && hist.amount > 0 ? (commissionBySku.get(sku) ?? 0) / hist.amount : orgCommissionRate;
     const gross = (l.gross || l.quantity * l.unitPrice) * fx;
-    fba += l.quantity * fbaPerUnit;
-    referral += gross * commissionRate;
     const orderedAt = dateOf.get(l.orderId)!;
-    entry(orderedAt, "fba_fees", "FBAPerUnitFulfillmentFee (pending)", l.quantity * fbaPerUnit);
-    entry(orderedAt, "referral_fees", "Commission (pending)", gross * commissionRate);
+    if (!noMoney.has(l.orderId)) {
+      fba += l.quantity * fbaPerUnit;
+      referral += gross * commissionRate;
+      entry(orderedAt, "fba_fees", "FBAPerUnitFulfillmentFee (pending)", l.quantity * fbaPerUnit);
+      entry(orderedAt, "referral_fees", "Commission (pending)", gross * commissionRate);
+    }
     if (!noCogs.has(l.orderId)) pendingLines.push({ sku, units: l.quantity, facility: facilityOf.get(l.orderId) ?? null, orderedAt });
   }
 
@@ -635,7 +640,7 @@ async function tiktokPendingBridge(orgId: string, from: Date, to: Date, baseCurr
     SELECT so.total, so.currency, so."orderedAt", so."productGross", so.discounts, so.shipping, so."sourceData"
     FROM "SalesOrder" so
     WHERE so."orgId" = ${orgId} AND so.channel = 'TIKTOK'
-      AND so.cancelled = false AND so.voided = false AND so.total <> 0
+      AND so.cancelled = false AND so.voided = false AND so."revenueVoided" = false AND so.total <> 0
       AND so."orderedAt" >= ${from} AND so."orderedAt" <= ${to}
       AND NOT EXISTS (
         SELECT 1 FROM "FinanceEvent" fe
@@ -769,7 +774,7 @@ async function ledgerBuckets(
         WHEN EXISTS (
           SELECT 1 FROM "SalesOrder" so
           WHERE so."orgId" = fe."orgId" AND so.channel = fe.channel AND so."externalId" = fe."orderId"
-            AND (so.voided OR (so.channel = 'SHOPIFY' AND so.source = ANY(${excludedSources}::text[])))) THEN 'duplicate'
+            AND (so.voided OR so."revenueVoided" OR (so.channel = 'SHOPIFY' AND so.source = ANY(${excludedSources}::text[])))) THEN 'duplicate'
         WHEN fe.sku IS NOT NULL AND (
           (fe.channel = 'AMAZON' AND NOT (fe.sku = ANY(${amazonSkus}::text[])))
           OR (fe.channel = 'TIKTOK' AND NOT (fe.sku = ANY(${tiktokSkus}::text[])))) THEN 'unmanaged'
@@ -817,7 +822,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
 
   // The ledgers, by bucket. Amazon and TikTok rows are scoped by the SKU they name; Shopify rows
   // exist only for managed lines. A voided order does not exist — on any channel, its money rows
-  // are skipped by their order number — and a Shopify order the Orders tab drops as another
+  // are skipped by their order number (a revenue-voided order's too: only its cost of goods counts) — and a Shopify order the Orders tab drops as another
   // channel's mirror is dropped here too.
   // Each row also says where its money came from: the channel's own ledger, or the ad platform
   // whose spend was written onto that channel (Meta rows are told apart by txId). Amazon's ad
@@ -837,7 +842,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
       AND NOT EXISTS (
         SELECT 1 FROM "SalesOrder" so
         WHERE so."orgId" = fe."orgId" AND so.channel = fe.channel AND so."externalId" = fe."orderId"
-          AND (so.voided OR (so.channel = 'SHOPIFY' AND so.source = ANY(${excludedSources}::text[]))))
+          AND (so.voided OR so."revenueVoided" OR (so.channel = 'SHOPIFY' AND so.source = ANY(${excludedSources}::text[]))))
       AND NOT (${adsFill.active}::boolean AND fe.channel = 'AMAZON' AND fe.type = 'ProductAdsPayment' AND fe.amount < 0)
       AND NOT (fe.id = ANY(${adsFill.excludeIds}::text[]))
       AND (fe."txId" IS NULL OR fe."txId" NOT LIKE 'ads:%')
@@ -877,7 +882,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
     FROM "OrderFee" f JOIN "SalesOrder" o ON o.id = f."orderId"
     WHERE o."orgId" = ${orgId} AND o.channel = ANY(${selected}::text[])
       AND o."orderedAt" >= ${from} AND o."orderedAt" <= ${to}
-      AND o.cancelled = false AND o.voided = false
+      AND o.cancelled = false AND o.voided = false AND o."revenueVoided" = false
       AND (f."ruleId" IS NULL OR o.mcf OR NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excludedSources}::text[])))`;
   // Each fee lands in the bucket its rule chose — a processor's charge under Payment processing,
   // everything else under Custom fees — as its own line. A CREDIT (money added by hand) counts
@@ -911,7 +916,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
       SELECT l.sku, SUM(l.quantity)::int AS units, COALESCE(SUM(l.quantity * l."unitPrice"), 0)::float8 AS sales
       FROM "SalesOrderLine" l JOIN "SalesOrder" o ON o.id = l."orderId"
       WHERE o."orgId" = ${orgId} AND o.channel = ANY(${lineChannels}::text[]) AND l."productId" IS NULL
-        AND o.cancelled = false AND o.voided = false AND o."orderedAt" >= ${from} AND o."orderedAt" <= ${to}
+        AND o.cancelled = false AND o.voided = false AND o."revenueVoided" = false AND o."orderedAt" >= ${from} AND o."orderedAt" <= ${to}
         AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excludedSources}::text[]))
       GROUP BY 1`;
     for (const r of left) {
@@ -1175,7 +1180,7 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
       AND NOT EXISTS (
         SELECT 1 FROM "SalesOrder" so
         WHERE so."orgId" = fe."orgId" AND so.channel = fe.channel AND so."externalId" = fe."orderId"
-          AND (so.voided OR (so.channel = 'SHOPIFY' AND so.source = ANY(${excludedSources}::text[]))))
+          AND (so.voided OR so."revenueVoided" OR (so.channel = 'SHOPIFY' AND so.source = ANY(${excludedSources}::text[]))))
       AND NOT (${adsFill.active}::boolean AND fe.channel = 'AMAZON' AND fe.type = 'ProductAdsPayment' AND fe.amount < 0)
       AND NOT (fe.id = ANY(${adsFill.excludeIds}::text[]))
       AND (fe."txId" IS NULL OR fe."txId" NOT LIKE 'ads:%')
@@ -1213,7 +1218,7 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
     SELECT o.channel, f.name, f.bucket, f.type, o.currency, f.amount::float8 AS amount, o."orderedAt"
     FROM "OrderFee" f JOIN "SalesOrder" o ON o.id = f."orderId"
     WHERE o."orgId" = ${orgId} AND o.channel = ANY(${selected}::text[])
-      AND o.cancelled = false AND o.voided = false
+      AND o.cancelled = false AND o.voided = false AND o."revenueVoided" = false
       AND (f."ruleId" IS NULL OR o.mcf OR NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excludedSources}::text[])))`;
   for (const f of feeRows) {
     const fx = f.currency === baseCurrency ? 1 : await fxRate(f.currency, baseCurrency, f.orderedAt);
@@ -1245,7 +1250,7 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
         SUM(l.quantity)::int AS units, COALESCE(SUM(l.quantity * l."unitPrice"), 0)::float8 AS sales
       FROM "SalesOrderLine" l JOIN "SalesOrder" o ON o.id = l."orderId"
       WHERE o."orgId" = ${orgId} AND o.channel = ANY(${lineChannels}::text[]) AND l."productId" IS NULL
-        AND o.cancelled = false AND o.voided = false
+        AND o.cancelled = false AND o.voided = false AND o."revenueVoided" = false
         AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excludedSources}::text[]))
       GROUP BY 1, 2, 3`;
     for (const r of left) {

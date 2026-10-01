@@ -1019,9 +1019,13 @@ model SalesOrder {
   // The automatic void rule that voided it (null when voided by hand or not voided). Rules never
   // touch an order decided by hand.
   voidRuleId   String?
-  // The order still counts (revenue, fees), but its units' cost of goods doesn't: they left a
-  // channel's stock another way that's already costed (an Amazon removal order sent to the buyer).
+  // An order is voided one way at a time (set by hand from the row menu — `voidedManual` — or by a
+  // rule — `voidRuleId`): `voided` takes it out of everything; `cogsVoided` keeps its money but not
+  // its units' cost of goods (they left a channel's stock another way that's already costed, e.g.
+  // an Amazon removal order sent to the buyer); `revenueVoided` keeps its units' cost but not its
+  // money (sales, fees, refunds — counted somewhere else).
   cogsVoided   Boolean         @default(false)
+  revenueVoided Boolean        @default(false)
   // How it was fulfilled, when the platform tells us — drives which stock pool drains later.
   // Amazon: "Amazon" (FBA) | "Merchant". TikTok: "TIKTOK" | "SELLER". Shopify: null (seller-fulfilled).
   fulfillment  String?
@@ -1107,9 +1111,11 @@ model OrderFeeRule {
   orgId        String?
   organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
   name         String
-  // What the rule does to a matching order: "fee" adds a cost; "void" takes the order out of
-  // every total (same `voided` switch as a manual void; `SalesOrder.voidRuleId` remembers which rule).
+  // What the rule does to a matching order: "fee" adds a cost; "void" voids it — the way
+  // `voidKind` says (the same switches as a manual void; `SalesOrder.voidRuleId` remembers which rule).
   action       String        @default("fee")
+  // A void rule only: "all" (out of every total) | "revenue" (its money) | "cogs" (its cost of goods).
+  voidKind     String        @default("all")
   kind         String // "fixed" (per order) | "percent" (of what the customer paid)
   value        Float
   // percent rules only: a flat amount added per order on top of the percentage (PayPal's

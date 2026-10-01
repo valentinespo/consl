@@ -10,9 +10,10 @@ export async function getLtvData(search: Record<string, string | string[] | unde
   // Capture the revision first. A concurrent write can leave it behind the report, but must
   // never tag old order data with a newer revision that the browser would consider current.
   const { connection, settings, org, revision } = await getLtvContext();
-  // Use the same flag written by the Orders tab and automatic void rules. Filtering here
-  // also keeps voided orders out of date bounds, currency choices and import diagnostics.
-  const stored = await prisma.salesOrder.findMany({ where: { channel: "SHOPIFY", voided: false }, select: { externalId: true, customerId: true, orderedAt: true, cancelled: true, voided: true, status: true, currency: true, ltvData: true }, orderBy: { orderedAt: "asc" } });
+  // Use the same flags written by the Orders tab and automatic void rules: LTV is revenue, so an
+  // order voided whole or revenue-only is out. Filtering here also keeps those orders out of date
+  // bounds, currency choices and import diagnostics.
+  const stored = await prisma.salesOrder.findMany({ where: { channel: "SHOPIFY", voided: false, revenueVoided: false }, select: { externalId: true, customerId: true, orderedAt: true, cancelled: true, voided: true, status: true, currency: true, ltvData: true }, orderBy: { orderedAt: "asc" } });
   const str = (key: string) => typeof search[key] === "string" ? search[key] as string : "";
   const now = new Date();
   const timezone = connection?.timezone || "UTC";

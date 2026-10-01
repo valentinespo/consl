@@ -146,6 +146,8 @@ export type OrderRow = {
   voided: boolean;
   /** Counts, but its units' cost of goods doesn't (already costed another way, e.g. a removal order). */
   cogsVoided: boolean;
+  /** Its units count (cost of goods), its money doesn't (counted somewhere else). */
+  revenueVoided: boolean;
   /** Dropped by a double-count toggle (mirrored Shopify source / MCF) — same wash + Voided pill. */
   excluded: boolean;
   /** Custom fees on the order — from a rule (fromRule) or written by hand. */
@@ -160,8 +162,10 @@ export type OrderRow = {
 export type FeeRuleRow = {
   id: string;
   name: string;
-  /** "fee" adds a cost to matching orders; "void" takes them out of every total. */
+  /** "fee" adds a cost to matching orders; "void" voids them, the way `voidKind` says. */
   action: string;
+  /** A void rule: "all" (the whole order) | "revenue" | "cogs". */
+  voidKind: string;
   kind: string;
   value: number;
   extraFixed: number | null;
@@ -240,7 +244,7 @@ export async function feeRuleOptions(): Promise<FeeRuleOptions> {
     });
   return {
     rules: rules.map((r) => ({
-      id: r.id, name: r.name, action: r.action, kind: r.kind, value: r.value, extraFixed: r.extraFixed, bucket: r.bucket, channel: r.channel, source: r.source,
+      id: r.id, name: r.name, action: r.action, voidKind: r.voidKind, kind: r.kind, value: r.value, extraFixed: r.extraFixed, bucket: r.bucket, channel: r.channel, source: r.source,
       paymentMethod: r.paymentMethod, facility: r.facility ? { id: r.facility.id, name: facilityLabel.get(r.facility.id) ?? r.facility.name } : null, tag: r.tag, appliesToPast: r.appliesToPast,
       period: r.periodFrom ? { from: dayIn(r.periodFrom, tz), to: r.periodTo ? dayIn(r.periodTo, tz) : null } : null,
       createdDay: dayIn(r.createdAt, tz),
@@ -310,7 +314,7 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
   // Two aggregations: revenue/orders straight off SalesOrder (joining lines would multiply an
   // order's total once per line), units from a joined pass.
   const rows = await prisma.$queryRaw<{ channel: string; orders: bigint; revenue: number | null }[]>`
-    SELECT o.channel, COUNT(*) AS orders, SUM(o.total) AS revenue
+    SELECT o.channel, COUNT(*) AS orders, SUM(CASE WHEN o."revenueVoided" THEN 0 ELSE o.total END) AS revenue
     FROM "SalesOrder" o
     WHERE o."orgId" = ${orgId}
       AND o.cancelled = false
@@ -390,6 +394,8 @@ function tagWhere(tag: OrderTag, ex: Exclusions): Record<string, unknown> {
       return {
         OR: [
           { voided: true },
+          { revenueVoided: true },
+          { cogsVoided: true },
           ...(ex.sources.length ? [{ channel: "SHOPIFY", source: { in: ex.sources } }] : []),
           ...(ex.mcf ? [{ channel: "AMAZON", mcf: true }] : []),
         ],
@@ -491,6 +497,7 @@ const ORDER_ROW_SELECT = {
   replacement: true,
   voided: true,
   cogsVoided: true,
+  revenueVoided: true,
   lines: { select: { quantity: true, sku: true, unitPrice: true, product: { select: { code: true, name: true, imageUrl: true } } } },
   fees: { select: { id: true, name: true, amount: true, ruleId: true, type: true, bucket: true }, orderBy: { createdAt: "asc" } },
 } as const;
@@ -590,6 +597,7 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
     freeSample: o.channel === "TIKTOK" && o.total === 0 && !o.cancelled,
     voided: o.voided,
     cogsVoided: o.cogsVoided,
+    revenueVoided: o.revenueVoided,
     excluded: (o.channel === "SHOPIFY" && !!o.source && excluded.includes(o.source)) || (excludeMcf && o.mcf),
     fees: o.fees.filter((f) => f.type !== "credit").map((f) => ({ id: f.id, name: f.name, amount: f.amount, fromRule: f.ruleId !== null })),
     feeTotal: o.fees.filter((f) => f.type !== "credit").reduce((s, f) => s + f.amount, 0),

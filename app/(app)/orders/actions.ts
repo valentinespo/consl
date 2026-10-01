@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requirePermission, requireView } from "@/lib/membership";
 import { importAllOrders } from "@/lib/orders";
 import { prisma } from "@/lib/prisma";
-import { applyFeeRule, applyFeeRulesToOrders, releaseVoidRule, feeAmount, FEE_TAGS, FEE_BUCKETS, CREDIT_BUCKETS, type FeeKind, type FeeBucket, type CreditBucket } from "@/lib/order-fees";
+import { applyFeeRule, applyFeeRulesToOrders, releaseVoidRule, feeAmount, voidFlags, voidKindOf, FEE_TAGS, FEE_BUCKETS, CREDIT_BUCKETS, type FeeKind, type FeeBucket, type CreditBucket, type VoidKind } from "@/lib/order-fees";
 import { getOrgSettings } from "@/lib/settings";
 import { zonedDayBounds } from "@/lib/pnl";
 
@@ -35,14 +35,19 @@ const touched = () => {
   revalidatePath("/ltv");
 };
 
-/** Void/unvoid orders from the row menu or the bulk bar. A decision made here is final for the
- *  automatic void rules: they never touch an order a person decided. */
-export async function setOrdersVoided(ids: string[], voided: boolean) {
+/** Void orders one way (null = unvoid) from the row menu or the bulk bar: the whole order, its
+ *  revenue only, or its cost of goods only — one way at a time. A decision made here is final for
+ *  the automatic void rules: they never touch an order a person decided. */
+async function setVoid(ids: string[], kind: VoidKind | null) {
   const gate = await requirePermission("inventory", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };
-  await prisma.salesOrder.updateMany({ where: { id: { in: ids } }, data: { voided, voidedManual: true, voidRuleId: null } });
+  await prisma.salesOrder.updateMany({ where: { id: { in: ids } }, data: { ...voidFlags(kind), voidedManual: true, voidRuleId: null } });
   touched();
   return { ok: true as const };
+}
+
+export async function setOrdersVoided(ids: string[], voided: boolean) {
+  return setVoid(ids, voided ? "all" : null);
 }
 
 /** Kept for the row menu: one order. */
@@ -54,11 +59,13 @@ export async function setOrderVoided(id: string, voided: boolean) {
  *  a channel's stock another way that's already costed — an Amazon removal order sent straight to
  *  the buyer. The order's sales and fees still count. */
 export async function setOrderCogsVoided(id: string, cogsVoided: boolean) {
-  const gate = await requirePermission("inventory", "edit");
-  if (!gate.ok) return { ok: false as const, error: gate.error };
-  await prisma.salesOrder.updateMany({ where: { id }, data: { cogsVoided } });
-  touched();
-  return { ok: true as const };
+  return setVoid([id], cogsVoided ? "cogs" : null);
+}
+
+/** Leave an order's money out (sales, fees, refunds — counted somewhere else), or count it again.
+ *  Its units' cost of goods still counts. */
+export async function setOrderRevenueVoided(id: string, revenueVoided: boolean) {
+  return setVoid([id], revenueVoided ? "revenue" : null);
 }
 
 type FeeInput = { name: string; kind: FeeKind; value: number; extraFixed?: number | null; bucket?: FeeBucket };
@@ -151,8 +158,9 @@ export async function setFulfillmentOverride(orderId: string, facilityId: string
 }
 
 type RuleInput = FeeInput & {
-  /** "fee" adds the fee to matching orders; "void" takes them out of every total. */
+  /** "fee" adds the fee to matching orders; "void" voids them, the way `voidKind` says. */
   action?: "fee" | "void";
+  voidKind?: VoidKind;
   channel: string | null;
   source: string | null;
   paymentMethod: string | null;
@@ -190,6 +198,7 @@ export async function createFeeRule(input: RuleInput) {
     data: {
       name: input.name.trim(),
       action,
+      voidKind: action === "void" ? voidKindOf(input.voidKind) : "all",
       kind: action === "void" ? "fixed" : input.kind,
       value: action === "void" ? 0 : input.value,
       extraFixed: action === "void" ? null : extraOf(input),

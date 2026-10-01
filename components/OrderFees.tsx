@@ -24,6 +24,25 @@ export type FeeOptions = FeeRuleOptions;
 
 // Client-side copy of the rule vocabulary (the server module can't be imported here).
 const FEE_TAGS: Record<string, string> = { mcf: "MCF", free_sample: "Free sample", replacement: "Replacement", free_unit: "Free unit" };
+type VoidKind = "all" | "revenue" | "cogs";
+/** What a void rule takes out: its choices, what each does (the rule list's line), and the note under the form. */
+const VOID_KIND: Record<VoidKind, { label: string; does: string; note: string }> = {
+  all: {
+    label: "The whole order",
+    does: "Voids every matching order",
+    note: "Matching orders are voided: out of sales, units, velocity and the P&L, with the Voided pill on the row.",
+  },
+  revenue: {
+    label: "Revenue only",
+    does: "Voids the revenue of every matching order",
+    note: "Matching orders keep their units' cost of goods, but their money (sales, fees, refunds) is left out of the P&L, with the Revenue voided pill on the row.",
+  },
+  cogs: {
+    label: "Cost of goods only",
+    does: "Voids the cost of goods of every matching order",
+    note: "Matching orders keep their money, but their units' cost of goods is left out, with the COGS voided pill on the row. For orders whose units are already costed another way, like an Amazon removal order.",
+  },
+};
 const CHANNEL_NAME: Record<string, string> = { AMAZON: "Amazon", SHOPIFY: "Shopify", TIKTOK: "TikTok" };
 
 const btnPrimary = "inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent-strong px-3 text-[12.5px] font-medium text-white hover:opacity-90 disabled:opacity-50";
@@ -453,14 +472,15 @@ const SCOPES: { value: Scope; label: string }[] = [
 type RuleAction = "fee" | "void";
 
 /** The automatic rules, in a pop-up over the Orders tab: every order that matches a FEE rule carries
- *  the fee, in the P&L under the bucket it chose; every order that matches a VOID rule is taken out
- *  of every total, as if voided by hand. */
+ *  the fee, in the P&L under the bucket it chose; every order that matches a VOID rule is voided the
+ *  way the rule says (whole order, revenue only, cost of goods only), as if voided by hand. */
 export function RulesDialog({ options, onClose }: { options: FeeOptions; onClose: () => void }) {
   const router = useRouter();
   const { money, locale } = useMoney();
   const [pending, start] = useTransition();
   const [action, setAction] = useState<RuleAction>("fee");
   const [voidName, setVoidName] = useState("");
+  const [voidKind, setVoidKind] = useState<VoidKind>("all");
   const [draft, setDraft] = useState<FeeDraft>(emptyFee);
   const [bucketTouched, setBucketTouched] = useState(false);
   const [channel, setChannel] = useState("");
@@ -517,6 +537,7 @@ export function RulesDialog({ options, onClose }: { options: FeeOptions; onClose
   const reset = () => {
     setDraft(emptyFee);
     setVoidName("");
+    setVoidKind("all");
     setBucketTouched(false);
     setChannel("");
     setSource("");
@@ -540,7 +561,7 @@ export function RulesDialog({ options, onClose }: { options: FeeOptions; onClose
         <div>
           <div className="text-[15px] font-semibold text-ink">Automatic rules</div>
           <p className="mt-1 text-[12.5px] leading-relaxed text-muted">
-            A rule applies to every order that matches it. A <span className="font-medium text-ink-soft">fee rule</span> adds a cost consl can&apos;t read from the channel: a 3PL handling charge per order, a wholesale marketplace&apos;s commission, what a payment processor keeps. A <span className="font-medium text-ink-soft">void rule</span> takes the matching orders out of every total, the same as voiding them by hand.
+            A rule applies to every order that matches it. A <span className="font-medium text-ink-soft">fee rule</span> adds a cost consl can&apos;t read from the channel: a 3PL handling charge per order, a wholesale marketplace&apos;s commission, what a payment processor keeps. A <span className="font-medium text-ink-soft">void rule</span> voids the matching orders, the whole order or only its revenue or its cost of goods, the same as voiding them by hand.
           </p>
         </div>
         <button onClick={onClose} className={iconBtn} aria-label="Close">
@@ -567,7 +588,7 @@ export function RulesDialog({ options, onClose }: { options: FeeOptions; onClose
                 : `From ${day(r.createdDay)}`;
             const does =
               r.action === "void"
-                ? "Voids every matching order"
+                ? VOID_KIND[(r.voidKind as VoidKind) in VOID_KIND ? (r.voidKind as VoidKind) : "all"].does
                 : `Adds ${amount(r)} · under ${r.bucket === "payment_fees" ? "Payment processing" : "Custom fees"}`;
             return (
               <li key={r.id} className={`grid grid-cols-[1fr_auto] items-stretch gap-x-4 gap-y-1 px-3 py-2.5 text-[13px] ${r.active ? "" : "opacity-60"}`}>
@@ -639,9 +660,17 @@ export function RulesDialog({ options, onClose }: { options: FeeOptions; onClose
           />
         ) : (
           <div className="flex flex-col gap-1.5">
-            <input value={voidName} onChange={(e) => setVoidName(e.target.value)} placeholder="Rule name, e.g. Wholesale samples" className={inputCls} maxLength={60} />
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <input value={voidName} onChange={(e) => setVoidName(e.target.value)} placeholder="Rule name, e.g. Wholesale samples" className={inputCls} maxLength={60} />
+              <SelectMenu
+                value={voidKind}
+                onChange={(v) => setVoidKind(v as VoidKind)}
+                options={(Object.keys(VOID_KIND) as VoidKind[]).map((k) => ({ value: k, label: VOID_KIND[k].label }))}
+                ariaLabel="What the rule voids"
+              />
+            </div>
             <p className="text-[12px] text-muted">
-              Matching orders are voided: out of sales, units, velocity and the P&amp;L, with the Voided pill on the row. Unvoid one by hand from its row menu and the rule leaves it alone from then on.
+              {VOID_KIND[voidKind].note} Change one by hand from its row menu and the rule leaves it alone from then on.
             </p>
           </div>
         )}
@@ -697,7 +726,7 @@ export function RulesDialog({ options, onClose }: { options: FeeOptions; onClose
             onClick={() =>
               act(async () => {
                 const r = await createFeeRule({
-                  ...(action === "void" ? { ...parseFee(emptyFee), name: voidName.trim(), action: "void" as const } : { ...parseFee(draft), action: "fee" as const }),
+                  ...(action === "void" ? { ...parseFee(emptyFee), name: voidName.trim(), action: "void" as const, voidKind } : { ...parseFee(draft), action: "fee" as const }),
                   channel: channel || null,
                   source: source || null,
                   paymentMethod: method || null,
