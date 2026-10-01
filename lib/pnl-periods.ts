@@ -1,4 +1,4 @@
-import { GROUP_ORDER, PNL_CHANNEL_LABEL, PNL_SOURCE_ORDER, sourceBits, sourcesFromBits, type Pnl, type PnlBreakdown, type PnlChannel, type PnlDay, type PnlGroupBlock, type PnlHistory, type PnlPeriod, type PnlPeriodRange, type PnlSource, type PnlStatement } from "@/lib/pnl-shared";
+import { GROUP_ORDER, PNL_CHANNEL_LABEL, PNL_SOURCE_ORDER, emptyPnlStock, sourceBits, sourcesFromBits, type Pnl, type PnlBreakdown, type PnlChannel, type PnlDay, type PnlGroupBlock, type PnlHistory, type PnlPeriod, type PnlPeriodRange, type PnlSource, type PnlStatement, type PnlStock } from "@/lib/pnl-shared";
 
 const iso = (date: Date) => date.toISOString().slice(0, 10);
 const dateOf = (day: string) => new Date(`${day}T00:00:00Z`);
@@ -88,12 +88,29 @@ export function pnlGroups(blocks: Blocks): PnlGroupBlock[] {
 
 type Tally = { units: number; cogs: number };
 
-/** A period's statement from its tallied blocks and costs — the same arithmetic as the Total. */
-export function statementFrom(blocks: Blocks, cogs: number, unitsSold: number, mcf: Tally, unreported: Tally): PnlStatement {
+/** A period's statement from its tallied blocks and costs — the same arithmetic as the Total.
+ *  `cogs` already includes `stock`. */
+export function statementFrom(blocks: Blocks, cogs: number, unitsSold: number, mcf: Tally, unreported: Tally, stock: PnlStock = emptyPnlStock()): PnlStatement {
   const groups = pnlGroups(blocks);
   const sales = groups.find((group) => group.group === "sales")?.total ?? 0;
   const netProfit = groups.reduce((sum, group) => sum + group.total, 0) + cogs;
-  return { groups, sales, cogs, unitsSold, mcf, unreported, netProfit, margin: sales !== 0 ? netProfit / sales : null, roi: cogs !== 0 ? netProfit / Math.abs(cogs) : null };
+  return { groups, sales, cogs, unitsSold, mcf, unreported, stock, netProfit, margin: sales !== 0 ? netProfit / sales : null, roi: cogs !== 0 ? netProfit / Math.abs(cogs) : null };
+}
+
+/** Compact stock lines for a PnlDay — omitted when there are none. */
+export function encodeStock(s: PnlStock): PnlDay["stk"] {
+  const v: [number, number, number, number, number, number] = [s.removals.units, s.removals.cogs, s.lost.units, s.lost.cogs, s.back.units, s.back.cogs];
+  return v.some((n) => n !== 0) ? v : undefined;
+}
+
+function addStock(into: PnlStock, stk: PnlDay["stk"]) {
+  if (!stk) return;
+  into.removals.units += stk[0];
+  into.removals.cogs += stk[1];
+  into.lost.units += stk[2];
+  into.lost.cogs += stk[3];
+  into.back.units += stk[4];
+  into.back.cogs += stk[5];
 }
 
 /** Daily statements → compact days (one channel), as the self-check uses them. Empty days are left out. */
@@ -107,6 +124,7 @@ export function encodePnlDays(days: PnlPeriod[], channel: PnlChannel = "AMAZON")
       units: s.unitsSold,
       mcf: [s.mcf.units, s.mcf.cogs] as [number, number],
       unreported: [s.unreported.units, s.unreported.cogs] as [number, number],
+      ...(encodeStock(s.stock) ? { stk: encodeStock(s.stock) } : {}),
     }))
     .filter((d) => d.rows.length > 0 || d.units !== 0 || d.cogs !== 0);
 }
@@ -118,6 +136,7 @@ class DayFold {
   units = 0;
   mcf = { units: 0, cogs: 0 };
   unreported = { units: 0, cogs: 0 };
+  stock = emptyPnlStock();
   estimated = { units: 0, cogs: 0, lots: new Set<string>() };
   preHistoryUnits = 0;
   overflowUnits = 0;
@@ -141,6 +160,7 @@ class DayFold {
     this.mcf.cogs += day.mcf[1];
     this.unreported.units += day.unreported[0];
     this.unreported.cogs += day.unreported[1];
+    addStock(this.stock, day.stk);
     if (day.est) {
       this.estimated.units += day.est[0];
       this.estimated.cogs += day.est[1];
@@ -163,7 +183,7 @@ class DayFold {
   }
 
   statement(): PnlStatement {
-    return statementFrom(this.blocks, this.cogs, this.units, this.mcf, this.unreported);
+    return statementFrom(this.blocks, this.cogs, this.units, this.mcf, this.unreported, this.stock);
   }
 }
 
@@ -212,7 +232,7 @@ export function foldPnl(history: PnlHistory, from: string, to: string, channels:
     backfillInProgress: importProgress !== null,
     importProgress,
     importing,
-    hasData: s.groups.length > 0 || s.unitsSold > 0,
+    hasData: s.groups.length > 0 || s.unitsSold > 0 || s.cogs !== 0,
   };
 }
 
@@ -223,7 +243,7 @@ export const channelNames = (channels: PnlChannel[]) => channels.map((c) => PNL_
 export function createPnlPeriods(ranges: PnlPeriodRange[], tz: string) {
   const buckets = ranges.map((range) => ({
     range, bounds: zonedDayBounds(range.from, range.to, tz), blocks: new Map() as Blocks,
-    cogs: 0, unitsSold: 0, mcf: { units: 0, cogs: 0 }, unreported: { units: 0, cogs: 0 },
+    cogs: 0, unitsSold: 0, mcf: { units: 0, cogs: 0 }, unreported: { units: 0, cogs: 0 }, stock: emptyPnlStock(),
   }));
   function bucketAt(at: string | number) {
     let lo = 0, hi = buckets.length - 1;
@@ -250,8 +270,16 @@ export function createPnlPeriods(ranges: PnlPeriodRange[], tz: string) {
       if (mcf) { bucket.mcf.units += units; bucket.mcf.cogs += cogs; }
       if (unreported) { bucket.unreported.units += units; bucket.unreported.cogs += cogs; }
     },
+    /** A stock move (removal, loss, found unit…): part of the period's cost of goods, on its line. */
+    addStock(at: number, line: keyof PnlStock, units: number, cogs: number) {
+      const bucket = bucketAt(at);
+      if (!bucket) return;
+      bucket.cogs += cogs;
+      bucket.stock[line].units += units;
+      bucket.stock[line].cogs += cogs;
+    },
     finish(): PnlPeriod[] {
-      return buckets.map(({ range, blocks, cogs, unitsSold, mcf, unreported }) => ({ ...range, statement: statementFrom(blocks, cogs, unitsSold, mcf, unreported) }));
+      return buckets.map(({ range, blocks, cogs, unitsSold, mcf, unreported, stock }) => ({ ...range, statement: statementFrom(blocks, cogs, unitsSold, mcf, unreported, stock) }));
     },
   };
 }

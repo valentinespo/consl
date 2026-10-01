@@ -127,7 +127,7 @@ async function companyRows(orgId: string) {
   for (const g of groups) if ((LINE_ORDER as string[]).includes(g.group)) add(g.channel, g.group as LineKey);
   for (const f of fees) add(f.channel, f.type === "credit" && f.bucket === "sales" ? "sales" : f.bucket === "payment_fees" ? "payment_fees" : "custom_fees");
   for (const [channel, set] of found) if (set.has("sales")) add(channel, "cogs");
-  for (const s of stock) add(s.channel, "removals");
+  for (const s of stock) add(s.channel, "cogs");
 
   const channels = CHANNEL_ORDER.filter((c) => found.has(c));
   const lines = channels.flatMap((channel) => LINE_ORDER.filter((l) => found.get(channel)!.has(l)).map((line) => ({ channel, line })));

@@ -1,10 +1,9 @@
 import "server-only";
-import { STOCK_EVENT_LABEL } from "@/lib/amazon-stock-events";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { amazonAdsStatementRows } from "@/lib/amazon-ads-statement";
-import { sourceBits, type Pnl, type PnlChannel, type PnlDay, type PnlHistory, type PnlPeriod, type PnlPeriodRange, type PnlSource } from "@/lib/pnl-shared";
-import { addPnlAmount, createPnlPeriods, pnlGroups } from "@/lib/pnl-periods";
+import { emptyPnlStock, pnlStockTotal, sourceBits, type Pnl, type PnlChannel, type PnlDay, type PnlHistory, type PnlPeriod, type PnlPeriodRange, type PnlSource, type PnlStock } from "@/lib/pnl-shared";
+import { addPnlAmount, createPnlPeriods, encodeStock, pnlGroups } from "@/lib/pnl-periods";
 import { todayIn } from "@/lib/channel-tz";
 import { getCurrentOrg } from "@/lib/org";
 import { fxRate } from "@/lib/fx";
@@ -96,8 +95,12 @@ type QueueKey = string;
 type Sale = { productId: string; units: number; at: number | null; channel: PnlChannel; queue: QueueKey | null; mcf?: boolean; unreported?: boolean; periodAt?: number };
 /** Units that left Amazon's stock without a sale (negative) or came back into it (positive) —
  *  removal orders, destroyed, lost, found, customer returns… (lib/amazon-stock-events). Priced on
- *  the same FIFO walk as the sales, under "Removals & losses", by `label`. */
-type StockMove = { productId: string; units: number; at: number; kind: string; label: string };
+ *  the same FIFO walk as the sales, as part of Cost of goods, on `line`. */
+type StockMove = { productId: string; units: number; at: number; kind: string; line: keyof PnlStock };
+
+/** The Cost of goods line a move lands on: removal orders; anything else that left (lost in the
+ *  warehouse or on the way in, destroyed, taken out by Amazon); or anything that came back. */
+const stockLine = (kind: string, units: number): keyof PnlStock => (kind === "REMOVAL" ? "removals" : units < 0 ? "lost" : "back");
 
 /** Every stock event of the company's managed Amazon products. */
 async function loadStockMoves(scope: Scope): Promise<StockMove[]> {
@@ -108,7 +111,7 @@ async function loadStockMoves(scope: Scope): Promise<StockMove[]> {
   const moves: StockMove[] = [];
   for (const r of rows) {
     const p = scope.amazon.get(r.sku);
-    if (p && r.quantity) moves.push({ productId: p.id, units: r.quantity, at: r.at.getTime(), kind: r.kind, label: STOCK_EVENT_LABEL[r.kind] ?? r.kind });
+    if (p && r.quantity) moves.push({ productId: p.id, units: r.quantity, at: r.at.getTime(), kind: r.kind, line: stockLine(r.kind, r.quantity) });
   }
   // Within a day, what left goes before what came back (a unit lost and found the same day).
   return moves.sort((a, b) => a.at - b.at || a.units - b.units);
@@ -224,7 +227,7 @@ async function fifoCogs(
   scope: Scope,
   onCost: (sale: Sale, cogs: number, detail: SaleDetail) => void,
   moves: StockMove[] = [],
-  onMove?: (move: StockMove, amount: number) => void,
+  onMove?: (move: StockMove, amount: number, units: number) => void,
 ): Promise<Cogs> {
   const tq = Date.now();
   const { queues, fallback } = await loadQueues();
@@ -250,8 +253,8 @@ async function fifoCogs(
     const product = scope.byId.get(d.productId);
     if (!product) continue;
     if (d.move) {
-      const amount = priceMove(d.move, queues.get("AMAZON")?.get(product.id) ?? [], product, cursor, recoverable);
-      if (onMove && amount !== 0 && selected.has("AMAZON") && d.move.at >= from.getTime() && d.move.at <= to.getTime()) onMove(d.move, amount);
+      const { amount, units } = priceMove(d.move, queues.get("AMAZON")?.get(product.id) ?? [], product, cursor, recoverable);
+      if (onMove && units !== 0 && selected.has("AMAZON") && d.move.at >= from.getTime() && d.move.at <= to.getTime()) onMove(d.move, amount, units);
       continue;
     }
     const qty = d.units;
@@ -363,13 +366,13 @@ const RECOVERS_FROM: Record<string, string> = { FOUND: "LOST", LOST_INBOUND: "LO
 const POOLED = new Set(["LOST", "LOST_INBOUND"]);
 
 /**
- * One stock move on Amazon's queue, as a signed P&L amount. Units that left take from the front
- * of the queue, exactly like a sale (before the first recorded layer: the pre-consl cost; beyond
- * everything recorded: the newest cost). Units that came back give back the cost of the units
- * most recently taken, and are taken again by whatever leaves next — the walk stays in step with
- * what is physically there.
+ * One stock move on Amazon's queue: the units that count and their signed cost. Units that left
+ * take from the front of the queue, exactly like a sale (before the first recorded layer: the
+ * pre-consl cost; beyond everything recorded: the newest cost). Units that came back give back the
+ * cost of the units most recently taken, and are taken again by whatever leaves next — the walk
+ * stays in step with what is physically there.
  */
-function priceMove(move: StockMove, layers: Layer[], product: ProductCost, cursor: Map<string, { idx: number; left: number }>, recoverable: Map<string, number>): number {
+function priceMove(move: StockMove, layers: Layer[], product: ProductCost, cursor: Map<string, { idx: number; left: number }>, recoverable: Map<string, number>): { amount: number; units: number } {
   const ck = `AMAZON|${product.id}`;
   // A found unit, or a reversed lost-on-the-way-in reimbursement, gives back only what was counted
   // lost: Amazon's reports reach 18 months back, and a unit lost before that was never taken off
@@ -380,7 +383,7 @@ function priceMove(move: StockMove, layers: Layer[], product: ProductCost, curso
     const open = recoverable.get(pool) ?? 0;
     const back = Math.min(open, move.units);
     recoverable.set(pool, open - back);
-    if (back <= 0) return 0;
+    if (back <= 0) return { amount: 0, units: 0 };
     if (back < move.units) move = { ...move, units: back };
   }
   const preConsl = product.preConslUnitCost ?? product.openingUnitCost ?? layers[0]?.unitCost ?? 0;
@@ -403,7 +406,7 @@ function priceMove(move: StockMove, layers: Layer[], product: ProductCost, curso
       cursor.set(ck, c);
     }
     cost += want * (before ? preConsl : (layers[layers.length - 1]?.unitCost ?? preConsl));
-    return -cost;
+    return { amount: -cost, units: move.units };
   }
   let back = move.units;
   let credit = 0;
@@ -427,7 +430,7 @@ function priceMove(move: StockMove, layers: Layer[], product: ProductCost, curso
       credit += give * layers[c.idx].unitCost;
     }
   }
-  return credit + back * preConsl;
+  return { amount: credit + back * preConsl, units: move.units };
 }
 
 type Bridge = {
@@ -601,7 +604,7 @@ async function tiktokPendingBridge(orgId: string, from: Date, to: Date, baseCurr
 }
 
 const EMPTY: Pnl = {
-  groups: [], sales: 0, cogs: 0, unitsSold: 0, netProfit: 0, margin: null, roi: null, pending: [],
+  groups: [], sales: 0, cogs: 0, unitsSold: 0, stock: emptyPnlStock(), netProfit: 0, margin: null, roi: null, pending: [],
   unmatchedSkus: [], preHistoryUnits: 0, overflowUnits: 0, unplaced: { units: 0, cogs: 0 }, mcf: { units: 0, cogs: 0 }, unreported: { units: 0, cogs: 0 }, ignored: { skus: [], units: 0, sales: 0 }, ledgerGap: 0, backfillInProgress: false, importProgress: null, importing: [], estimated: { units: 0, cogs: 0, lots: [] }, hasData: false,
 };
 
@@ -914,8 +917,9 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
 
   const [sales, moves] = await Promise.all([allSales(orgId, scope, amazonSkus, excludedSources, exclusions.mcf, queueOf), loadStockMoves(scope)]);
 
-  // Stock moves always ride the walk (they change what every later sale draws); they only show
-  // when Amazon is in view.
+  // Stock moves always ride the walk (they change what every later sale draws); they only count
+  // when Amazon is in view — as part of Cost of goods, on their own lines.
+  const stock = emptyPnlStock();
   const fifo = await fifoCogs(
     [...sales, ...pendingSales],
     from,
@@ -927,16 +931,18 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
       if (at != null) periods.addCost(at, sale.units, cogs, sale.mcf, sale.unreported);
     },
     moves,
-    (move, amount) => {
-      add("removals", move.label, amount, "AMAZON");
-      periods.addAmount(move.at, "removals", move.label, amount, "AMAZON");
+    (move, amount, units) => {
+      stock[move.line].units += units;
+      stock[move.line].cogs += amount;
+      periods.addStock(move.at, move.line, units, amount);
     },
   );
   const groups = pnlGroups(blocks);
+  const cogs = fifo.cogs + pnlStockTotal(stock);
 
   const salesTotal = groups.find((g) => g.group === "sales")?.total ?? 0;
   const ledgerTotal = groups.reduce((t, g) => t + g.total, 0);
-  const netProfit = ledgerTotal + fifo.cogs;
+  const netProfit = ledgerTotal + cogs;
 
   const [settings, connections] = await Promise.all([
     prisma.settings.findFirst({ select: { financeBackfillCursor: true, financeRewalkCursor: true, financeProgressAt: true, importerVersions: true, shopifySyncedThrough: true, tiktokSyncedThrough: true, tiktokFinanceSyncedThrough: true } }),
@@ -954,11 +960,12 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
     periods: periods.finish(),
     groups,
     sales: salesTotal,
-    cogs: fifo.cogs,
+    cogs,
     unitsSold: fifo.units,
+    stock,
     netProfit,
     margin: salesTotal !== 0 ? netProfit / salesTotal : null,
-    roi: fifo.cogs !== 0 ? netProfit / Math.abs(fifo.cogs) : null,
+    roi: cogs !== 0 ? netProfit / Math.abs(cogs) : null,
     pending: pending.filter((p) => p.sales > 0),
     unmatchedSkus: [...fifo.unmatchedSkus],
     preHistoryUnits: fifo.preHistoryUnits,
@@ -976,7 +983,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
     backfillInProgress: importProgress !== null,
     importProgress,
     importing,
-    hasData: groups.length > 0 || fifo.units > 0,
+    hasData: groups.length > 0 || fifo.units > 0 || cogs !== 0,
   };
 }
 
@@ -993,6 +1000,7 @@ type DayTally = {
   units: number;
   mcf: { units: number; cogs: number };
   unreported: { units: number; cogs: number };
+  stock: PnlStock;
   estimated: { units: number; cogs: number; lots: Set<string> };
   preHistoryUnits: number;
   overflowUnits: number;
@@ -1077,7 +1085,7 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
     let t = tallies.get(k);
     if (!t) {
       t = {
-        blocks: new Map(), cogs: 0, units: 0, mcf: { units: 0, cogs: 0 }, unreported: { units: 0, cogs: 0 },
+        blocks: new Map(), cogs: 0, units: 0, mcf: { units: 0, cogs: 0 }, unreported: { units: 0, cogs: 0 }, stock: emptyPnlStock(),
         estimated: { units: 0, cogs: 0, lots: new Set() }, preHistoryUnits: 0, overflowUnits: 0, unplaced: { units: 0, cogs: 0 },
         unmatched: new Set(), ignored: { skus: new Set(), units: 0, sales: 0 }, pending: 0, gap: 0,
       };
@@ -1231,7 +1239,12 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
   // Every sale on record, priced by the same FIFO walk, each landing on its channel and day.
   const [sales, moves] = await Promise.all([allSales(orgId, scope, amazonSkus, excludedSources, exclusions.mcf, queueOf), loadStockMoves(scope)]);
   mark("load sales");
-  const onMove = (move: StockMove, amount: number) => addPnlAmount(tally("AMAZON", dayOf(move.at)).blocks, "removals", move.label, amount, "AMAZON");
+  const onMove = (move: StockMove, amount: number, units: number) => {
+    const t = tally("AMAZON", dayOf(move.at));
+    t.cogs += amount;
+    t.stock[move.line].units += units;
+    t.stock[move.line].cogs += amount;
+  };
   await fifoCogs([...sales, ...pendingSales], allTime.from, allTime.to, new Set(selected), scope, (sale, cogs, detail) => {
     const at = sale.periodAt ?? sale.at;
     if (at == null) return;
@@ -1258,6 +1271,8 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
     const rows = pnlGroups(t.blocks).flatMap((g) => g.types.map((r) => [g.group, r.type, r.amount, sourceBits(r.sources)] as [string, string, number, number]));
     const lots = [...t.estimated.lots].map((tag) => { const i = tag.indexOf("|"); lotIds.set(tag.slice(0, i), tag.slice(i + 1)); return tag.slice(0, i); });
     const day: PnlDay = { d, c: channel, rows, cogs: t.cogs, units: t.units, mcf: [t.mcf.units, t.mcf.cogs], unreported: [t.unreported.units, t.unreported.cogs] };
+    const stk = encodeStock(t.stock);
+    if (stk) day.stk = stk;
     if (t.estimated.units) day.est = [t.estimated.units, t.estimated.cogs, lots];
     if (t.preHistoryUnits) day.pre = t.preHistoryUnits;
     if (t.overflowUnits) day.over = t.overflowUnits;

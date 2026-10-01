@@ -7,8 +7,9 @@ import { fetchReportText, makeClient } from "@/lib/spapi";
 
 /**
  * Units that leave Amazon's stock without a sale, or come back into it — from Amazon's own
- * reports, stored as StockEvent rows the P&L prices at first-in-first-out cost ("Removals &
- * losses"). Sales are costed by their orders; this is everything else:
+ * reports, stored as StockEvent rows the P&L prices at first-in-first-out cost inside Cost of
+ * goods (removal orders, lost & destroyed, found & returned). Sales are costed by their orders;
+ * this is everything else:
  *
  * - The FBA inventory LEDGER (every unit movement, per SKU, per day): removal orders shipped out
  *   (VendorReturns), customer returns received back (any condition), and the adjustments that
@@ -152,15 +153,3 @@ export async function syncAmazonStockEvents(): Promise<{ ledger: number; lostInb
   await saveOrgSettings({ amazonStockEventsSyncedAt: new Date(), ...(first ? { amazonStockEventsBackfilledAt: new Date() } : {}) });
   return { ledger: ledger.length, lostInbound: lost.length, from: startISO.slice(0, 10), to: endISO.slice(0, 10) };
 }
-
-/** P&L line names, by kind (a cost when units left, a credit when they came back). */
-export const STOCK_EVENT_LABEL: Record<string, string> = {
-  REMOVAL: "Removal orders",
-  DESTROYED: "Destroyed",
-  LOST: "Lost in Amazon's warehouse",
-  LOST_INBOUND: "Lost on the way in",
-  REIMBURSED: "Taken out by Amazon",
-  FOUND: "Found by Amazon",
-  CREDITED: "Credited back by Amazon",
-  RETURNED: "Customer returns back in stock",
-};

@@ -58,6 +58,9 @@ export type PnlDay = {
   units: number;
   mcf: [number, number];
   unreported: [number, number];
+  /** Stock that left Amazon without a sale or came back, part of `cogs`: units and cost of the
+   *  removal orders, the lost & destroyed, and the found & returned (see PnlStock). */
+  stk?: [number, number, number, number, number, number];
   /** Units priced from lots not fully costed yet, their (negative) cost, and those lots' ids. */
   est?: [number, number, string[]];
   /** Units sold before the product's first recorded layer / beyond everything recorded shipped. */
@@ -100,14 +103,31 @@ export type PnlHistory = {
 };
 export const sourceBits = (sources: PnlSource[]) => sources.reduce((bits, s) => bits | (1 << PNL_SOURCE_ORDER.indexOf(s)), 0);
 export const sourcesFromBits = (bits: number): PnlSource[] => PNL_SOURCE_ORDER.filter((_, i) => bits & (1 << i));
-export type PnlStatement = Pick<Pnl, "groups" | "sales" | "cogs" | "unitsSold" | "netProfit" | "margin" | "roi" | "mcf" | "unreported">;
+export type PnlStatement = Pick<Pnl, "groups" | "sales" | "cogs" | "unitsSold" | "netProfit" | "margin" | "roi" | "mcf" | "unreported" | "stock">;
+
+/** One Cost of goods line beside the units sold: units (signed: − left, + came back) and cost. */
+export type PnlStockLine = { units: number; cogs: number };
+/** Amazon stock that left without a sale or came back (lib/amazon-stock-events), inside Cost of
+ *  goods: removal orders; lost & destroyed (lost in the warehouse or on the way in, destroyed,
+ *  taken out by Amazon); found & returned (found, credited back, customer returns back in stock). */
+export type PnlStock = { removals: PnlStockLine; lost: PnlStockLine; back: PnlStockLine };
+export const PNL_STOCK_LINES = ["removals", "lost", "back"] as const;
+export const PNL_STOCK_LABEL: Record<(typeof PNL_STOCK_LINES)[number], string> = {
+  removals: "Removal orders",
+  lost: "Lost & destroyed",
+  back: "Found & returned",
+};
+export const emptyPnlStock = (): PnlStock => ({ removals: { units: 0, cogs: 0 }, lost: { units: 0, cogs: 0 }, back: { units: 0, cogs: 0 } });
+export const pnlStockTotal = (s: PnlStock) => s.removals.cogs + s.lost.cogs + s.back.cogs;
 export type PnlPeriod = PnlPeriodRange & { statement: PnlStatement };
 
 export type Pnl = {
   groups: PnlGroupBlock[];
   sales: number;
-  cogs: number; // negative (an expense), 0 when nothing shipped
+  cogs: number; // negative (an expense), 0 when nothing shipped — the units sold plus `stock`
   unitsSold: number;
+  /** Amazon stock that left without a sale or came back — part of `cogs`. */
+  stock: PnlStock;
   netProfit: number;
   margin: number | null; // netProfit / sales
   roi: number | null; // netProfit / |cogs|
@@ -152,11 +172,10 @@ export type Pnl = {
 };
 
 /** Sellerise-shaped ordering; "sales" first, computed COGS is inserted by the UI right after. */
-export const GROUP_ORDER = ["sales", "removals", "taxes", "fba_fees", "referral_fees", "payment_fees", "custom_fees", "storage_fees", "advertising", "refunds", "other"] as const;
+export const GROUP_ORDER = ["sales", "taxes", "fba_fees", "referral_fees", "payment_fees", "custom_fees", "storage_fees", "advertising", "refunds", "other"] as const;
 
 export const GROUP_LABEL: Record<string, string> = {
   sales: "Sales",
-  removals: "Removals & losses",
   taxes: "Taxes",
   fba_fees: "Fulfillment fees",
   referral_fees: "Referral fees",

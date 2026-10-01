@@ -15,7 +15,6 @@ export type LineKey =
   | "sales"
   | "refunds"
   | "cogs"
-  | "removals"
   | "referral_fees"
   | "fba_fees"
   | "payment_fees"
@@ -46,8 +45,7 @@ export const newAccountName = (base: string) => `${NEW_ACCOUNT_PREFIX}${base}`;
 export const LINES: Record<LineKey, { label: string; hint: string; section: SectionKey; suggest: Suggestion }> = {
   sales: { label: "Sales", hint: "What customers paid for your products.", section: "revenue", suggest: { name: "Sales", type: "REVENUE" } },
   refunds: { label: "Refunds", hint: "Money returned to customers.", section: "revenue", suggest: { name: "Refunds", type: "REVENUE" } },
-  cogs: { label: "Cost of goods sold", hint: "The landed cost of every unit sold, from consl.", section: "goods", suggest: { name: "Cost of Goods Sold", type: "DIRECTCOSTS" } },
-  removals: { label: "Removals & losses", hint: "Stock that left without a sale (removal orders, destroyed, lost), less what came back.", section: "goods", suggest: { name: "Inventory Losses", type: "DIRECTCOSTS" } },
+  cogs: { label: "Cost of goods sold", hint: "The landed cost of every unit sold, removed or lost, from consl.", section: "goods", suggest: { name: "Cost of Goods Sold", type: "DIRECTCOSTS" } },
   referral_fees: { label: "Referral fees", hint: "The channel's commission on each sale.", section: "costs", suggest: { name: "Selling Fees", type: "DIRECTCOSTS" } },
   fba_fees: { label: "Fulfillment fees", hint: "Picking, packing and shipping done by the channel.", section: "costs", suggest: { name: "Fulfillment Fees", type: "DIRECTCOSTS" } },
   payment_fees: { label: "Payment processing", hint: "Card and payment gateway fees.", section: "costs", suggest: { name: "Payment Processing Fees", type: "DIRECTCOSTS" } },
@@ -56,7 +54,7 @@ export const LINES: Record<LineKey, { label: string; hint: string; section: Sect
   advertising: { label: "Advertising", hint: "Ad spend on the channel and its ad platforms.", section: "marketing", suggest: { name: "Advertising", type: "EXPENSE" } },
   other: { label: "Other transactions", hint: "Reimbursements, adjustments and anything else the channel reports.", section: "other", suggest: { name: "Marketplace Adjustments", type: "OTHERINCOME" } },
 };
-export const LINE_ORDER: LineKey[] = ["sales", "refunds", "cogs", "removals", "referral_fees", "fba_fees", "payment_fees", "storage_fees", "custom_fees", "advertising", "other"];
+export const LINE_ORDER: LineKey[] = ["sales", "refunds", "cogs", "referral_fees", "fba_fees", "payment_fees", "storage_fees", "custom_fees", "advertising", "other"];
 
 export type BalanceRow = { key: string; label: string; hint: string; channel?: XeroChannel; suggest: Suggestion };
 

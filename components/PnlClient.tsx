@@ -8,7 +8,7 @@ import { ChevronDown, PnlFilled, Receipt, X, CurrencyDollar, CreditCard } from "
 import { useMoney } from "@/components/CurrencyProvider";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
 import { SelectMenu } from "@/components/SelectMenu";
-import { GROUP_LABEL, GROUP_ORDER, PNL_BREAKDOWNS, PNL_CHANNEL_LABEL, PNL_SOURCE_LABEL, PNL_SOURCE_ORDER, parsePnlBreakdown, type Pnl, type PnlBreakdown, type PnlChannel, type PnlGroupBlock, type PnlHistory, type PnlPeriod, type PnlSource, type PnlStatement } from "@/lib/pnl-shared";
+import { GROUP_LABEL, GROUP_ORDER, PNL_BREAKDOWNS, PNL_CHANNEL_LABEL, PNL_SOURCE_LABEL, PNL_SOURCE_ORDER, PNL_STOCK_LABEL, PNL_STOCK_LINES, parsePnlBreakdown, pnlStockTotal, type Pnl, type PnlBreakdown, type PnlChannel, type PnlGroupBlock, type PnlHistory, type PnlPeriod, type PnlSource, type PnlStatement } from "@/lib/pnl-shared";
 import { aggregatePnlDays, foldPnl, pnlPeriodHeading, pnlPeriodRanges } from "@/lib/pnl-periods";
 import { rangeBounds } from "@/lib/chart";
 import { readSavedPnlView, saveSavedPnlView } from "@/lib/pnl-view";
@@ -170,19 +170,25 @@ function PeriodGroupRows({ block, statements, money }: { block: PnlGroupBlock; s
   );
 }
 
+/** Which Cost of goods lines a statement has to show: Amazon stock moves sit beside the units sold. */
+const stockLinesOf = (pnl: Pnl) => PNL_STOCK_LINES.filter((line) => pnl.stock[line].units !== 0 || Math.abs(pnl.stock[line].cogs) >= 0.005);
+
 /** Cost of goods across the columns. The units live in the row's label only (like the plain
- *  statement); the "of which" lines (MCF, free units) sit behind a chevron. */
+ *  statement); behind a chevron: the units sold with their "of which" lines (MCF, free units), and
+ *  Amazon stock that left without a sale or came back (removal orders, lost & destroyed, found &
+ *  returned). */
 function PeriodCogsRows({ pnl, statements, money, locale }: { pnl: Pnl; statements: PnlStatement[]; money: (n: number) => string; locale: string }) {
   const [open, setOpen] = useState(false);
-  const expandable = pnl.mcf.units > 0 || pnl.unreported.units > 0;
-  const sub = (key: string, label: string, units: number, value: (statement: PnlStatement) => number) => (
+  const stockLines = stockLinesOf(pnl);
+  const expandable = pnl.mcf.units > 0 || pnl.unreported.units > 0 || stockLines.length > 0;
+  const sub = (key: string, label: string, units: number, value: (statement: PnlStatement) => number, source: PnlSource = "CONSL") => (
     <tr key={key} className="dropdown-in text-[12.5px] text-ink-soft">
       <th scope="row" className={`${periodLabelCell} py-1.5 pl-8 font-normal`}>
         <span className="flex items-center gap-2">
-          <SourceMarks sources={["CONSL"]} size={13} />
+          <SourceMarks sources={[source]} size={13} />
           <span className="truncate">
             {label}
-            <span className="ml-1.5 text-[11.5px] text-muted">{units.toLocaleString(locale)} units</span>
+            <span className="ml-1.5 text-[11.5px] text-muted">{Math.abs(units).toLocaleString(locale)} units</span>
           </span>
         </span>
       </th>
@@ -206,8 +212,10 @@ function PeriodCogsRows({ pnl, statements, money, locale }: { pnl: Pnl; statemen
         {statements.map((statement, index) => <td key={index} className={`${periodValueCell(index)} py-2.5`}><Amount value={statement.cogs} money={money} /></td>)}
         <Filler />
       </tr>
+      {open && stockLines.length > 0 && sub("sold", "Units sold", pnl.unitsSold, (statement) => statement.cogs - pnlStockTotal(statement.stock))}
       {open && pnl.mcf.units > 0 && sub("mcf", "of which MCF orders", pnl.mcf.units, (statement) => statement.mcf.cogs)}
       {open && pnl.unreported.units > 0 && sub("unreported", "of which free units & replacements", pnl.unreported.units, (statement) => statement.unreported.cogs)}
+      {open && stockLines.map((line) => sub(line, PNL_STOCK_LABEL[line], pnl.stock[line].units, (statement) => statement.stock[line].cogs, "AMAZON"))}
     </>
   );
 }
@@ -280,10 +288,12 @@ function PnlBreakdownTable({ pnl, periods, breakdown, money, locale }: { pnl: Pn
 }
 
 /** Cost of goods in the plain statement: consl's mark, the units at landed cost, and — behind a
- *  chevron — the "of which" lines (MCF orders, free units) that used to sit open underneath. */
+ *  chevron — the units sold with their "of which" lines (MCF orders, free units), and Amazon stock
+ *  that left without a sale or came back. */
 function CogsRow({ pnl, money }: { pnl: Pnl; money: (n: number) => string }) {
   const [open, setOpen] = useState(false);
-  const expandable = pnl.mcf.units > 0 || pnl.unreported.units > 0;
+  const stockLines = stockLinesOf(pnl);
+  const expandable = pnl.mcf.units > 0 || pnl.unreported.units > 0 || stockLines.length > 0;
   return (
     <>
       <button
@@ -302,6 +312,15 @@ function CogsRow({ pnl, money }: { pnl: Pnl; money: (n: number) => string }) {
         </span>
         <Amount value={pnl.cogs} money={money} />
       </button>
+      {open && stockLines.length > 0 && (
+        <div className="dropdown-in flex items-center justify-between gap-3 px-4 py-1.5 pl-8 text-[12.5px] text-ink-soft">
+          <span className="flex min-w-0 items-center gap-2">
+            <SourceMarks sources={["CONSL"]} size={13} />
+            <span className="min-w-0 truncate">Units sold · {pnl.unitsSold.toLocaleString()} units</span>
+          </span>
+          <Amount value={pnl.cogs - pnlStockTotal(pnl.stock)} money={money} />
+        </div>
+      )}
       {open && pnl.mcf.units > 0 && (
         <div className="dropdown-in flex items-center justify-between gap-3 px-4 py-1.5 pl-8 text-[12.5px] text-ink-soft">
           <span className="flex min-w-0 items-center gap-2">
@@ -326,9 +345,29 @@ function CogsRow({ pnl, money }: { pnl: Pnl; money: (n: number) => string }) {
           <Amount value={pnl.unreported.cogs} money={money} />
         </div>
       )}
+      {open &&
+        stockLines.map((line) => (
+          <div key={line} className="dropdown-in flex items-center justify-between gap-3 px-4 py-1.5 pl-8 text-[12.5px] text-ink-soft">
+            <span className="flex min-w-0 items-center gap-2">
+              <SourceMarks sources={["AMAZON"]} size={13} />
+              <span className="min-w-0 truncate">
+                {PNL_STOCK_LABEL[line]} · {Math.abs(pnl.stock[line].units).toLocaleString()} units
+                <span className="ml-1.5 text-[11.5px] text-muted">{STOCK_NOTE[line]}</span>
+              </span>
+            </span>
+            <Amount value={pnl.stock[line].cogs} money={money} />
+          </div>
+        ))}
     </>
   );
 }
+
+/** What each Amazon stock line holds, in a few words. */
+const STOCK_NOTE: Record<(typeof PNL_STOCK_LINES)[number], string> = {
+  removals: "shipped out of Amazon",
+  lost: "lost in the warehouse or on the way in, destroyed",
+  back: "found, credited back, customer returns",
+};
 
 type Filter = { range: Range; channel: string; breakdown: PnlBreakdown };
 
