@@ -64,9 +64,7 @@ const parseDate = (v: unknown): Date | null => {
   return Number.isNaN(d.getTime()) ? null : d;
 };
 
-/** Fee type → bucket, mirroring how the settlement P&L reads: FBA fees = per-order fulfillment
- *  only; inbound/removal/placement programmes live under Other; storage = the monthly FBA storage
- *  fee alone (upstream/STAR storage variants also read as Other). */
+/** Fee type → bucket, a first pass: `amazonSection` has the last word on where a fee sits. */
 function feeGroup(type: string): PnlGroup {
   const t = type.toLowerCase();
   if (t.includes("inbound") || t.includes("removal") || t.includes("placement") || t.includes("disposal")) return "other";
@@ -76,6 +74,26 @@ function feeGroup(type: string): PnlGroup {
   if (t.includes("commission") || t.includes("chargeback") || t.includes("closingfee") || t.includes("referral")) return "referral_fees";
   if (t.includes("storage")) return "storage_fees";
   return "other";
+}
+
+/**
+ * The section a fee belongs in, whichever kind of transaction carried it — Amazon files one fee
+ * under different kinds (an order's fees, a service fee, an adjustment), so its name decides.
+ * Fulfillment = everything Amazon charges to move stock: picking, packing and shipping an order
+ * (and the shipping or gift wrap it charges back), getting stock in (inbound transportation,
+ * placement), AWD's processing and transport, removals and disposals. Storage = FBA's and AWD's.
+ * Vine is marketing. Reimbursements stay with the other transactions; revenue, refunds and taxes
+ * never move. Migration 20261001180000_fee_sections applied the same rules to the rows on file.
+ */
+function amazonSection(type: string, group: PnlGroup): PnlGroup {
+  if (group !== "other" && group !== "referral_fees") return group;
+  const t = type.replace(/^MCF:/, "").toLowerCase();
+  if (t.includes("vine")) return "advertising";
+  if (t.endsWith("chargeback")) return "fba_fees";
+  if (/missing|reimburs|clawback|refund|replacement/.test(t)) return group;
+  if (t.includes("storage") && !t.includes("transport")) return "storage_fees";
+  if (/inbound|removal|disposal|upstream|perunitfulfillment/.test(t)) return "fba_fees";
+  return group;
 }
 
 type Leaf = { path: string[]; amount: number };
@@ -139,9 +157,9 @@ function productContext(item: AnyObj): { sku: string | null; quantity: number | 
   return { sku: ctx?.sku ? String(ctx.sku) : null, quantity: typeof qty === "number" ? qty : null };
 }
 
-/** Push one row, dropping zero-amount noise. */
+/** Push one row, dropping zero-amount noise, in the section its fee belongs in. */
 function push(rows: FlatRow[], row: FlatRow) {
-  if (row.amount !== 0) rows.push(row);
+  if (row.amount !== 0) rows.push({ ...row, group: amazonSection(row.type, row.group) });
 }
 
 /** One transaction → flat P&L rows (empty for kinds that aren't P&L, like bank disbursements).

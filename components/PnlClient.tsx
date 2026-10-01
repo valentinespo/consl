@@ -18,6 +18,9 @@ import { SkuAvatar } from "@/components/ui";
 import { useCan } from "@/components/AccessProvider";
 import { savePreConslCosts } from "@/app/(app)/pnl/actions";
 
+/** Sales and the refunds against them come first, above Cost of goods; every other section after. */
+const REVENUE_GROUPS = new Set(["sales", "refunds"]);
+
 /** "FBAPerUnitFulfillmentFee" → "FBA per unit fulfillment fee"; a refund prefix folds away inside
  *  Refunds (elsewhere, e.g. tax handed back under Taxes, it's what tells the line apart). */
 function humanize(raw: string, group?: string): string {
@@ -271,9 +274,9 @@ function PnlBreakdownTable({ pnl, periods, breakdown, money, locale }: { pnl: Pn
             </tr>
           </thead>
           <tbody>
-            {groups.filter((group) => group.group === "sales").map((block) => <PeriodGroupRows key={block.group} block={block} statements={statements} money={money} />)}
+            {groups.filter((group) => REVENUE_GROUPS.has(group.group)).map((block) => <PeriodGroupRows key={block.group} block={block} statements={statements} money={money} />)}
             <PeriodCogsRows pnl={pnl} statements={statements} money={money} locale={locale} />
-            {groups.filter((group) => group.group !== "sales").map((block) => <PeriodGroupRows key={block.group} block={block} statements={statements} money={money} />)}
+            {groups.filter((group) => !REVENUE_GROUPS.has(group.group)).map((block) => <PeriodGroupRows key={block.group} block={block} statements={statements} money={money} />)}
             {row("profit", "Net profit", (statement) => <span className={`tabular font-semibold ${statement.netProfit >= 0 ? "text-positive" : "text-negative"}`}>{statement.netProfit < 0 ? `−${money(Math.abs(statement.netProfit))}` : money(statement.netProfit)}</span>, true)}
             {row("margin", <span className="font-normal text-ink-soft">Margin</span>, (statement) => <span className="tabular text-ink-soft">{pct(statement.margin)}</span>)}
             {row("roi", <span className="font-normal text-ink-soft">ROI</span>, (statement) => <span className="tabular text-ink-soft">{pct(statement.roi)}</span>)}
@@ -415,8 +418,8 @@ export function PnlClient({ history, initial }: { history: PnlHistory; initial: 
   const setBreakdown = (value: string) => update({ breakdown: parsePnlBreakdown(value) });
 
   const pct = (v: number | null) => (v == null ? "—" : `${(v * 100).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`);
-  const salesBlock = pnl.groups.find((g) => g.group === "sales");
-  const rest = pnl.groups.filter((g) => g.group !== "sales");
+  const revenue = pnl.groups.filter((g) => REVENUE_GROUPS.has(g.group));
+  const rest = pnl.groups.filter((g) => !REVENUE_GROUPS.has(g.group));
 
   return (
     <div className="flex flex-col gap-5">
@@ -482,7 +485,9 @@ export function PnlClient({ history, initial }: { history: PnlHistory; initial: 
       ) : (
         <div className="overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface">
           <div className="divide-y divide-line">
-            {salesBlock && <GroupRow block={salesBlock} money={money} />}
+            {revenue.map((g) => (
+              <GroupRow key={g.group} block={g} money={money} />
+            ))}
             <CogsRow pnl={pnl} money={money} />
             {rest.map((g) => (
               <GroupRow key={g.group} block={g} money={money} />
