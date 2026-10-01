@@ -64,6 +64,8 @@ export interface EngineTransaction {
  *  Interleaved with production by date, so material transferred in before a lot is available to
  *  that lot, and material lost before a lot can no longer be used by it. */
 export interface EngineRawMovement {
+  /** The movement's id, to report what a loss cost. */
+  id?: string;
   materialCode: string;
   fromFacility: string;
   toFacility: string | null; // set for a transfer; null = it left inventory (a loss)
@@ -100,6 +102,8 @@ export interface PoolRemaining {
 export interface EngineResult {
   lines: Map<string, LineCost>;
   pools: PoolRemaining[];
+  /** Each raw-material loss (by movement id): the units it took out of stock and what they cost. */
+  losses: Map<string, { consumed: number; cost: number }>;
 }
 
 /** A FIFO stack of purchase layers for one pool. Consume oldest-first. */
@@ -173,6 +177,7 @@ export function runEngine(
   transactions: EngineTransaction[],
   rawMovements: EngineRawMovement[] = [],
 ): EngineResult {
+  const losses = new Map<string, { consumed: number; cost: number }>();
   // ---- Build FIFO pools, bucketing purchases by their pool id. ----
   // poolKey per material is inferred from how purchases carry sku: a material that ever
   // has an sku is FACILITY_SKU. We derive it from the line materials instead (authoritative).
@@ -247,12 +252,14 @@ export function runEngine(
     }
 
     // A transfer consumes the source pool and re-lands those units at the destination carrying
-    // their FIFO cost. A loss (no destination) just leaves — nothing is added anywhere.
+    // their FIFO cost. A loss (no destination) just leaves — nothing is added anywhere; what it
+    // cost is reported, for the P&L to book.
     const mv = ev.mv;
     if (!(mv.quantity > 0)) continue;
     const pk = materialPoolKey.get(mv.materialCode) ?? (mv.sku ? "FACILITY_SKU" : "FACILITY");
     const from = pools.get(poolId(mv.materialCode, pk, mv.fromFacility, mv.sku));
     const { cost, consumed } = from ? from.consume(mv.quantity) : { cost: 0, consumed: 0 };
+    if (!mv.toFacility && mv.id) losses.set(mv.id, { consumed, cost });
     if (mv.toFacility && consumed > 0) {
       const toId = poolId(mv.materialCode, pk, mv.toFacility, mv.sku);
       ensurePool(toId, mv.materialCode, mv.toFacility, mv.sku).addLayer(consumed, cost / consumed);
@@ -325,5 +332,5 @@ export function runEngine(
     });
   }
 
-  return { lines: result, pools: poolRemaining };
+  return { lines: result, pools: poolRemaining, losses };
 }

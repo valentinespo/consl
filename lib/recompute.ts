@@ -110,6 +110,7 @@ export async function computeEngineResult(opts: { excludeMovementId?: string } =
   const rawMovements: EngineRawMovement[] = rawMovesRaw
     .filter((m) => !isLayerKind(m.kind) && m.fromFacility)
     .map((m, i) => ({
+      id: m.id,
       materialCode: m.materialType?.code ?? "",
       fromFacility: m.fromFacility!.code,
       toFacility: m.toFacility?.code ?? null, // null = a loss (LOSS destination)
@@ -120,12 +121,17 @@ export async function computeEngineResult(opts: { excludeMovementId?: string } =
     }));
 
   const result = runEngine(purchases, lines, transactions, rawMovements);
-  return { result, lines, lotsRaw, purchasesRaw };
+  return { result, lines, lotsRaw, purchasesRaw, rawMovesRaw };
 }
 
 /** Runs the engine and persists each lot line's cost snapshot. Call after any data change. */
 export async function recomputeAll() {
-  const { result, lines } = await computeEngineResult();
+  const { result, lines, rawMovesRaw } = await computeEngineResult();
+  // What each raw-material loss cost (the P&L books it as cost of goods): written only when it moved.
+  const lossCosts = rawMovesRaw
+    .filter((m) => m.toDestination === "LOSS" && !m.toFacilityId)
+    .map((m) => ({ id: m.id, was: m.lossCost, cost: Math.round((result.losses.get(m.id)?.cost ?? 0) * 100) / 100 }))
+    .filter((m) => m.was == null || Math.abs(m.was - m.cost) >= 0.005);
 
   // Interactive transaction with a generous timeout: the per-query round-trip is fast on
   // Railway's internal network, but seeding from a laptop goes over the slower public proxy.
@@ -148,6 +154,7 @@ export async function recomputeAll() {
           },
         });
       }
+      for (const m of lossCosts) await tx.stockMovement.update({ where: { id: m.id }, data: { lossCost: m.cost } });
     },
     { timeout: 120_000, maxWait: 15_000 },
   );

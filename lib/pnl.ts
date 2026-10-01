@@ -231,17 +231,19 @@ async function fifoCogs(
   onCost: (sale: Sale, cogs: number, detail: SaleDetail) => void,
   moves: StockMove[] = [],
   onMove?: (move: StockMove, amount: number, units: number) => void,
+  onWriteOff?: (at: number, amount: number, units: number) => void,
 ): Promise<Cogs> {
   const tq = Date.now();
   const { queues, fallback } = await loadQueues();
   if ((process.env.PNL_PROFILE === "1" || process.env.NODE_ENV === "development")) console.log(`[pnl history]   loadQueues ${Date.now() - tq}ms`);
   const exits = await prisma.stockMovement.findMany({
     where: { itemType: "FINISHED", kind: "STANDARD", fromFacilityId: { not: null }, productId: { not: null } },
-    select: { productId: true, fromFacilityId: true, quantity: true, date: true },
+    select: { productId: true, fromFacilityId: true, quantity: true, date: true, toDestination: true },
   });
-  type Draw = { queue: QueueKey | null; productId: string; units: number; at: number | null; sale: Sale | null; move?: StockMove };
+  // A write-off or samples (to LOSS / CUSTOMER) is the one exit that is charged: the units are gone.
+  type Draw = { queue: QueueKey | null; productId: string; units: number; at: number | null; sale: Sale | null; move?: StockMove; writeOff?: boolean };
   const draws: Draw[] = [
-    ...exits.map((e) => ({ queue: e.fromFacilityId as string, productId: e.productId as string, units: e.quantity, at: e.date.getTime(), sale: null })),
+    ...exits.map((e) => ({ queue: e.fromFacilityId as string, productId: e.productId as string, units: e.quantity, at: e.date.getTime(), sale: null, writeOff: e.toDestination === "LOSS" || e.toDestination === "CUSTOMER" })),
     ...sales.map((s) => ({ queue: s.queue, productId: s.productId, units: s.units, at: s.at, sale: s })),
     ...moves.map((m) => ({ queue: "AMAZON", productId: m.productId, units: Math.abs(m.units), at: m.at, sale: null, move: m })),
   ];
@@ -258,6 +260,12 @@ async function fifoCogs(
     if (d.move) {
       const { amount, units } = priceMove(d.move, queues.get("AMAZON")?.get(product.id) ?? [], product, cursor, recoverable);
       if (onMove && units !== 0 && selected.has("AMAZON") && d.move.at >= from.getTime() && d.move.at <= to.getTime()) onMove(d.move, amount, units);
+      continue;
+    }
+    if (d.writeOff && d.queue != null && d.at != null) {
+      const layers = queues.get(d.queue)?.get(product.id) ?? [];
+      const cost = takeCost(`${d.queue}|${product.id}`, layers, product, d.units, d.at, cursor);
+      if (onWriteOff && d.at >= from.getTime() && d.at <= to.getTime()) onWriteOff(d.at, -cost, d.units);
       continue;
     }
     const qty = d.units;
@@ -363,6 +371,69 @@ async function fifoCogs(
   return out;
 }
 
+/**
+ * What `qty` units leaving one queue cost, taken from its front exactly like a sale: before the
+ * queue's first recorded layer, the pre-consl cost (nothing taken); beyond everything recorded, the
+ * newest cost.
+ */
+function takeCost(ck: string, layers: Layer[], product: ProductCost, qty: number, at: number, cursor: Map<string, { idx: number; left: number }>): number {
+  const preConsl = product.preConslUnitCost ?? product.openingUnitCost ?? layers[0]?.unitCost ?? 0;
+  const before = layers.length === 0 || at < layers[0].date;
+  let want = qty;
+  let cost = 0;
+  if (!before) {
+    const c = cursor.get(ck) ?? { idx: 0, left: layers[0].units };
+    while (want > 1e-9 && c.idx < layers.length) {
+      const take = Math.min(c.left, want);
+      cost += take * layers[c.idx].unitCost;
+      c.left -= take;
+      want -= take;
+      if (c.left <= 1e-9) {
+        c.idx++;
+        c.left = c.idx < layers.length ? layers[c.idx].units : 0;
+      }
+    }
+    cursor.set(ck, c);
+  }
+  return cost + want * (before ? preConsl : (layers[layers.length - 1]?.unitCost ?? preConsl));
+}
+
+/**
+ * How a company-wide cost (a write-off: lost materials, stock written off) splits across the sales
+ * channels: by units sold that month, else by all units ever sold, else all on `fallback`.
+ */
+function channelShares(sales: Sale[], fallback: PnlChannel): (at: number) => [PnlChannel, number][] {
+  const month = (t: number) => new Date(t).toISOString().slice(0, 7);
+  const byMonth = new Map<string, Map<PnlChannel, number>>();
+  const overall = new Map<PnlChannel, number>();
+  for (const s of sales) {
+    if (s.at == null || s.units <= 0) continue;
+    const m = byMonth.get(month(s.at)) ?? new Map<PnlChannel, number>();
+    m.set(s.channel, (m.get(s.channel) ?? 0) + s.units);
+    byMonth.set(month(s.at), m);
+    overall.set(s.channel, (overall.get(s.channel) ?? 0) + s.units);
+  }
+  const shares = (counts: Map<PnlChannel, number>): [PnlChannel, number][] => {
+    const total = [...counts.values()].reduce((t, n) => t + n, 0);
+    return [...counts].map(([c, n]) => [c, n / total]);
+  };
+  return (at) => {
+    const m = byMonth.get(month(at));
+    if (m?.size) return shares(m);
+    if (overall.size) return shares(overall);
+    return [[fallback, 1]];
+  };
+}
+
+/** Lost raw materials (Movements to LOSS), at what the cost engine says they cost (lossCost). */
+async function rawWriteOffs(): Promise<{ at: number; amount: number }[]> {
+  const rows = await prisma.stockMovement.findMany({
+    where: { itemType: "RAW", toDestination: "LOSS", toFacilityId: null, lossCost: { not: null } },
+    select: { date: true, lossCost: true },
+  });
+  return rows.filter((r) => r.lossCost).map((r) => ({ at: r.date.getTime(), amount: -(r.lossCost as number) }));
+}
+
 /** A recovery and the loss it can undo: found ← lost in the warehouse; a reversed lost-inbound
  *  reimbursement ← lost on the way in. */
 const RECOVERS_FROM: Record<string, string> = { FOUND: "LOST", LOST_INBOUND: "LOST_INBOUND" };
@@ -391,26 +462,7 @@ function priceMove(move: StockMove, layers: Layer[], product: ProductCost, curso
   }
   const preConsl = product.preConslUnitCost ?? product.openingUnitCost ?? layers[0]?.unitCost ?? 0;
   const before = layers.length === 0 || move.at < layers[0].date;
-  if (move.units < 0) {
-    let want = -move.units;
-    let cost = 0;
-    if (!before) {
-      const c = cursor.get(ck) ?? { idx: 0, left: layers[0].units };
-      while (want > 1e-9 && c.idx < layers.length) {
-        const take = Math.min(c.left, want);
-        cost += take * layers[c.idx].unitCost;
-        c.left -= take;
-        want -= take;
-        if (c.left <= 1e-9) {
-          c.idx++;
-          c.left = c.idx < layers.length ? layers[c.idx].units : 0;
-        }
-      }
-      cursor.set(ck, c);
-    }
-    cost += want * (before ? preConsl : (layers[layers.length - 1]?.unitCost ?? preConsl));
-    return { amount: -cost, units: move.units };
-  }
+  if (move.units < 0) return { amount: -takeCost(ck, layers, product, -move.units, move.at, cursor), units: move.units };
   let back = move.units;
   let credit = 0;
   const c = before ? undefined : cursor.get(ck);
@@ -918,11 +970,22 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
     }
   }
 
-  const [sales, moves] = await Promise.all([allSales(orgId, scope, amazonSkus, excludedSources, exclusions.mcf, queueOf), loadStockMoves(scope)]);
+  const [sales, moves, rawLosses] = await Promise.all([allSales(orgId, scope, amazonSkus, excludedSources, exclusions.mcf, queueOf), loadStockMoves(scope), rawWriteOffs()]);
 
   // Stock moves always ride the walk (they change what every later sale draws); they only count
-  // when Amazon is in view — as part of Cost of goods, on their own lines.
+  // when Amazon is in view — as part of Cost of goods, on their own lines. Write-offs belong to the
+  // whole company: each channel in view takes its share.
   const stock = emptyPnlStock();
+  const shareOf = channelShares(sales, present[0]);
+  const writeOff = (at: number, amount: number, units: number) => {
+    for (const [channel, share] of shareOf(at)) {
+      if (!selectedSet.has(channel)) continue;
+      stock.writeoffs.units += units * share;
+      stock.writeoffs.cogs += amount * share;
+      periods.addStock(at, "writeoffs", units * share, amount * share);
+    }
+  };
+  for (const w of rawLosses) if (w.at >= from.getTime() && w.at <= to.getTime()) writeOff(w.at, w.amount, 0);
   const fifo = await fifoCogs(
     [...sales, ...pendingSales],
     from,
@@ -939,6 +1002,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
       stock[move.line].cogs += amount;
       periods.addStock(move.at, move.line, units, amount);
     },
+    writeOff,
   );
   const groups = pnlGroups(blocks);
   const cogs = fifo.cogs + pnlStockTotal(stock);
@@ -1240,8 +1304,19 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
 
   mark("pending bridges");
   // Every sale on record, priced by the same FIFO walk, each landing on its channel and day.
-  const [sales, moves] = await Promise.all([allSales(orgId, scope, amazonSkus, excludedSources, exclusions.mcf, queueOf), loadStockMoves(scope)]);
+  const [sales, moves, rawLosses] = await Promise.all([allSales(orgId, scope, amazonSkus, excludedSources, exclusions.mcf, queueOf), loadStockMoves(scope), rawWriteOffs()]);
   mark("load sales");
+  // Write-offs belong to the whole company: each channel takes its share, by units sold.
+  const shareOf = channelShares(sales, present[0]);
+  const onWriteOff = (at: number, amount: number, units: number) => {
+    for (const [channel, share] of shareOf(at)) {
+      const t = tally(channel, dayOf(at));
+      t.cogs += amount * share;
+      t.stock.writeoffs.units += units * share;
+      t.stock.writeoffs.cogs += amount * share;
+    }
+  };
+  for (const w of rawLosses) onWriteOff(w.at, w.amount, 0);
   const onMove = (move: StockMove, amount: number, units: number) => {
     const t = tally("AMAZON", dayOf(move.at));
     t.cogs += amount;
@@ -1264,7 +1339,7 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
     t.unplaced.units += detail.unplacedUnits;
     t.unplaced.cogs += detail.unplacedCogs;
     if (detail.unmatched) t.unmatched.add(detail.unmatched);
-  }, moves, onMove);
+  }, moves, onMove, onWriteOff);
 
   mark("fifo walk (queues + replay)");
   const lotIds = new Map<string, string>();

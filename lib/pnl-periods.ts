@@ -1,4 +1,4 @@
-import { GROUP_ORDER, PNL_CHANNEL_LABEL, PNL_SOURCE_ORDER, emptyPnlStock, sourceBits, sourcesFromBits, type Pnl, type PnlBreakdown, type PnlChannel, type PnlDay, type PnlGroupBlock, type PnlHistory, type PnlPeriod, type PnlPeriodRange, type PnlSource, type PnlStatement, type PnlStock } from "@/lib/pnl-shared";
+import { GROUP_ORDER, PNL_CHANNEL_LABEL, PNL_SOURCE_ORDER, PNL_STOCK_LINES, emptyPnlStock, sourceBits, sourcesFromBits, type Pnl, type PnlBreakdown, type PnlChannel, type PnlDay, type PnlGroupBlock, type PnlHistory, type PnlPeriod, type PnlPeriodRange, type PnlSource, type PnlStatement, type PnlStock } from "@/lib/pnl-shared";
 
 const iso = (date: Date) => date.toISOString().slice(0, 10);
 const dateOf = (day: string) => new Date(`${day}T00:00:00Z`);
@@ -97,20 +97,19 @@ export function statementFrom(blocks: Blocks, cogs: number, unitsSold: number, m
   return { groups, sales, cogs, unitsSold, mcf, unreported, stock, netProfit, margin: sales !== 0 ? netProfit / sales : null, roi: cogs !== 0 ? netProfit / Math.abs(cogs) : null };
 }
 
-/** Compact stock lines for a PnlDay — omitted when there are none. */
+/** Compact stock lines for a PnlDay — [units, cost] per line in PNL_STOCK_LINES order; omitted when
+ *  there are none. */
 export function encodeStock(s: PnlStock): PnlDay["stk"] {
-  const v: [number, number, number, number, number, number] = [s.removals.units, s.removals.cogs, s.lost.units, s.lost.cogs, s.back.units, s.back.cogs];
+  const v = PNL_STOCK_LINES.flatMap((line) => [s[line].units, s[line].cogs]);
   return v.some((n) => n !== 0) ? v : undefined;
 }
 
 function addStock(into: PnlStock, stk: PnlDay["stk"]) {
   if (!stk) return;
-  into.removals.units += stk[0];
-  into.removals.cogs += stk[1];
-  into.lost.units += stk[2];
-  into.lost.cogs += stk[3];
-  into.back.units += stk[4];
-  into.back.cogs += stk[5];
+  PNL_STOCK_LINES.forEach((line, i) => {
+    into[line].units += stk[2 * i] ?? 0;
+    into[line].cogs += stk[2 * i + 1] ?? 0;
+  });
 }
 
 /** Daily statements → compact days (one channel), as the self-check uses them. Empty days are left out. */

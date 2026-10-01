@@ -58,9 +58,9 @@ export type PnlDay = {
   units: number;
   mcf: [number, number];
   unreported: [number, number];
-  /** Stock that left Amazon without a sale or came back, part of `cogs`: units and cost of the
-   *  removal orders, the lost & destroyed, and the found & returned (see PnlStock). */
-  stk?: [number, number, number, number, number, number];
+  /** Stock that left without a sale or came back, part of `cogs`: units and cost of the removal
+   *  orders, the lost & destroyed, the found & returned, and the write-offs (see PnlStock). */
+  stk?: number[];
   /** Units priced from lots not fully costed yet, their (negative) cost, and those lots' ids. */
   est?: [number, number, string[]];
   /** Units sold before the product's first recorded layer / beyond everything recorded shipped. */
@@ -107,18 +107,21 @@ export type PnlStatement = Pick<Pnl, "groups" | "sales" | "cogs" | "unitsSold" |
 
 /** One Cost of goods line beside the units sold: units (signed: − left, + came back) and cost. */
 export type PnlStockLine = { units: number; cogs: number };
-/** Amazon stock that left without a sale or came back (lib/amazon-stock-events), inside Cost of
- *  goods: removal orders; lost & destroyed (lost in the warehouse or on the way in, destroyed,
- *  taken out by Amazon); found & returned (found, credited back, customer returns back in stock). */
-export type PnlStock = { removals: PnlStockLine; lost: PnlStockLine; back: PnlStockLine };
-export const PNL_STOCK_LINES = ["removals", "lost", "back"] as const;
+/** Stock that left without a sale or came back, inside Cost of goods. Amazon's (lib/amazon-stock-
+ *  events): removal orders; lost & destroyed (lost in the warehouse or on the way in, destroyed,
+ *  taken out by Amazon); found & returned (found, credited back, customer returns back in stock).
+ *  The company's own (Movements): write-offs — lost raw materials, finished goods written off or
+ *  sent out as samples — split across channels by units sold. */
+export type PnlStock = { removals: PnlStockLine; lost: PnlStockLine; back: PnlStockLine; writeoffs: PnlStockLine };
+export const PNL_STOCK_LINES = ["removals", "lost", "back", "writeoffs"] as const;
 export const PNL_STOCK_LABEL: Record<(typeof PNL_STOCK_LINES)[number], string> = {
   removals: "Removal orders",
   lost: "Lost & destroyed",
   back: "Found & returned",
+  writeoffs: "Write-offs",
 };
-export const emptyPnlStock = (): PnlStock => ({ removals: { units: 0, cogs: 0 }, lost: { units: 0, cogs: 0 }, back: { units: 0, cogs: 0 } });
-export const pnlStockTotal = (s: PnlStock) => s.removals.cogs + s.lost.cogs + s.back.cogs;
+export const emptyPnlStock = (): PnlStock => ({ removals: { units: 0, cogs: 0 }, lost: { units: 0, cogs: 0 }, back: { units: 0, cogs: 0 }, writeoffs: { units: 0, cogs: 0 } });
+export const pnlStockTotal = (s: PnlStock) => s.removals.cogs + s.lost.cogs + s.back.cogs + s.writeoffs.cogs;
 export type PnlPeriod = PnlPeriodRange & { statement: PnlStatement };
 
 export type Pnl = {
