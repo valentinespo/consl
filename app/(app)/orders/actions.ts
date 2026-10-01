@@ -41,7 +41,8 @@ const touched = () => {
 async function setVoid(ids: string[], kind: VoidKind | null) {
   const gate = await requirePermission("inventory", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };
-  await prisma.salesOrder.updateMany({ where: { id: { in: ids } }, data: { ...voidFlags(kind), voidedManual: true, voidRuleId: null } });
+  // An Amazon removal order isn't a sale: nothing to void (lib/amazon-removals).
+  await prisma.salesOrder.updateMany({ where: { id: { in: ids }, removal: false }, data: { ...voidFlags(kind), voidedManual: true, voidRuleId: null } });
   touched();
   return { ok: true as const };
 }
@@ -100,7 +101,8 @@ export async function addOrderFees(orderIds: string[], fee: FeeInput) {
   if (!gate.ok) return { ok: false as const, error: gate.error };
   const bad = checkFee(fee);
   if (bad) return { ok: false as const, error: bad };
-  const orders = await prisma.salesOrder.findMany({ where: { id: { in: orderIds } }, select: { id: true, total: true } });
+  // Never on an Amazon removal order: its only fee is Amazon's own, already on the P&L once.
+  const orders = await prisma.salesOrder.findMany({ where: { id: { in: orderIds }, removal: false }, select: { id: true, total: true } });
   if (orders.length === 0) return { ok: false as const, error: "No orders selected." };
   await prisma.orderFee.createMany({
     data: orders.map((o) => ({ orderId: o.id, ruleId: null, name: fee.name.trim(), amount: feeAmount(fee.kind, fee.value, o.total, extraOf(fee)), bucket: bucketOf(fee) })),
@@ -131,7 +133,7 @@ export async function addOrderCredits(orderIds: string[], credit: CreditInput) {
   if (!gate.ok) return { ok: false as const, error: gate.error };
   const bad = checkCredit(credit);
   if (bad) return { ok: false as const, error: bad };
-  const orders = await prisma.salesOrder.findMany({ where: { id: { in: orderIds } }, select: { id: true, total: true } });
+  const orders = await prisma.salesOrder.findMany({ where: { id: { in: orderIds }, removal: false }, select: { id: true, total: true } });
   if (orders.length === 0) return { ok: false as const, error: "No orders selected." };
   await prisma.orderFee.createMany({
     data: orders.map((o) => ({ orderId: o.id, ruleId: null, type: "credit", name: credit.name.trim(), amount: feeAmount(credit.kind, credit.value, o.total, null), bucket: credit.bucket })),
@@ -155,7 +157,7 @@ export async function setFulfillmentOverrides(orderIds: string[], facilityId: st
   const gate = await requirePermission("inventory", "edit");
   if (!gate.ok) return { ok: false as const, error: gate.error };
   if (facilityId && !(await prisma.facility.findFirst({ where: { id: facilityId }, select: { id: true } }))) return { ok: false as const, error: "Pick a facility." };
-  await prisma.salesOrder.updateMany({ where: { id: { in: orderIds } }, data: { fulfillmentOverrideFacilityId: facilityId } });
+  await prisma.salesOrder.updateMany({ where: { id: { in: orderIds }, removal: false }, data: { fulfillmentOverrideFacilityId: facilityId } });
   await applyFeeRulesToOrders(orderIds);
   touched();
   return { ok: true as const };

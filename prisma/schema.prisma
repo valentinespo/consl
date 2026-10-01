@@ -107,6 +107,7 @@ model Organization {
   metaAdAccounts          MetaAdAccount[]
   xeroSetup               XeroSetup?
   stockEvents             StockEvent[]
+  amazonRemovals          AmazonRemoval[]
   orderFeeRules           OrderFeeRule[]
   adInvoices              AdInvoice[]
   orderFees               OrderFee[]
@@ -182,6 +183,31 @@ model StockEvent {
 
   @@index([orgId, channel, at])
   @@index([orgId, source, at])
+}
+
+/// One Amazon removal order — stock the seller (or Amazon's automatic removals) pulled out of
+/// Amazon: sent back, sent to a buyer, or disposed of. From Amazon's removal order report, the
+/// record of what each asked for, shipped, cancelled and was charged (lib/amazon-removals). Shown
+/// on the Orders tab; never a sale. Amazon's order feed lists the ones that ship like MCF orders —
+/// those copies carry SalesOrder.removal.
+model AmazonRemoval {
+  id           String        @id @default(cuid())
+  orgId        String?
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  removalId    String // Amazon's order-id for it (the id it was given when created) = SalesOrder.mcfRef of its copy
+  requestedAt  DateTime
+  type         String // Return | Disposal | Liquidation
+  status       String // Amazon's order-status: Completed | Cancelled | Pending | …
+  source       String? // who made it: a seller's manual removal, Amazon's automatic ones…
+  // Per product: { sku, disposition, requested, shipped, disposed, cancelled, inProcess, fee }.
+  lines        Json
+  fee          Float         @default(0) // Amazon's removal fee for it (the money ledger books it; shown here, never added)
+  currency     String        @default("USD")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@unique([orgId, removalId])
+  @@index([orgId, requestedAt])
 }
 
 model XeroSetup {
@@ -608,6 +634,10 @@ model Settings {
   // when the first 18-month read finished, and when the last refresh ran.
   amazonStockEventsBackfilledAt DateTime?
   amazonStockEventsSyncedAt     DateTime?
+  // Amazon's removal orders report (AmazonRemoval): when it was last read, and up to when it is
+  // complete — MCF orders placed after that wait to be matched, so a removal is never matched.
+  amazonRemovalsSyncedAt  DateTime?
+  amazonRemovalsThrough   DateTime?
   // Amazon Ads daily spend: the last day read (walks forward; the refresh re-reads a few days of
   // overlap) and the first day covered. Once there is data, the P&L places the ad INVOICES day by
   // day along this spend (lib/ads-waterfill) — the invoices stay the amount of record.
@@ -1018,6 +1048,11 @@ model SalesOrder {
   mcfRef       String?
   mcfChannel   String?
   mcfOrderId   String?
+  // Amazon's order feed lists removal orders (stock pulled out of Amazon) exactly like MCF orders.
+  // A copy whose reference is one of Amazon's removal orders (AmazonRemoval) is marked here and is
+  // not a sale: no order total, no cost, no fee rule, never matched. Its units' cost counts once,
+  // from Amazon's ledger (StockEvent REMOVAL); Amazon's removal fee once, from the money ledger.
+  removal      Boolean         @default(false)
   replacement  Boolean         @default(false)
   // Voided = out of every total, washed out in the list. Operator-set from the row menu ONLY —
   // imports never touch it. (Cancelled has its own flag; free units/samples carry real COG and

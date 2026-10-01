@@ -2,6 +2,8 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { decryptSecret } from "@/lib/secret-box";
 import { getOrderSellerRef, makeClient } from "@/lib/spapi";
+import { getOrgSettings } from "@/lib/settings";
+import { markRemovalOrders } from "@/lib/amazon-removals";
 import type { PnlChannel } from "@/lib/pnl-shared";
 
 /**
@@ -19,6 +21,8 @@ import type { PnlChannel } from "@/lib/pnl-shared";
  *     before it, with the same products and quantities, that no other MCF order took;
  *  3. failing that, nothing — the P&L splits its fees by each channel's share of the orders Amazon
  *     shipped for them that month (see mcfMoves).
+ * Amazon's removal orders come through the same feed looking like MCF orders (lib/amazon-removals):
+ * they are never matched, and an order waits until Amazon's removal list covers its day.
  */
 
 const DAY = 86_400_000;
@@ -77,8 +81,12 @@ const shape = (lines: Lines) =>
 
 /** Match every MCF order that has its reference but no channel yet. Idempotent; cheap when nothing is new. */
 export async function matchMcfOrders(): Promise<{ matched: number; unmatched: number }> {
+  // Removals first, so none is ever matched; and only orders the removal list already covers.
+  await markRemovalOrders();
+  const { amazonRemovalsThrough: covered } = await getOrgSettings();
+  if (!covered) return { matched: 0, unmatched: 0 };
   const pending = await prisma.salesOrder.findMany({
-    where: { channel: "AMAZON", mcf: true, mcfChannel: null, mcfRef: { not: null } },
+    where: { channel: "AMAZON", mcf: true, removal: false, mcfChannel: null, mcfRef: { not: null }, orderedAt: { lte: covered } },
     select: { id: true, orderedAt: true, mcfRef: true, lines: { select: { productId: true, quantity: true } } },
   });
   if (!pending.length) return { matched: 0, unmatched: 0 };
@@ -94,7 +102,7 @@ export async function matchMcfOrders(): Promise<{ matched: number; unmatched: nu
   const byKey = new Map<string, (typeof named)[number][]>();
   for (const s of named) for (const k of [s.orderNumber, s.externalId]) if (k) byKey.set(k, [...(byKey.get(k) ?? []), s]);
 
-  const taken = new Set((await prisma.salesOrder.findMany({ where: { channel: "AMAZON", mcf: true, mcfOrderId: { not: null } }, select: { mcfOrderId: true } })).map((o) => o.mcfOrderId!));
+  const taken = new Set((await prisma.salesOrder.findMany({ where: { channel: "AMAZON", mcf: true, removal: false, mcfOrderId: { not: null } }, select: { mcfOrderId: true } })).map((o) => o.mcfOrderId!));
   const channelOf = (s: { channel: string; source: string | null }): PnlChannel => (s.channel === "SHOPIFY" ? mirrorOf(s.source) : null) ?? (s.channel as PnlChannel);
   // What the P&L needs is the channel: candidates that all belong to one channel settle it (the
   // first of them is kept as the order); candidates on two channels settle nothing.
@@ -164,11 +172,11 @@ export async function mcfMoves(
   amazonSkus: string[],
 ): Promise<McfMove[]> {
   if (!present.includes("AMAZON") || present.length < 2) return [];
-  const rows = await prisma.$queryRaw<{ group: string; type: string; day: string; month: string; target: string | null; via: string | null; amount: number }[]>`
+  const rows = await prisma.$queryRaw<{ group: string; type: string; day: string; month: string; target: string | null; via: string | null; removal: boolean; amount: number }[]>`
     SELECT fe."group", fe.type,
       (fe."eventAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::date::text AS day,
       to_char(fe."eventAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz}, 'YYYY-MM') AS month,
-      so."mcfChannel" AS target, m.channel AS via,
+      so."mcfChannel" AS target, m.channel AS via, COALESCE(so.removal, false) AS removal,
       COALESCE(SUM(fe."baseAmount"), 0)::float8 AS amount
     FROM "FinanceEvent" fe
     LEFT JOIN "SalesOrder" so ON so."orgId" = fe."orgId" AND so.channel = 'AMAZON' AND so."externalId" = fe."orderId" AND so.mcf
@@ -182,12 +190,14 @@ export async function mcfMoves(
         WHERE v."orgId" = fe."orgId" AND v.channel = 'AMAZON' AND v."externalId" = fe."orderId" AND (v.voided OR v."revenueVoided"))
       AND (fe."txId" IS NULL OR fe."txId" NOT LIKE 'ads:%')
       AND fe."group" <> 'cash'
-    GROUP BY 1, 2, 3, 4, 5, 6`;
+    GROUP BY 1, 2, 3, 4, 5, 6, 7`;
   if (!rows.length) return [];
 
   const shares = await mcfShares(orgId, tz, present);
   const out: McfMove[] = [];
   for (const r of rows) {
+    // A removal's money (its fee) is Amazon's: it never moves.
+    if (r.removal) continue;
     const to = mcfRoute(r.target, r.via, r.month, present, shares);
     if (to.length) out.push({ day: r.day, group: r.group, type: r.type, amount: r.amount, to });
   }

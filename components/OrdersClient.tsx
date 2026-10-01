@@ -25,6 +25,12 @@ const PILL = "inline-flex items-center whitespace-nowrap rounded-full border px-
 /** The order's lifecycle as a pill. Cancelled wins; platform statuses map to a small shared
  *  vocabulary; anything unrecognized still shows, prettified, as a neutral pill. */
 function statusPill(o: OrderRow): { label: string; cls: string } | null {
+  // A removal's outcome comes from Amazon's removal report, not the order feed (which calls a
+  // removal Amazon cancelled "shipped").
+  if (o.removal) {
+    const s = o.removal.status;
+    return { label: s, cls: s === "Cancelled" ? "pill-red" : s === "Shipped" || s === "Disposed" ? "pill-green" : "pill-amber" };
+  }
   if (o.cancelled) return { label: "Cancelled", cls: "pill-red" };
   const s = (o.status ?? "").toLowerCase().replace(/_/g, " ");
   if (!s) return null;
@@ -325,10 +331,12 @@ export function OrdersClient({
       else next.add(id);
       return next;
     });
-  // Only rows on this page count as selected — a page change or filter silently drops the rest.
-  const selectedIds = orders.rows.filter((r) => selected.has(r.id)).map((r) => r.id);
-  const allSelected = orders.rows.length > 0 && selectedIds.length === orders.rows.length;
-  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(orders.rows.map((r) => r.id)));
+  // Only rows on this page count as selected — a page change or filter silently drops the rest. A
+  // removal order takes no fee, credit or void, so it is never selected.
+  const selectable = orders.rows.filter((r) => !r.removal);
+  const selectedIds = selectable.filter((r) => selected.has(r.id)).map((r) => r.id);
+  const allSelected = selectable.length > 0 && selectedIds.length === selectable.length;
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(selectable.map((r) => r.id)));
   const toggleOne = (id: string) =>
     setSelected((cur) => {
       const next = new Set(cur);
@@ -569,12 +577,12 @@ export function OrdersClient({
                 {orders.rows.map((o) => {
                   const st = statusPill(o);
                   const open = expanded.has(o.id);
-                  const dim = o.cancelled || o.voided || o.excluded ? "opacity-45" : "";
+                  const dim = o.cancelled || o.voided || o.excluded || o.removal ? "opacity-45" : "";
                   return (
                   <Fragment key={o.id}>
                   <tr className={`${open ? "" : "border-b border-line last:border-0"} ${dim} ${selected.has(o.id) ? "bg-accent-soft/40" : ""}`}>
                     <td className="px-3 py-2.5">
-                      <input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleOne(o.id)} aria-label="Select order" className="h-4 w-4 accent-accent-strong" />
+                      {!o.removal && <input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleOne(o.id)} aria-label="Select order" className="h-4 w-4 accent-accent-strong" />}
                     </td>
                     <td className="px-1 py-2.5">
                       <button
@@ -594,6 +602,15 @@ export function OrdersClient({
                         {o.mcf && (
                           <HoverHint title="MCF order" body="Amazon shipped this for another channel (e.g. a Shopify order). The money lives on that channel's own order, so $0 here is correct." className="align-middle">
                             <span className={`${PILL} pill-chart`}>MCF</span>
+                          </HoverHint>
+                        )}
+                        {o.removal && (
+                          <HoverHint
+                            title="Removal order"
+                            body="Stock pulled out of Amazon (sent back, sent to a buyer, or disposed of), not a sale: it counts in no order total. The units that left count once on the P&L, under Cost of goods (Removal orders), and Amazon's removal fee once, under Removals & disposal."
+                            className="align-middle"
+                          >
+                            <span className={`${PILL} pill-neutral`}>Removal</span>
                           </HoverHint>
                         )}
                         {o.replacement && (
@@ -679,7 +696,7 @@ export function OrdersClient({
                           column's width (the hint's trigger is inline, so a column wrap alone
                           would leave a short "fees" line sitting beside the total). */}
                       <div className="flex flex-col items-end">
-                        <span className="whitespace-nowrap">{money(o.total)}</span>
+                        <span className="whitespace-nowrap">{o.removal ? <span className="text-muted">—</span> : money(o.total)}</span>
                         {o.fees.length > 0 && (
                           <HoverHint title="Custom fees" body={o.fees.map((f) => `${f.name}: ${money(f.amount)}`).join(" · ")}>
                             <span className="whitespace-nowrap text-[11px] text-muted">−{money(o.feeTotal)} fees</span>
@@ -699,8 +716,14 @@ export function OrdersClient({
                           sticks to the left, so it never pushes the table wider. */}
                       <td colSpan={11} className="px-3 pb-3 pt-0.5">
                         <div className="sticky left-3 flex min-w-[640px] flex-col gap-2" style={viewW > 0 ? { width: viewW - 24 } : undefined}>
-                          <OrderLines lines={o.lines} money={money} />
-                          <OrderAdjustments order={o} facilities={fees.facilities} />
+                          {o.removal ? (
+                            <RemovalLines removal={o.removal} money={money} />
+                          ) : (
+                            <>
+                              <OrderLines lines={o.lines} money={money} />
+                              <OrderAdjustments order={o} facilities={fees.facilities} />
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -819,6 +842,70 @@ function OrderLines({ lines, money }: { lines: OrderRow["lines"]; money: (v: num
         </tbody>
       </table>
       <div className="border-t border-line px-3 py-1.5 text-[11px] text-muted">Product prices are net of promotions. Shipping, tax and order-level discounts sit in the order total.</div>
+    </div>
+  );
+}
+
+/** An opened removal order: per product, what it asked Amazon to remove, what actually left and
+ *  what Amazon cancelled — from Amazon's removal report — and where it lands on the P&L. Sized and
+ *  pinned like OrderLines. */
+function RemovalLines({ removal, money }: { removal: NonNullable<OrderRow["removal"]>; money: (v: number) => string }) {
+  const disposal = /disposal/i.test(removal.type);
+  const left = removal.lines.reduce((t, l) => t + l.left, 0);
+  return (
+    <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <table className="w-full table-fixed border-collapse text-[12.5px]">
+        <colgroup>
+          <col />
+          <col className="w-[200px]" />
+          <col className="w-[96px]" />
+          <col className="w-[96px]" />
+          <col className="w-[96px]" />
+        </colgroup>
+        <thead>
+          <tr className="border-b border-line bg-surface-2/50 text-[10.5px] font-medium uppercase tracking-wide text-muted">
+            <th className="whitespace-nowrap px-3 py-1.5 text-left font-medium">Item</th>
+            <th className="whitespace-nowrap px-3 py-1.5 text-left font-medium">Amazon SKU</th>
+            <th className="whitespace-nowrap px-3 py-1.5 text-right font-medium">Asked</th>
+            <th className="whitespace-nowrap px-3 py-1.5 text-right font-medium">{disposal ? "Disposed" : "Shipped"}</th>
+            <th className="whitespace-nowrap px-3 py-1.5 text-right font-medium">Cancelled</th>
+          </tr>
+        </thead>
+        <tbody>
+          {removal.lines.length === 0 && (
+            <tr>
+              <td colSpan={5} className="px-3 py-1.5 text-muted">Amazon&apos;s removal report doesn&apos;t list this one yet.</td>
+            </tr>
+          )}
+          {removal.lines.map((l, i) => (
+            <tr key={i} className="border-b border-line last:border-0">
+              <td className="overflow-hidden px-3 py-1.5">
+                <span className="flex min-w-0 items-center gap-2">
+                  <SkuAvatar code={l.code ?? l.sku} imageUrl={l.imageUrl} size={24} />
+                  <span className="flex min-w-0 flex-col leading-tight">
+                    <span className="truncate font-medium text-ink">{l.code ?? <span className="font-normal text-muted">Not mapped to a product</span>}</span>
+                    {l.name && <span className="truncate text-[11px] text-muted" title={l.name}>{l.name}</span>}
+                  </span>
+                </span>
+              </td>
+              <td className="truncate px-3 py-1.5 text-ink-soft" title={l.sku}>{l.sku}</td>
+              <td className="whitespace-nowrap px-3 py-1.5 text-right tabular text-ink-soft">{l.requested.toLocaleString()}</td>
+              <td className="whitespace-nowrap px-3 py-1.5 text-right tabular text-ink">
+                {l.left.toLocaleString()}
+                {l.inProcess > 0 && <span className="ml-1 text-[11px] text-muted">+{l.inProcess} in progress</span>}
+              </td>
+              <td className="whitespace-nowrap px-3 py-1.5 text-right tabular text-ink-soft">{l.cancelled.toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="border-t border-line px-3 py-1.5 text-[11px] text-muted">
+        Not a sale.{" "}
+        {left > 0
+          ? `The ${left.toLocaleString()} ${left === 1 ? "unit" : "units"} that left Amazon count once on the P&L, under Cost of goods (Removal orders).`
+          : "Nothing left Amazon, so it adds no cost."}{" "}
+        {removal.fee > 0 ? `Amazon's fee for it, ${money(removal.fee)}, counts once, under Removals & disposal.` : "Amazon charged no fee for it."}
+      </div>
     </div>
   );
 }

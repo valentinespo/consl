@@ -21,6 +21,7 @@ import {
   lastAmazonAdsTick,
   lastMetaAdsTick,
   lastAmazonStockEvents,
+  lastAmazonRemovals,
   lastShopifyBillingCheck,
   nudgeOrgImports,
 } from "@/lib/scheduler-gates";
@@ -502,6 +503,21 @@ async function backfillTick(): Promise<void> {
           if (!s.syncEnabled) return;
           const conn = await prisma.integration.findFirst({ where: { provider: "amazon", status: "connected" }, select: { id: true } });
           if (!conn) return;
+          // Amazon's removal orders (lib/amazon-removals), first and on its own: every two hours —
+          // new MCF orders wait for it before they're matched, so a removal is never taken for a
+          // sale. Amazon refuses the same report asked again within minutes: a failed read waits
+          // half an hour.
+          const removalsAt = s.amazonRemovalsSyncedAt?.getTime() ?? 0;
+          if (Date.now() - removalsAt >= 2 * 3_600_000 && Date.now() - (lastAmazonRemovals.get(orgId) ?? 0) >= 30 * 60_000) {
+            lastAmazonRemovals.set(orgId, Date.now());
+            try {
+              const { syncAmazonRemovals } = await import("@/lib/amazon-removals");
+              const rm = await syncAmazonRemovals();
+              if (rm) console.log(`[scheduler] amazon removals for ${orgId}: ${rm.removals} removal orders, ${rm.marked} order copies marked (${rm.from}..${rm.to})`);
+            } catch (e) {
+              console.error(`[scheduler] amazon removals failed for org ${orgId}:`, (e as Error).message);
+            }
+          }
           const { backfillAmazonOrdersStep, backfillAmazonShipFromStep } = await import("@/lib/orders");
           const r = await backfillAmazonOrdersStep();
           if (r.imported > 0) console.log(`[scheduler] amazon order backfill for ${orgId}: +${r.imported} (cursor ${r.cursor}${r.done ? ", done" : ""})`);

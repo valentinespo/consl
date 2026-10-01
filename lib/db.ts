@@ -12,6 +12,7 @@ export const TENANT_MODELS = new Set([
   "MetaAdAccount",
   "XeroSetup",
   "StockEvent",
+  "AmazonRemoval",
   "Supplier",
   "Product",
   "SkuSnapshot",

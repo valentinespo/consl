@@ -728,7 +728,7 @@ async function allSales(
     SELECT l."productId", l.quantity::int AS units, o."orderedAt" AS at,
       COALESCE(o."fulfillmentOverrideFacilityId", o."fulfillmentFacilityId") AS facility
     FROM "SalesOrderLine" l JOIN "SalesOrder" o ON o.id = l."orderId"
-    WHERE o."orgId" = ${orgId} AND o.channel = 'AMAZON' AND o.mcf = false AND l."productId" IS NOT NULL
+    WHERE o."orgId" = ${orgId} AND o.channel = 'AMAZON' AND o.mcf = false AND o.removal = false AND l."productId" IS NOT NULL
       AND o.cancelled = false AND o.voided = false AND o."cogsVoided" = false AND o.total = 0
       AND o.status IN ('Shipped', 'PartiallyShipped')
       AND NOT EXISTS (
@@ -736,12 +736,13 @@ async function allSales(
         WHERE fe."orgId" = o."orgId" AND fe.channel = 'AMAZON' AND fe."orderId" = o."externalId" AND fe.type = 'Principal')`;
   for (const r of unreportedRows) sales.push({ productId: r.productId, units: r.units, at: r.at.getTime(), channel: "AMAZON", queue: queueOf(r.facility), unreported: true });
   // Amazon the only channel: the MCF orders' units count too, from the Orders tab, as their own line.
+  // Never a removal order's copy (lib/amazon-removals): its units count once, under Removal orders.
   if (!mcfExcluded) {
     const mcfRows = await prisma.$queryRaw<{ productId: string; units: number; at: Date; facility: string | null }[]>`
       SELECT l."productId", l.quantity::int AS units, o."orderedAt" AS at,
         COALESCE(o."fulfillmentOverrideFacilityId", o."fulfillmentFacilityId") AS facility
       FROM "SalesOrderLine" l JOIN "SalesOrder" o ON o.id = l."orderId"
-      WHERE o."orgId" = ${orgId} AND o.channel = 'AMAZON' AND o.mcf = true AND l."productId" IS NOT NULL
+      WHERE o."orgId" = ${orgId} AND o.channel = 'AMAZON' AND o.mcf = true AND o.removal = false AND l."productId" IS NOT NULL
         AND o.cancelled = false AND o.voided = false AND o."cogsVoided" = false`;
     for (const r of mcfRows) sales.push({ productId: r.productId, units: r.units, at: r.at.getTime(), channel: "AMAZON", queue: queueOf(r.facility), mcf: true });
   }
@@ -906,7 +907,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
     LEFT JOIN "SalesOrder" m ON m.id = o."mcfOrderId"
     WHERE o."orgId" = ${orgId} AND (o.channel = ANY(${selected}::text[]) OR o.mcf)
       AND o."orderedAt" >= ${from} AND o."orderedAt" <= ${to}
-      AND o.cancelled = false AND o.voided = false AND o."revenueVoided" = false
+      AND o.cancelled = false AND o.voided = false AND o."revenueVoided" = false AND o.removal = false
       AND (f."ruleId" IS NULL OR o.mcf OR NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excludedSources}::text[])))`;
   // Each fee lands in the bucket its rule chose — a processor's charge under Payment processing,
   // everything else under Custom fees — as its own line. A CREDIT (money added by hand) counts
@@ -1257,7 +1258,7 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
     FROM "OrderFee" f JOIN "SalesOrder" o ON o.id = f."orderId"
     LEFT JOIN "SalesOrder" m ON m.id = o."mcfOrderId"
     WHERE o."orgId" = ${orgId} AND o.channel = ANY(${selected}::text[])
-      AND o.cancelled = false AND o.voided = false AND o."revenueVoided" = false
+      AND o.cancelled = false AND o.voided = false AND o."revenueVoided" = false AND o.removal = false
       AND (f."ruleId" IS NULL OR o.mcf OR NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excludedSources}::text[])))`;
   const feeShares = feeRows.some((f) => f.mcf) ? await mcfShares(orgId, tz, present) : new Map<string, [PnlChannel, number][]>();
   for (const f of feeRows) {

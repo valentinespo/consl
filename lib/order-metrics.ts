@@ -6,6 +6,7 @@ import { getOrgSettings } from "@/lib/settings";
 import { dayIn, todayIn } from "@/lib/channel-tz";
 import { zonedDayBounds, zonedDayStart } from "@/lib/pnl-periods";
 import { paymentMethodLabel } from "@/lib/payment-methods";
+import type { RemovalLine } from "@/lib/amazon-removals";
 
 /**
  * Read side of the orders feed.
@@ -14,7 +15,9 @@ import { paymentMethodLabel } from "@/lib/payment-methods";
  * order created by a channel that is present in consl (connected, or with orders in the feed) is
  * that channel's sale and counts there; an Amazon MCF order is Amazon shipping another present
  * channel's sale. Both stay in the list, greyed out with the Voided pill. Applied at read time, so
- * connecting a channel (or loading its history) dedups the whole past at once.
+ * connecting a channel (or loading its history) dedups the whole past at once. An Amazon REMOVAL
+ * order (SalesOrder.removal, lib/amazon-removals) is never a sale for any company: it stays in the
+ * list with the Removal pill and counts in no total.
  *
  * Money: `SalesOrder.total` is what the buyer actually PAID — shipping, taxes and discounts all
  * applied (a 100%-discounted sample order is $0). That is what the Total column and the revenue
@@ -107,6 +110,16 @@ function bounds(f: OrdersFilter, tz: string): { since: Date | null; until: Date 
 
 export type OrderLineRow = { code: string | null; name: string | null; imageUrl: string | null; sku: string | null; quantity: number; unitPrice: number };
 
+/** An Amazon removal order as Amazon's removal report has it: per product, what was asked for, what
+ *  actually left (shipped, or disposed of), what Amazon cancelled — and Amazon's fee for it. */
+export type RemovalRow = {
+  type: string;
+  /** Shipped | Disposed | Partially shipped/disposed | Cancelled | Pending — from the quantities, not the feed. */
+  status: string;
+  fee: number;
+  lines: { code: string | null; name: string | null; imageUrl: string | null; sku: string; requested: number; left: number; cancelled: number; inProcess: number }[];
+};
+
 export type OrderRow = {
   id: string;
   orderNumber: string | null;
@@ -139,6 +152,8 @@ export type OrderRow = {
   status: string | null;
   cancelled: boolean;
   mcf: boolean;
+  /** An Amazon removal order (stock pulled out of Amazon, not a sale) — null for every other order. */
+  removal: RemovalRow | null;
   replacement: boolean;
   /** A shipped Amazon order that charged $0 and isn't MCF or a replacement — Vine or another freebie. */
   freeUnit: boolean;
@@ -323,6 +338,7 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
       AND o.voided = false
       AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excluded}))
       AND NOT (${excludeMcf}::boolean AND o.mcf)
+      AND o.removal = false
       AND (${since}::timestamp IS NULL OR o."orderedAt" >= ${since})
       AND (${until}::timestamp IS NULL OR o."orderedAt" <= ${until})
       AND (${channelFilter}::text IS NULL OR o.channel = ${channelFilter})
@@ -336,6 +352,7 @@ export async function getOrdersSummary(connectedChannels: string[] = [], filter:
       AND o.voided = false
       AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excluded}))
       AND NOT (${excludeMcf}::boolean AND o.mcf)
+      AND o.removal = false
       AND (${since}::timestamp IS NULL OR o."orderedAt" >= ${since})
       AND (${until}::timestamp IS NULL OR o."orderedAt" <= ${until})
       AND (${channelFilter}::text IS NULL OR o.channel = ${channelFilter})
@@ -375,17 +392,19 @@ const FREE_UNIT_WHERE = {
 const FREE_SAMPLE_WHERE = { channel: "TIKTOK", total: 0, cancelled: false };
 
 /** The tags an order can wear — the pills beside its number — as the values of the Orders tag filter. */
-export const ORDER_TAGS = ["mcf", "replacement", "free_unit", "free_sample", "voided"] as const;
+export const ORDER_TAGS = ["mcf", "removal", "replacement", "free_unit", "free_sample", "voided"] as const;
 export type OrderTag = (typeof ORDER_TAGS)[number];
 export const isOrderTag = (v: string | undefined): v is OrderTag => !!v && (ORDER_TAGS as readonly string[]).includes(v);
-const TAG_LABEL: Record<OrderTag, string> = { mcf: "MCF", replacement: "Replacement", free_unit: "Free unit", free_sample: "Free sample", voided: "Voided" };
+const TAG_LABEL: Record<OrderTag, string> = { mcf: "MCF", removal: "Removal", replacement: "Replacement", free_unit: "Free unit", free_sample: "Free sample", voided: "Voided" };
 
 /** The orders wearing a tag. "Voided" is what the row shows for a manual void AND for an order
  *  the double-count rule drops, so the tag finds both — everything wearing the pill. */
 function tagWhere(tag: OrderTag, ex: Exclusions): Record<string, unknown> {
   switch (tag) {
     case "mcf":
-      return { mcf: true };
+      return { mcf: true, removal: false };
+    case "removal":
+      return { removal: true };
     case "replacement":
       return { replacement: true };
     case "free_unit":
@@ -399,7 +418,7 @@ function tagWhere(tag: OrderTag, ex: Exclusions): Record<string, unknown> {
           { revenueVoided: true },
           { cogsVoided: true },
           ...(ex.sources.length ? [{ channel: "SHOPIFY", source: { in: ex.sources } }] : []),
-          ...(ex.mcf ? [{ channel: "AMAZON", mcf: true }] : []),
+          ...(ex.mcf ? [{ channel: "AMAZON", mcf: true, removal: false }] : []),
         ],
       };
   }
@@ -427,6 +446,7 @@ export async function unplacedOrderCount(): Promise<number> {
       fulfillmentFacilityId: null,
       cancelled: false,
       voided: false,
+      removal: false,
       ...(dropped.length ? { NOT: dropped } : {}),
     },
   });
@@ -444,6 +464,7 @@ function searchWhere(raw: string, ex: Exclusions): Record<string, unknown> {
   const contains = (v: string) => ({ contains: v, mode: "insensitive" as const });
 
   if (["mcf", "multichannel", "multi-channel"].includes(s)) return tagWhere("mcf", ex);
+  if (["removal", "removals", "removal order", "removal orders"].includes(s)) return tagWhere("removal", ex);
   if (["replacement", "replacements"].includes(s)) return tagWhere("replacement", ex);
   if (["free", "free unit", "free units", "vine"].includes(s)) return tagWhere("free_unit", ex);
   if (["sample", "samples", "free sample", "free samples"].includes(s)) return tagWhere("free_sample", ex);
@@ -496,6 +517,8 @@ const ORDER_ROW_SELECT = {
   status: true,
   cancelled: true,
   mcf: true,
+  mcfRef: true,
+  removal: true,
   replacement: true,
   voided: true,
   cogsVoided: true,
@@ -523,6 +546,17 @@ function ordersWhere(filter: OrdersFilter, ex: Exclusions, tz: string): Record<s
         : {}),
     ...(narrow.length ? { AND: narrow } : {}),
   };
+}
+
+/** A removal's outcome from its quantities — Amazon marks one it cancelled entirely "Completed". */
+function removalStatus(type: string, status: string, lines: RemovalRow["lines"]): string {
+  const left = lines.reduce((t, l) => t + l.left, 0);
+  const cancelled = lines.reduce((t, l) => t + l.cancelled, 0);
+  if (/cancel/i.test(status) || (left === 0 && cancelled > 0 && !lines.some((l) => l.inProcess > 0))) return "Cancelled";
+  if (lines.some((l) => l.inProcess > 0) || /pending|process|plann/i.test(status)) return "Pending";
+  const disposal = /disposal/i.test(type);
+  if (cancelled > 0) return disposal ? "Partially disposed" : "Partially shipped";
+  return disposal ? "Disposed" : "Shipped";
 }
 
 export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilter = {}): Promise<OrdersPage> {
@@ -566,7 +600,32 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
     platformFees.set(k, [...(platformFees.get(k) ?? []), { name: f.type, amount: f.baseAmount ?? f.amount }]);
   }
 
-  const rows: OrderRow[] = orders.map((o) => ({
+  // Amazon's removal orders on this page, as its removal report has them (the feed's copy gets the
+  // products and the outcome wrong).
+  const removalIds = orders.flatMap((o) => (o.removal && o.mcfRef ? [o.mcfRef] : []));
+  const removals = new Map<string, RemovalRow>();
+  if (removalIds.length) {
+    const recs = await prisma.amazonRemoval.findMany({ where: { removalId: { in: removalIds } } });
+    const skus = [...new Set(recs.flatMap((r) => (r.lines as RemovalLine[]).map((l) => l.sku)))];
+    const products = new Map(
+      (await prisma.product.findMany({ where: { sellerSku: { in: skus } }, select: { sellerSku: true, code: true, name: true, imageUrl: true } })).map((p) => [p.sellerSku as string, p]),
+    );
+    for (const r of recs) {
+      const lines = (r.lines as RemovalLine[]).map((l) => {
+        const p = products.get(l.sku);
+        return { code: p?.code ?? null, name: p?.name ?? null, imageUrl: p?.imageUrl ?? null, sku: l.sku, requested: l.requested, left: l.shipped + l.disposed, cancelled: l.cancelled, inProcess: l.inProcess };
+      });
+      removals.set(r.removalId, { type: r.type, status: removalStatus(r.type, r.status, lines), fee: r.fee, lines });
+    }
+  }
+
+  const rows: OrderRow[] = orders.map((o) => {
+    const removal = o.removal ? (removals.get(o.mcfRef ?? "") ?? null) : null;
+    // A removal lists what it asked Amazon to remove (the feed's copy shows one product at most).
+    const lines = removal
+      ? removal.lines.map((l) => ({ code: l.code, name: l.name, imageUrl: l.imageUrl, sku: l.sku, quantity: l.requested, unitPrice: 0 }))
+      : o.lines.map((l) => ({ code: l.product?.code ?? null, name: l.product?.name ?? null, imageUrl: l.product?.imageUrl ?? null, sku: l.sku, quantity: l.quantity, unitPrice: l.unitPrice }));
+    return {
     id: o.id,
     orderNumber: o.orderNumber,
     channel: o.channel,
@@ -582,13 +641,14 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
     paymentDetail: o.paymentDetail,
     platformFees: platformFees.get(`${o.channel}|${o.externalId}`) ?? [],
     orderedAt: o.orderedAt.toISOString(),
-    units: o.lines.reduce((s, l) => s + l.quantity, 0),
-    lines: o.lines.map((l) => ({ code: l.product?.code ?? null, name: l.product?.name ?? null, imageUrl: l.product?.imageUrl ?? null, sku: l.sku, quantity: l.quantity, unitPrice: l.unitPrice })),
+    units: lines.reduce((s, l) => s + l.quantity, 0),
+    lines,
     total: o.total,
     currency: o.currency,
     status: o.status,
     cancelled: o.cancelled,
-    mcf: o.mcf,
+    mcf: o.mcf && !o.removal,
+    removal: removal ?? (o.removal ? { type: "Return", status: o.cancelled ? "Cancelled" : "Pending", fee: 0, lines: [] } : null),
     replacement: o.replacement,
     freeUnit:
       o.channel === "AMAZON" &&
@@ -601,12 +661,13 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
     voided: o.voided,
     cogsVoided: o.cogsVoided,
     revenueVoided: o.revenueVoided,
-    excluded: (o.channel === "SHOPIFY" && !!o.source && excluded.includes(o.source)) || (excludeMcf && o.mcf),
+    excluded: (o.channel === "SHOPIFY" && !!o.source && excluded.includes(o.source)) || (excludeMcf && o.mcf && !o.removal),
     fees: o.fees.filter((f) => f.type !== "credit").map((f) => ({ id: f.id, name: f.name, amount: f.amount, fromRule: f.ruleId !== null, bucket: f.bucket })),
     feeTotal: o.fees.filter((f) => f.type !== "credit").reduce((s, f) => s + f.amount, 0),
     credits: o.fees.filter((f) => f.type === "credit").map((f) => ({ id: f.id, name: f.name, amount: f.amount, bucket: f.bucket })),
     creditTotal: o.fees.filter((f) => f.type === "credit").reduce((s, f) => s + f.amount, 0),
-  }));
+    };
+  });
 
   return { rows, total, page: current, pageSize, pageCount };
 }
@@ -680,8 +741,9 @@ function nextBucket(d: Date, b: ChartBucket): Date {
 /**
  * The header chart for the Orders tab under the page's filters. It counts the orders the table
  * lists, less the ones that count nowhere (cancelled, voided, a mirrored copy of another channel's
- * sale) — unless the filter asks for exactly those (the Voided or MCF tag, a mirrored sales
- * channel, a search for cancelled/voided/MCF), when it counts what is listed. All time starts at
+ * sale, an Amazon removal order) — unless the filter asks for exactly those (the Voided, MCF or
+ * Removal tag, a mirrored sales channel, a search for cancelled/voided/MCF/removal), when it counts
+ * what is listed. All time starts at
  * the first order the filters match.
  */
 export async function getOrdersChart(filter: OrdersFilter, range: { from: string; to: string; allTime: boolean }): Promise<OrdersChart> {
@@ -700,7 +762,8 @@ export async function getOrdersChart(filter: OrdersFilter, range: { from: string
   const wantsUncounted =
     filter.tag === "voided" ||
     filter.tag === "mcf" ||
-    ["cancelled", "canceled", "voided", "void", "excluded", "mcf", "multichannel", "multi-channel"].includes(q.toLowerCase()) ||
+    filter.tag === "removal" ||
+    ["cancelled", "canceled", "voided", "void", "excluded", "mcf", "multichannel", "multi-channel", "removal", "removals", "removal order", "removal orders"].includes(q.toLowerCase()) ||
     (!!filter.source && ex.sources.includes(filter.source));
   const narrowed = !!q || isOrderTag(filter.tag);
 
@@ -718,6 +781,7 @@ export async function getOrdersChart(filter: OrdersFilter, range: { from: string
     const dropped = [
       ...(ex.sources.length ? [{ channel: "SHOPIFY", source: { in: ex.sources } }] : []),
       ...(ex.mcf ? [{ channel: "AMAZON", mcf: true }] : []),
+      { removal: true },
     ];
     const counting = wantsUncounted ? {} : { cancelled: false, voided: false, ...(dropped.length ? { NOT: dropped } : {}) };
     const base = ordersWhere({ ...filter, from: undefined, to: undefined }, ex, tz);
@@ -757,7 +821,8 @@ export async function getOrdersChart(filter: OrdersFilter, range: { from: string
           (${wantsUncounted}::boolean OR (
             o.cancelled = false AND o.voided = false
             AND NOT (o.channel = 'SHOPIFY' AND COALESCE(o.source, '') = ANY(${ex.sources}::text[]))
-            AND NOT (${ex.mcf}::boolean AND o.channel = 'AMAZON' AND o.mcf)))
+            AND NOT (${ex.mcf}::boolean AND o.channel = 'AMAZON' AND o.mcf)
+            AND o.removal = false))
           AND (${channel}::text IS NULL OR o.channel = ${channel})
           AND (${source}::text IS NULL OR o.source = ${source})
           AND (${place}::text IS NULL

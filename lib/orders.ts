@@ -122,12 +122,20 @@ async function persist(
   let orders = 0;
   let lines = 0;
   const touched: string[] = [];
+  // Amazon's removal orders arrive looking like MCF orders: a known one is marked as it lands
+  // (lib/amazon-removals marks the rest when it reads Amazon's list).
+  const refs = channel === "AMAZON" ? fetched.flatMap((o) => (o.mcf && o.mcfRef ? [o.mcfRef] : [])) : [];
+  const removals = refs.length
+    ? new Set((await prisma.amazonRemoval.findMany({ where: { removalId: { in: refs } }, select: { removalId: true } })).map((r) => r.removalId))
+    : new Set<string>();
   for (const o of fetched) {
     try {
       const existing = await prisma.salesOrder.findFirst({
         where: { channel, externalId: o.externalId },
-        select: { id: true, total: true },
+        select: { id: true, total: true, removal: true },
       });
+      // A removal's products come from Amazon's removal list, not the feed (lib/amazon-removals).
+      const removal = !!existing?.removal || (!!o.mcf && !!o.mcfRef && removals.has(o.mcfRef));
       const keepTotal = o.preserveNonzeroTotal && o.total === 0 && (existing?.total ?? 0) > 0;
       const data = {
         orderNumber: o.orderNumber,
@@ -145,6 +153,7 @@ async function persist(
         ...(o.customerId !== undefined ? { customerId: o.customerId } : {}),
         ...(o.ltvData !== undefined ? { ltvData: o.ltvData } : {}),
         ...(o.mcfRef ? { mcfRef: o.mcfRef } : {}),
+        ...(removal ? { removal: true } : {}),
         ...(o.shipFromKey !== undefined ? { shipFromKey: o.shipFromKey } : {}),
         ...(o.shipFromLabel !== undefined ? { shipFromLabel: o.shipFromLabel } : {}),
         ...(keepTotal ? {} : { total: o.total }),
@@ -173,8 +182,8 @@ async function persist(
       // quick poll that couldn't read items (fresh Pending) must not wipe detail already stored.
       // Not wrapped in a transaction: a rare failure between delete and create leaves the order
       // briefly line-less and the next import repairs it.
-      if (existing && o.lines.length) await prisma.salesOrderLine.deleteMany({ where: { orderId: order.id } });
-      if (o.lines.length) {
+      if (existing && o.lines.length && !removal) await prisma.salesOrderLine.deleteMany({ where: { orderId: order.id } });
+      if (o.lines.length && !(removal && existing)) {
         await prisma.salesOrderLine.createMany({
           data: o.lines.map((l) => ({
             orderId: order.id,

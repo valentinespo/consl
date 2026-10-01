@@ -41,13 +41,13 @@ type Rule = {
 };
 type Order = {
   id: string; channel: string; source: string | null; paymentMethod: string | null; fulfillmentFacilityId: string | null; fulfillmentOverrideFacilityId: string | null;
-  mcf: boolean; replacement: boolean; total: number; cancelled: boolean; status: string | null; orderedAt: Date;
+  mcf: boolean; removal: boolean; replacement: boolean; total: number; cancelled: boolean; status: string | null; orderedAt: Date;
   voided: boolean; revenueVoided: boolean; cogsVoided: boolean; voidedManual: boolean; voidRuleId: string | null;
 };
 
 const ORDER_SELECT = {
   id: true, channel: true, source: true, paymentMethod: true, fulfillmentFacilityId: true, fulfillmentOverrideFacilityId: true,
-  mcf: true, replacement: true, total: true, cancelled: true, status: true, orderedAt: true,
+  mcf: true, removal: true, replacement: true, total: true, cancelled: true, status: true, orderedAt: true,
   voided: true, revenueVoided: true, cogsVoided: true, voidedManual: true, voidRuleId: true,
 } as const;
 
@@ -56,7 +56,7 @@ export const round2 = (n: number) => Math.round(n * 100) / 100;
 /** The Orders tab's row tags, from the same rules it uses. */
 export function orderTags(o: Order): Set<string> {
   const tags = new Set<string>();
-  if (o.mcf) tags.add("mcf");
+  if (o.mcf && !o.removal) tags.add("mcf");
   if (o.replacement) tags.add("replacement");
   if (o.channel === "TIKTOK" && o.total === 0 && !o.cancelled) tags.add("free_sample");
   if (o.channel === "AMAZON" && o.total === 0 && !o.mcf && !o.replacement && !o.cancelled && (o.status === "Shipped" || o.status === "PartiallyShipped")) tags.add("free_unit");
@@ -68,7 +68,8 @@ export const effectiveFacilityId = (o: { fulfillmentFacilityId: string | null; f
   o.fulfillmentOverrideFacilityId ?? o.fulfillmentFacilityId;
 
 export function ruleMatches(rule: Rule, o: Order): boolean {
-  if (!rule.active) return false;
+  // An Amazon removal order isn't a sale (lib/amazon-removals): no fee or void rule touches it.
+  if (!rule.active || o.removal) return false;
   // When: a period beats everything; otherwise from the rule's creation, or the whole past.
   if (rule.periodFrom && o.orderedAt < rule.periodFrom) return false;
   if (rule.periodTo && o.orderedAt > rule.periodTo) return false;
@@ -198,6 +199,7 @@ export async function applyFeeRule(ruleId: string): Promise<number> {
 function ruleWhere(rule: Rule) {
   const period = rule.periodFrom || rule.periodTo;
   return {
+    removal: false,
     ...(rule.channel ? { channel: rule.channel } : {}),
     ...(rule.source ? { source: { equals: rule.source, mode: "insensitive" as const } } : {}),
     ...(rule.paymentMethod ? { paymentMethod: rule.paymentMethod } : {}),

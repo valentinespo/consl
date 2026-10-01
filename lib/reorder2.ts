@@ -40,9 +40,10 @@ export async function getReorder2(): Promise<Reorder2Data> {
 
   // Units shipped per product, per place, per company-calendar day — the velocity of every place.
   // Exactly the orders the Orders tab and the P&L count: never cancelled or voided ones, never a
-  // mirrored copy or an Amazon MCF twin of another channel's sale (activeExclusions), and never an
-  // order with no facility — consl can't tell which place sold it, so it counts nowhere until
-  // someone places it (the Orders tab flags them).
+  // mirrored copy or an Amazon MCF twin of another channel's sale (activeExclusions) or an Amazon
+  // removal order (lib/amazon-removals: stock pulled out, not sold), and never an order with no
+  // facility — consl can't tell which place sold it, so it counts nowhere until someone places it
+  // (the Orders tab flags them).
   const since = new Date(Date.now() - VELOCITY_DAYS * 86_400_000);
   const sold = await prisma.$queryRaw<{ productId: string; facility: string; d: string; units: number }[]>`
     SELECT l."productId", COALESCE(o."fulfillmentOverrideFacilityId", o."fulfillmentFacilityId") AS facility,
@@ -52,6 +53,7 @@ export async function getReorder2(): Promise<Reorder2Data> {
       AND COALESCE(o."fulfillmentOverrideFacilityId", o."fulfillmentFacilityId") IS NOT NULL
       AND NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${ex.sources}))
       AND NOT (${ex.mcf}::boolean AND o.mcf)
+      AND o.removal = false
       AND o."orderedAt" >= ${since}
     GROUP BY 1, 2, 3`;
   const daily = new Map<string, Record<string, number>>(); // productId|placeId → day → units
