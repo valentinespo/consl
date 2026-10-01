@@ -98,9 +98,12 @@ type Sale = { productId: string; units: number; at: number | null; channel: PnlC
  *  the same FIFO walk as the sales, as part of Cost of goods, on `line`. */
 type StockMove = { productId: string; units: number; at: number; kind: string; line: keyof PnlStock };
 
-/** The Cost of goods line a move lands on: removal orders; anything else that left (lost in the
- *  warehouse or on the way in, destroyed, taken out by Amazon); or anything that came back. */
-const stockLine = (kind: string, units: number): keyof PnlStock => (kind === "REMOVAL" ? "removals" : units < 0 ? "lost" : "back");
+/** The Cost of goods line a move lands on: removal orders; lost & destroyed (lost in the warehouse,
+ *  destroyed, taken out by Amazon, and lost on the way in — net: inbound units Amazon finds later
+ *  come off this line, never shown again as found); or found & returned (found in the warehouse,
+ *  credited back, customer returns). */
+const stockLine = (kind: string, units: number): keyof PnlStock =>
+  kind === "REMOVAL" ? "removals" : kind === "LOST_INBOUND" || units < 0 ? "lost" : "back";
 
 /** Every stock event of the company's managed Amazon products. */
 async function loadStockMoves(scope: Scope): Promise<StockMove[]> {
