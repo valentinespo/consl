@@ -28,7 +28,9 @@ import { IMPORTER_VERSIONS, importerVersion, stampImporterVersion } from "@/lib/
  * P&L the day it ships, not the day Amazon lets go of the cash.
  */
 
-export type PnlGroup = "sales" | "refunds" | "fba_fees" | "referral_fees" | "payment_fees" | "custom_fees" | "storage_fees" | "advertising" | "taxes" | "other";
+/** A row's section on the statement — or "cash": money a channel holds back and releases later
+ *  (a reserve), kept in the ledger for the payout to reconcile but never profit. */
+export type PnlGroup = "sales" | "refunds" | "fba_fees" | "referral_fees" | "payment_fees" | "custom_fees" | "storage_fees" | "advertising" | "taxes" | "other" | "cash";
 
 type FlatRow = {
   postedAt: Date;
@@ -83,11 +85,13 @@ function feeGroup(type: string): PnlGroup {
  * (and the shipping or gift wrap it charges back), getting stock in (inbound transportation,
  * placement), AWD's processing and transport, removals and disposals. Storage = FBA's and AWD's.
  * Vine is marketing. Reimbursements stay with the other transactions; revenue, refunds and taxes
- * never move. Migration 20261001180000_fee_sections applied the same rules to the rows on file.
+ * never move. A reserve credited or debited is cash, not profit. Migrations 20261001180000_fee_sections
+ * and 20261001200000_reserves_not_profit applied the same rules to the rows on file.
  */
 function amazonSection(type: string, group: PnlGroup): PnlGroup {
   if (group !== "other" && group !== "referral_fees") return group;
   const t = type.replace(/^MCF:/, "").toLowerCase();
+  if (/^reserve(credit|debit)$/.test(t)) return "cash";
   if (t.includes("vine")) return "advertising";
   if (t.endsWith("chargeback")) return "fba_fees";
   if (/missing|reimburs|clawback|refund|replacement/.test(t)) return group;

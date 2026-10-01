@@ -1241,7 +1241,7 @@ model FinanceEvent {
   // The P&L attribution date: the order's purchase instant for shipment-scoped money (matching how
   // sellers read a daily P&L), the posted date for everything else (refunds, ads, adjustments).
   eventAt      DateTime
-  group        String // P&L bucket: sales|refunds|fba_fees|referral_fees|storage_fees|advertising|taxes|other
+  group        String // P&L bucket: sales|refunds|fba_fees|referral_fees|storage_fees|advertising|taxes|other — or cash (a reserve held/released: never profit)
   type         String // the platform's fine-grained label, e.g. "Principal", "Commission", "FBAPerUnitFulfillmentFee"
   amount       Float // signed as the platform reports it: revenue +, fees/withholdings −
   currency     String        @default("USD")

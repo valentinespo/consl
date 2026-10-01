@@ -256,7 +256,6 @@ export function pnlLineOf(group: string, type: string, sources: PnlSource[]): st
       return "Other advertising";
     case "other":
       if (t.includes("subscription")) return "Seller subscription";
-      if (t.includes("reserve")) return "Reserves held & released";
       if (only("AMAZON") && REIMBURSEMENT_CODE.test(base)) return "Amazon reimbursements";
       return "Other adjustments";
     default:

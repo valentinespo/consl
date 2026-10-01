@@ -755,7 +755,7 @@ async function allSales(
  * `counted`, by its own query; `counted` must then equal what the statement summed. When it
  * doesn't — a filter added to one query and not the other, a row kind nobody foresaw — the
  * difference is a gap: logged as an invariant failure and shown on the page, never silent. */
-type LedgerBucket = { channel: string; day: string; bucket: "counted" | "unmanaged" | "duplicate" | "ads"; amount: number };
+type LedgerBucket = { channel: string; day: string; bucket: "counted" | "unmanaged" | "duplicate" | "ads" | "cash"; amount: number };
 
 async function ledgerBuckets(
   orgId: string,
@@ -769,6 +769,7 @@ async function ledgerBuckets(
     SELECT fe.channel,
       CASE WHEN ${tz !== null} THEN (fe."eventAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz ?? "UTC"})::date::text ELSE '' END AS day,
       CASE
+        WHEN fe."group" = 'cash' THEN 'cash'
         WHEN fe."txId" LIKE 'ads:%' OR fe.id = ANY(${adsFill.excludeIds}::text[])
           OR (${adsFill.active}::boolean AND fe.channel = 'AMAZON' AND fe.type = 'ProductAdsPayment' AND fe.amount < 0) THEN 'ads'
         WHEN EXISTS (
@@ -846,6 +847,7 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
       AND NOT (${adsFill.active}::boolean AND fe.channel = 'AMAZON' AND fe.type = 'ProductAdsPayment' AND fe.amount < 0)
       AND NOT (fe.id = ANY(${adsFill.excludeIds}::text[]))
       AND (fe."txId" IS NULL OR fe."txId" NOT LIKE 'ads:%')
+      AND fe."group" <> 'cash'
     GROUP BY 1, 2, 3, 4`;
   // One line per type inside a bucket; a type two channels both post keeps both sources.
   const blocks = new Map<string, Map<string, { amount: number; sources: Set<PnlSource> }>>();
@@ -1184,6 +1186,7 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
       AND NOT (${adsFill.active}::boolean AND fe.channel = 'AMAZON' AND fe.type = 'ProductAdsPayment' AND fe.amount < 0)
       AND NOT (fe.id = ANY(${adsFill.excludeIds}::text[]))
       AND (fe."txId" IS NULL OR fe."txId" NOT LIKE 'ads:%')
+      AND fe."group" <> 'cash'
     GROUP BY 1, 2, 3, 4, 5`;
   for (const r of sums) addPnlAmount(tally(r.channel as PnlChannel, r.day).blocks, r.group, r.type, r.amount, r.source as PnlSource);
   // Completeness, per channel and day: every ledger dollar is on a line above, or in a bucket

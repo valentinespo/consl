@@ -244,7 +244,9 @@ export function moneyLines(t: StatementTx, totals: { revenue: unknown; shipping:
   if (adj !== 0) fees.push({ type: "adjustment", name: "Adjustment", amount: String(adj), group: "other" });
   if ((t.type ?? "").toUpperCase() === "RESERVE") {
     const reserve = num(t.reserve_amount ?? totals.settlement);
-    if (reserve !== 0) fees.push({ type: "reserve", name: (t.reserve_status ?? "").toUpperCase() === "RELEASED" || reserve > 0 ? "Reserve released" : "Reserve held", amount: String(reserve), group: "other" });
+    // Money TikTok holds back and releases later: cash timing, never profit (it stays in the
+    // ledger so the payout still reconciles).
+    if (reserve !== 0) fees.push({ type: "reserve", name: (t.reserve_status ?? "").toUpperCase() === "RELEASED" || reserve > 0 ? "Reserve released" : "Reserve held", amount: String(reserve), group: "cash" });
   }
   // The whole transaction must equal what TikTok settled for it.
   const all = [...revenue, ...shipping, ...fees].reduce((s, l) => s + num(l.amount), 0);
