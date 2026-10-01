@@ -50,6 +50,14 @@ export async function setOrdersVoided(ids: string[], voided: boolean) {
   return setVoid(ids, voided ? "all" : null);
 }
 
+export async function setOrdersRevenueVoided(ids: string[], revenueVoided: boolean) {
+  return setVoid(ids, revenueVoided ? "revenue" : null);
+}
+
+export async function setOrdersCogsVoided(ids: string[], cogsVoided: boolean) {
+  return setVoid(ids, cogsVoided ? "cogs" : null);
+}
+
 /** Kept for the row menu: one order. */
 export async function setOrderVoided(id: string, voided: boolean) {
   return setOrdersVoided([id], voided);

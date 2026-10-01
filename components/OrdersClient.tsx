@@ -4,10 +4,9 @@ import Image from "next/image";
 import { Fragment, type ReactNode, useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { AlertTriangle, Building2, ChevronDown, ChevronRight, DotsVertical, Layers, Search, Settings, Tag, WarehouseFilled, X } from "@/components/icons";
+import { AlertTriangle, Building2, ChevronDown, ChevronRight, Layers, Search, Settings, Tag, WarehouseFilled, X } from "@/components/icons";
 import { PageHeader, SkuAvatar } from "@/components/ui";
 import { useMoney } from "@/components/CurrencyProvider";
-import { setOrderCogsVoided, setOrderRevenueVoided, setOrderVoided } from "@/app/(app)/orders/actions";
 import type { OrdersChart as OrdersChartData, OrdersPage, OrderRow } from "@/lib/order-metrics";
 import { OrdersChart } from "@/components/OrdersChart";
 import { inputCls } from "@/components/FormKit";
@@ -15,7 +14,7 @@ import { DateRangePicker, type Range } from "@/components/DateRangePicker";
 import { HoverHint } from "@/components/HoverHint";
 import { useExitAnimation } from "@/components/animate";
 import { ROOT_LOGO } from "@/lib/channel-logos";
-import { BulkBar, OrderDialog, RulesDialog, type FeeOptions, type DialogMode } from "@/components/OrderFees";
+import { BulkBar, OrderAdjustments, RulesDialog, type FeeOptions } from "@/components/OrderFees";
 import { paymentMethodLabel } from "@/lib/payment-methods";
 
 // Channel marks come from the shared map — Orders always talks about a whole channel.
@@ -39,125 +38,6 @@ function statusPill(o: OrderRow): { label: string; cls: string } | null {
   if (s.includes("transit")) return { label: "In transit", cls: "pill-amber" };
   if (s.includes("paid")) return { label: "Paid", cls: "pill-green" };
   return { label: s.charAt(0).toUpperCase() + s.slice(1), cls: "pill-neutral" };
-}
-
-/** The row's overflow menu (⋮): custom fees, where it shipped from, credits, and the three ways to
- *  void (revenue only, cost of goods only, the whole order — one at a time). Portalled — the
- *  table's scroll container would clip an inline popover. */
-function RowMenu({ id, voided, revenueVoided, cogsVoided, onManage }: { id: string; voided: boolean; revenueVoided: boolean; cogsVoided: boolean; onManage: (mode: DialogMode) => void }) {
-  const router = useRouter();
-  const btn = useRef<HTMLButtonElement>(null);
-  const menu = useRef<HTMLDivElement>(null);
-  const [box, setBox] = useState<{ top: number; left: number } | null>(null);
-  const [pending, start] = useTransition();
-  const open = box !== null;
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: MouseEvent) => {
-      const t = e.target as Node;
-      // The menu lives in a portal, so it is NOT inside btn — exempt both, or a press on a
-      // menu item unmounts the menu on mousedown and its click never fires.
-      if (!btn.current?.contains(t) && !menu.current?.contains(t)) setBox(null);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setBox(null);
-    const follow = () => setBox(null); // scrolling under a fixed menu — just close it
-    document.addEventListener("mousedown", close);
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", follow, true);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", follow, true);
-    };
-  }, [open]);
-
-  function toggle() {
-    if (open) return setBox(null);
-    const r = btn.current!.getBoundingClientRect();
-    setBox({ top: r.bottom + 4, left: Math.max(8, r.right - 172) });
-  }
-
-  return (
-    <>
-      <button
-        ref={btn}
-        onClick={toggle}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="Order options"
-        className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-ink"
-      >
-        <DotsVertical size={16} />
-      </button>
-      {box &&
-        createPortal(
-          <div
-            ref={menu}
-            role="menu"
-            style={{ position: "fixed", top: box.top, left: box.left, width: 172 }}
-            className="dropdown-in z-[300] rounded-xl border border-border bg-surface p-1 shadow-xl"
-          >
-            {(
-              [
-                ["fees", "Custom fees…"],
-                ["shipped", "Shipped from…"],
-                ["credits", "Credits…"],
-              ] as [DialogMode, string][]
-            ).map(([mode, label]) => (
-              <button
-                key={mode}
-                role="menuitem"
-                onClick={() => {
-                  setBox(null);
-                  onManage(mode);
-                }}
-                className="w-full rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink-soft hover:bg-surface-2 hover:text-ink"
-              >
-                {label}
-              </button>
-            ))}
-            {(
-              [
-                ["revenue", revenueVoided ? "Count revenue" : "Void revenue", () => setOrderRevenueVoided(id, !revenueVoided)],
-                ["cogs", cogsVoided ? "Count cost of goods" : "Void cost of goods", () => setOrderCogsVoided(id, !cogsVoided)],
-              ] as [string, string, () => Promise<unknown>][]
-            ).map(([key, label, run]) => (
-              <button
-                key={key}
-                role="menuitem"
-                disabled={pending}
-                onClick={() =>
-                  start(async () => {
-                    await run();
-                    setBox(null);
-                    router.refresh();
-                  })
-                }
-                className="w-full rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink-soft hover:bg-surface-2 hover:text-ink disabled:opacity-50"
-              >
-                {label}
-              </button>
-            ))}
-            <button
-              role="menuitem"
-              disabled={pending}
-              onClick={() =>
-                start(async () => {
-                  await setOrderVoided(id, !voided);
-                  setBox(null);
-                  router.refresh();
-                })
-              }
-              className="w-full rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink-soft hover:bg-surface-2 hover:text-ink disabled:opacity-50"
-            >
-              {pending ? "Saving…" : voided ? "Unvoid order" : "Void order"}
-            </button>
-          </div>,
-          document.body,
-        )}
-    </>
-  );
 }
 
 const CHANNEL_ORDER = ["AMAZON", "SHOPIFY", "TIKTOK"];
@@ -423,7 +303,6 @@ export function OrdersClient({
   const { money, locale } = useMoney();
   const [search, setSearch] = useState(filter.q);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [dialog, setDialog] = useState<{ id: string; mode: DialogMode } | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
   // Rows opened to show their units (per page; a page change starts closed).
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -457,7 +336,6 @@ export function OrdersClient({
       else next.add(id);
       return next;
     });
-  const dialogOrder = dialog ? orders.rows.find((r) => r.id === dialog.id) ?? null : null;
 
   // Every filter or page change stays on screen while the new results load: no loading skeleton,
   // no jump to the top — the chart and table dim until the results land.
@@ -685,7 +563,6 @@ export function OrdersClient({
                   <th className="px-4 py-2.5 text-left font-medium">Status</th>
                   <th className="px-4 py-2.5 text-right font-medium">Units</th>
                   <th className="px-4 py-2.5 text-right font-medium">Total</th>
-                  <th className="w-10 px-2 py-2.5" />
                 </tr>
               </thead>
               <tbody>
@@ -815,16 +692,16 @@ export function OrdersClient({
                         )}
                       </div>
                     </td>
-                    <td className="px-2 py-2.5 text-right">
-                      <RowMenu id={o.id} voided={o.voided} revenueVoided={o.revenueVoided} cogsVoided={o.cogsVoided} onManage={(mode) => setDialog({ id: o.id, mode })} />
-                    </td>
                   </tr>
                   {open && (
                     <tr className={`border-b border-line last:border-0 ${dim}`}>
                       {/* One cell across the whole row: the block inside is sized to the visible width and
                           sticks to the left, so it never pushes the table wider. */}
-                      <td colSpan={12} className="px-3 pb-3 pt-0.5">
-                        <OrderLines lines={o.lines} money={money} width={viewW} />
+                      <td colSpan={11} className="px-3 pb-3 pt-0.5">
+                        <div className="sticky left-3 flex min-w-[640px] flex-col gap-2" style={viewW > 0 ? { width: viewW - 24 } : undefined}>
+                          <OrderLines lines={o.lines} money={money} />
+                          <OrderAdjustments order={o} facilities={fees.facilities} />
+                        </div>
                       </td>
                     </tr>
                   )}
@@ -864,7 +741,6 @@ export function OrdersClient({
       )}
       </div>
 
-      {dialogOrder && dialog && <OrderDialog order={dialogOrder} mode={dialog.mode} facilities={fees.facilities} onClose={() => setDialog(null)} />}
     </div>
     </>
   );
@@ -893,18 +769,18 @@ function ItemChips({ lines }: { lines: OrderRow["lines"] }) {
 }
 
 /** The opened row: every unit on the order with the product it maps to (or the SKU as sold, when
- *  unmapped), its quantity and its net price.
+ *  unmapped), its quantity and its net price. (Its Adjustments sit right under it.)
  *
- *  Spans the full VISIBLE width of the orders table (measured by the parent) and is sticky on the
- *  left: the table is wider than the screen and scrolls sideways, so a block anchored at the
- *  table's left edge would sit off-screen for anyone looking at the Total column — this one is
- *  always exactly what is on screen, wherever the table is scrolled. Fixed column widths for the
+ *  The parent block spans the full VISIBLE width of the orders table and is sticky on the left:
+ *  the table is wider than the screen and scrolls sideways, so a block anchored at the table's
+ *  left edge would sit off-screen for anyone looking at the Total column — this one is always
+ *  exactly what is on screen, wherever the table is scrolled. Fixed column widths for the
  *  SKU and the numbers; the Item column takes the rest, a long product name cut to one line (the
  *  full name is the tooltip). */
-function OrderLines({ lines, money, width }: { lines: OrderRow["lines"]; money: (v: number) => string; width: number }) {
+function OrderLines({ lines, money }: { lines: OrderRow["lines"]; money: (v: number) => string }) {
   if (lines.length === 0) return <div className="text-[12px] text-muted">No line items on this order.</div>;
   return (
-    <div className="sticky left-3 min-w-[640px] overflow-hidden rounded-lg border border-border bg-surface" style={width > 0 ? { width: width - 24 } : undefined}>
+    <div className="overflow-hidden rounded-lg border border-border bg-surface">
       <table className="w-full table-fixed border-collapse text-[12.5px]">
         <colgroup>
           <col />

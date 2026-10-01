@@ -129,6 +129,8 @@ export const Tag = regular(P.Tag);
 /** Money marks on the P&L's hand-written lines: a credit counted as revenue, a processor's charge. */
 export const CurrencyDollar = regular(P.CurrencyDollar);
 export const CreditCard = regular(P.CreditCard);
+/** A voided order (Adjustments). */
+export const Prohibit = regular(P.Prohibit);
 
 /* ---- Layout & movement ---- */
 export const GripVertical = regular(P.DotsSixVertical);

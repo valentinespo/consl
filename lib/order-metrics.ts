@@ -117,6 +117,8 @@ export type OrderRow = {
   fulfillmentLabel: string | null;
   /** The consl facility it counts as fulfilled from — the correction if there is one, else the detected one. */
   fulfilledAt: { id: string; name: string } | null;
+  /** Someone picked where it shipped from (the correction is `fulfilledAt`). */
+  shippedFromChanged: boolean;
   /** The facility detected from the platform, when a correction replaced it. */
   fulfilledAtDetected: { id: string; name: string } | null;
   /** A non-Amazon order that shipped from Amazon FBA — through MCF. */
@@ -151,7 +153,7 @@ export type OrderRow = {
   /** Dropped by a double-count toggle (mirrored Shopify source / MCF) — same wash + Voided pill. */
   excluded: boolean;
   /** Custom fees on the order — from a rule (fromRule) or written by hand. */
-  fees: { id: string; name: string; amount: number; fromRule: boolean }[];
+  fees: { id: string; name: string; amount: number; fromRule: boolean; bucket: string }[];
   feeTotal: number;
   /** Credits written by hand — money added to the order, with the P&L bucket each one lands in
    *  (sales | custom_fees | payment_fees). */
@@ -572,6 +574,7 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
     sourceLabel: o.sourceLabel,
     fulfillmentLabel: o.fulfillmentLabel,
     fulfilledAt: (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility) ? { id: (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility)!.id, name: placeLabel.get((o.fulfillmentOverrideFacility ?? o.fulfillmentFacility)!.id) ?? (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility)!.name } : null,
+    shippedFromChanged: !!o.fulfillmentOverrideFacility,
     fulfilledAtDetected: o.fulfillmentOverrideFacility && o.fulfillmentFacility ? { id: o.fulfillmentFacility.id, name: placeLabel.get(o.fulfillmentFacility.id) ?? o.fulfillmentFacility.name } : null,
     viaMcf: o.channel !== "AMAZON" && (o.fulfillmentOverrideFacility ?? o.fulfillmentFacility)?.channel === "AMAZON_FBA",
     shipFromLabel: o.shipFromLabel,
@@ -599,7 +602,7 @@ export async function getOrdersPage(page = 1, pageSize = 50, filter: OrdersFilte
     cogsVoided: o.cogsVoided,
     revenueVoided: o.revenueVoided,
     excluded: (o.channel === "SHOPIFY" && !!o.source && excluded.includes(o.source)) || (excludeMcf && o.mcf),
-    fees: o.fees.filter((f) => f.type !== "credit").map((f) => ({ id: f.id, name: f.name, amount: f.amount, fromRule: f.ruleId !== null })),
+    fees: o.fees.filter((f) => f.type !== "credit").map((f) => ({ id: f.id, name: f.name, amount: f.amount, fromRule: f.ruleId !== null, bucket: f.bucket })),
     feeTotal: o.fees.filter((f) => f.type !== "credit").reduce((s, f) => s + f.amount, 0),
     credits: o.fees.filter((f) => f.type === "credit").map((f) => ({ id: f.id, name: f.name, amount: f.amount, bucket: f.bucket })),
     creditTotal: o.fees.filter((f) => f.type === "credit").reduce((s, f) => s + f.amount, 0),

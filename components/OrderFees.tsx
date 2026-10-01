@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { X, Plus, Check } from "@/components/icons";
+import { X, Plus, Check, ChevronDown, Receipt, CurrencyDollar, Truck, Prohibit } from "@/components/icons";
 import { inputCls } from "@/components/FormKit";
 import { SelectMenu } from "@/components/SelectMenu";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
@@ -10,14 +11,29 @@ import { DatePicker } from "@/components/DatePicker";
 import { rangeBounds } from "@/lib/chart";
 import { useMoney } from "@/components/CurrencyProvider";
 import { paymentMethodLabel } from "@/lib/payment-methods";
-import { addOrderFees, addOrderCredits, removeOrderFee, setFulfillmentOverride, setFulfillmentOverrides, setOrdersVoided, createFeeRule, deleteFeeRule, setFeeRuleActive } from "@/app/(app)/orders/actions";
+import {
+  addOrderFees,
+  addOrderCredits,
+  removeOrderFee,
+  setFulfillmentOverride,
+  setFulfillmentOverrides,
+  setOrdersVoided,
+  setOrdersRevenueVoided,
+  setOrdersCogsVoided,
+  setOrderVoided,
+  setOrderRevenueVoided,
+  setOrderCogsVoided,
+  createFeeRule,
+  deleteFeeRule,
+  setFeeRuleActive,
+} from "@/app/(app)/orders/actions";
 import type { OrderRow, FeeRuleRow, FeeRuleOptions } from "@/lib/order-metrics";
 
 /**
- * Custom fees and credits on orders: the bulk bar over a selection, the per-order dialog (one of
- * three — Custom fees, Shipped from, Credits — from the row's ⋮ menu), and the fee-rules panel
- * behind the Orders tab's gear. All writes go through the server actions and refresh the page;
- * nothing is kept locally beyond the form drafts.
+ * Changing orders: the bulk bar over a selection, each order's Adjustments (inside its opened row:
+ * custom fees, credits, where it shipped from, a void), and the automatic-rules panel behind the
+ * Orders tab's gear. All writes go through the server actions and refresh the page; nothing is
+ * kept locally beyond the form drafts.
  */
 
 export type FeeOptions = FeeRuleOptions;
@@ -56,8 +72,6 @@ const emptyFee: FeeDraft = { name: "", kind: "fixed", value: "", extra: "", buck
 type CreditBucket = "sales" | "custom_fees" | "payment_fees";
 type CreditDraft = { name: string; kind: "fixed" | "percent"; value: string; bucket: CreditBucket };
 const emptyCredit: CreditDraft = { name: "", kind: "fixed", value: "", bucket: "sales" };
-const CREDIT_BUCKET_LABEL: Record<CreditBucket, string> = { sales: "Sales", custom_fees: "Custom fees", payment_fees: "Payment processing" };
-export type DialogMode = "fees" | "shipped" | "credits";
 const num = (s: string) => Number(s.replace(",", "."));
 const parseFee = (d: FeeDraft) => ({
   name: d.name.trim(),
@@ -175,7 +189,8 @@ function CreditFields({ draft, onChange }: { draft: CreditDraft; onChange: (d: C
   );
 }
 
-/** Actions over the ticked rows: void, unvoid, or put the same fee or credit on each. */
+/** Actions over the ticked rows: void (whole order, revenue only or cost of goods only), unvoid,
+ *  put the same fee or credit on each, or set where they shipped from. */
 export function BulkBar({ ids, facilities, onClear }: { ids: string[]; facilities: { id: string; name: string }[]; onClear: () => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -206,6 +221,12 @@ export function BulkBar({ ids, facilities, onClear }: { ids: string[]; facilitie
       </span>
       <button className={btnSecondary} disabled={pending} onClick={() => run(() => setOrdersVoided(ids, true))}>
         Void
+      </button>
+      <button className={btnSecondary} disabled={pending} onClick={() => run(() => setOrdersRevenueVoided(ids, true))}>
+        Void revenue
+      </button>
+      <button className={btnSecondary} disabled={pending} onClick={() => run(() => setOrdersCogsVoided(ids, true))}>
+        Void cost of goods
       </button>
       <button className={btnSecondary} disabled={pending} onClick={() => run(() => setOrdersVoided(ids, false))}>
         Unvoid
@@ -272,192 +293,286 @@ export function BulkBar({ ids, facilities, onClear }: { ids: string[]; facilitie
   );
 }
 
-/** One order, one job at a time from the row's ⋮ menu: its custom fees (with the fees its platform
- *  reported), where it shipped from, or the credits added to it. */
-export function OrderDialog({ order, mode, facilities, onClose }: { order: OrderRow; mode: DialogMode; facilities: { id: string; name: string }[]; onClose: () => void }) {
+type AddKind = "fee" | "credit" | "shipped";
+const CREDIT_PLACE: Record<CreditBucket, string> = { sales: "credit to Sales", custom_fees: "credit against Custom fees", payment_fees: "credit against Payment processing" };
+const VOID_ROW: Record<VoidKind, { pill: string; note: string; menu: string }> = {
+  all: { pill: "Voided", note: "out of every total", menu: "Void the whole order" },
+  revenue: { pill: "Revenue voided", note: "its money isn't counted, its units' cost is", menu: "Void revenue only" },
+  cogs: { pill: "COGS voided", note: "its money counts, its units' cost doesn't", menu: "Void cost of goods only" },
+};
+
+/** One adjustment: what it is, then its amount and what you can do with it. */
+function AdjustmentRow({ icon, children, amount, actions }: { icon?: ReactNode; children: ReactNode; amount?: ReactNode; actions?: ReactNode }) {
+  return (
+    <li className="flex min-h-[38px] items-center justify-between gap-3 px-3 py-1.5 text-[12.5px]">
+      <span className="flex min-w-0 items-center gap-2">
+        {icon && <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-surface-2 text-ink-soft">{icon}</span>}
+        <span className="min-w-0 truncate text-ink">{children}</span>
+      </span>
+      <span className="flex shrink-0 items-center gap-1.5">
+        {amount}
+        {actions}
+      </span>
+    </li>
+  );
+}
+
+/** "+ Add adjustment": a small menu, portalled so the orders table's scroll box can't clip it. */
+function AddAdjustmentMenu({ voidKind, disabled, onAdd, onVoid }: { voidKind: VoidKind | null; disabled: boolean; onAdd: (k: AddKind) => void; onVoid: (k: VoidKind) => void }) {
+  const btn = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState<{ top: number; left: number } | null>(null);
+  useEffect(() => {
+    if (!box) return;
+    const close = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!btn.current?.contains(t) && !menu.current?.contains(t)) setBox(null);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setBox(null);
+    const follow = () => setBox(null);
+    document.addEventListener("mousedown", close);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", follow, true);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", follow, true);
+    };
+  }, [box]);
+  const item = "flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink-soft hover:bg-surface-2 hover:text-ink disabled:opacity-50";
+  const glyph = "shrink-0 text-muted";
+  const pick = (fn: () => void) => () => {
+    setBox(null);
+    fn();
+  };
+  return (
+    <>
+      <button
+        ref={btn}
+        type="button"
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={!!box}
+        onClick={() => {
+          if (box) return setBox(null);
+          const r = btn.current!.getBoundingClientRect();
+          setBox({ top: r.bottom + 4, left: Math.max(8, r.right - 220) });
+        }}
+        className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 text-[12px] font-medium text-ink-soft hover:border-ink/25 hover:text-ink disabled:opacity-50"
+      >
+        <Plus size={12} /> Add adjustment <ChevronDown size={12} className="text-muted" />
+      </button>
+      {box &&
+        createPortal(
+          <div ref={menu} role="menu" style={{ position: "fixed", top: box.top, left: box.left, width: 220 }} className="dropdown-in z-[300] rounded-xl border border-border bg-surface p-1 shadow-xl">
+            <button role="menuitem" className={item} onClick={pick(() => onAdd("fee"))}>
+              <Receipt size={14} className={glyph} /> Fee
+            </button>
+            <button role="menuitem" className={item} onClick={pick(() => onAdd("credit"))}>
+              <CurrencyDollar size={14} className={glyph} /> Credit
+            </button>
+            <button role="menuitem" className={item} onClick={pick(() => onAdd("shipped"))}>
+              <Truck size={14} className={glyph} /> Shipped from
+            </button>
+            <div className="my-1 border-t border-line" />
+            {(Object.keys(VOID_ROW) as VoidKind[]).map((k) => (
+              <button key={k} role="menuitem" className={item} disabled={voidKind === k} onClick={pick(() => onVoid(k))}>
+                <Prohibit size={14} className={glyph} />
+                <span className="flex-1">{VOID_ROW[k].menu}</span>
+                {voidKind === k && <Check size={13} className="text-accent" />}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+/**
+ * Everything changed on one order, inside its opened row: each custom fee, each credit, where it
+ * shipped from, and a void — one row each, removed or undone on the spot — and "Add adjustment"
+ * to put on another (a fee, a credit, where it shipped from, or one of the three voids).
+ */
+export function OrderAdjustments({ order, facilities }: { order: OrderRow; facilities: { id: string; name: string }[] }) {
   const router = useRouter();
   const { money } = useMoney();
   const [pending, start] = useTransition();
+  const [adding, setAdding] = useState<AddKind | null>(null);
   const [draft, setDraft] = useState<FeeDraft>(emptyFee);
   const [credit, setCredit] = useState<CreditDraft>(emptyCredit);
+  const [loc, setLoc] = useState(order.shippedFromChanged ? (order.fulfilledAt?.id ?? "") : "");
   const [error, setError] = useState<string | null>(null);
-  const detected = order.fulfilledAtDetected ?? (order.fulfilledAt && !order.fulfilledAtDetected ? order.fulfilledAt : null);
-  const [loc, setLoc] = useState(order.fulfilledAtDetected ? (order.fulfilledAt?.id ?? "") : "");
   const channelName = CHANNEL_NAME[order.channel] ?? order.channel;
-  const act = (fn: () => Promise<Result>) =>
+  const detected = order.shippedFromChanged ? order.fulfilledAtDetected : order.fulfilledAt;
+  const voidKind: VoidKind | null = order.voided ? "all" : order.revenueVoided ? "revenue" : order.cogsVoided ? "cogs" : null;
+
+  const act = (fn: () => Promise<Result>, done?: () => void) =>
     start(async () => {
       const r = await fn();
       if (!r.ok) return setError(r.error ?? "Something went wrong.");
       setError(null);
+      done?.();
       router.refresh();
     });
+  const voidAs = (kind: VoidKind | null) =>
+    act(() =>
+      kind === "all"
+        ? setOrderVoided(order.id, true)
+        : kind === "revenue"
+          ? setOrderRevenueVoided(order.id, true)
+          : kind === "cogs"
+            ? setOrderCogsVoided(order.id, true)
+            : setOrderVoided(order.id, false),
+    );
+  const close = () => {
+    setAdding(null);
+    setDraft(emptyFee);
+    setCredit(emptyCredit);
+    setError(null);
+  };
+  const remove = (label: string, fn: () => Promise<Result>) => (
+    <button className={iconBtn} disabled={pending} onClick={() => act(fn)} aria-label={label} title={label}>
+      <X size={13} />
+    </button>
+  );
   const locations = [
-    { value: "", label: detected ? `Keep detected (${detected.name})` : "Keep as detected (no facility yet)" },
+    { value: "", label: detected ? `As ${channelName} said (${detected.name})` : "As detected (no facility yet)" },
     ...facilities.filter((f) => f.id !== detected?.id).map((f) => ({ value: f.id, label: f.name })),
   ];
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        className="org-pop max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
+  const rows: ReactNode[] = [
+    ...order.fees.map((f) => (
+      <AdjustmentRow
+        key={f.id}
+        icon={<Receipt size={13} />}
+        amount={<span className="tabular text-ink-soft">−{money(f.amount)}</span>}
+        actions={f.fromRule ? <span className="w-7" /> : remove("Remove fee", () => removeOrderFee(f.id))}
       >
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-[15px] font-semibold text-ink">
-              {mode === "fees" ? "Custom fees" : mode === "credits" ? "Credits" : "Shipped from"} · Order {order.orderNumber ?? ""}
-            </div>
-            <div className="text-[12px] text-muted">
-              {channelName} · {money(order.total)} paid
-              {order.paymentMethod && (
-                <>
-                  {" "}with {paymentMethodLabel(order.paymentMethod)}
-                  {order.paymentDetail ? ` · ${order.paymentDetail}` : ""}
-                </>
-              )}
-            </div>
-          </div>
-          <button onClick={onClose} className={iconBtn} aria-label="Close">
-            <X size={16} />
-          </button>
-        </div>
+        {f.name}
+        <span className="text-muted"> · {f.bucket === "payment_fees" ? "Payment processing" : "Custom fees"}</span>
+        {f.fromRule && <span className="pill-neutral ml-2 inline-flex items-center rounded-full border px-1.5 py-px text-[10.5px] font-medium">from a rule</span>}
+      </AdjustmentRow>
+    )),
+    ...order.credits.map((c) => (
+      <AdjustmentRow key={c.id} icon={<CurrencyDollar size={13} />} amount={<span className="tabular text-positive">+{money(c.amount)}</span>} actions={remove("Remove credit", () => removeOrderFee(c.id))}>
+        {c.name}
+        <span className="text-muted"> · {CREDIT_PLACE[c.bucket as CreditBucket] ?? c.bucket}</span>
+      </AdjustmentRow>
+    )),
+    ...(order.shippedFromChanged
+      ? [
+          <AdjustmentRow
+            key="shipped"
+            icon={<Truck size={13} />}
+            actions={
+              <>
+                <button className="rounded-md px-2 py-1 text-[12px] font-medium text-ink-soft hover:bg-surface-2 hover:text-ink" disabled={pending} onClick={() => setAdding("shipped")}>
+                  Change
+                </button>
+                {remove("Back to what the channel said", () => setFulfillmentOverride(order.id, null))}
+              </>
+            }
+          >
+            Shipped from {order.fulfilledAt?.name ?? "—"}
+            <span className="text-muted"> · {channelName} said {detected?.name ?? `“${order.fulfillmentLabel ?? "unknown"}”`}</span>
+          </AdjustmentRow>,
+        ]
+      : []),
+    ...(voidKind
+      ? [
+          <AdjustmentRow
+            key="void"
+            icon={<Prohibit size={13} />}
+            actions={
+              <button className="rounded-md px-2 py-1 text-[12px] font-medium text-ink-soft hover:bg-surface-2 hover:text-ink" disabled={pending} onClick={() => voidAs(null)}>
+                Undo
+              </button>
+            }
+          >
+            <span className="pill-red inline-flex items-center rounded-full border px-2 py-px text-[11px] font-medium">{VOID_ROW[voidKind].pill}</span>
+            <span className="ml-2 text-muted">{VOID_ROW[voidKind].note}</span>
+          </AdjustmentRow>,
+        ]
+      : order.excluded
+        ? [
+            <AdjustmentRow key="excluded" icon={<Prohibit size={13} />}>
+              <span className="pill-red inline-flex items-center rounded-full border px-2 py-px text-[11px] font-medium">Voided</span>
+              <span className="ml-2 text-muted">left out automatically: a copy of another channel&apos;s sale</span>
+            </AdjustmentRow>,
+          ]
+        : []),
+  ];
 
-        {mode === "fees" && order.channel !== "AMAZON" && (
-          <section className="mt-4">
-            <div className="text-[11px] font-medium uppercase tracking-wide text-muted">Fees read from {channelName}</div>
-            {order.platformFees.length === 0 ? (
-              <p className="mt-1 text-[12.5px] text-muted">
-                {channelName} reported no processing fee for this order
-                {order.paymentMethod ? ` (paid with ${paymentMethodLabel(order.paymentMethod)})` : ""}. If a processor charged you, add it below.
-              </p>
-            ) : (
-              <ul className="mt-1 divide-y divide-line rounded-lg border border-border">
-                {order.platformFees.map((f, i) => (
-                  <li key={i} className="flex items-center justify-between gap-2 px-3 py-2 text-[13px]">
-                    <span className="truncate text-ink">{spell(f.name)}</span>
-                    <span className="tabular text-ink-soft">{f.amount < 0 ? `−${money(-f.amount)}` : money(f.amount)}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        )}
-
-        {mode === "fees" && (
-        <section className="mt-4">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-muted">Custom fees</div>
-          {order.fees.length === 0 ? (
-            <p className="mt-1 text-[12.5px] text-muted">No custom fees on this order.</p>
-          ) : (
-            <ul className="mt-1 divide-y divide-line rounded-lg border border-border">
-              {order.fees.map((f) => (
-                <li key={f.id} className="flex items-center justify-between gap-2 px-3 py-2 text-[13px]">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-ink">{f.name}</span>
-                    {f.fromRule && <span className="pill-neutral inline-flex items-center rounded-full border px-1.5 py-px text-[10.5px] font-medium">rule</span>}
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="tabular text-ink-soft">−{money(f.amount)}</span>
-                    {!f.fromRule && (
-                      <button className={iconBtn} disabled={pending} onClick={() => act(() => removeOrderFee(f.id))} aria-label="Remove fee">
-                        <X size={13} />
-                      </button>
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="mt-2 flex flex-col gap-2">
-            <FeeFields draft={draft} onChange={setDraft} />
-            <button
-              className={`${btnPrimary} self-start`}
-              disabled={pending}
-              onClick={() =>
-                act(async () => {
-                  const r = await addOrderFees([order.id], parseFee(draft));
-                  if (r.ok) setDraft(emptyFee);
-                  return r;
-                })
-              }
-            >
-              <Plus size={13} /> Add fee
-            </button>
-          </div>
-        </section>
-        )}
-
-        {mode === "credits" && (
-        <section className="mt-4">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-muted">Credits</div>
-          <p className="mt-1 text-[12.5px] text-muted">
-            Money this order brought in that {channelName}&apos;s record doesn&apos;t show — a shipping charge the customer paid, a reimbursement.
-            Each credit lands on the P&amp;L where you put it: as revenue under Sales, or netted against a fee bucket.
-          </p>
-          {order.credits.length === 0 ? (
-            <p className="mt-1 text-[12.5px] text-muted">No credits on this order.</p>
-          ) : (
-            <ul className="mt-1 divide-y divide-line rounded-lg border border-border">
-              {order.credits.map((c) => (
-                <li key={c.id} className="flex items-center justify-between gap-2 px-3 py-2 text-[13px]">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-ink">{c.name}</span>
-                    <span className="pill-neutral inline-flex items-center rounded-full border px-1.5 py-px text-[10.5px] font-medium">{CREDIT_BUCKET_LABEL[c.bucket as CreditBucket] ?? c.bucket}</span>
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="tabular text-positive">+{money(c.amount)}</span>
-                    <button className={iconBtn} disabled={pending} onClick={() => act(() => removeOrderFee(c.id))} aria-label="Remove credit">
-                      <X size={13} />
-                    </button>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="mt-2 flex flex-col gap-2">
-            <CreditFields draft={credit} onChange={setCredit} />
-            <button
-              className={`${btnPrimary} self-start`}
-              disabled={pending}
-              onClick={() =>
-                act(async () => {
-                  const r = await addOrderCredits([order.id], parseCredit(credit));
-                  if (r.ok) setCredit(emptyCredit);
-                  return r;
-                })
-              }
-            >
-              <Plus size={13} /> Add credit
-            </button>
-          </div>
-        </section>
-        )}
-
-        {mode === "shipped" && (
-        <section className="mt-4">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-muted">Shipped from</div>
-          <p className="mt-1 text-[12.5px] text-muted">
-            {channelName} says &ldquo;{order.fulfillmentLabel ?? "unknown"}&rdquo;
-            {detected ? `, which consl reads as ${detected.name}` : ", which consl can't place yet"}. Pick the facility it really shipped from — the
-            detected one stays on the record, struck through.
-          </p>
-          <div className="mt-2 flex flex-col gap-2">
-            <SelectMenu value={loc} options={locations} onChange={setLoc} />
-            <button
-              className={`${btnPrimary} self-start`}
-              disabled={pending}
-              onClick={() => act(() => setFulfillmentOverride(order.id, loc || null))}
-            >
-              <Check size={13} /> Save location
-            </button>
-          </div>
-        </section>
-        )}
-
-        {error && <p className="mt-3 text-[12px] text-negative">{error}</p>}
+  return (
+    <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="flex items-center justify-between gap-3 border-b border-line bg-surface-2/50 px-3 py-1.5">
+        <span className="text-[10.5px] font-medium uppercase tracking-wide text-muted">Adjustments</span>
+        <AddAdjustmentMenu voidKind={voidKind} disabled={pending} onAdd={(k) => { setError(null); setAdding(k); }} onVoid={(k) => voidAs(k)} />
       </div>
+      {rows.length > 0 ? (
+        <ul className="divide-y divide-line">{rows}</ul>
+      ) : (
+        !adding && <p className="px-3 py-2.5 text-[12px] text-muted">Nothing changed on this order. Add a fee, a credit, where it shipped from, or a void.</p>
+      )}
+
+      {adding && (
+        <div className="flex flex-col gap-2 border-t border-line bg-surface-2/30 p-3">
+          {adding === "fee" && (
+            <>
+              <div className="text-[11px] font-medium uppercase tracking-wide text-muted">New fee</div>
+              {order.channel !== "AMAZON" && (
+                <p className="text-[12px] text-muted">
+                  {order.platformFees.length
+                    ? `${channelName} already reported: ${order.platformFees.map((f) => `${spell(f.name)} ${f.amount < 0 ? `−${money(-f.amount)}` : money(f.amount)}`).join(", ")}.`
+                    : `${channelName} reported no processing fee for this order${order.paymentMethod ? ` (paid with ${paymentMethodLabel(order.paymentMethod)})` : ""}.`}
+                </p>
+              )}
+              <FeeFields draft={draft} onChange={setDraft} />
+            </>
+          )}
+          {adding === "credit" && (
+            <>
+              <div className="text-[11px] font-medium uppercase tracking-wide text-muted">New credit</div>
+              <p className="text-[12px] text-muted">Money this order brought in that {channelName}&apos;s record doesn&apos;t show, like a shipping charge the customer paid or a reimbursement.</p>
+              <CreditFields draft={credit} onChange={setCredit} />
+            </>
+          )}
+          {adding === "shipped" && (
+            <>
+              <div className="text-[11px] font-medium uppercase tracking-wide text-muted">Shipped from</div>
+              <p className="text-[12px] text-muted">
+                {channelName} says &ldquo;{order.fulfillmentLabel ?? "unknown"}&rdquo;
+                {detected ? `, which consl reads as ${detected.name}` : ", which consl can't place yet"}. Pick where it really shipped from.
+              </p>
+              <SelectMenu value={loc} options={locations} onChange={setLoc} />
+            </>
+          )}
+          <div className="flex items-center gap-2">
+            <button
+              className={btnPrimary}
+              disabled={pending}
+              onClick={() =>
+                act(
+                  () =>
+                    adding === "fee"
+                      ? addOrderFees([order.id], parseFee(draft))
+                      : adding === "credit"
+                        ? addOrderCredits([order.id], parseCredit(credit))
+                        : setFulfillmentOverride(order.id, loc || null),
+                  close,
+                )
+              }
+            >
+              <Check size={13} /> {pending ? "Saving…" : adding === "fee" ? "Add fee" : adding === "credit" ? "Add credit" : "Save"}
+            </button>
+            <button className={btnSecondary} disabled={pending} onClick={close}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {error && <p className="border-t border-line px-3 py-2 text-[12px] text-negative">{error}</p>}
     </div>
   );
 }
