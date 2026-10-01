@@ -97,7 +97,7 @@ export async function amazonAdsStatementRows(): Promise<{
   const unified = unifyAdInvoices({
     // Booked in the company's currency; recognised as the same bill by the amount as Amazon
     // stated it (converted figures drift with the day's rate).
-    ledger: invoiceRows.filter((r) => r.amount < 0).map((r) => ({ id: r.id, day: dayOf(r.postedAt), amount: -(r.baseAmount ?? r.amount), native: { amount: -r.amount, currency: r.currency } })),
+    ledger: invoiceRows.filter((r) => r.amount < 0).map((r) => ({ id: r.id, day: dayOf(r.postedAt), amount: -(r.baseAmount ?? r.amount), native: { amount: -r.amount, currency: r.currency }, at: r.postedAt.getTime() })),
     credits: invoiceRows.filter((r) => r.amount > 0).map((r) => ({ id: r.id, day: dayOf(r.postedAt), amount: r.baseAmount ?? r.amount, native: { amount: r.amount, currency: r.currency } })),
     feed: feedRows.map((f) => ({
       id: f.externalId,
@@ -113,7 +113,14 @@ export async function amazonAdsStatementRows(): Promise<{
     })),
     floorDay: floor ? dayOf(floor.eventAt) : null,
   });
-  const fill = waterfillAdInvoices({ invoices: unified.invoices, spend, covered });
+  // How much of an ads-calendar day had gone by at an instant (DST days are 23 or 25 hours long).
+  const dayShare = (at: number, day: string) => {
+    if (dayOf(new Date(at)) !== day) return null;
+    const start = zonedDayStart(day, tz).getTime();
+    const end = zonedDayStart(new Date(new Date(`${day}T00:00:00Z`).getTime() + 86_400_000).toISOString().slice(0, 10), tz).getTime();
+    return (at - start) / (end - start);
+  };
+  const fill = waterfillAdInvoices({ invoices: unified.invoices, spend, covered, dayShare });
   // The one thing this must never get wrong: what it books is the invoices, to the cent.
   const cents = (n: number) => Math.round(n * 100);
   const owed = unified.invoices.reduce((t, x) => t + cents(x.amount), 0);

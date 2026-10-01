@@ -12,22 +12,36 @@ const dayTotals = (rows: { day: string; amount: number; held: boolean }[], held 
 };
 const total = (rows: { amount: number; held: boolean }[], held = false) => Math.round(rows.filter((r) => r.held === held).reduce((t, r) => t + r.amount, 0) * 100) / 100;
 
-// 1. The transition (agreed 2026-09-15): A Jul14–16 $500 with the API knowing only the 16th = $10
-//    → 16th = 10, the 14th and 15th (unknown) = 245 each. No surplus at the transition.
+// The test calendar is UTC: how much of `day` had gone by at `at`, or null on another day.
+const utcShare = (at: number, day: string) => {
+  const start = Date.parse(`${day}T00:00:00Z`);
+  return at >= start && at < start + 86_400_000 ? (at - start) / 86_400_000 : null;
+};
+
+// 1. The transition: A Jul14–16 $500 with the API knowing only the 16th = $10. A runs INTO the
+//    daily figures on the 16th, so the 16th takes only A's part of it, up to A's cut: half the day
+//    when the charge time is unknown (→ 5, the 14th and 15th 247.50 each), the part gone by at the
+//    charge when it is (06:00 → 2.50). No surplus at the transition.
 {
-  const r = waterfillAdInvoices({
-    invoices: [{ id: "pre", day: "2026-07-14", amount: 400 }, { id: "A", day: "2026-07-16", amount: 500 }],
-    spend: flat({ "2026-07-16": 10 }),
-    coveredFrom: "2026-07-16",
-    coveredTo: "2026-07-16",
-  });
-  const a = r.perInvoice.find((p) => p.id === "A")!;
-  assert.deepEqual([...a.placed].sort(), [["2026-07-14", 24500], ["2026-07-15", 24500], ["2026-07-16", 1000]]);
-  assert.equal(a.surplus, 0);
+  const run = (chargedAt?: number) =>
+    waterfillAdInvoices({
+      invoices: [{ id: "pre", day: "2026-07-14", amount: 400 }, { id: "A", day: "2026-07-16", amount: 500, chargedAt }],
+      spend: flat({ "2026-07-16": 10 }),
+      coveredFrom: "2026-07-16",
+      coveredTo: "2026-07-16",
+      dayShare: utcShare,
+    }).perInvoice.find((p) => p.id === "A")!;
+  const unknown = run();
+  assert.deepEqual([...unknown.placed].sort(), [["2026-07-14", 24750], ["2026-07-15", 24750], ["2026-07-16", 500]]);
+  assert.equal(unknown.surplus, 0);
+  assert.deepEqual([...run(Date.parse("2026-07-16T06:00:00Z")).placed].sort(), [["2026-07-14", 24875], ["2026-07-15", 24875], ["2026-07-16", 250]]);
+  // charged a day later: the charge says nothing about the cut → half the day again
+  assert.deepEqual([...run(Date.parse("2026-07-17T09:00:00Z")).placed].sort(), [...unknown.placed].sort());
 }
 
 // 2. The chain (agreed 2026-09-15): API $170/day from the 16th, a $500 invoice at every
 //    threshold with shared boundary days. Every day = the API figure, every invoice = its amount.
+//    A runs into the daily figures on the 16th with no charge time: it keeps half of the 16th.
 {
   const spend: Record<string, number> = {};
   for (const d of daysBetween("2026-07-16", "2026-07-25")) spend[d] = 170;
@@ -44,15 +58,15 @@ const total = (rows: { amount: number; held: boolean }[], held = false) => Math.
     coveredTo: "2026-07-25",
   });
   const of = (id: string) => Object.fromEntries([...r.perInvoice.find((p) => p.id === id)!.placed].map(([d, c]) => [d.slice(8), c / 100]).sort());
-  assert.deepEqual(of("A"), { "14": 165, "15": 165, "16": 170 });
-  assert.deepEqual(of("B"), { "17": 170, "18": 170, "19": 160 });
-  assert.deepEqual(of("C"), { "19": 10, "20": 170, "21": 170, "22": 150 });
-  assert.deepEqual(of("D"), { "22": 20, "23": 170, "24": 170, "25": 140 });
-  // The 25th shows 30 held until the next invoice; every covered day totals the API's 170.
-  assert.deepEqual(dayTotals(r.rows, true), { "2026-07-25": 30 });
+  assert.deepEqual(of("A"), { "14": 207.5, "15": 207.5, "16": 85 });
+  assert.deepEqual(of("B"), { "16": 85, "17": 170, "18": 170, "19": 75 });
+  assert.deepEqual(of("C"), { "19": 95, "20": 170, "21": 170, "22": 65 });
+  assert.deepEqual(of("D"), { "22": 105, "23": 170, "24": 170, "25": 55 });
+  // The 25th shows 115 held until the next invoice; every covered day totals the API's 170.
+  assert.deepEqual(dayTotals(r.rows, true), { "2026-07-25": 115 });
   const billed = dayTotals(r.rows);
   for (const d of daysBetween("2026-07-16", "2026-07-24")) assert.equal(billed[d], 170, d);
-  assert.equal(billed["2026-07-25"], 140);
+  assert.equal(billed["2026-07-25"], 55);
   assert.equal(total(r.rows), 2500); // the five invoices, to the cent
 }
 
@@ -361,6 +375,71 @@ const total = (rows: { amount: number; held: boolean }[], held = false) => Math.
   // held: only on and after the last cut (Jul 3) — never the 6th of February, long since billed
   assert.deepEqual(dayTotals(r.rows, true), { "2026-07-03": 50, "2026-07-04": 100, "2026-07-05": 100, "2026-07-06": 100 });
   assert.equal(total(r.rows), 1340);
+}
+
+// 12. Running into the daily figures (found on Herbl, 2026-10-01: weeks of days off). The daily
+//     figures start on the 25th ($420 a day); the invoice before crosses into them and was charged
+//     at 02:00 on the 25th, so the 25th takes only its first two hours ($35). Filling the whole
+//     25th first would leave the next invoice no room there and push every later one a day ahead
+//     — a surplus on each invoice's last day until the chain caught up. With the cut: every
+//     covered day equals the API's figure, no surplus anywhere, every invoice placed whole.
+{
+  const spend: Record<string, number> = {};
+  for (const d of daysBetween("2026-07-25", "2026-07-30")) spend[d] = 420;
+  const r = waterfillAdInvoices({
+    invoices: [
+      { id: "pre", day: "2026-07-23", amount: 500 },
+      { id: "T", from: "2026-07-23", day: "2026-07-25", amount: 500, chargedAt: Date.parse("2026-07-25T02:00:00Z") },
+      { id: "N1", from: "2026-07-25", day: "2026-07-26", amount: 500, chargedAt: Date.parse("2026-07-26T07:00:00Z") },
+      { id: "N2", from: "2026-07-26", day: "2026-07-27", amount: 500 },
+      { id: "N3", from: "2026-07-27", day: "2026-07-28", amount: 500 },
+      { id: "N4", from: "2026-07-28", day: "2026-07-29", amount: 500 },
+    ],
+    spend: flat(spend),
+    coveredFrom: "2026-07-25",
+    coveredTo: "2026-07-30",
+    dayShare: utcShare,
+  });
+  const of = (id: string) => Object.fromEntries([...r.perInvoice.find((p) => p.id === id)!.placed].map(([d, c]) => [d.slice(8), c / 100]).sort());
+  assert.deepEqual(of("T"), { "23": 232.5, "24": 232.5, "25": 35 });
+  assert.deepEqual(of("N1"), { "25": 385, "26": 115 });
+  assert.ok(r.perInvoice.every((p) => p.surplus === 0), "no surplus after the transition");
+  const all = new Map<string, number>();
+  for (const x of r.rows) all.set(x.day, Math.round(((all.get(x.day) ?? 0) + x.amount) * 100) / 100);
+  for (const d of daysBetween("2026-07-25", "2026-07-30")) assert.equal(all.get(d), 420, `${d} = the API's figure`);
+  assert.equal(total(r.rows), 3000);
+}
+
+// 13. The same where the daily figures RESUME after a hole (an outage longer than Amazon keeps
+//     them): the invoice that runs from the hole into the figures keeps, of the first day back,
+//     only the part up to its charge (noon → half), and the hole's days take the rest evenly.
+{
+  const spend: Record<string, number> = {};
+  for (const d of daysBetween("2026-07-01", "2026-07-04")) spend[d] = 200;
+  const r = waterfillAdInvoices({
+    invoices: [
+      { id: "back", from: "2026-06-29", day: "2026-07-01", amount: 300, chargedAt: Date.parse("2026-07-01T12:00:00Z") },
+      { id: "next", from: "2026-07-01", day: "2026-07-03", amount: 500 },
+    ],
+    spend: flat(spend),
+    covered: [["2026-03-01", "2026-03-10"], ["2026-07-01", "2026-07-04"]],
+    dayShare: utcShare,
+  });
+  const of = (id: string) => Object.fromEntries([...r.perInvoice.find((p) => p.id === id)!.placed].map(([d, c]) => [d.slice(5), c / 100]).sort());
+  assert.deepEqual(of("back"), { "06-29": 100, "06-30": 100, "07-01": 100 });
+  assert.deepEqual(of("next"), { "07-01": 100, "07-02": 200, "07-03": 200 });
+  assert.ok(r.perInvoice.every((p) => p.surplus === 0));
+  assert.deepEqual(dayTotals(r.rows, true), { "2026-07-04": 200 });
+}
+
+// 14. The charge time travels with the invoice: from the money report, matched or not.
+{
+  const u = unifyAdInvoices({
+    ledger: [{ id: "l1", day: "2026-09-13", amount: 500.43, at: Date.parse("2026-09-13T15:00:00Z") }, { id: "l2", day: "2026-09-20", amount: 99, at: 1 }],
+    feed: [{ id: "f1", from: "2026-09-12", to: "2026-09-13", invoiceDay: "2026-09-13", amount: 500.43, status: "PAID_IN_FULL", detail: true, balancePaid: 500.43 }],
+    floorDay: "2025-01-31",
+  });
+  assert.deepEqual(u.invoices.map((x) => [x.id, x.chargedAt]), [["l1", Date.parse("2026-09-13T15:00:00Z")], ["l2", 1]]);
 }
 
 console.log("ads water-fill: all checks passed");

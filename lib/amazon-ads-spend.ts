@@ -228,6 +228,13 @@ export async function collectAmazonAdsReports(): Promise<{ collected: number; ro
     const st = await amazonAdsStatementRows().catch(() => null);
     const audit = st?.audit;
     if (audit?.from) console.log(`[amazon-ads] audit ${audit.from}..${audit.to}: API ${audit.apiSpend.toFixed(2)} vs invoiced ${audit.invoiced.toFixed(2)} (${(audit.invoiced - audit.apiSpend).toFixed(2)})${st?.invoices ? ` | invoices: ${st.invoices.matched} with exact periods, ${st.invoices.moneyReportOnly} money report only, ${st.invoices.fromFeed} paid outside the balance, ${st.invoices.waitingDetail} waiting for detail` : ""}`);
+    // Invoices and daily figures agree to a few dollars over months (Herbl: $6 on $28k). A wider
+    // gap means invoices landing on the wrong days — e.g. pushed forward from where the daily
+    // figures start (fixed 2026-10-01: $390 over four weeks) — or daily figures gone stale.
+    const drift = audit?.from ? audit.invoiced - audit.apiSpend : 0;
+    if (audit?.from && Math.abs(drift) > Math.max(50, audit.apiSpend * 0.005)) {
+      console.error(`[amazon-ads] CHECK for ${orgId}: over ${audit.from}..${audit.to} the invoices placed on covered days differ from Amazon's daily spend by ${drift.toFixed(2)} (${((drift / audit.apiSpend) * 100).toFixed(2)}%)`);
+    }
   }
   return { collected, rows, waiting: still.length };
 }

@@ -13,7 +13,13 @@
  * earlier invoices already placed there:
  *  1. the period's API-covered days are filled first, in time order, each giving min(R(d), what
  *     is left of the invoice) — a shared day is therefore split between its two invoices, its
- *     total never exceeds the API's figure, and every invoice lands wholly inside its period;
+ *     total never exceeds the API's figure, and every invoice lands wholly inside its period —
+ *     EXCEPT covered days the period runs INTO from uncovered ones (where the daily figures start,
+ *     or resume after a hole): the invoice's money reached them last, so they take only what it
+ *     covered of them — their whole days before its last one and, of its last day, the part gone
+ *     by when Amazon charged it (the charge follows the cut within minutes; half the day when the
+ *     charge time is unknown). Filled first, they would claim the next invoice's spend, and every
+ *     later invoice would land up to a day late until the chain caught up: weeks of days off;
  *  2. what is left goes EVENLY onto the period's days the API does not cover (older than Amazon
  *     keeps, or not read yet) — they are the unknown ones, so they absorb the rest;
  *  3. with no uncovered day to take it, the rest is a surplus (corrections, adjustments) and
@@ -42,6 +48,8 @@ export type AdInvoice = {
   from?: string | null;
   /** The invoice's own split by ad program (label → cost), from its detail. */
   mix?: Record<string, number> | null;
+  /** When Amazon charged it (epoch ms), from the money report: within minutes of its cut. */
+  chargedAt?: number | null;
 };
 
 /** The ad types the Ads API reports daily spend for; anything else an invoice bills is outside it. */
@@ -73,6 +81,8 @@ export type AdFillRow = {
 
 export const UNTYPED_AD_SPEND = "Sponsored ads";
 export const HELD_SUFFIX = " (not invoiced yet)";
+/** Where an invoice runs into the daily figures and its charge time is unknown: half its last day. */
+const UNKNOWN_CUT_SHARE = 0.5;
 
 const cents = (n: number) => Math.round(n * 100);
 const nextDay = (day: string) => new Date(new Date(`${day}T00:00:00Z`).getTime() + 86_400_000).toISOString().slice(0, 10);
@@ -182,6 +192,9 @@ export function waterfillAdInvoices(input: {
   /** …or one unbroken range: its first and last day; null = no API data at all. */
   coveredFrom?: string | null;
   coveredTo?: string | null;
+  /** How much of `day` had gone by at instant `at` (0–1) on the ads account's calendar, or null
+   *  when `at` falls on another day — the caller knows the timezone. */
+  dayShare?: (at: number, day: string) => number | null;
 }): AdFillResult {
   const { invoices, spend } = input;
   const ranges: DayRanges = input.covered ?? (input.coveredFrom && input.coveredTo && input.coveredFrom <= input.coveredTo ? [[input.coveredFrom, input.coveredTo]] : []);
@@ -253,15 +266,26 @@ export function waterfillAdInvoices(input: {
       fill.set(d, (fill.get(d) ?? 0) + c);
       place(d, c);
     };
+    // Covered days after the period's last uncovered one: the invoice runs into the daily figures
+    // there, so they take only what it covered of them (see the header) — up to its cut.
+    const lastGap = days.findLastIndex((d) => !covered(d));
+    let intoCovered = Infinity;
+    if (lastGap >= 0 && lastGap < days.length - 1) {
+      const charged = inv.chargedAt != null ? (input.dayShare?.(inv.chargedAt, to) ?? null) : null;
+      const share = Math.min(1, Math.max(0, charged ?? UNKNOWN_CUT_SHARE));
+      intoCovered = days.slice(lastGap + 1, -1).reduce((t, d) => t + roomOf(d), 0) + Math.round(roomOf(to) * share);
+    }
     // 1. covered days first, in time order
-    for (const d of days) {
+    for (const [i, d] of days.entries()) {
       if (left <= 0) break;
       if (!covered(d)) continue;
-      const take = Math.min(roomOf(d), left);
+      const cap = i > lastGap ? intoCovered : Infinity;
+      const take = Math.min(roomOf(d), left, cap);
       if (take > 0) {
         room.set(d, roomOf(d) - take);
         put(d, take);
         left -= take;
+        if (i > lastGap) intoCovered -= take;
       }
     }
     // 2. the rest, evenly over the days the API doesn't cover — 3. or a surplus on the last day
@@ -345,6 +369,8 @@ export type LedgerAdCharge = {
   /** The same as posted. A charge and its invoice are the same bill when THESE agree to the cent:
    *  converted figures differ by the day's exchange rate (a charge often posts the day after). */
   native?: NativeAmount | null;
+  /** When it posted (epoch ms). */
+  at?: number | null;
 };
 
 export type FeedAdInvoice = {
@@ -417,9 +443,9 @@ export function unifyAdInvoices(input: {
           continue;
         }
       }
-      invoices.push({ id: l.id, day: best.to!, from: best.from, amount: l.amount, mix: best.mix ?? null });
+      invoices.push({ id: l.id, day: best.to!, from: best.from, amount: l.amount, mix: best.mix ?? null, chargedAt: l.at ?? null });
     } else {
-      invoices.push({ id: l.id, day: l.day, amount: l.amount });
+      invoices.push({ id: l.id, day: l.day, amount: l.amount, chargedAt: l.at ?? null });
     }
   }
   let fromFeed = 0;
