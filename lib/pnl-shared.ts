@@ -248,9 +248,11 @@ export function pnlLineOf(group: string, type: string, sources: PnlSource[]): st
       if (/star|upstream|\bawd\b/.test(t)) return "AWD storage";
       return only("AMAZON") ? "FBA storage" : "Storage";
     case "advertising":
-      // Everything on Amazon Ads' invoices (Sponsored Products, Brands, Display, Creator
-      // Connections, the spend not invoiced yet) is one line; Vine is billed in Seller Central.
+      // Amazon's ads (Sponsored Products, Brands, Display, the spend not invoiced yet) are one line;
+      // Creator Connections — a commission to Amazon's creators, billed on the same invoices but never
+      // in the daily spend — and Vine (billed in Seller Central) each keep their own.
       if (t.includes("vine")) return "Amazon Vine";
+      if (only("AMAZON") && t.includes("creator")) return "Creator Connections";
       if (only("AMAZON")) return "Amazon ads";
       if (sources.includes("META") || t.includes("meta")) return "Meta ads";
       if (only("TIKTOK")) {
@@ -261,6 +263,9 @@ export function pnlLineOf(group: string, type: string, sources: PnlSource[]): st
       return "Other advertising";
     case "other":
       if (t.includes("subscription")) return "Seller subscription";
+      // Sales tax or GST/HST Amazon charges on its own fees, where the seller's state or province
+      // taxes them: a cost of those fees (or reclaimable), never the buyers' tax under Taxes.
+      if (only("AMAZON") && t === "tax") return "Tax on Amazon's fees";
       if (only("AMAZON") && REIMBURSEMENT_CODE.test(base)) return "Amazon reimbursements";
       return "Other adjustments";
     default:

@@ -266,6 +266,14 @@ export function flattenTransaction(tx: FinanceTransaction, unhandled?: Map<strin
       }
     }
   }
+  // Sales tax the buyer paid that Amazon did not pay over itself — a seller registered for GST/HST
+  // on Amazon.ca, or any marketplace where the seller remits: the seller still owes it to the state.
+  // Where Amazon is the marketplace facilitator (every US state), its withholding cancels the tax
+  // and nothing is owed. Taxes always nets to zero, and only what is owed reaches the balance sheet.
+  // (Tax Amazon charges on its own fees files with the fees, never under Taxes.)
+  const taxRows = rows.filter((r) => r.group === "taxes");
+  const unpaid = Math.round(taxRows.reduce((t, r) => t + r.amount, 0) * 100) / 100;
+  if (unpaid !== 0) rows.push({ ...taxRows[0], type: "Tax owed", sku: null, quantity: null, amount: -unpaid });
   return rows;
 }
 
