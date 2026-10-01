@@ -23,13 +23,14 @@
  *                    connection that may read customers can fill it, so this one is stamped only
  *                    after a full read made WITH that permission: a store that gains it later (a
  *                    reconnect, an approved app update) is re-read then, by itself.
- *  amazonAdsSpend 1 — daily spend per ad type in the ad profile's own currency, with the covered
+ *  amazonAdsSpend 2 — daily spend per ad type in the ad profile's own currency, with the covered
  *                    day ranges recorded per ad type. A re-read can only reach as far back as
- *                    Amazon still keeps daily data; days already on record stay.
+ *                    Amazon still keeps daily data; days already on record stay. Generation 1
+ *                    re-read only the last 3 days, so a day Amazon lowered later kept its old figure.
  *  amazonAdsInvoices 1 — Amazon Ads' invoice feed: every invoice with its period, payment record
  *                    and split by ad program. A re-read lists the whole history again.
  */
-export const IMPORTER_VERSIONS = { amazonFinance: 3, shopifyFinance: 3, shopifyOrders: 2, shopifyCustomers: 1, tiktokOrders: 1, tiktokFinance: 2, amazonAdsSpend: 1, amazonAdsInvoices: 1 } as const;
+export const IMPORTER_VERSIONS = { amazonFinance: 3, shopifyFinance: 3, shopifyOrders: 2, shopifyCustomers: 1, tiktokOrders: 1, tiktokFinance: 2, amazonAdsSpend: 2, amazonAdsInvoices: 1 } as const;
 export type ImporterKey = keyof typeof IMPORTER_VERSIONS;
 
 /** The generation a company's ledger was written with (0 = before generations were tracked). */
