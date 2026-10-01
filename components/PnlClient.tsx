@@ -212,7 +212,7 @@ function PeriodCogsRows({ pnl, statements, money, locale }: { pnl: Pnl; statemen
         <Filler />
       </tr>
       {open && stockLines.length > 0 && sub("sold", "Units sold", pnl.unitsSold, (statement) => statement.cogs - pnlStockTotal(statement.stock))}
-      {open && stockLines.map((line) => sub(line, PNL_STOCK_LABEL[line], line === "writeoffs" ? null : pnl.stock[line].units, (statement) => statement.stock[line].cogs, line === "writeoffs" ? "CONSL" : "AMAZON"))}
+      {open && stockLines.map((line) => sub(line, PNL_STOCK_LABEL[line], line === "writeoffs" ? null : pnl.stock[line].units, (statement) => statement.stock[line].cogs))}
     </>
   );
 }
@@ -322,7 +322,7 @@ function CogsRow({ pnl, money }: { pnl: Pnl; money: (n: number) => string }) {
         stockLines.map((line) => (
           <div key={line} className="dropdown-in flex items-center justify-between gap-3 px-4 py-1.5 pl-8 text-[12.5px] text-ink-soft">
             <span className="flex min-w-0 items-center gap-2">
-              <SourceMarks sources={[line === "writeoffs" ? "CONSL" : "AMAZON"]} size={13} />
+              <SourceMarks sources={["CONSL"]} size={13} />
               <span className="min-w-0 truncate">
                 {PNL_STOCK_LABEL[line]}
                 {line !== "writeoffs" && ` · ${Math.round(Math.abs(pnl.stock[line].units)).toLocaleString()} units`}
