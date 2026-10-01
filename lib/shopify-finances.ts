@@ -148,16 +148,18 @@ export function flattenShopifyOrder(
   push({ group: "sales", type: "Tips", amount: num(o.totalTipReceivedSet) });
   const tax = num(o.totalTaxSet);
   // Tax, duties and collected fees are the state's money, not sales: they sit under Taxes, where
-  // what the store collected and what it pays over cancel out.
+  // what the store collected and what it owes the state cancel out. On its own store the merchant
+  // pays that tax over; when Shopify pays it instead (a Shop app order), the payout ledger says so
+  // and moves it off "Tax owed" (see balanceRows).
   push({ group: "taxes", type: "Tax collected", amount: tax });
-  push({ group: "taxes", type: "Tax remitted", amount: -tax });
+  push({ group: "taxes", type: "Tax owed", amount: -tax });
   // Duties and other collected fees (a retail delivery fee) pass through like the tax.
   const duties = num(o.originalTotalDutiesSet);
   push({ group: "taxes", type: "Duties collected", amount: duties });
-  push({ group: "taxes", type: "Duties remitted", amount: -duties });
+  push({ group: "taxes", type: "Duties owed", amount: -duties });
   const extraFees = num(o.originalTotalAdditionalFeesSet);
   push({ group: "taxes", type: "Additional fees collected", amount: extraFees });
-  push({ group: "taxes", type: "Additional fees remitted", amount: -extraFees });
+  push({ group: "taxes", type: "Additional fees owed", amount: -extraFees });
 
   // What Shopify Payments kept on the capture(s) — only when the ledger isn't the source.
   if (!ledgerFees) {
@@ -185,7 +187,7 @@ export function flattenShopifyOrder(
       push({ group: "refunds", type: "Refund:Product sales", amount: -sub, sku: rl.lineItem ? lineKey(rl.lineItem) : null, txId: r.id, postedAt: at, eventAt: at });
     }
     push({ group: "taxes", type: "Refund:Tax collected", amount: -lineTax, txId: r.id, postedAt: at, eventAt: at });
-    push({ group: "taxes", type: "Tax remitted", amount: lineTax, txId: r.id, postedAt: at, eventAt: at });
+    push({ group: "taxes", type: "Tax owed", amount: lineTax, txId: r.id, postedAt: at, eventAt: at });
     push({ group: "refunds", type: "Refund:Shipping & other", amount: -(total - lines - lineTax), txId: r.id, postedAt: at, eventAt: at });
   }
 
@@ -252,7 +254,7 @@ const label = (type: string) => {
   return t.charAt(0).toUpperCase() + t.slice(1);
 };
 
-function balanceRows(t: BalanceTx): Row[] {
+export function balanceRows(t: BalanceTx): Row[] {
   const at = new Date(t.transactionDate);
   const amount = num(t.amount.amount);
   const fee = num(t.fee.amount); // positive = charged to the merchant
@@ -290,7 +292,13 @@ function balanceRows(t: BalanceTx): Row[] {
       }
       break;
     case "ADJUSTMENT":
-      push("other", label(t.type), amount);
+      if (/^TAX_ADJUSTMENT/.test(t.type)) {
+        // Sales tax Shopify pays to the state itself and withholds from the payout — it is the
+        // marketplace facilitator for orders placed in the Shop app (and passes on Facebook's and
+        // Instagram's). Paid by the channel, so that order's tax is no longer the merchant's to owe.
+        push("taxes", "Tax withheld by Shopify", amount);
+        push("taxes", "Tax owed", -amount);
+      } else push("other", label(t.type), amount);
       push("payment_fees", "Processing fee", -fee);
       break;
     default:

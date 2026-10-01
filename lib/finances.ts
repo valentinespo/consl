@@ -85,13 +85,16 @@ function feeGroup(type: string): PnlGroup {
  * (and the shipping or gift wrap it charges back), getting stock in (inbound transportation,
  * placement), AWD's processing and transport, removals and disposals. Storage = FBA's and AWD's.
  * Vine is marketing. Reimbursements stay with the other transactions; revenue, refunds and taxes
- * never move. A reserve credited or debited is cash, not profit. Migrations 20261001180000_fee_sections
- * and 20261001200000_reserves_not_profit applied the same rules to the rows on file.
+ * never move. A reserve credited or debited, or a debt payment, is cash, not profit. Migrations
+ * 20261001180000_fee_sections, 20261001200000_reserves_not_profit and 20261001220000_debt_not_profit
+ * applied the same rules to the rows on file.
  */
 function amazonSection(type: string, group: PnlGroup): PnlGroup {
   if (group !== "other" && group !== "referral_fees") return group;
   const t = type.replace(/^MCF:/, "").toLowerCase();
-  if (/^reserve(credit|debit)$/.test(t)) return "cash";
+  // A reserve held and released, and a card or another marketplace's balance topping up a negative
+  // one ("Debt payment"): money moving, never profit — the fee that ran the balance down is the cost.
+  if (/^reserve(credit|debit)$/.test(t) || t.startsWith("debt")) return "cash";
   if (t.includes("vine")) return "advertising";
   if (t.endsWith("chargeback")) return "fba_fees";
   if (/missing|reimburs|clawback|refund|replacement/.test(t)) return group;

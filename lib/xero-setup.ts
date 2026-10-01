@@ -144,7 +144,7 @@ async function companyRows(orgId: string) {
     balances.push({
       key: "sales_tax",
       label: "Sales tax payable",
-      hint: "Tax your customers paid, until it's paid to the state. Amazon and TikTok pay it for you, so theirs goes straight back out.",
+      hint: "Tax your customers paid that you still owe the state. What the channel pays for you (Amazon, TikTok, Shopify's Shop app) goes straight back out.",
       suggest: { name: "Sales Tax Payable", type: "CURRLIAB" },
     });
   }

@@ -8,6 +8,10 @@
  *                    MCF shipment fees ("Non-Amazon" marketplace) included.
  *  shopifyFinance 3 — everything the customer is charged: shipping after discount codes, tips,
  *                    duties and additional fees as pass-throughs, tax-inclusive prices unpacked.
+ *  shopifyFinance 4 — tax Shopify pays to the state itself (Shop app orders; withheld from the
+ *                    payout as TAX_ADJUSTMENT_*) booked under Taxes as "Tax withheld by Shopify",
+ *                    taking that order's tax off "Tax owed" (renamed from "Tax remitted": what the
+ *                    merchant still has to pay over). Before, it sat under Other and was paid twice.
  *  shopifyOrders  2 — the payment method (gateway + wallet/card) captured on every order; PayPal
  *                    Wallet inside Shopify Payments named as such.
  *  tiktokOrders   1 — first API generation: a company whose TikTok orders were loaded from a
@@ -31,7 +35,7 @@
  *  amazonAdsInvoices 1 — Amazon Ads' invoice feed: every invoice with its period, payment record
  *                    and split by ad program. A re-read lists the whole history again.
  */
-export const IMPORTER_VERSIONS = { amazonFinance: 3, shopifyFinance: 3, shopifyOrders: 2, shopifyCustomers: 1, tiktokOrders: 1, tiktokFinance: 2, amazonAdsSpend: 2, amazonAdsInvoices: 1 } as const;
+export const IMPORTER_VERSIONS = { amazonFinance: 3, shopifyFinance: 4, shopifyOrders: 2, shopifyCustomers: 1, tiktokOrders: 1, tiktokFinance: 2, amazonAdsSpend: 2, amazonAdsInvoices: 1 } as const;
 export type ImporterKey = keyof typeof IMPORTER_VERSIONS;
 
 /** The generation a company's ledger was written with (0 = before generations were tracked). */

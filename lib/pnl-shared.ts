@@ -222,7 +222,12 @@ export function pnlLineOf(group: string, type: string, sources: PnlSource[]): st
       if (!/customer|buyer/.test(t) && (/:tax$/.test(t) || /commission|chargeback|digitalservices|closingfee|fulfillment|referral/.test(t))) return "Fees given back";
       return "Refunded to customers";
     case "taxes":
-      return /withheld|facilitator|remitted|payment/.test(t) ? "Tax paid over" : "Tax collected";
+      // What customers paid; what the channel paid to the state for you (Amazon, TikTok, Shopify on
+      // Shop app orders), taken out of the payout; and what you still owe the state yourself (your
+      // own store's tax) — the one the balance sheet carries as sales tax payable.
+      if (/withheld|facilitator|payment/.test(t)) return "Tax paid by the channel";
+      if (/owed|remitted/.test(t)) return "Tax owed";
+      return "Tax collected";
     case "fba_fees":
       if (t.startsWith("mcf:")) return "MCF fulfillment";
       if (t.endsWith("chargeback")) return "Shipping charged back";
