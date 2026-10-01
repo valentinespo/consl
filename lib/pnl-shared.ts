@@ -174,8 +174,110 @@ export type Pnl = {
   hasData: boolean;
 };
 
-/** Sellerise-shaped ordering; "sales" first, computed COGS is inserted by the UI right after. */
-export const GROUP_ORDER = ["sales", "refunds", "taxes", "fba_fees", "referral_fees", "payment_fees", "custom_fees", "storage_fees", "advertising", "other"] as const;
+/**
+ * The statement's order. Sales and the refunds against them make Net sales; Cost of goods (which
+ * the UI inserts) and the cost of delivering every order (the channel's fulfillment, referral,
+ * payment, storage and custom fees) come off it for Gross profit; then advertising, everything
+ * else, and the taxes that only pass through, down to Net profit.
+ */
+export const GROUP_ORDER = ["sales", "refunds", "fba_fees", "referral_fees", "payment_fees", "storage_fees", "custom_fees", "advertising", "other", "taxes"] as const;
+export const PNL_REVENUE_GROUPS: readonly string[] = ["sales", "refunds"];
+export const PNL_DELIVERY_GROUPS: readonly string[] = ["fba_fees", "referral_fees", "payment_fees", "storage_fees", "custom_fees"];
+
+/** A statement's subtotals: Net sales (sales less refunds) and Gross profit (net sales less cost
+ *  of goods and the cost of delivery). The UI reads each, like the margin, against sales. */
+export function pnlSubtotals(s: PnlStatement): { netSales: number; grossProfit: number } {
+  const total = (group: string) => s.groups.find((b) => b.group === group)?.total ?? 0;
+  const netSales = PNL_REVENUE_GROUPS.reduce((t, g) => t + total(g), 0);
+  return { netSales, grossProfit: netSales + s.cogs + PNL_DELIVERY_GROUPS.reduce((t, g) => t + total(g), 0) };
+}
+
+/** One grouped line of a section: a plain name over the platforms' own lines it gathers. */
+export type PnlLine = { line: string; amount: number; sources: PnlSource[]; types: PnlTypeRow[] };
+
+/** Amazon's reimbursement reasons arrive as codes: MISSING_FROM_INBOUND, WAREHOUSE_LOST… */
+const REIMBURSEMENT_CODE = /^[A-Z0-9]+(_[A-Z0-9]+)+$/;
+
+/**
+ * The grouped line a platform's own line sits under: plain names that read the same for every
+ * channel — "Product sales" holds Amazon's Principal, Shopify's product sales and TikTok's gross
+ * sales. Naming only: every platform line stays one click deeper with its own amount, and no
+ * section, amount or total moves. A line the rules don't know lands in its section's catch-all.
+ */
+export function pnlLineOf(group: string, type: string, sources: PnlSource[]): string {
+  const custom = sources.length > 0 && sources.every((x) => x === "CUSTOM");
+  const only = (source: "AMAZON" | "TIKTOK") => sources.length > 0 && sources.every((x) => x === source || (source === "AMAZON" && x === "AMAZON_ADS"));
+  const base = type.replace(/ \((pending|not invoiced yet)\)$/i, "");
+  const t = base.toLowerCase();
+  switch (group) {
+    case "sales":
+      if (custom) return "Credits you added";
+      if (/principal|product sales|gross sales/.test(t)) return "Product sales";
+      if (/discount|promotion|coupon|voucher/.test(t)) return "Discounts";
+      if (/shipping|gift ?wrap/.test(t)) return "Shipping & gift wrap";
+      return "Other sales";
+    case "refunds":
+      if (t === "chargeback" || t.startsWith("chargeback:")) return "Chargebacks";
+      if (/refundcommission|refund administration/.test(t)) return "Refund admin fees";
+      if (!/customer|buyer/.test(t) && (/:tax$/.test(t) || /commission|chargeback|digitalservices|closingfee|fulfillment|referral/.test(t))) return "Fees given back";
+      return "Refunded to customers";
+    case "taxes":
+      return /withheld|facilitator|remitted|payment/.test(t) ? "Tax paid over" : "Tax collected";
+    case "fba_fees":
+      if (t.startsWith("mcf:")) return "MCF fulfillment";
+      if (t.endsWith("chargeback")) return "Shipping charged back";
+      if (/inbound|placement/.test(t)) return "Inbound shipping & placement";
+      if (/upstream|\bawd\b/.test(t)) return "AWD processing & transport";
+      if (/removal|disposal|liquidation/.test(t)) return "Removals & disposal";
+      return only("AMAZON") ? "FBA fulfillment" : "Shipping & fulfillment";
+    case "referral_fees":
+      return "Referral fees";
+    case "payment_fees":
+      if (custom) return "Fees you added";
+      return t.includes("chargeback") ? "Chargeback fees" : "Processing fees";
+    case "custom_fees":
+      return custom ? "Fees you added" : "Other fees";
+    case "storage_fees":
+      if (/star|upstream|\bawd\b/.test(t)) return "AWD storage";
+      return only("AMAZON") ? "FBA storage" : "Storage";
+    case "advertising":
+      if (t.includes("sponsored products")) return "Sponsored Products";
+      if (t.includes("sponsored brands")) return "Sponsored Brands";
+      if (t.includes("sponsored display")) return "Sponsored Display";
+      if (/sponsored ads|productadspayment/.test(t)) return "Amazon ads";
+      if (t.includes("vine")) return "Amazon Vine";
+      if (sources.includes("META") || t.includes("meta")) return "Meta ads";
+      if (only("TIKTOK")) {
+        if (/affiliate|creator|dynamic commission/.test(t)) return "TikTok affiliates";
+        if (/promotion|campaign/.test(t)) return "TikTok promotions";
+        return "TikTok ads";
+      }
+      if (t.includes("creator")) return "Creator Connections";
+      return "Other advertising";
+    case "other":
+      if (t.includes("subscription")) return "Seller subscription";
+      if (t.includes("reserve")) return "Reserves held & released";
+      if (only("AMAZON") && REIMBURSEMENT_CODE.test(base)) return "Amazon reimbursements";
+      return "Other adjustments";
+    default:
+      return "Other";
+  }
+}
+
+/** A section's lines under their grouped names, biggest first; each keeps its platform lines, biggest first. */
+export function pnlLines(block: PnlGroupBlock): PnlLine[] {
+  const lines = new Map<string, PnlLine>();
+  for (const t of block.types) {
+    const name = pnlLineOf(block.group, t.type, t.sources);
+    const line = lines.get(name) ?? { line: name, amount: 0, sources: [], types: [] };
+    line.amount += t.amount;
+    line.sources = PNL_SOURCE_ORDER.filter((x) => line.sources.includes(x) || t.sources.includes(x));
+    line.types.push(t);
+    lines.set(name, line);
+  }
+  const big = (a: { amount: number }, b: { amount: number }) => Math.abs(b.amount) - Math.abs(a.amount);
+  return [...lines.values()].map((l) => ({ ...l, types: [...l.types].sort(big) })).sort(big);
+}
 
 export const GROUP_LABEL: Record<string, string> = {
   sales: "Sales",

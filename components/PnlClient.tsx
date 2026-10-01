@@ -8,7 +8,7 @@ import { ChevronDown, PnlFilled, Receipt, X, CurrencyDollar, CreditCard } from "
 import { useMoney } from "@/components/CurrencyProvider";
 import { DateRangePicker, type Range } from "@/components/DateRangePicker";
 import { SelectMenu } from "@/components/SelectMenu";
-import { GROUP_LABEL, GROUP_ORDER, PNL_BREAKDOWNS, PNL_CHANNEL_LABEL, PNL_SOURCE_LABEL, PNL_SOURCE_ORDER, PNL_STOCK_LABEL, PNL_STOCK_LINES, parsePnlBreakdown, pnlStockTotal, type Pnl, type PnlBreakdown, type PnlChannel, type PnlGroupBlock, type PnlHistory, type PnlPeriod, type PnlSource, type PnlStatement } from "@/lib/pnl-shared";
+import { GROUP_LABEL, GROUP_ORDER, PNL_BREAKDOWNS, PNL_CHANNEL_LABEL, PNL_DELIVERY_GROUPS, PNL_REVENUE_GROUPS, PNL_SOURCE_LABEL, PNL_SOURCE_ORDER, PNL_STOCK_LABEL, PNL_STOCK_LINES, parsePnlBreakdown, pnlLines, pnlStockTotal, pnlSubtotals, type Pnl, type PnlBreakdown, type PnlChannel, type PnlGroupBlock, type PnlHistory, type PnlLine, type PnlPeriod, type PnlSource, type PnlStatement, type PnlTypeRow } from "@/lib/pnl-shared";
 import { aggregatePnlDays, foldPnl, pnlPeriodHeading, pnlPeriodRanges } from "@/lib/pnl-periods";
 import { rangeBounds } from "@/lib/chart";
 import { readSavedPnlView, saveSavedPnlView } from "@/lib/pnl-view";
@@ -18,8 +18,12 @@ import { SkuAvatar } from "@/components/ui";
 import { useCan } from "@/components/AccessProvider";
 import { savePreConslCosts } from "@/app/(app)/pnl/actions";
 
-/** Sales and the refunds against them come first, above Cost of goods; every other section after. */
-const REVENUE_GROUPS = new Set(["sales", "refunds"]);
+/** The statement's three bands of sections: above Net sales, between it and Gross profit (after
+ *  Cost of goods), and below Gross profit. */
+const bandOf = (group: string) => (PNL_REVENUE_GROUPS.includes(group) ? "revenue" : PNL_DELIVERY_GROUPS.includes(group) ? "delivery" : "rest");
+
+/** A share of sales, the base every percentage on the statement is read against. */
+const shareOfSales = (statement: PnlStatement, value: number) => (statement.sales !== 0 ? value / statement.sales : null);
 
 /** "FBAPerUnitFulfillmentFee" → "FBA per unit fulfillment fee"; a refund prefix folds away inside
  *  Refunds (elsewhere, e.g. tax handed back under Taxes, it's what tells the line apart). */
@@ -100,6 +104,7 @@ function Amount({ value, money, bold = false }: { value: number; money: (n: numb
 
 function GroupRow({ block, money }: { block: PnlGroupBlock; money: (n: number) => string }) {
   const [open, setOpen] = useState(false);
+  const lines = useMemo(() => pnlLines(block), [block]);
   const expandable = block.types.length > 1 || (block.types.length === 1 && block.types[0].type !== block.group);
   return (
     <>
@@ -118,17 +123,62 @@ function GroupRow({ block, money }: { block: PnlGroupBlock; money: (n: number) =
         </span>
         <Amount value={block.total} money={money} />
       </button>
-      {open &&
-        block.types.map((t) => (
-          <div key={t.type} className="dropdown-in flex items-center justify-between gap-3 px-4 py-1.5 pl-8 text-[12.5px] text-ink-soft">
-            <span className="flex min-w-0 items-center gap-2">
-              <SourceMarks sources={t.sources} size={13} group={block.group} />
-              <span className="min-w-0 truncate">{lineLabel(t, block.group)}</span>
-            </span>
-            <Amount value={t.amount} money={money} />
-          </div>
-        ))}
+      {open && (lines.length === 1 ? lines[0].types.map((t) => <TypeRow key={t.type} type={t} group={block.group} money={money} />) : lines.map((line) => <LineRow key={line.line} line={line} group={block.group} money={money} />))}
     </>
+  );
+}
+
+/** A platform's own line, as it names it. Directly under its section when the section has one
+ *  grouped line, one level deeper under a grouped line otherwise. */
+function TypeRow({ type, group, money, deep = false }: { type: PnlTypeRow; group: string; money: (n: number) => string; deep?: boolean }) {
+  return (
+    <div className={`dropdown-in flex items-center justify-between gap-3 px-4 ${deep ? "py-1 pl-14 text-[12px] text-muted" : "py-1.5 pl-8 text-[12.5px] text-ink-soft"}`}>
+      <span className="flex min-w-0 items-center gap-2">
+        <SourceMarks sources={type.sources} size={deep ? 12 : 13} group={group} />
+        <span className="min-w-0 truncate">{lineLabel(type, group)}</span>
+      </span>
+      <Amount value={type.amount} money={money} />
+    </div>
+  );
+}
+
+/** A grouped line can open when it holds more than one platform line, or one under another name. */
+const lineOpens = (line: PnlLine, group: string) => line.types.length > 1 || lineLabel(line.types[0], group) !== line.line;
+
+/** A grouped line of a section, and — behind its chevron — the platforms' own lines inside it. */
+function LineRow({ line, group, money }: { line: PnlLine; group: string; money: (n: number) => string }) {
+  const [open, setOpen] = useState(false);
+  const expandable = lineOpens(line, group);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => expandable && setOpen((o) => !o)}
+        aria-expanded={expandable ? open : undefined}
+        className={`dropdown-in flex w-full items-center justify-between gap-3 px-4 py-1.5 pl-8 text-left text-[12.5px] text-ink-soft ${expandable ? "hover:bg-surface-2/60" : "cursor-default"}`}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <SourceMarks sources={line.sources} size={13} group={group} />
+          <span className="min-w-0 truncate">{line.line}</span>
+          {expandable && <ChevronDown size={12} className={`shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`} />}
+        </span>
+        <Amount value={line.amount} money={money} />
+      </button>
+      {open && line.types.map((t) => <TypeRow key={t.type} type={t} group={group} money={money} deep />)}
+    </>
+  );
+}
+
+/** Net sales and Gross profit in the plain statement: the running total, and its share of sales. */
+function SubtotalRow({ label, value, share, note, money, pct }: { label: string; value: number; share: number | null; note: string; money: (n: number) => string; pct: (v: number | null) => string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 bg-surface-2/40 px-4 py-2.5 text-[13.5px]">
+      <span className="flex items-center gap-2 font-semibold text-ink">
+        {label}
+        {share != null && <span className="pill-neutral inline-flex items-center rounded-full border px-2 py-px text-[11px] font-medium">{pct(share)} {note}</span>}
+      </span>
+      <span className={`tabular font-semibold ${value >= 0 ? "text-positive" : "text-negative"}`}>{value < 0 ? `−${money(Math.abs(value))}` : money(value)}</span>
+    </div>
   );
 }
 
@@ -147,6 +197,12 @@ function PeriodGroupRows({ block, statements, money }: { block: PnlGroupBlock; s
   const [open, setOpen] = useState(false);
   const expandable = block.types.length > 1 || (block.types.length === 1 && block.types[0].type !== block.group);
   const groups = statements.map((statement) => statement.groups.find((group) => group.group === block.group));
+  const lines = useMemo(() => pnlLines(block), [block]);
+  // Each column's amount per platform line, looked up once (a daily breakdown has hundreds of columns).
+  const amounts = useMemo(
+    () => statements.map((statement) => new Map(statement.groups.find((group) => group.group === block.group)?.types.map((row) => [row.type, row.amount]) ?? [])),
+    [statements, block.group],
+  );
   return (
     <>
       <tr className={`${periodRowBorder} text-[13px]`}>
@@ -160,15 +216,44 @@ function PeriodGroupRows({ block, statements, money }: { block: PnlGroupBlock; s
         {groups.map((group, index) => <td key={index} className={`${periodValueCell(index)} py-2.5`}><Amount value={group?.total ?? 0} money={money} /></td>)}
         <Filler />
       </tr>
-      {open && block.types.map((type) => (
-        <tr key={type.type} className="dropdown-in text-[12.5px] text-ink-soft">
-          <th scope="row" className={`${periodLabelCell} py-1.5 pl-8 font-normal`}>
-            <span className="flex items-center gap-2"><SourceMarks sources={type.sources} size={13} group={block.group} /><span title={lineLabel(type, block.group)} className="truncate">{lineLabel(type, block.group)}</span></span>
-          </th>
-          {groups.map((group, index) => <td key={index} className={`${periodValueCell(index)} py-1.5`}><Amount value={group?.types.find((row) => row.type === type.type)?.amount ?? 0} money={money} /></td>)}
-          <Filler />
-        </tr>
-      ))}
+      {open && (lines.length === 1
+        ? lines[0].types.map((type) => <PeriodTypeRow key={type.type} type={type} group={block.group} amounts={amounts} money={money} />)
+        : lines.map((line) => <PeriodLineRows key={line.line} line={line} group={block.group} amounts={amounts} money={money} />))}
+    </>
+  );
+}
+
+/** A platform's own line across the columns (see TypeRow). */
+function PeriodTypeRow({ type, group, amounts, money, deep = false }: { type: PnlTypeRow; group: string; amounts: Map<string, number>[]; money: (n: number) => string; deep?: boolean }) {
+  return (
+    <tr className={`dropdown-in ${deep ? "text-[12px] text-muted" : "text-[12.5px] text-ink-soft"}`}>
+      <th scope="row" className={`${periodLabelCell} ${deep ? "py-1 pl-14" : "py-1.5 pl-8"} font-normal`}>
+        <span className="flex items-center gap-2"><SourceMarks sources={type.sources} size={deep ? 12 : 13} group={group} /><span title={lineLabel(type, group)} className="truncate">{lineLabel(type, group)}</span></span>
+      </th>
+      {amounts.map((column, index) => <td key={index} className={`${periodValueCell(index)} ${deep ? "py-1" : "py-1.5"}`}><Amount value={column.get(type.type) ?? 0} money={money} /></td>)}
+      <Filler />
+    </tr>
+  );
+}
+
+/** A grouped line across the columns, and behind its chevron the platform lines inside it (see LineRow). */
+function PeriodLineRows({ line, group, amounts, money }: { line: PnlLine; group: string; amounts: Map<string, number>[]; money: (n: number) => string }) {
+  const [open, setOpen] = useState(false);
+  const expandable = lineOpens(line, group);
+  return (
+    <>
+      <tr className="dropdown-in text-[12.5px] text-ink-soft">
+        <th scope="row" className={`${periodLabelCell} py-1.5 pl-8 font-normal`}>
+          <button type="button" onClick={() => expandable && setOpen((value) => !value)} aria-expanded={expandable ? open : undefined} className={`flex w-full items-center gap-2 text-left ${expandable ? "hover:text-accent" : "cursor-default"}`}>
+            <SourceMarks sources={line.sources} size={13} group={group} />
+            <span title={line.line} className="truncate">{line.line}</span>
+            {expandable && <ChevronDown size={12} className={`shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`} />}
+          </button>
+        </th>
+        {amounts.map((column, index) => <td key={index} className={`${periodValueCell(index)} py-1.5`}><Amount value={line.types.reduce((total, type) => total + (column.get(type.type) ?? 0), 0)} money={money} /></td>)}
+        <Filler />
+      </tr>
+      {open && line.types.map((type) => <PeriodTypeRow key={type.type} type={type} group={group} amounts={amounts} money={money} deep />)}
     </>
   );
 }
@@ -224,18 +309,31 @@ function PnlBreakdownTable({ pnl, periods, breakdown, money, locale }: { pnl: Pn
   // Newest period first, like a statement is read: this month, then the ones before it.
   const ordered = [...periods].reverse();
   const statements: PnlStatement[] = [pnl, ...ordered.map((period) => period.statement)];
-  // Include a line even when opposite movements in different periods cancel out in Total.
+  // Include a line even when opposite movements in different periods cancel out in Total. A line
+  // keeps the Total's amount (the first statement), which orders the grouped lines.
   const groups = GROUP_ORDER.flatMap((group) => {
     const blocks = statements.flatMap((statement) => statement.groups.filter((block) => block.group === group));
     if (!blocks.length) return [];
     const types = new Map<string, PnlGroupBlock["types"][number]>();
     for (const block of blocks) for (const type of block.types) {
       const current = types.get(type.type);
-      types.set(type.type, { ...type, sources: PNL_SOURCE_ORDER.filter((source) => type.sources.includes(source) || current?.sources.includes(source)) });
+      types.set(type.type, { ...type, amount: current?.amount ?? type.amount, sources: PNL_SOURCE_ORDER.filter((source) => type.sources.includes(source) || current?.sources.includes(source)) });
     }
     return [{ group, total: blocks[0].total, types: [...types.values()] }];
   });
   const pct = (value: number | null) => value == null ? "—" : `${(value * 100).toLocaleString(locale, { maximumFractionDigits: 1 })}%`;
+  // A subtotal across the columns: each period's figure with its share of that period's sales.
+  const total = (key: string, label: string, value: (statement: PnlStatement) => number) =>
+    row(key, label, (statement) => {
+      const amount = value(statement);
+      const share = shareOfSales(statement, amount);
+      return (
+        <span className="inline-flex items-baseline justify-end gap-1.5">
+          {share != null && <span className="tabular text-[11px] font-normal text-muted">{pct(share)}</span>}
+          <span className={`tabular font-semibold ${amount >= 0 ? "text-positive" : "text-negative"}`}>{amount < 0 ? `−${money(Math.abs(amount))}` : money(amount)}</span>
+        </span>
+      );
+    }, true);
   function row(key: string, label: ReactNode, value: (statement: PnlStatement) => ReactNode, summary = false) {
     return (
       <tr key={key} className={`${periodRowBorder} ${summary ? "bg-surface-2/40 text-[14px]" : "text-[13px]"}`}>
@@ -274,11 +372,13 @@ function PnlBreakdownTable({ pnl, periods, breakdown, money, locale }: { pnl: Pn
             </tr>
           </thead>
           <tbody>
-            {groups.filter((group) => REVENUE_GROUPS.has(group.group)).map((block) => <PeriodGroupRows key={block.group} block={block} statements={statements} money={money} />)}
+            {groups.filter((group) => bandOf(group.group) === "revenue").map((block) => <PeriodGroupRows key={block.group} block={block} statements={statements} money={money} />)}
+            {total("net-sales", "Net sales", (statement) => pnlSubtotals(statement).netSales)}
             <PeriodCogsRows pnl={pnl} statements={statements} money={money} locale={locale} />
-            {groups.filter((group) => !REVENUE_GROUPS.has(group.group)).map((block) => <PeriodGroupRows key={block.group} block={block} statements={statements} money={money} />)}
-            {row("profit", "Net profit", (statement) => <span className={`tabular font-semibold ${statement.netProfit >= 0 ? "text-positive" : "text-negative"}`}>{statement.netProfit < 0 ? `−${money(Math.abs(statement.netProfit))}` : money(statement.netProfit)}</span>, true)}
-            {row("margin", <span className="font-normal text-ink-soft">Margin</span>, (statement) => <span className="tabular text-ink-soft">{pct(statement.margin)}</span>)}
+            {groups.filter((group) => bandOf(group.group) === "delivery").map((block) => <PeriodGroupRows key={block.group} block={block} statements={statements} money={money} />)}
+            {total("gross-profit", "Gross profit", (statement) => pnlSubtotals(statement).grossProfit)}
+            {groups.filter((group) => bandOf(group.group) === "rest").map((block) => <PeriodGroupRows key={block.group} block={block} statements={statements} money={money} />)}
+            {total("profit", "Net profit", (statement) => statement.netProfit)}
             {row("roi", <span className="font-normal text-ink-soft">ROI</span>, (statement) => <span className="tabular text-ink-soft">{pct(statement.roi)}</span>)}
           </tbody>
         </table>
@@ -418,8 +518,8 @@ export function PnlClient({ history, initial }: { history: PnlHistory; initial: 
   const setBreakdown = (value: string) => update({ breakdown: parsePnlBreakdown(value) });
 
   const pct = (v: number | null) => (v == null ? "—" : `${(v * 100).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`);
-  const revenue = pnl.groups.filter((g) => REVENUE_GROUPS.has(g.group));
-  const rest = pnl.groups.filter((g) => !REVENUE_GROUPS.has(g.group));
+  const band = (name: string) => pnl.groups.filter((g) => bandOf(g.group) === name);
+  const { netSales, grossProfit } = pnlSubtotals(pnl);
 
   return (
     <div className="flex flex-col gap-5">
@@ -485,25 +585,30 @@ export function PnlClient({ history, initial }: { history: PnlHistory; initial: 
       ) : (
         <div className="overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface">
           <div className="divide-y divide-line">
-            {revenue.map((g) => (
+            {band("revenue").map((g) => (
               <GroupRow key={g.group} block={g} money={money} />
             ))}
+            <SubtotalRow label="Net sales" value={netSales} share={shareOfSales(pnl, netSales)} note="of sales" money={money} pct={pct} />
             <CogsRow pnl={pnl} money={money} />
-            {rest.map((g) => (
+            {band("delivery").map((g) => (
+              <GroupRow key={g.group} block={g} money={money} />
+            ))}
+            <SubtotalRow label="Gross profit" value={grossProfit} share={shareOfSales(pnl, grossProfit)} note="margin" money={money} pct={pct} />
+            {band("rest").map((g) => (
               <GroupRow key={g.group} block={g} money={money} />
             ))}
           </div>
           <div className="border-t border-border bg-surface-2/40">
             <div className="flex items-center justify-between gap-3 px-4 py-3 text-[14px]">
-              <span className="font-semibold text-ink">Net profit</span>
+              <span className="flex items-center gap-2 font-semibold text-ink">
+                Net profit
+                {pnl.margin != null && <span className="pill-neutral inline-flex items-center rounded-full border px-2 py-px text-[11px] font-medium">{pct(pnl.margin)} margin</span>}
+              </span>
               <span className={`tabular font-semibold ${pnl.netProfit >= 0 ? "text-positive" : "text-negative"}`}>
                 {pnl.netProfit < 0 ? `−${money(Math.abs(pnl.netProfit))}` : money(pnl.netProfit)}
               </span>
             </div>
-            <div className="flex items-center justify-between gap-3 px-4 pb-3 text-[12.5px] text-ink-soft">
-              <span>Margin {pct(pnl.margin)}</span>
-              <span>ROI {pct(pnl.roi)}</span>
-            </div>
+            <div className="px-4 pb-3 text-[12.5px] text-ink-soft">ROI {pct(pnl.roi)}</div>
           </div>
         </div>
       )}
