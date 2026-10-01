@@ -25,9 +25,14 @@ const bandOf = (group: string) => (PNL_REVENUE_GROUPS.includes(group) ? "revenue
 /** A share of sales, the base every percentage on the statement is read against. */
 const shareOfSales = (statement: PnlStatement, value: number) => (statement.sales !== 0 ? value / statement.sales : null);
 
+/** Platform codes whose spelled-out form says nothing: Amazon's MCF fee credit, and its coupon fee
+ *  under both the names Amazon has used for it. */
+const NAMED: Record<string, string> = { MCCFCredit: "MCF fee credit", SellerPoweredCoupon: "Coupon fees", CouponPayment: "Coupon fees" };
+
 /** "FBAPerUnitFulfillmentFee" → "FBA per unit fulfillment fee"; a refund prefix folds away inside
  *  Refunds (elsewhere, e.g. tax handed back under Taxes, it's what tells the line apart). */
 function humanize(raw: string, group?: string): string {
+  if (NAMED[raw]) return NAMED[raw];
   const [prefix, rest] = raw.includes(":") ? [raw.slice(0, raw.indexOf(":")), raw.slice(raw.indexOf(":") + 1)] : [null, raw];
   const spell = (s: string) =>
     s

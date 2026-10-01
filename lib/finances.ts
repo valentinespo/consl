@@ -85,9 +85,10 @@ function feeGroup(type: string): PnlGroup {
  * (and the shipping or gift wrap it charges back), getting stock in (inbound transportation,
  * placement), AWD's processing and transport, removals and disposals. Storage = FBA's and AWD's.
  * Vine is marketing. Reimbursements stay with the other transactions; revenue, refunds and taxes
- * never move. A reserve credited or debited, or a debt payment, is cash, not profit. Migrations
- * 20261001180000_fee_sections, 20261001200000_reserves_not_profit and 20261001220000_debt_not_profit
- * applied the same rules to the rows on file.
+ * never move. A reserve credited or debited, or a debt payment, is cash, not profit. An MCF fee
+ * credit joins MCF fulfillment; coupon fees join the discounts. Migrations 20261001180000_fee_sections,
+ * 20261001200000_reserves_not_profit, 20261001220000_debt_not_profit and
+ * 20261002100000_mcf_credit_and_coupon_fees applied the same rules to the rows on file.
  */
 function amazonSection(type: string, group: PnlGroup): PnlGroup {
   if (group !== "other" && group !== "referral_fees") return group;
@@ -95,6 +96,11 @@ function amazonSection(type: string, group: PnlGroup): PnlGroup {
   // A reserve held and released, and a card or another marketplace's balance topping up a negative
   // one ("Debt payment"): money moving, never profit — the fee that ran the balance down is the cost.
   if (/^reserve(credit|debit)$/.test(t) || t.startsWith("debt")) return "cash";
+  // Amazon handing back part of an MCF fee: it nets against the MCF fulfillment it credits.
+  if (t === "mccfcredit") return "fba_fees";
+  // Amazon's coupon fee (charged per coupon used): the cost of offering the discount, so it sits
+  // with the discounts (Sales). Amazon has named it CouponPayment and SellerPoweredCoupon.
+  if (t.includes("coupon")) return "sales";
   if (t.includes("vine")) return "advertising";
   if (t.endsWith("chargeback")) return "fba_fees";
   if (/missing|reimburs|clawback|refund|replacement/.test(t)) return group;
@@ -164,9 +170,12 @@ function productContext(item: AnyObj): { sku: string | null; quantity: number | 
   return { sku: ctx?.sku ? String(ctx.sku) : null, quantity: typeof qty === "number" ? qty : null };
 }
 
-/** Push one row, dropping zero-amount noise, in the section its fee belongs in. */
+/** Push one row, dropping zero-amount noise, in the section its fee belongs in. Amazon's coupon fee
+ *  keeps one name whichever Amazon used (CouponPayment, later SellerPoweredCoupon). */
 function push(rows: FlatRow[], row: FlatRow) {
-  if (row.amount !== 0) rows.push({ ...row, group: amazonSection(row.type, row.group) });
+  if (row.amount === 0) return;
+  const type = row.type === "CouponPayment" ? "SellerPoweredCoupon" : row.type;
+  rows.push({ ...row, type, group: amazonSection(type, row.group) });
 }
 
 /** One transaction → flat P&L rows (empty for kinds that aren't P&L, like bank disbursements).

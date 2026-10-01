@@ -231,7 +231,7 @@ export function pnlLineOf(group: string, type: string, sources: PnlSource[]): st
       if (/owed|remitted/.test(t)) return "Tax owed";
       return "Tax collected";
     case "fba_fees":
-      if (t.startsWith("mcf:")) return "MCF fulfillment";
+      if (t.startsWith("mcf:") || t.includes("mccf")) return "MCF fulfillment";
       if (t.endsWith("chargeback")) return "Shipping charged back";
       if (/inbound|placement/.test(t)) return "Inbound shipping & placement";
       if (/upstream|\bawd\b/.test(t)) return "AWD processing & transport";
