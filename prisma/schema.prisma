@@ -613,6 +613,9 @@ model Settings {
   // day along this spend (lib/ads-waterfill) — the invoices stay the amount of record.
   amazonAdsSyncedThrough DateTime?
   amazonAdsSince DateTime?
+  // When the last 90 days were last asked again (daily): Amazon lowers a day's spend for weeks
+  // after it happened, while the passes in between re-read only the last few days.
+  amazonAdsDeepReadAt DateTime?
   // First day each ad type's reports cover, e.g. {"SPONSORED_PRODUCTS":"2026-06-20",…} — Amazon
   // keeps each ad type for a different number of days, and a day only some of them reach back to
   // would understate that day's spend, so the fill treats it as not covered.

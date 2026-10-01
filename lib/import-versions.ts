@@ -26,7 +26,8 @@
  *  amazonAdsSpend 2 — daily spend per ad type in the ad profile's own currency, with the covered
  *                    day ranges recorded per ad type. A re-read can only reach as far back as
  *                    Amazon still keeps daily data; days already on record stay. Generation 1
- *                    re-read only the last 3 days, so a day Amazon lowered later kept its old figure.
+ *                    never re-read a day more than 3 days back, so a day Amazon lowered later kept
+ *                    its old figure; generation 2 also re-reads the last 90 days once a day.
  *  amazonAdsInvoices 1 — Amazon Ads' invoice feed: every invoice with its period, payment record
  *                    and split by ad program. A re-read lists the whole history again.
  */

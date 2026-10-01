@@ -19,9 +19,10 @@ import { IMPORTER_VERSIONS, importerVersion, stampImporterVersion } from "@/lib/
  * most hours) later. So the import is two steps run by the scheduler: REQUEST the reports for
  * the days not yet covered (31 days per request is Amazon's limit; the first pull reaches back
  * as far as each ad type keeps data — 95/60/65 days), and COLLECT whatever finished, writing
- * its rows and moving the marker. Every pass re-reads the last 90 days (or as far back as the ad
- * type keeps, if less): Amazon lowers a day's spend for weeks after it happened, and the statement
- * fills each day up to the spend on record, so a stale day would carry the old, higher number.
+ * its rows and moving the marker. A pass starts as soon as the last one is in and re-reads the
+ * last 3 days; once a day it re-reads the last 90 (or as far back as the ad type keeps, if less)
+ * instead: Amazon lowers a day's spend for weeks after it happened, and the statement fills each
+ * day up to the spend on record, so a stale day would carry the old, higher number.
  *
  * The row's day is Amazon's: the report is cut in the advertising profile's own timezone, so a
  * day's spend is booked at the start of that calendar day in that zone. Spend is negative, like
@@ -47,7 +48,9 @@ const AD_PRODUCTS: { adProduct: AdProduct; reportTypeId: string; label: string; 
   { adProduct: "SPONSORED_DISPLAY", reportTypeId: "sdCampaigns", label: "Sponsored Display", retentionDays: 63, columns: ["date", "campaignId", "campaignName", "cost", "impressions", "clicks", "purchases", "sales"] },
 ];
 const WINDOW_DAYS = 31;
-const OVERLAP_DAYS = 90;
+const OVERLAP_DAYS = 3;
+const DEEP_OVERLAP_DAYS = 90;
+const DEEP_EVERY_MS = 24 * 60 * 60_000;
 
 type Pending = { id: string; adProduct: AdProduct; from: string; to: string; at?: string };
 /** Amazon builds a report in minutes, at most a few hours. One still not done after this long is
@@ -77,11 +80,12 @@ export async function requestAmazonAdsReports(): Promise<{ requested: number }> 
   const tz = client.timezone ?? "America/Los_Angeles";
   const today = todayIn(tz);
   const synced = s.amazonAdsSyncedThrough ? day(s.amazonAdsSyncedThrough) : null;
+  const deep = !s.amazonAdsDeepReadAt || Date.now() - s.amazonAdsDeepReadAt.getTime() >= DEEP_EVERY_MS;
   const requested: Pending[] = [];
   for (const p of AD_PRODUCTS) {
     // From the marker (minus overlap) — or as far back as this ad type keeps — up to today.
     const floor = addDays(today, -p.retentionDays);
-    let from = synced ? addDays(synced, -OVERLAP_DAYS) : floor;
+    let from = synced ? addDays(synced, -(deep ? DEEP_OVERLAP_DAYS : OVERLAP_DAYS)) : floor;
     if (from < floor) from = floor;
     if (from > today) continue;
     while (from <= today) {
@@ -110,7 +114,7 @@ export async function requestAmazonAdsReports(): Promise<{ requested: number }> 
       from = addDays(to, 1);
     }
   }
-  if (requested.length) await saveOrgSettings({ amazonAdsPendingReports: requested });
+  if (requested.length) await saveOrgSettings({ amazonAdsPendingReports: requested, ...(deep ? { amazonAdsDeepReadAt: new Date() } : {}) });
   return { requested: requested.length };
 }
 
