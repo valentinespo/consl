@@ -2,8 +2,8 @@
  * The Xero export's vocabulary, shared by the setup screen and the server (plain module, no
  * "server-only"). A company's consl P&L is a set of LINES per channel — the P&L's own groups plus
  * cost of goods — and each line posts to one Xero account. The money those lines move waits in
- * BALANCE rows until the cash moves: a clearing account per channel (payout deposits are coded
- * there), sales tax payable (the P&L's Taxes row: the state's money, never revenue), payables for
+ * BALANCE rows until the cash moves: a receivable per channel (what the channel holds for you;
+ * payout deposits are coded there), sales tax payable (the P&L's Taxes row: the state's money, never revenue), payables for
  * costs paid outside the channel, and inventory (cost of goods leaves it).
  */
 

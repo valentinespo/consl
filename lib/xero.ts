@@ -20,7 +20,7 @@ import { APP_ORIGIN } from "@/lib/amazon-oauth";
 
 export const XERO_REDIRECT_URI = `${APP_ORIGIN}/api/integrations/xero/callback`;
 // Apps created after 2026-03-02 only have granular scopes. accounting.settings: the organisation,
-// chart of accounts (read, and create clearing accounts), tax rates, tracking categories.
+// chart of accounts (read, and create consl's accounts), tax rates, tracking categories.
 // accounting.manualjournals: post the P&L as journals.
 export const XERO_SCOPES = "offline_access accounting.settings accounting.manualjournals";
 

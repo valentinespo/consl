@@ -651,7 +651,7 @@ function HowItWorks() {
   const steps = [
     { title: "Match your lines", text: "Each line of your consl P&L goes to an account in your Xero chart." },
     { title: "Monthly journals", text: "When a month is complete, consl sends one journal per channel, dated when things happened." },
-    { title: "Payouts clear", text: "Code each payout deposit to its channel's clearing account, and it balances out." },
+    { title: "Code your payouts", text: "Code each payout deposit to its channel's receivable account. What's left is what the channel still owes you." },
   ];
   return (
     <div className="grid overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface sm:grid-cols-3">

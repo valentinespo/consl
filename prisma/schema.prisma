@@ -158,7 +158,7 @@ model Integration {
 }
 
 // How a company's P&L goes to Xero (lib/xero-setup): which Xero account each P&L line posts to,
-// per channel, and the balance-sheet accounts the money waits in (a clearing account per channel,
+// per channel, and the balance-sheet accounts the money waits in (a receivable per channel,
 // payables for costs paid outside the channel, inventory). Targets are Xero AccountIDs with the
 // code/name/type as last seen, so the screen reads right even before Xero answers.
 /// Units that left a sales channel's stock without a sale, or came back into it — read from the
@@ -190,7 +190,7 @@ model XeroSetup {
   organization       Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
   // "<CHANNEL>:<line>" → { accountId, code, name, type }  (line = the P&L group, or "cogs")
   lines              Json          @default("{}")
-  // "clearing:<CHANNEL>" | "payable:<SOURCE>" | "inventory" → { accountId, code, name, type }
+  // "receivable:<CHANNEL>" | "sales_tax" | "payable:<SOURCE>" | "inventory" → { accountId, code, name, type }
   balances           Json          @default("{}")
   sameForAllChannels Boolean       @default(true)
   // Tag every journal line with its sales channel (a Xero tracking category).

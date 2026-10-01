@@ -133,11 +133,11 @@ async function companyRows(orgId: string) {
   const lines = channels.flatMap((channel) => LINE_ORDER.filter((l) => found.get(channel)!.has(l)).map((line) => ({ channel, line })));
 
   const balances: BalanceRow[] = channels.map((channel) => ({
-    key: `clearing:${channel}`,
+    key: `receivable:${channel}`,
     channel,
-    label: `${CHANNEL_NAME[channel]} clearing`,
+    label: `${CHANNEL_NAME[channel]} receivable`,
     hint: `What ${CHANNEL_NAME[channel]} owes you. Code its payout deposits here.`,
-    suggest: { name: `${CHANNEL_NAME[channel]} Clearing`, type: "CURRENT" },
+    suggest: { name: `${CHANNEL_NAME[channel]} Receivable`, type: "CURRENT" },
   }));
   // The P&L's Taxes row is the state's money, not income: it waits here until it's paid over.
   if (groups.some((g) => g.group === "taxes" && isChannel(g.channel))) {
