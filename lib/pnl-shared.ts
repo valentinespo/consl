@@ -224,8 +224,10 @@ export function pnlLineOf(group: string, type: string, sources: PnlSource[]): st
     case "taxes":
       // What customers paid; what the channel paid to the state for you (Amazon, TikTok, Shopify on
       // Shop app orders), taken out of the payout; and what you still owe the state yourself (your
-      // own store's tax) — the one the balance sheet carries as sales tax payable.
-      if (/withheld|facilitator|payment/.test(t)) return "Tax paid by the channel";
+      // own store's tax) — the one the balance sheet carries as sales tax payable. TikTok calls the
+      // buyer's tax "Sales tax payment" (and its refund) and the tax it keeps to pay over "Sales tax".
+      if (only("TIKTOK")) return /payment|refund/.test(t) ? "Tax collected" : "Tax paid by the channel";
+      if (/withheld|facilitator/.test(t)) return "Tax paid by the channel";
       if (/owed|remitted/.test(t)) return "Tax owed";
       return "Tax collected";
     case "fba_fees":
@@ -246,18 +248,16 @@ export function pnlLineOf(group: string, type: string, sources: PnlSource[]): st
       if (/star|upstream|\bawd\b/.test(t)) return "AWD storage";
       return only("AMAZON") ? "FBA storage" : "Storage";
     case "advertising":
-      if (t.includes("sponsored products")) return "Sponsored Products";
-      if (t.includes("sponsored brands")) return "Sponsored Brands";
-      if (t.includes("sponsored display")) return "Sponsored Display";
-      if (/sponsored ads|productadspayment/.test(t)) return "Amazon ads";
+      // Everything on Amazon Ads' invoices (Sponsored Products, Brands, Display, Creator
+      // Connections, the spend not invoiced yet) is one line; Vine is billed in Seller Central.
       if (t.includes("vine")) return "Amazon Vine";
+      if (only("AMAZON")) return "Amazon ads";
       if (sources.includes("META") || t.includes("meta")) return "Meta ads";
       if (only("TIKTOK")) {
         if (/affiliate|creator|dynamic commission/.test(t)) return "TikTok affiliates";
         if (/promotion|campaign/.test(t)) return "TikTok promotions";
         return "TikTok ads";
       }
-      if (t.includes("creator")) return "Creator Connections";
       return "Other advertising";
     case "other":
       if (t.includes("subscription")) return "Seller subscription";

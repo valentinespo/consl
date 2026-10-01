@@ -292,7 +292,12 @@ export function balanceRows(t: BalanceTx): Row[] {
       }
       break;
     case "ADJUSTMENT":
-      if (/^TAX_ADJUSTMENT/.test(t.type)) {
+      if (/^SHOP_CASH/.test(t.type)) {
+        // Shop Cash is how the customer paid part of the order (Shopify settles it like a gift
+        // card, and takes it back on a refund). The sale is already counted from the order, so
+        // this is the payment for it, like the card part: cash, not income.
+        push("cash", label(t.type), amount);
+      } else if (/^TAX_ADJUSTMENT/.test(t.type)) {
         // Sales tax Shopify pays to the state itself and withholds from the payout — it is the
         // marketplace facilitator for orders placed in the Shop app (and passes on Facebook's and
         // Instagram's). Paid by the channel, so that order's tax is no longer the merchant's to owe.

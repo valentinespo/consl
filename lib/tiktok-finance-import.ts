@@ -158,7 +158,8 @@ const KNOWN: Record<string, LineSpec> = {
   sales_tax_amount: { name: "Sales tax", group: "taxes" },
   sales_tax_payment_amount: { name: "Sales tax payment", group: "taxes" },
   sales_tax_refund_amount: { name: "Sales tax refund", group: "taxes" },
-  sales_tax_referral_fee_amount: { name: "Sales tax on referral fee", group: "taxes" },
+  // Tax TikTok charges on its own fee: a cost, not the buyer's tax passing through.
+  sales_tax_referral_fee_amount: { name: "Sales tax on referral fee", group: "referral_fees" },
   smart_promotion_fee_tax_amount: { name: "Smart Promotion fee tax", group: "taxes" },
   retail_delivery_fee_amount: { name: "Retail delivery fee", group: "taxes" },
   retail_delivery_fee_payment_amount: { name: "Retail delivery fee payment", group: "taxes" },
