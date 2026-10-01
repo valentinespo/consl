@@ -288,6 +288,8 @@ export type LiveAmazonOrder = {
   total: number; // OrderTotal — the buyer's grand total (items + tax + shipping, net of promos)
   currency: string;
   salesChannel: string; // "Amazon.com" | "Non-Amazon" (an MCF order for another channel)
+  /** An MCF order's reference from whoever sent it (Shopify's app: "Shopify #1234 …"). */
+  sellerOrderId: string | null;
   isReplacement: boolean;
   lastUpdateDate: string;
   /** Merchant-fulfilled only: the ship-from place — a stable key and a human label. Null for FBA. */
@@ -303,6 +305,7 @@ type ApiOrder = {
   FulfillmentChannel?: string;
   OrderTotal?: { Amount?: string; CurrencyCode?: string };
   SalesChannel?: string;
+  SellerOrderId?: string;
   IsReplacementOrder?: boolean | string;
   LastUpdateDate?: string;
   DefaultShipFromLocationAddress?: ApiAddress | null;
@@ -337,6 +340,7 @@ function liveOrderOf(o: ApiOrder): LiveAmazonOrder {
     total: Number(o.OrderTotal?.Amount) || 0,
     currency: o.OrderTotal?.CurrencyCode ?? "USD",
     salesChannel: o.SalesChannel ?? "",
+    sellerOrderId: o.SellerOrderId?.trim() || null,
     isReplacement: o.IsReplacementOrder === true || o.IsReplacementOrder === "true",
     lastUpdateDate: o.LastUpdateDate ?? "",
     shipFromKey: from.key,
@@ -422,6 +426,15 @@ export async function getMfnOrdersCreatedBetween(client: SpApiClient, fromISO: s
   return getOrdersCreatedBetween(client, fromISO, toISO, { fulfillment: "MFN", maxPages });
 }
 
+/** One order's seller reference (an MCF order's "Shopify #1234 …"): null when Amazon has none,
+ *  undefined when Amazon didn't answer. Rate-limited hard by Amazon (0.5 rps) — the caller paces. */
+export async function getOrderSellerRef(client: SpApiClient, orderId: string): Promise<string | null | undefined> {
+  const r = await sp(client, `/orders/v0/orders/${encodeURIComponent(orderId)}`);
+  if (!r.ok) return undefined;
+  const j = (await r.json()) as { payload?: { SellerOrderId?: string } };
+  return j.payload?.SellerOrderId?.trim() || null;
+}
+
 /** Line items for one live order. Rate-limited hard by Amazon (0.5 rps) — the caller paces. */
 export async function getOrderItems(client: SpApiClient, orderId: string): Promise<LiveAmazonOrderItem[]> {
   const r = await sp(client, `/orders/v0/orders/${orderId}/orderItems`);
@@ -462,6 +475,8 @@ export type AmazonOrderRow = {
   currency: string;
   // "Amazon.com" for marketplace sales; "Non-Amazon" = an MCF order Amazon ships for another channel.
   salesChannel: string;
+  /** merchant-order-id: an MCF order's reference from whoever sent it ("Shopify #1234 …"). */
+  merchantOrderId: string;
   isReplacement: boolean; // is-replacement-order — a free re-ship of an earlier order
   // ---- Full-detail columns, stored so the P&L can split every dollar and dimension.
   lastUpdatedDate: string;
@@ -518,6 +533,7 @@ export async function getAllOrderRows(client: SpApiClient, startISO: string, end
     const iShipPromo = h.indexOf("ship-promotion-discount");
     const iCur = h.indexOf("currency");
     const iSalesCh = h.indexOf("sales-channel");
+    const iMerchantId = h.indexOf("merchant-order-id");
     const iRepl = h.indexOf("is-replacement-order");
     const iUpdated = h.indexOf("last-updated-date");
     const iItemStatus = h.indexOf("item-status");
@@ -555,6 +571,7 @@ export async function getAllOrderRows(client: SpApiClient, startISO: string, end
         shipPromotionDiscount: Math.abs(num(iShipPromo, c)),
         currency: iCur >= 0 ? c[iCur] || "USD" : "USD",
         salesChannel: iSalesCh >= 0 ? c[iSalesCh] || "" : "",
+        merchantOrderId: str(iMerchantId, c).trim(),
         isReplacement: iRepl >= 0 && (c[iRepl] || "").trim().toLowerCase() === "true",
         lastUpdatedDate: str(iUpdated, c),
         itemStatus: str(iItemStatus, c),

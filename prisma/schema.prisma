@@ -1012,6 +1012,12 @@ model SalesOrder {
   // "Non-Amazon" — its $0 here is correct, the revenue lives on that channel's own order); a
   // replacement is a free re-ship of an earlier order (is-replacement-order).
   mcf          Boolean         @default(false)
+  // MCF only (lib/mcf-attribution): the reference of the sale it shipped, as Amazon keeps it from
+  // whoever sent it ("Shopify #1234 …"); the channel whose sale that is, and that order — null =
+  // not matched, so its fees are split by each channel's share of Amazon-shipped orders.
+  mcfRef       String?
+  mcfChannel   String?
+  mcfOrderId   String?
   replacement  Boolean         @default(false)
   // Voided = out of every total, washed out in the list. Operator-set from the row menu ONLY —
   // imports never touch it. (Cancelled has its own flag; free units/samples carry real COG and

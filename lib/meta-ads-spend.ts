@@ -69,6 +69,10 @@ async function readAccount(hub: Hub, a: Account, orgId: string, baseCurrency: st
     }
   }
   const tz = a.timezone ?? hub.timezone ?? "America/Los_Angeles";
+  // Meta reports each day of the ad account's own calendar. The books keep that date: noon of it on
+  // the company's clock, so a day never slips into the one before (an account on New York time,
+  // books on Los Angeles time — Meta's midnight is still the evening before on the books).
+  const booksTz = (await getOrgSettings()).syncTz;
   const today = todayIn(tz);
   const synced = a.syncedThrough ? day(a.syncedThrough) : null;
   const from = synced ? addDays(synced, -OVERLAP_DAYS) : addDays(today, -BACKFILL_DAYS);
@@ -103,7 +107,7 @@ async function readAccount(hub: Hub, a: Account, orgId: string, baseCurrency: st
       const spend = Number(r.spend) || 0;
       if (!r.date_start || spend === 0) continue;
       currency = r.account_currency ?? currency;
-      const at = zonedDayStart(r.date_start, tz);
+      const at = new Date(zonedDayStart(r.date_start, booksTz).getTime() + 12 * 3_600_000);
       const amount = -Math.round(spend * 100) / 100;
       const fx = currency === baseCurrency ? 1 : await fxRate(currency, baseCurrency, at);
       created.push({ channel, postedAt: at, eventAt: at, group: "advertising", type: "Meta ads", amount, currency, baseAmount: Math.round(amount * fx * 100) / 100, txId: `meta:${a.accountId}:${r.date_start}`, status: "released" });

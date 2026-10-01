@@ -109,13 +109,17 @@ async function allAccounts(c: Conn): Promise<XeroApiAccount[]> {
 
 /** The rows this company's P&L has: its lines per channel, and the balance rows they need. */
 async function companyRows(orgId: string) {
-  const [groups, stock, fees, metaAccounts, adsConn] = await Promise.all([
+  const [groups, stock, fees, metaAccounts, adsConn, mcfSales] = await Promise.all([
     prismaBase.financeEvent.groupBy({ by: ["channel", "group"], where: { orgId } }),
     prismaBase.stockEvent.groupBy({ by: ["channel"], where: { orgId } }),
     prismaBase.$queryRaw<{ channel: string; bucket: string; type: string }[]>`
       SELECT DISTINCT s.channel, f.bucket, f.type FROM "OrderFee" f JOIN "SalesOrder" s ON s.id = f."orderId" WHERE f."orgId" = ${orgId}`,
     prismaBase.metaAdAccount.count({ where: { orgId } }),
     prismaBase.integration.findUnique({ where: { orgId_provider: { orgId, provider: "amazon_ads" } }, select: { id: true } }),
+    // Channels whose sales Amazon ships (MCF): Amazon's fees for those move onto them (lib/mcf-attribution).
+    prismaBase.$queryRaw<{ channel: string }[]>`
+      SELECT DISTINCT so.channel FROM "SalesOrder" so JOIN "Facility" f ON f.id = COALESCE(so."fulfillmentOverrideFacilityId", so."fulfillmentFacilityId")
+      WHERE so."orgId" = ${orgId} AND so.channel IN ('SHOPIFY', 'TIKTOK') AND f.channel LIKE 'AMAZON%'`,
   ]);
   const isChannel = (c: string): c is XeroChannel => (CHANNEL_ORDER as string[]).includes(c);
   const found = new Map<XeroChannel, Set<LineKey>>();
@@ -128,6 +132,7 @@ async function companyRows(orgId: string) {
   for (const f of fees) add(f.channel, f.type === "credit" && f.bucket === "sales" ? "sales" : f.bucket === "payment_fees" ? "payment_fees" : "custom_fees");
   for (const [channel, set] of found) if (set.has("sales")) add(channel, "cogs");
   for (const s of stock) add(s.channel, "cogs");
+  if (found.has("AMAZON")) for (const m of mcfSales) add(m.channel, "fba_fees");
 
   const channels = CHANNEL_ORDER.filter((c) => found.has(c));
   const lines = channels.flatMap((channel) => LINE_ORDER.filter((l) => found.get(channel)!.has(l)).map((line) => ({ channel, line })));

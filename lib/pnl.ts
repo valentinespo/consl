@@ -10,6 +10,8 @@ import { fxRate } from "@/lib/fx";
 import { computeFinishedGoods } from "@/lib/queries";
 import { activeExclusions } from "@/lib/order-metrics";
 import { IMPORTER_VERSIONS, importerVersion } from "@/lib/import-versions";
+import { mcfMoves, mcfRoute, mcfShares } from "@/lib/mcf-attribution";
+import { getOrgSettings } from "@/lib/settings";
 
 export { GROUP_ORDER, GROUP_LABEL, PNL_CHANNEL_LABEL, type Pnl, type PnlChannel, type PnlGroupBlock, type PnlTypeRow } from "@/lib/pnl-shared";
 export { zonedDayStart, zonedDayBounds } from "@/lib/pnl-periods";
@@ -874,15 +876,35 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
       });
     }
   }
+  // Amazon's MCF fees and credits belong to the channel whose sale each MCF order shipped (lib/
+  // mcf-attribution): off Amazon's lines, onto that channel's — still Amazon's money, so still
+  // Amazon's mark. The completeness check above saw them where the ledger keeps them.
+  const companyTz = breakdown?.timeZone ?? (await getOrgSettings()).syncTz;
+  for (const mv of await mcfMoves(orgId, { from, to }, companyTz, present, amazonSkus)) {
+    const day = breakdown?.ranges.length ? mv.day : "";
+    if (selectedSet.has("AMAZON")) {
+      add(mv.group, mv.type, -mv.amount, "AMAZON");
+      periods.addAmount(day, mv.group, mv.type, -mv.amount, "AMAZON");
+    }
+    for (const [channel, share] of mv.to) {
+      if (!selectedSet.has(channel)) continue;
+      add(mv.group, mv.type, mv.amount * share, "AMAZON");
+      periods.addAmount(day, mv.group, mv.type, mv.amount * share, "AMAZON");
+    }
+  }
 
   // Custom fees the operator attached (by rule or by hand): a cost on the order's own channel. A
   // fee counts whenever its order counts; on an MCF order it always counts (the fee is a real
   // cost even though that order's revenue lives on another channel); on a Shopify order the
   // double-count rule drops, only a hand-written fee counts.
-  const feeRows = await prisma.$queryRaw<{ name: string; bucket: string; type: string; currency: string; amount: number; orderedAt: Date }[]>`
-    SELECT f.name, f.bucket, f.type, o.currency, f.amount::float8 AS amount, o."orderedAt"
+  // A fee on an MCF order goes where that order's Amazon fees go (see mcfMoves).
+  const feeRows = await prisma.$queryRaw<{ channel: string; mcf: boolean; target: string | null; via: string | null; month: string; name: string; bucket: string; type: string; currency: string; amount: number; orderedAt: Date }[]>`
+    SELECT o.channel, o.mcf, o."mcfChannel" AS target, m.channel AS via,
+      to_char(o."orderedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${companyTz}, 'YYYY-MM') AS month,
+      f.name, f.bucket, f.type, o.currency, f.amount::float8 AS amount, o."orderedAt"
     FROM "OrderFee" f JOIN "SalesOrder" o ON o.id = f."orderId"
-    WHERE o."orgId" = ${orgId} AND o.channel = ANY(${selected}::text[])
+    LEFT JOIN "SalesOrder" m ON m.id = o."mcfOrderId"
+    WHERE o."orgId" = ${orgId} AND (o.channel = ANY(${selected}::text[]) OR o.mcf)
       AND o."orderedAt" >= ${from} AND o."orderedAt" <= ${to}
       AND o.cancelled = false AND o.voided = false AND o."revenueVoided" = false
       AND (f."ruleId" IS NULL OR o.mcf OR NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excludedSources}::text[])))`;
@@ -890,8 +912,14 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
   // everything else under Custom fees — as its own line. A CREDIT (money added by hand) counts
   // the other way, where the operator put it: as revenue under Sales, or against a fee bucket.
   const feeByName = new Map<string, { bucket: string; name: string; amount: number }>();
+  const feeShares = feeRows.some((f) => f.mcf) ? await mcfShares(orgId, companyTz, present) : new Map<string, [PnlChannel, number][]>();
   for (const f of feeRows) {
-    const fx = f.currency === baseCurrency ? 1 : await fxRate(f.currency, baseCurrency, f.orderedAt);
+    // The part of this fee the selected channels carry: all of it on its own channel, or — on an
+    // MCF order — the shares of the channels it belongs to (Amazon's when it belongs to none).
+    const route = f.mcf ? mcfRoute(f.target, f.via, f.month, present, feeShares) : [];
+    const part = route.length ? route.reduce((t, [ch, w]) => t + (selectedSet.has(ch) ? w : 0), 0) : selectedSet.has(f.channel as PnlChannel) ? 1 : 0;
+    if (part === 0) continue;
+    const fx = (f.currency === baseCurrency ? 1 : await fxRate(f.currency, baseCurrency, f.orderedAt)) * part;
     const { bucket, signed } = customLine(f);
     const k = `${bucket}|${f.name}`;
     feeByName.set(k, { bucket, name: f.name, amount: (feeByName.get(k)?.amount ?? 0) + signed * fx });
@@ -1214,19 +1242,31 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
       r.sources.forEach((source, i) => addPnlAmount(tally("AMAZON", dayOf(r.at)).blocks, "advertising", r.type, i === 0 ? r.amount : 0, source));
     }
   }
+  // Amazon's MCF money onto the channel whose sale each MCF order shipped (see getPnl).
+  for (const mv of await mcfMoves(orgId, { from: new Date(0), to: new Date(Date.now() + 366 * 86_400_000) }, tz, present, amazonSkus)) {
+    addPnlAmount(tally("AMAZON", mv.day).blocks, mv.group, mv.type, -mv.amount, "AMAZON");
+    for (const [channel, share] of mv.to) addPnlAmount(tally(channel, mv.day).blocks, mv.group, mv.type, mv.amount * share, "AMAZON");
+  }
   mark("ledger");
 
-  // Custom fees, on the order's own channel and day.
-  const feeRows = await prisma.$queryRaw<{ channel: string; name: string; bucket: string; type: string; currency: string; amount: number; orderedAt: Date }[]>`
-    SELECT o.channel, f.name, f.bucket, f.type, o.currency, f.amount::float8 AS amount, o."orderedAt"
+  // Custom fees, on the order's own channel and day — an MCF order's where its Amazon fees go.
+  const feeRows = await prisma.$queryRaw<{ channel: string; mcf: boolean; target: string | null; via: string | null; month: string; name: string; bucket: string; type: string; currency: string; amount: number; orderedAt: Date }[]>`
+    SELECT o.channel, o.mcf, o."mcfChannel" AS target, m.channel AS via,
+      to_char(o."orderedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz}, 'YYYY-MM') AS month,
+      f.name, f.bucket, f.type, o.currency, f.amount::float8 AS amount, o."orderedAt"
     FROM "OrderFee" f JOIN "SalesOrder" o ON o.id = f."orderId"
+    LEFT JOIN "SalesOrder" m ON m.id = o."mcfOrderId"
     WHERE o."orgId" = ${orgId} AND o.channel = ANY(${selected}::text[])
       AND o.cancelled = false AND o.voided = false AND o."revenueVoided" = false
       AND (f."ruleId" IS NULL OR o.mcf OR NOT (o.channel = 'SHOPIFY' AND o.source = ANY(${excludedSources}::text[])))`;
+  const feeShares = feeRows.some((f) => f.mcf) ? await mcfShares(orgId, tz, present) : new Map<string, [PnlChannel, number][]>();
   for (const f of feeRows) {
     const fx = f.currency === baseCurrency ? 1 : await fxRate(f.currency, baseCurrency, f.orderedAt);
     const { bucket, signed } = customLine(f);
-    addPnlAmount(tally(f.channel as PnlChannel, dayOf(f.orderedAt)).blocks, bucket, f.name, signed * fx, "CUSTOM");
+    const route = f.mcf ? mcfRoute(f.target, f.via, f.month, present, feeShares) : [];
+    for (const [channel, share] of route.length ? route : [[f.channel as PnlChannel, 1] as [PnlChannel, number]]) {
+      addPnlAmount(tally(channel, dayOf(f.orderedAt)).blocks, bucket, f.name, signed * fx * share, "CUSTOM");
+    }
   }
 
   mark("fees");

@@ -290,6 +290,18 @@ async function runOrgChannelStockInner(orgId: string): Promise<void> {
             console.error(`[scheduler] ${provider} orders failed for org ${orgId}:`, (e as Error).message);
           }
         }
+        // Which channel's sale each Amazon MCF order shipped: Amazon's reference for the orders
+        // stored before consl read it, then the match (lib/mcf-attribution).
+        if (conns.some((c) => c.provider === "amazon")) {
+          try {
+            const { backfillMcfRefs, matchMcfOrders } = await import("@/lib/mcf-attribution");
+            const b = await backfillMcfRefs(40);
+            const m = await matchMcfOrders();
+            if (b.filled || m.matched) console.log(`[scheduler] mcf for ${orgId}: ${b.filled} references read (${b.left} left), ${m.matched} matched, ${m.unmatched} unmatched`);
+          } catch (e) {
+            console.error(`[scheduler] mcf matching failed for org ${orgId}:`, (e as Error).message);
+          }
+        }
       }
 
       // TikTok's settlement ledger (statements, SKU splits, unsettled money), every quarter hour.

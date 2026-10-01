@@ -52,6 +52,9 @@ type Fetched = {
   cancelled: boolean;
   // Amazon only: MCF (shipped for another channel — $0 here on purpose) / replacement re-ships.
   mcf?: boolean;
+  /** MCF only: the reference of the sale it shipped, from whoever sent it (lib/mcf-attribution).
+   *  Undefined = this source doesn't say, so a known one is left alone. */
+  mcfRef?: string;
   replacement?: boolean;
   fulfillment: string | null;
   fulfillmentLabel: string | null;
@@ -141,6 +144,7 @@ async function persist(
         ...(o.paymentDetail !== undefined ? { paymentDetail: o.paymentDetail } : {}),
         ...(o.customerId !== undefined ? { customerId: o.customerId } : {}),
         ...(o.ltvData !== undefined ? { ltvData: o.ltvData } : {}),
+        ...(o.mcfRef ? { mcfRef: o.mcfRef } : {}),
         ...(o.shipFromKey !== undefined ? { shipFromKey: o.shipFromKey } : {}),
         ...(o.shipFromLabel !== undefined ? { shipFromLabel: o.shipFromLabel } : {}),
         ...(keepTotal ? {} : { total: o.total }),
@@ -732,6 +736,7 @@ export async function importAmazonOrders(window: { start: Date; end: Date } | nu
         cancelled: row.status === "Cancelled",
         // "Non-Amazon" sales channel = an MCF order (Amazon shipping another channel's sale).
         mcf: /^non.?amazon/i.test(row.salesChannel),
+        ...(/^non.?amazon/i.test(row.salesChannel) && row.merchantOrderId ? { mcfRef: row.merchantOrderId } : {}),
         replacement: row.isReplacement,
         fulfillment: row.fulfillment === "Amazon" ? "Amazon" : "Merchant",
         fulfillmentLabel: row.fulfillment === "Amazon" ? "Amazon FBA" : "Merchant",
@@ -1024,6 +1029,7 @@ function liveFetched(o: LiveOrder, lines: FetchedLine[]): Fetched {
     status: o.status,
     cancelled: o.status === "Canceled",
     mcf: /^non.?amazon/i.test(o.salesChannel),
+    ...(/^non.?amazon/i.test(o.salesChannel) && o.sellerOrderId ? { mcfRef: o.sellerOrderId } : {}),
     replacement: o.isReplacement,
     platformUpdatedAt: o.lastUpdateDate ? new Date(o.lastUpdateDate) : undefined,
     fulfillment: o.fulfillment === "AFN" ? "Amazon" : "Merchant",

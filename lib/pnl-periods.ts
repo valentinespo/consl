@@ -81,6 +81,9 @@ export function pnlGroups(blocks: Blocks): PnlGroupBlock[] {
   return GROUP_ORDER.map((group) => {
     const types = [...(blocks.get(group) ?? new Map()).entries()]
       .map(([type, row]) => ({ type, amount: row.amount, sources: [...row.sources].sort((a, b) => PNL_SOURCE_ORDER.indexOf(a) - PNL_SOURCE_ORDER.indexOf(b)) }))
+      // A line that nets to nothing here (Amazon's MCF fees once moved to the channel they belong
+      // to) isn't a line of this statement.
+      .filter((row) => Math.abs(row.amount) >= 0.005)
       .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
     return { group, total: types.reduce((sum, row) => sum + row.amount, 0), types };
   }).filter((block) => block.types.length > 0);
