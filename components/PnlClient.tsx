@@ -174,13 +174,12 @@ function PeriodGroupRows({ block, statements, money }: { block: PnlGroupBlock; s
 const stockLinesOf = (pnl: Pnl) => PNL_STOCK_LINES.filter((line) => pnl.stock[line].units !== 0 || Math.abs(pnl.stock[line].cogs) >= 0.005);
 
 /** Cost of goods across the columns. The units live in the row's label only (like the plain
- *  statement); behind a chevron: the units sold with their "of which" lines (MCF, free units), and
- *  Amazon stock that left without a sale or came back (removal orders, lost & destroyed, found &
- *  returned). */
+ *  statement); behind a chevron: the units sold, and stock that left without a sale or came back
+ *  (removal orders, lost & destroyed, found & returned, write-offs) — lines that add up to the row. */
 function PeriodCogsRows({ pnl, statements, money, locale }: { pnl: Pnl; statements: PnlStatement[]; money: (n: number) => string; locale: string }) {
   const [open, setOpen] = useState(false);
   const stockLines = stockLinesOf(pnl);
-  const expandable = pnl.mcf.units > 0 || pnl.unreported.units > 0 || stockLines.length > 0;
+  const expandable = stockLines.length > 0;
   const sub = (key: string, label: string, units: number | null, value: (statement: PnlStatement) => number, source: PnlSource = "CONSL") => (
     <tr key={key} className="dropdown-in text-[12.5px] text-ink-soft">
       <th scope="row" className={`${periodLabelCell} py-1.5 pl-8 font-normal`}>
@@ -213,8 +212,6 @@ function PeriodCogsRows({ pnl, statements, money, locale }: { pnl: Pnl; statemen
         <Filler />
       </tr>
       {open && stockLines.length > 0 && sub("sold", "Units sold", pnl.unitsSold, (statement) => statement.cogs - pnlStockTotal(statement.stock))}
-      {open && pnl.mcf.units > 0 && sub("mcf", "of which MCF orders", pnl.mcf.units, (statement) => statement.mcf.cogs)}
-      {open && pnl.unreported.units > 0 && sub("unreported", "of which free units & replacements", pnl.unreported.units, (statement) => statement.unreported.cogs)}
       {open && stockLines.map((line) => sub(line, PNL_STOCK_LABEL[line], line === "writeoffs" ? null : pnl.stock[line].units, (statement) => statement.stock[line].cogs, line === "writeoffs" ? "CONSL" : "AMAZON"))}
     </>
   );
@@ -288,12 +285,12 @@ function PnlBreakdownTable({ pnl, periods, breakdown, money, locale }: { pnl: Pn
 }
 
 /** Cost of goods in the plain statement: consl's mark, the units at landed cost, and — behind a
- *  chevron — the units sold with their "of which" lines (MCF orders, free units), and Amazon stock
- *  that left without a sale or came back. */
+ *  chevron — the units sold and the stock that left without a sale or came back, lines that add up
+ *  to the row. */
 function CogsRow({ pnl, money }: { pnl: Pnl; money: (n: number) => string }) {
   const [open, setOpen] = useState(false);
   const stockLines = stockLinesOf(pnl);
-  const expandable = pnl.mcf.units > 0 || pnl.unreported.units > 0 || stockLines.length > 0;
+  const expandable = stockLines.length > 0;
   return (
     <>
       <button
@@ -319,30 +316,6 @@ function CogsRow({ pnl, money }: { pnl: Pnl; money: (n: number) => string }) {
             <span className="min-w-0 truncate">Units sold · {pnl.unitsSold.toLocaleString()} units</span>
           </span>
           <Amount value={pnl.cogs - pnlStockTotal(pnl.stock)} money={money} />
-        </div>
-      )}
-      {open && pnl.mcf.units > 0 && (
-        <div className="dropdown-in flex items-center justify-between gap-3 px-4 py-1.5 pl-8 text-[12.5px] text-ink-soft">
-          <span className="flex min-w-0 items-center gap-2">
-            <SourceMarks sources={["CONSL"]} size={13} />
-            <span className="min-w-0 truncate">
-              of which MCF orders · {pnl.mcf.units.toLocaleString()} units
-              <span className="ml-1.5 text-[11.5px] text-muted">shipped by Amazon for another channel, no sale reported</span>
-            </span>
-          </span>
-          <Amount value={pnl.mcf.cogs} money={money} />
-        </div>
-      )}
-      {open && pnl.unreported.units > 0 && (
-        <div className="dropdown-in flex items-center justify-between gap-3 px-4 py-1.5 pl-8 text-[12.5px] text-ink-soft">
-          <span className="flex min-w-0 items-center gap-2">
-            <SourceMarks sources={["CONSL"]} size={13} />
-            <span className="min-w-0 truncate">
-              of which free units &amp; replacements · {pnl.unreported.units.toLocaleString()} units
-              <span className="ml-1.5 text-[11.5px] text-muted">shipped, but Amazon reported no money for them</span>
-            </span>
-          </span>
-          <Amount value={pnl.unreported.cogs} money={money} />
         </div>
       )}
       {open &&
