@@ -18,6 +18,7 @@ import {
   LINE_ORDER,
   NEW_BALANCE_TYPES,
   NEW_PL_TYPES,
+  PAYPAL_STANDARD_FEE,
   XERO_TYPE_LABEL,
   balancesOf,
   customClass,
@@ -650,7 +651,7 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
             b.key === "receivable:AMAZON"
               ? ["Amazon payouts", "Card charges from Amazon, when your Amazon balance runs negative"]
               : b.key === "receivable:SHOPIFY"
-                ? data.shopifyPaidVia
+                ? ["Shopify payouts", ...(data.regularPaypal ? ["PayPal transfers, for orders paid with regular PayPal (money that lands in your PayPal balance)"] : [])]
                 : b.key === "receivable:TIKTOK"
                   ? ["TikTok Shop payouts"]
                   : b.key === "sales_tax"
@@ -679,7 +680,20 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
                 onRemove={isAddedBalance(b.key) && editable ? () => removeAdded(b.key) : undefined}
                 total={null}
               />
-              <BalanceBreakdown terms={terms} codeHere={codeHere} />
+              <BalanceBreakdown
+                terms={terms}
+                codeHere={codeHere}
+                notes={
+                  b.key === "receivable:SHOPIFY"
+                    ? [
+                        ...(data.regularPaypal
+                          ? [`Regular PayPal fees never reach Shopify's records, so consl adds PayPal's standard fee to those orders (${PAYPAL_STANDARD_FEE.percent}% + $${PAYPAL_STANDARD_FEE.fixed.toFixed(2)}). If your rate is different, change it in Orders › Automatic rules.`]
+                          : []),
+                        "Orders from other channels that come in through your Shopify store (Etsy, Faire, wholesale apps…): consl can't see their fees. Either void those orders and record their payouts straight in Xero, or add their fees with a rule and code their payouts to a receivable: this one, or a new one you add for that channel.",
+                      ]
+                    : []
+                }
+              />
             </div>
           );
         })}
@@ -940,7 +954,7 @@ function AccountHeader({
 
 /** How a balance account's number is made: what consl's journals send to it (the accounts that
  *  move it, each with its sign), then — highlighted — what the owner codes to it in Xero. */
-function BalanceBreakdown({ terms, codeHere }: { terms: { name: string; sign: "+" | "−"; note?: string }[]; codeHere: string[] }) {
+function BalanceBreakdown({ terms, codeHere, notes }: { terms: { name: string; sign: "+" | "−"; note?: string }[]; codeHere: string[]; notes: string[] }) {
   return (
     <div className="border-t border-line">
       <div className="px-4 py-2.5">
@@ -970,6 +984,16 @@ function BalanceBreakdown({ terms, codeHere }: { terms: { name: string; sign: "+
           ))}
         </ul>
       </div>
+      {notes.length > 0 && (
+        <div className="space-y-1.5 px-4 pb-3">
+          {notes.map((n) => (
+            <p key={n} className="flex items-start gap-1.5 text-[12px] leading-snug text-muted">
+              <Info size={12} className="mt-[2px] shrink-0" />
+              <span>{n}</span>
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

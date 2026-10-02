@@ -1,5 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
+import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
+import { PAYPAL_STANDARD_FEE } from "@/lib/xero-setup-shared";
 
 /**
  * Custom order fees — costs consl can't see on any channel's ledger, attached per order.
@@ -216,4 +218,41 @@ function ruleWhere(rule: Rule) {
         ? {}
         : { orderedAt: { gte: rule.createdAt } }),
   };
+}
+
+export { PAYPAL_STANDARD_FEE };
+
+/**
+ * Shopify orders paid with REGULAR PayPal (the money lands in the merchant's own PayPal balance)
+ * carry no fee on Shopify's records, so consl adds PayPal's standard fee as a rule, once, the first
+ * time it sees such an order — past orders included. The owner edits it to their own rate, or
+ * deletes it (it is never added back). PayPal paid through Shopify Payments (the wallet) is a
+ * different gateway: in Shopify's payouts, its fee already on record. A company that already has a
+ * PayPal fee rule keeps its own.
+ */
+export async function ensurePaypalFeeRule(): Promise<{ created: boolean; count: number }> {
+  const settings = await getOrgSettings();
+  if (settings.paypalFeeRuleAt) return { created: false, count: 0 };
+  const orders = await prisma.salesOrder.count({ where: { channel: "SHOPIFY", paymentMethod: "paypal", cancelled: false } });
+  if (!orders) return { created: false, count: 0 };
+  const own = await prisma.orderFeeRule.findFirst({ where: { paymentMethod: "paypal", action: "fee" }, select: { id: true } });
+  let count = 0;
+  if (!own) {
+    const rule = await prisma.orderFeeRule.create({
+      data: {
+        name: "PayPal fees (standard rate)",
+        action: "fee",
+        kind: "percent",
+        value: PAYPAL_STANDARD_FEE.percent,
+        extraFixed: PAYPAL_STANDARD_FEE.fixed,
+        bucket: "payment_fees",
+        channel: "SHOPIFY",
+        paymentMethod: "paypal",
+        appliesToPast: true,
+      },
+    });
+    count = await applyFeeRule(rule.id);
+  }
+  await saveOrgSettings({ paypalFeeRuleAt: new Date() });
+  return { created: !own, count };
 }

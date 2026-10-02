@@ -647,6 +647,9 @@ model Settings {
   // complete — MCF orders placed after that wait to be matched, so a removal is never matched.
   amazonRemovalsSyncedAt  DateTime?
   amazonRemovalsThrough   DateTime?
+  // When consl added PayPal's standard fee as a rule for regular-PayPal Shopify orders (once: a
+  // rule the owner deletes is never added back).
+  paypalFeeRuleAt         DateTime?
   // Amazon Ads daily spend: the last day read (walks forward; the refresh re-reads a few days of
   // overlap) and the first day covered. Once there is data, the P&L places the ad INVOICES day by
   // day along this spend (lib/ads-waterfill) — the invoices stay the amount of record.

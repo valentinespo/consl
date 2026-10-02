@@ -287,6 +287,12 @@ async function runOrgChannelStockInner(orgId: string): Promise<void> {
               await saveOrgSettings({ importerVersions: stampImporterVersion(settingsNow.importerVersions, "tiktokOrders") });
               console.log(`[scheduler] tiktok orders re-read for ${orgId}: on the current importer (${r.orders} orders)`);
             }
+            // Regular-PayPal orders carry no PayPal fee on Shopify's records: PayPal's standard fee, once.
+            if (provider === "shopify") {
+              const { ensurePaypalFeeRule } = await import("@/lib/order-fees");
+              const pp = await ensurePaypalFeeRule();
+              if (pp.created) console.log(`[scheduler] paypal standard fee rule added for org ${orgId} (${pp.count} orders)`);
+            }
           } catch (e) {
             console.error(`[scheduler] ${provider} orders failed for org ${orgId}:`, (e as Error).message);
           }

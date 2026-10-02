@@ -228,3 +228,6 @@ export function balancesOf(l: SetupLine, custom?: CustomChoice): { key: string; 
   if (!out.length) out.push({ key: `receivable:${l.channel}` });
   return out.filter((b, i) => out.findIndex((x) => x.key === b.key && x.note === b.note) === i);
 }
+
+/** PayPal's standard US fee for checkout payments (consl's default rule for regular-PayPal orders). */
+export const PAYPAL_STANDARD_FEE = { percent: 3.49, fixed: 0.49 };
