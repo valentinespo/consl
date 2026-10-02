@@ -1,29 +1,39 @@
 import "server-only";
+import { Prisma } from "@/app/generated/prisma/client";
 import { prismaBase } from "@/lib/prisma-base";
+import { runWithOrg } from "@/lib/tenant";
 import { xeroAccessToken, xeroApi } from "@/lib/xero";
 import { devAccounts, devFixture, type FixtureAccount } from "@/lib/xero-dev-fixture";
 import { localDay } from "@/lib/tz";
+import { loadPnlHistory } from "@/lib/pnl-cache";
+import { PNL_SOURCE_ORDER, pnlLineOf, sourcesFromBits } from "@/lib/pnl-shared";
 import {
   CHANNEL_NAME,
   CHANNEL_ORDER,
+  CLASS_OF_TYPE,
   LINES,
   LINE_ORDER,
+  customClass,
   isIsoDay,
-  lineRowKey,
+  lockedAccountOf,
   newAccountName,
+  setupLineId,
   type BalanceRow,
-  type LineKey,
+  type CustomChoice,
+  type SetupLine,
   type Suggestion,
   type XeroAccountOption,
   type XeroChannel,
+  type XeroSetupState,
   type XeroTarget,
 } from "@/lib/xero-setup-shared";
 
 /**
- * The Xero export's setup (the account behind every P&L line and balance row) — loaded for the
- * setup screen and saved from it. Reading never changes anything in Xero; saving creates the new
- * accounts the owner accepted, the "Sales channel" tracking category when channel tags are on, and
- * stores the choices. Journals come later and read the stored setup.
+ * The Xero export's setup (the account behind every P&L line and balance account) — loaded for
+ * the setup screen, saved from it as a draft (consl only), and published. Reading and saving a
+ * draft never change anything in Xero; publishing creates the new accounts the owner accepted and
+ * the "Sales channel" tracking category when channel tags are on, then stores the setup the monthly
+ * journals use.
  *
  * A new account is always a new account: a name already taken in Xero is refused, never quietly
  * swapped for the existing account — except accounts consl itself created for this company
@@ -107,36 +117,56 @@ async function allAccounts(c: Conn): Promise<XeroApiAccount[]> {
   return res.Accounts ?? [];
 }
 
-/** The rows this company's P&L has: its lines per channel, and the balance rows they need. */
-async function companyRows(orgId: string) {
-  const [groups, stock, fees, metaAccounts, adsConn, mcfSales] = await Promise.all([
-    prismaBase.financeEvent.groupBy({ by: ["channel", "group"], where: { orgId } }),
-    prismaBase.stockEvent.groupBy({ by: ["channel"], where: { orgId } }),
-    prismaBase.$queryRaw<{ channel: string; bucket: string; type: string }[]>`
-      SELECT DISTINCT s.channel, f.bucket, f.type FROM "OrderFee" f JOIN "SalesOrder" s ON s.id = f."orderId" WHERE f."orgId" = ${orgId}`,
+/** The company's P&L lines, all time (from the P&L's own history, so they are exactly the
+ *  statement's), and the balance accounts they need. */
+async function companyRows(orgId: string): Promise<{ channels: XeroChannel[]; lines: SetupLine[]; balances: BalanceRow[] }> {
+  const tz = await companyZone(orgId);
+  const [hist, metaAccounts, adsConn] = await Promise.all([
+    runWithOrg(orgId, () => loadPnlHistory(tz)),
     prismaBase.metaAdAccount.count({ where: { orgId } }),
     prismaBase.integration.findUnique({ where: { orgId_provider: { orgId, provider: "amazon_ads" } }, select: { id: true } }),
-    // Channels whose sales Amazon ships (MCF): Amazon's fees for those move onto them (lib/mcf-attribution).
-    prismaBase.$queryRaw<{ channel: string }[]>`
-      SELECT DISTINCT so.channel FROM "SalesOrder" so JOIN "Facility" f ON f.id = COALESCE(so."fulfillmentOverrideFacilityId", so."fulfillmentFacilityId")
-      WHERE so."orgId" = ${orgId} AND so.channel IN ('SHOPIFY', 'TIKTOK') AND f.channel LIKE 'AMAZON%'`,
   ]);
   const isChannel = (c: string): c is XeroChannel => (CHANNEL_ORDER as string[]).includes(c);
-  const found = new Map<XeroChannel, Set<LineKey>>();
-  const add = (channel: string, line: LineKey) => {
-    if (!isChannel(channel)) return;
-    if (!found.has(channel)) found.set(channel, new Set());
-    found.get(channel)!.add(line);
-  };
-  for (const g of groups) if ((LINE_ORDER as string[]).includes(g.group)) add(g.channel, g.group as LineKey);
-  for (const f of fees) add(f.channel, f.type === "credit" && f.bucket === "sales" ? "sales" : f.bucket === "payment_fees" ? "payment_fees" : "custom_fees");
-  for (const [channel, set] of found) if (set.has("sales")) add(channel, "cogs");
-  for (const s of stock) add(s.channel, "cogs");
-  if (found.has("AMAZON")) for (const m of mcfSales) add(m.channel, "fba_fees");
+  const types = new Map<string, { channel: XeroChannel; group: string; type: string; amount: number; bits: number }>();
+  const cogs = new Map<XeroChannel, number>();
+  for (const d of hist.days) {
+    if (!isChannel(d.c)) continue;
+    for (const [group, type, amount, bits] of d.rows) {
+      const k = `${d.c}|${group}|${type}`;
+      const t = types.get(k) ?? { channel: d.c, group, type, amount: 0, bits: 0 };
+      t.amount += amount;
+      t.bits |= bits;
+      types.set(k, t);
+    }
+    if (d.cogs || d.units) cogs.set(d.c, (cogs.get(d.c) ?? 0) + d.cogs);
+  }
+  const byId = new Map<string, SetupLine>();
+  for (const t of types.values()) {
+    const sources = sourcesFromBits(t.bits);
+    const line = pnlLineOf(t.group, t.type, sources);
+    const id = setupLineId(t.channel, t.group, line);
+    const cur = byId.get(id) ?? { id, channel: t.channel, group: t.group, line, amount: 0, sources: [], custom: false };
+    cur.amount += t.amount;
+    cur.sources = PNL_SOURCE_ORDER.filter((x) => cur.sources.includes(x) || sources.includes(x));
+    byId.set(id, cur);
+  }
+  for (const l of byId.values()) l.custom = l.sources.length > 0 && l.sources.every((x) => x === "CUSTOM");
+  for (const [channel, amount] of cogs) {
+    const id = setupLineId(channel, "cogs", "Cost of goods");
+    byId.set(id, { id, channel, group: "cogs", line: "Cost of goods", amount, sources: ["CONSL"], custom: false });
+  }
+  const order = [...LINE_ORDER, "taxes"] as string[];
+  const lines = [...byId.values()]
+    .map((l) => ({ ...l, amount: Math.round(l.amount * 100) / 100 }))
+    .sort(
+      (a, b) =>
+        CHANNEL_ORDER.indexOf(a.channel) - CHANNEL_ORDER.indexOf(b.channel) ||
+        (order.indexOf(a.group) + 1 || 99) - (order.indexOf(b.group) + 1 || 99) ||
+        Math.abs(b.amount) - Math.abs(a.amount),
+    );
 
-  const channels = CHANNEL_ORDER.filter((c) => found.has(c));
-  const lines = channels.flatMap((channel) => LINE_ORDER.filter((l) => found.get(channel)!.has(l)).map((line) => ({ channel, line })));
-
+  const sourced = (src: string) => lines.some((l) => (l.sources as string[]).includes(src));
+  const channels = CHANNEL_ORDER.filter((c) => lines.some((l) => l.channel === c) || sourced(c));
   const balances: BalanceRow[] = channels.map((channel) => ({
     key: `receivable:${channel}`,
     channel,
@@ -144,19 +174,19 @@ async function companyRows(orgId: string) {
     hint: `What ${CHANNEL_NAME[channel]} owes you. Code its payout deposits here.`,
     suggest: { name: `${CHANNEL_NAME[channel]} Receivable`, type: "CURRENT" },
   }));
-  // The P&L's Taxes row is the state's money, not income: it waits here until it's paid over.
-  if (groups.some((g) => g.group === "taxes" && isChannel(g.channel))) {
+  // Tax owed is the state's money, not income: it waits here until it's paid over.
+  if (lines.some((l) => l.group === "taxes")) {
     balances.push({
       key: "sales_tax",
       label: "Sales tax payable",
-      hint: "Tax your customers paid that you still owe the state. What the channel pays for you (Amazon, TikTok, Shopify's Shop app) goes straight back out.",
+      hint: "Tax your customers paid that you still owe the state (the P&L's Tax owed). What a channel pays over for you never lands here.",
       suggest: { name: "Sales Tax Payable", type: "CURRLIAB" },
     });
   }
-  if (metaAccounts > 0) {
+  if (metaAccounts > 0 || sourced("META")) {
     balances.push({ key: "payable:META_ADS", label: "Meta Ads payable", hint: "Meta ad spend as it happens. Code the card charges from Meta here.", suggest: { name: "Meta Ads Payable", type: "CURRLIAB" } });
   }
-  if (adsConn) {
+  if (adsConn || sourced("AMAZON_ADS")) {
     balances.push({ key: "payable:AMAZON_ADS", label: "Amazon Ads payable", hint: "Amazon ad invoices paid by card. Code those card charges here.", suggest: { name: "Amazon Ads Payable", type: "CURRLIAB" } });
   }
   balances.push({
@@ -199,17 +229,19 @@ export type XeroSetupScreen = {
   orgName: string;
   accounts: XeroAccountOption[];
   channels: XeroChannel[];
-  lines: { channel: XeroChannel; line: LineKey }[];
+  lines: SetupLine[];
   balances: BalanceRow[];
-  targets: Record<string, XeroTarget>;
-  sameForAllChannels: boolean;
-  tagChannels: boolean;
-  /** The first day sent to Xero ("YYYY-MM-DD", the company's calendar). */
-  startDate: string;
+  /** What Xero has now (null until the first publish). */
+  published: XeroSetupState | null;
+  /** Where the screen starts: the saved draft, else what's published, else consl's defaults. */
+  current: XeroSetupState;
+  /** consl's defaults (where discarding a draft goes back to when nothing is published). */
+  defaults: XeroSetupState;
   /** The accounts consl created in this Xero organisation (reusable by name). */
   conslMade: string[];
   savedAt: string | null;
-  /** Rows whose saved account is gone from Xero (archived or deleted there). */
+  draftSavedAt: string | null;
+  /** Accounts the setup names that are gone from Xero (archived or deleted there). */
   stale: string[];
 };
 
@@ -218,6 +250,24 @@ export type XeroSetupLoad =
   | { state: "not_connected" }
   | { state: "reconnect"; orgName: string | null; message: string }
   | { state: "error"; orgName: string | null; message: string };
+
+const isTarget = (v: unknown): v is XeroTarget =>
+  !!v && typeof v === "object" && ((v as XeroTarget).kind === "account" || (v as XeroTarget).kind === "new") && typeof (v as { name?: unknown }).name === "string";
+
+/** A stored state (a draft, or what the screen sends), read defensively: keys it doesn't know are kept,
+ *  shapes it doesn't recognise are dropped. */
+function readState(raw: unknown): XeroSetupState | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const targets: Record<string, XeroTarget> = {};
+  for (const [k, v] of Object.entries((r.targets as Record<string, unknown>) ?? {})) if (isTarget(v)) targets[k] = v;
+  const customLines: Record<string, CustomChoice> = {};
+  for (const [k, v] of Object.entries((r.customLines as Record<string, unknown>) ?? {})) {
+    const c = v as Partial<CustomChoice> | null;
+    if (c && typeof c.account === "string") customLines[k] = { account: c.account, balance: typeof c.balance === "string" ? c.balance : "" };
+  }
+  return { targets, customLines, tagChannels: r.tagChannels !== false, startDate: typeof r.startDate === "string" ? r.startDate : "" };
+}
 
 export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
   let c: Conn;
@@ -232,24 +282,48 @@ export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
     const [raw, rows, saved, tz] = await Promise.all([allAccounts(c), companyRows(orgId), prismaBase.xeroSetup.findUnique({ where: { orgId } }), companyZone(orgId)]);
     const accounts = raw.filter(usable).map(option).sort(byCode);
     const live = new Map(accounts.map((a) => [a.accountId, a]));
-    const storedLines = (saved?.lines ?? {}) as Record<string, Stored>;
-    const storedBalances = (saved?.balances ?? {}) as Record<string, Stored>;
     const conslMade = idList(saved?.createdAccountIds);
     const ours = oursByName(accounts, conslMade);
-    const today = localDay(tz);
+    const firstOfMonth = `${localDay(tz).slice(0, 8)}01`;
 
-    const targets: Record<string, XeroTarget> = {};
-    const stale: string[] = [];
-    const pick = (key: string, stored: Stored | undefined, s: Suggestion) => {
-      const acc = stored ? live.get(stored.accountId) : undefined;
-      if (acc) targets[key] = { kind: "account", ...acc };
-      else {
-        if (stored) stale.push(key);
-        targets[key] = suggest(s, ours);
+    // consl's proposal for every account: its own section accounts and every balance account.
+    const defaults: Record<string, XeroTarget> = {};
+    for (const k of LINE_ORDER) defaults[k] = suggest(LINES[k].suggest, ours);
+    for (const b of rows.balances) defaults[b.key] = suggest(b.suggest, ours);
+
+    const stale = new Set<string>();
+    // An account gone from Xero falls back to consl's proposal (an added one: to a new account of its name).
+    const settle = (targets: Record<string, XeroTarget>) => {
+      const out: Record<string, XeroTarget> = { ...defaults };
+      for (const [k, t] of Object.entries(targets)) {
+        if (t.kind === "new") out[k] = t;
+        else if (live.has(t.accountId)) out[k] = { kind: "account", ...live.get(t.accountId)! };
+        else {
+          stale.add(k);
+          if (!defaults[k]) out[k] = { kind: "new", name: t.name, type: t.type };
+        }
       }
+      return out;
     };
-    for (const { channel, line } of rows.lines) pick(lineRowKey(channel, line), storedLines[lineRowKey(channel, line)], LINES[line].suggest);
-    for (const b of rows.balances) pick(b.key, storedBalances[b.key], b.suggest);
+    const lineIds = new Set(rows.lines.map((l) => l.id));
+    const onlyLive = (cl: Record<string, CustomChoice>) => Object.fromEntries(Object.entries(cl).filter(([id]) => lineIds.has(id)));
+
+    let published: XeroSetupState | null = null;
+    if (saved?.savedAt) {
+      const stored: Record<string, XeroTarget> = {};
+      for (const [k, v] of Object.entries({ ...(saved.lines as Record<string, Stored>), ...(saved.balances as Record<string, Stored>) })) stored[k] = { kind: "account", ...v };
+      published = {
+        targets: settle(stored),
+        customLines: onlyLive((readState({ customLines: saved.customLines })?.customLines ?? {}) as Record<string, CustomChoice>),
+        tagChannels: saved.tagChannels,
+        startDate: saved.startDate ?? (saved.startMonth ? `${saved.startMonth}-01` : firstOfMonth),
+      };
+    }
+    const draft = saved?.draft ? readState(saved.draft) : null;
+    const fresh: XeroSetupState = { targets: { ...defaults }, customLines: {}, tagChannels: true, startDate: firstOfMonth };
+    const current: XeroSetupState = draft
+      ? { targets: settle(draft.targets), customLines: onlyLive(draft.customLines), tagChannels: draft.tagChannels, startDate: draft.startDate || published?.startDate || firstOfMonth }
+      : (published ?? fresh);
 
     return {
       state: "ready",
@@ -258,14 +332,13 @@ export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
       channels: rows.channels,
       lines: rows.lines,
       balances: rows.balances,
-      targets,
-      sameForAllChannels: saved?.sameForAllChannels ?? true,
-      tagChannels: saved?.tagChannels ?? true,
-      // Not saved yet: the 1st of this month. (Setups saved before start dates had a month.)
-      startDate: saved?.startDate ?? (saved?.startMonth ? `${saved.startMonth}-01` : `${today.slice(0, 8)}01`),
+      published,
+      current,
+      defaults: fresh,
       conslMade,
       savedAt: saved?.savedAt?.toISOString() ?? null,
-      stale,
+      draftSavedAt: draft ? (saved?.draftSavedAt?.toISOString() ?? null) : null,
+      stale: [...stale],
     };
   } catch (e) {
     return { state: "error", orgName: c.orgName, message: (e as Error).message };
@@ -280,12 +353,20 @@ export async function listUsableXeroAccounts(orgId: string): Promise<{ accounts:
   return { accounts: raw.filter(usable).map(option).sort(byCode), conslMade: idList(saved?.createdAccountIds) };
 }
 
-export type XeroSetupInput = {
-  targets: Record<string, XeroTarget>;
-  sameForAllChannels: boolean;
-  tagChannels: boolean;
-  startDate: string;
-};
+/** Keep the setup as a draft: consl only, nothing reaches Xero. */
+export async function saveXeroDraft(orgId: string, input: XeroSetupState): Promise<{ draftSavedAt: string }> {
+  const state = readState(input);
+  if (!state) throw new Error("Nothing to save.");
+  const at = new Date();
+  const draft = JSON.parse(JSON.stringify(state)) as Prisma.InputJsonValue;
+  await prismaBase.xeroSetup.upsert({ where: { orgId }, create: { orgId, draft, draftSavedAt: at }, update: { draft, draftSavedAt: at } });
+  return { draftSavedAt: at.toISOString() };
+}
+
+/** Throw away the saved draft: the screen goes back to what's published. */
+export async function discardXeroDraft(orgId: string): Promise<void> {
+  await prismaBase.xeroSetup.updateMany({ where: { orgId }, data: { draft: Prisma.DbNull, draftSavedAt: null } });
+}
 
 /** A failed save, with the rows it had already settled (accounts created before it stopped). */
 export class XeroSaveError extends Error {
@@ -367,19 +448,45 @@ export function nextCode(type: string, raw: XeroApiAccount[], used: Set<string>)
 }
 
 /**
- * Save the setup: every row needs an account; new ones are created in Xero first (numbered in
- * the company's own numbering), then the choices are stored. Returns the accounts created.
+ * Publish the setup: it must be complete (an account behind every line that's sent; a P&L account
+ * AND a balance account for every custom line placed), new accounts are created in Xero first
+ * (numbered in the company's own numbering), then the setup is stored for the monthly journals and
+ * the draft is cleared. Accounts nothing uses are never created. Returns the accounts created.
  */
-export async function saveXeroSetup(orgId: string, input: XeroSetupInput): Promise<{ created: { code: string; name: string }[]; targets: Record<string, XeroTarget> }> {
+export async function publishXeroSetup(orgId: string, raw0: XeroSetupState): Promise<{ created: { code: string; name: string }[]; targets: Record<string, XeroTarget> }> {
+  const input = readState(raw0);
+  if (!input) throw new Error("Nothing to publish.");
   if (!isIsoDay(input.startDate)) throw new Error("Pick the day to start sending from.");
   const got = await connection(orgId);
   if (!("conn" in got)) throw new Error(got.state === "not_connected" ? "Connect Xero first." : got.message);
   const c = got.conn;
 
   const [raw, rows, saved] = await Promise.all([allAccounts(c), companyRows(orgId), prismaBase.xeroSetup.findUnique({ where: { orgId }, select: { createdAccountIds: true } })]);
-  const keys = [...rows.lines.map((l) => lineRowKey(l.channel, l.line)), ...rows.balances.map((b) => b.key)];
-  const missing = keys.filter((k) => !input.targets[k]);
-  if (missing.length) throw new Error("Pick an account for every line before saving.");
+  const byLine = new Map(rows.lines.map((l) => [l.id, l]));
+  const custom = Object.fromEntries(Object.entries(input.customLines).filter(([id]) => byLine.has(id)));
+  const plKeys = new Set<string>();
+  const balanceKeys = new Set<string>(rows.balances.map((b) => b.key));
+  for (const l of rows.lines) {
+    const k = l.custom ? null : lockedAccountOf(l);
+    if (k) plKeys.add(k);
+  }
+  for (const [id, choice] of Object.entries(custom)) {
+    if (!choice.account || !choice.balance) throw new Error("Pick a P&L account and a balance account for every custom line you send to Xero.");
+    plKeys.add(choice.account);
+    balanceKeys.add(choice.balance);
+    const t = input.targets[choice.account];
+    if (t && CLASS_OF_TYPE[t.type] !== customClass(byLine.get(id)!)) throw new Error(`${byLine.get(id)!.line} needs ${customClass(byLine.get(id)!) === "income" ? "an income" : "a cost"} account.`);
+  }
+  const keys = [...plKeys, ...balanceKeys];
+  if (keys.some((k) => !input.targets[k])) throw new Error("Pick an account for every line before publishing.");
+  // Each account keeps its kind: an income account for income, a cost account for costs, and a
+  // balance account on the balance sheet.
+  const wrong = (k: string, want: string[]) => !want.includes(CLASS_OF_TYPE[input.targets[k].type] ?? "");
+  for (const k of plKeys) {
+    const own = (LINE_ORDER as string[]).includes(k) ? [CLASS_OF_TYPE[LINES[k as keyof typeof LINES].suggest.type]] : ["income", "cost"];
+    if (wrong(k, own)) throw new Error(`${input.targets[k].name} is the wrong kind of account for its lines. Pick ${own[0] === "income" ? "an income" : "a cost"} account.`);
+  }
+  for (const k of balanceKeys) if (wrong(k, ["asset", "liability"])) throw new Error(`${input.targets[k].name} isn't a balance sheet account. Pick an asset or liability account.`);
 
   const used = new Set(raw.map((a) => a.Code).filter((code): code is string => Boolean(code)));
   const live = new Map(raw.filter(usable).map((a) => [a.AccountID, option(a)]));
@@ -448,23 +555,23 @@ export async function saveXeroSetup(orgId: string, input: XeroSetupInput): Promi
   const lines: Record<string, Stored> = {};
   const balances: Record<string, Stored> = {};
   try {
-    for (const l of rows.lines) {
-      const k = lineRowKey(l.channel, l.line);
-      lines[k] = await resolve(input.targets[k]);
-    }
-    for (const b of rows.balances) balances[b.key] = await resolve(input.targets[b.key]);
+    for (const k of plKeys) lines[k] = await resolve(input.targets[k]);
+    for (const k of balanceKeys) balances[k] = await resolve(input.targets[k]);
     const tracking = input.tagChannels && rows.channels.length > 0 ? await ensureTracking(c, rows.channels) : null;
 
     const data = {
       lines,
       balances,
-      sameForAllChannels: input.sameForAllChannels,
+      customLines: custom,
+      sameForAllChannels: true,
       tagChannels: input.tagChannels,
       trackingCategoryId: tracking?.categoryId ?? null,
       trackingOptions: tracking?.options ?? {},
       startDate: input.startDate,
       createdAccountIds: [...conslMade],
       savedAt: new Date(),
+      draft: Prisma.DbNull,
+      draftSavedAt: null,
     };
     await prismaBase.xeroSetup.upsert({ where: { orgId }, create: { orgId, ...data }, update: data });
   } catch (e) {
@@ -472,7 +579,7 @@ export async function saveXeroSetup(orgId: string, input: XeroSetupInput): Promi
     for (const [k, v] of Object.entries({ ...lines, ...balances })) settled[k] = { kind: "account", ...v };
     throw new XeroSaveError((e as Error).message, settled);
   }
-  console.log(`[xero] org ${orgId}: export setup saved (${keys.length} rows, ${created.length} accounts created)`);
+  console.log(`[xero] org ${orgId}: export setup published (${keys.length} accounts, ${Object.keys(custom).length} custom lines, ${created.length} accounts created)`);
   const targets: Record<string, XeroTarget> = {};
   for (const [k, v] of Object.entries({ ...lines, ...balances })) targets[k] = { kind: "account", ...v };
   return { created, targets };

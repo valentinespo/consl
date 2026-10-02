@@ -214,10 +214,19 @@ model XeroSetup {
   id                 String        @id @default(cuid())
   orgId              String?       @unique
   organization       Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  // "<CHANNEL>:<line>" → { accountId, code, name, type }  (line = the P&L group, or "cogs")
+  // The published setup (what the monthly journals use). P&L accounts: "<group>" (consl's account
+  // for that P&L section, every platform line of it locked there) or "acct:<id>" (one the owner
+  // added) → { accountId, code, name, type }.
   lines              Json          @default("{}")
-  // "receivable:<CHANNEL>" | "sales_tax" | "payable:<SOURCE>" | "inventory" → { accountId, code, name, type }
+  // Balance accounts: "receivable:<CHANNEL>" | "sales_tax" | "payable:<SOURCE>" | "inventory", or
+  // "bal:<id>" (one the owner added) → { accountId, code, name, type }.
   balances           Json          @default("{}")
+  // The lines the company added itself in consl (custom fees and credits) that ARE sent:
+  // "<CHANNEL>|<group>|<line>" → { account, balance } (keys above). Every other one stays out of Xero.
+  customLines        Json          @default("{}")
+  // Saved but not published: the whole editor state ({ targets, customLines, tagChannels, startDate }).
+  draft              Json?
+  draftSavedAt       DateTime?
   sameForAllChannels Boolean       @default(true)
   // Tag every journal line with its sales channel (a Xero tracking category).
   tagChannels        Boolean       @default(true)

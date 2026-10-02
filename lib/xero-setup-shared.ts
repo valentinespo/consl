@@ -1,11 +1,17 @@
 /**
  * The Xero export's vocabulary, shared by the setup screen and the server (plain module, no
- * "server-only"). A company's consl P&L is a set of LINES per channel — the P&L's own groups plus
- * cost of goods — and each line posts to one Xero account. The money those lines move waits in
- * BALANCE rows until the cash moves: a receivable per channel (what the channel holds for you;
- * payout deposits are coded there), sales tax payable (the P&L's Taxes row: the state's money, never revenue), payables for
- * costs paid outside the channel, and inventory (cost of goods leaves it).
+ * "server-only"). A company's consl P&L is a set of LINES per channel (the P&L's grouped lines, plus
+ * cost of goods). Every platform line is LOCKED to consl's account for its P&L section ("consl -
+ * Sales", "consl - Fulfillment Fees"…); the owner picks which Xero account each of those is. Lines
+ * the company added itself in consl (custom fees and credits) stay out of Xero until placed in an
+ * account, with a balance account picked for them. The money the lines move waits in BALANCE
+ * accounts until the cash moves: a receivable per channel (what the channel holds for you; payout
+ * deposits are coded there), sales tax payable (tax owed: the state's money, never revenue),
+ * payables for what's paid by card, and inventory (cost of goods leaves it). Which one a line uses
+ * follows who holds or charged its money (balancesOf).
  */
+
+import type { PnlSource } from "@/lib/pnl-shared";
 
 export type XeroChannel = "AMAZON" | "SHOPIFY" | "TIKTOK";
 export const CHANNEL_NAME: Record<XeroChannel, string> = { AMAZON: "Amazon", SHOPIFY: "Shopify", TIKTOK: "TikTok Shop" };
@@ -65,7 +71,6 @@ export type XeroTarget =
 
 export type XeroAccountOption = { accountId: string; code: string; name: string; type: string };
 
-export const lineRowKey = (channel: XeroChannel, line: LineKey) => `line:${channel}:${line}`;
 
 /** Xero's account types in plain words, for the pickers. */
 export const XERO_TYPE_LABEL: Record<string, string> = {
@@ -123,4 +128,100 @@ export function journalWindows(start: string, today: string): JournalWindow[] {
     from = isoDay(new Date(Date.UTC(Number(to.slice(0, 4)), Number(to.slice(5, 7)), 1)));
   }
   return out;
+}
+
+/** One line of the company's consl P&L as the setup shows it, with its all-time amount. */
+export type SetupLine = {
+  /** "<CHANNEL>|<group>|<line>" */
+  id: string;
+  channel: XeroChannel;
+  /** The P&L section ("cogs" for cost of goods, "taxes" for the tax lines). */
+  group: string;
+  /** The P&L's grouped line name. */
+  line: string;
+  amount: number;
+  sources: PnlSource[];
+  /** Added in consl (custom fees and credits): sent to Xero only once placed. */
+  custom: boolean;
+};
+
+export const setupLineId = (channel: string, group: string, line: string) => `${channel}|${group}|${line}`;
+
+/** A custom line placed in Xero: its P&L account and its balance account (setup keys). */
+export type CustomChoice = { account: string; balance: string };
+
+/** The whole setup: what Save keeps as a draft and Publish sends to Xero. */
+export type XeroSetupState = {
+  targets: Record<string, XeroTarget>;
+  customLines: Record<string, CustomChoice>;
+  tagChannels: boolean;
+  startDate: string;
+};
+
+/** The consl P&L account a platform line is locked to: its section's (a section consl doesn't know
+ *  yet: Other). Taxes post to none: they're the state's money, on the balance sheet only. */
+export const lockedAccountOf = (l: SetupLine): LineKey | null =>
+  l.group === "taxes" ? null : (LINE_ORDER as string[]).includes(l.group) ? (l.group as LineKey) : "other";
+
+/** Accounts the owner adds: P&L ones are "acct:<id>", balance ones "bal:<id>". */
+export const isAddedAccount = (key: string) => key.startsWith("acct:");
+export const isAddedBalance = (key: string) => key.startsWith("bal:");
+
+export type AccountClass = "income" | "cost" | "asset" | "liability";
+export const CLASS_OF_TYPE: Record<string, AccountClass> = {
+  REVENUE: "income",
+  SALES: "income",
+  OTHERINCOME: "income",
+  DIRECTCOSTS: "cost",
+  EXPENSE: "cost",
+  OVERHEADS: "cost",
+  DEPRECIATN: "cost",
+  CURRENT: "asset",
+  INVENTORY: "asset",
+  PREPAYMENT: "asset",
+  NONCURRENT: "asset",
+  FIXED: "asset",
+  CURRLIAB: "liability",
+  LIABILITY: "liability",
+  TERMLIAB: "liability",
+};
+/** A custom line takes an income account (a credit under Sales) or a cost account (a fee, or a credit against fees). */
+export const customClass = (l: SetupLine): AccountClass => (l.group === "sales" ? "income" : "cost");
+
+/** The kinds of account the owner can add, and the Xero type each becomes. */
+export const NEW_PL_TYPES = [
+  { type: "DIRECTCOSTS", label: "Direct cost" },
+  { type: "EXPENSE", label: "Expense" },
+  { type: "REVENUE", label: "Income" },
+  { type: "OTHERINCOME", label: "Other income" },
+] as const;
+export const NEW_BALANCE_TYPES = [
+  { type: "CURRLIAB", label: "Current liability (money you owe)" },
+  { type: "CURRENT", label: "Current asset (money owed to you)" },
+] as const;
+
+/**
+ * Where a line's money waits until the cash moves, by who holds or charged it (its sources): what
+ * Amazon charges sits on the Amazon receivable even when the P&L shows it on another channel (MCF
+ * fees on a Shopify or TikTok sale), Meta's spend on Meta Ads payable, Amazon's ad invoices on
+ * Amazon Ads payable when paid by card or the Amazon receivable when paid from the balance, cost of
+ * goods on Inventory, and tax owed on Sales tax payable (plus the receivable that holds it until the
+ * payout). Tax a channel collected and paid over itself nets out inside its receivable. A custom
+ * line goes where its owner placed it.
+ */
+export function balancesOf(l: SetupLine, custom?: CustomChoice): { key: string; note?: string }[] {
+  if (l.custom) return custom ? [{ key: custom.balance }] : [];
+  if (l.group === "cogs") return [{ key: "inventory" }];
+  if (l.group === "taxes") return l.line === "Tax owed" ? [{ key: `receivable:${l.channel}` }, { key: "sales_tax" }] : [];
+  const out: { key: string; note?: string }[] = [];
+  for (const src of l.sources) {
+    if (src === "AMAZON" || src === "SHOPIFY" || src === "TIKTOK") out.push({ key: `receivable:${src}` });
+    else if (src === "META") out.push({ key: "payable:META_ADS" });
+    else if (src === "AMAZON_ADS") {
+      out.push({ key: "payable:AMAZON_ADS", note: "invoices paid by card" });
+      out.push({ key: "receivable:AMAZON", note: "invoices paid from your balance" });
+    }
+  }
+  if (!out.length) out.push({ key: `receivable:${l.channel}` });
+  return out.filter((b, i) => out.findIndex((x) => x.key === b.key && x.note === b.note) === i);
 }
