@@ -21,8 +21,11 @@ import { APP_ORIGIN } from "@/lib/amazon-oauth";
 export const XERO_REDIRECT_URI = `${APP_ORIGIN}/api/integrations/xero/callback`;
 // Apps created after 2026-03-02 only have granular scopes. accounting.settings: the organisation,
 // chart of accounts (read, and create consl's accounts), tax rates, tracking categories.
-// accounting.manualjournals: post the P&L as journals.
-export const XERO_SCOPES = "offline_access accounting.settings accounting.manualjournals";
+// accounting.manualjournals: post the P&L as journals. accounting.reports.balancesheet.read: an
+// account's balance on a day (the starting inventory); added 2026-10-02, so a company connected
+// before then grants it by reconnecting.
+export const BALANCE_SHEET_SCOPE = "accounting.reports.balancesheet.read";
+export const XERO_SCOPES = `offline_access accounting.settings accounting.manualjournals ${BALANCE_SHEET_SCOPE}`;
 
 const AUTHORIZE_URL = "https://login.xero.com/identity/connect/authorize";
 const TOKEN_URL = "https://identity.xero.com/connect/token";

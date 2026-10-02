@@ -187,7 +187,7 @@ export type StartingInventory = {
   /** Xero's balance in the inventory account that day (0 for an account consl will create). With a
    *  new account, `others` are the company's own inventory accounts that hold stock that day: kept
    *  beside a new one, that stock would be counted twice. */
-  xero: { balance: number | null; newAccount: boolean; error?: string; others?: (XeroAccountOption & { balance: number })[] };
+  xero: { balance: number | null; newAccount: boolean; error?: string; reconnect?: boolean; others?: (XeroAccountOption & { balance: number })[] };
 };
 
 /** The calendar day before `day` ("YYYY-MM-DD"). */

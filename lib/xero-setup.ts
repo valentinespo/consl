@@ -2,7 +2,7 @@ import "server-only";
 import { Prisma } from "@/app/generated/prisma/client";
 import { prismaBase } from "@/lib/prisma-base";
 import { runWithOrg } from "@/lib/tenant";
-import { xeroAccessToken, xeroApi } from "@/lib/xero";
+import { BALANCE_SHEET_SCOPE, xeroAccessToken, xeroApi } from "@/lib/xero";
 import { devAccounts, devBalances, devFixture, type FixtureAccount } from "@/lib/xero-dev-fixture";
 import { localDay } from "@/lib/tz";
 import { loadPnlHistory } from "@/lib/pnl-cache";
@@ -103,17 +103,20 @@ const option = (a: XeroApiAccount): XeroAccountOption => ({ accountId: a.Account
 const byCode = (a: XeroAccountOption, b: XeroAccountOption) => a.code.localeCompare(b.code, undefined, { numeric: true }) || a.name.localeCompare(b.name);
 const norm = (s: string) => s.trim().toLowerCase();
 
-type Conn = { token: string; tenantId: string; orgName: string };
+/** A live Xero connection; `readsBalances`: it was granted the balance sheet (connections made
+ *  before consl asked for it grant it by reconnecting). */
+type Conn = { token: string; tenantId: string; orgName: string; readsBalances: boolean };
 
 async function connection(orgId: string): Promise<{ conn: Conn } | { state: "not_connected" } | { state: "reconnect"; orgName: string | null; message: string }> {
-  if (DEV_FIXTURE) return { conn: { token: "dev", tenantId: "dev", orgName: devFixture.orgName } };
+  if (DEV_FIXTURE) return { conn: { token: "dev", tenantId: "dev", orgName: devFixture.orgName, readsBalances: process.env.XERO_DEV_NO_BALANCES !== "1" } };
   const row = await prismaBase.integration.findUnique({ where: { orgId_provider: { orgId, provider: "xero" } } });
   if (!row || !row.refreshTokenEnc || row.status === "revoked" || row.status === "choose") return { state: "not_connected" };
   if (row.status === "error" || !row.sellerId) {
     return { state: "reconnect", orgName: row.accountName, message: "consl's access to Xero ended. Reconnect Xero to continue." };
   }
   const token = await xeroAccessToken(row);
-  return { conn: { token, tenantId: row.sellerId, orgName: row.accountName ?? "your Xero organisation" } };
+  const readsBalances = (row.scope ?? "").split(/\s+/).includes(BALANCE_SHEET_SCOPE);
+  return { conn: { token, tenantId: row.sellerId, orgName: row.accountName ?? "your Xero organisation", readsBalances } };
 }
 
 async function allAccounts(c: Conn): Promise<XeroApiAccount[]> {
@@ -439,7 +442,8 @@ async function openingNumbers(c: Conn, orgId: string, startDate: string, account
   ]);
   const consl = row ? { total: cents(row.total), raw: cents(row.raw), inProduction: cents(row.inProduction), finished: cents(row.total - row.raw - row.inProduction) } : null;
   let xero: StartingInventory["xero"] = { balance: accountId ? null : 0, newAccount: !accountId };
-  if (!pending) {
+  if (!pending && !c.readsBalances) xero = { balance: null, newAccount: !accountId, reconnect: true };
+  else if (!pending) {
     try {
       const [balances, chart] = await Promise.all([xeroBalancesAt(c, asOf), accountId ? Promise.resolve([] as XeroApiAccount[]) : allAccounts(c)]);
       const others = chart
@@ -592,6 +596,9 @@ export async function publishXeroSetup(orgId: string, raw0: XeroSetupState): Pro
   if (input.inventoryOpening !== "keep") {
     const inv = input.targets.inventory;
     const s = await openingNumbers(c, orgId, input.startDate, inv?.kind === "account" ? inv.accountId : null);
+    if (s.xero.reconnect) {
+      throw new Error("To match consl's value, reconnect Xero first so consl can read your inventory there (or keep Xero's inventory number).");
+    }
     if (!s.pending && !s.consl) {
       throw new Error(
         `consl has no stock value for ${dayLabel(s.asOf)}${s.firstDay && s.firstDay > s.asOf ? ` (its stock history starts ${dayLabel(s.firstDay)})` : ""}. Pick a later start date, or keep Xero's inventory number.`,

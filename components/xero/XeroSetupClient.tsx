@@ -180,8 +180,9 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
   const choice = state.inventoryOpening ?? "match";
   const openingData = openingNow?.data ?? null;
   const openingDiff = openingData?.consl && openingData.xero.balance !== null ? Math.round((openingData.consl.total - openingData.xero.balance) * 100) / 100 : null;
-  // Matching needs consl's value for that day: a start date before consl's stock history can't match.
-  const matchBlocked = choice === "match" && !!openingData && !openingData.pending && !openingData.consl;
+  // Matching needs consl's value for that day (a start date before consl's stock history can't
+  // match) and Xero's permission to read the balance sheet.
+  const matchBlocked = choice === "match" && !!openingData && ((!openingData.pending && !openingData.consl) || !!openingData.xero.reconnect);
 
   const lines = data.lines;
   const byId = useMemo(() => new Map(lines.map((l) => [l.id, l])), [lines]);
@@ -409,7 +410,11 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
 
   function askPublish() {
     if (matchBlocked) {
-      setError("consl has no stock value for the day before your start date. Pick a later start date, or keep Xero's inventory number.");
+      setError(
+        openingData?.xero.reconnect
+          ? "To match consl's value, reconnect Xero first, or keep Xero's inventory number."
+          : "consl has no stock value for the day before your start date. Pick a later start date, or keep Xero's inventory number.",
+      );
       return;
     }
     if (missingBalance) {
@@ -1276,6 +1281,8 @@ function StartingInventoryCard({
     ? { value: "…", sub: "Reading…" }
     : data?.pending
       ? { value: "—", sub: `Read at the end of ${day}` }
+      : data?.xero.reconnect
+        ? { value: "—", sub: "Reconnect Xero to read it", warn: true }
       : data?.xero.newAccount
         ? { value: money(0), sub: "A new account: nothing in it yet" }
         : error || data?.xero.error
@@ -1289,17 +1296,18 @@ function StartingInventoryCard({
         ? { value: money(0), sub: "Xero already matches consl" }
         : { value: signed(diff), sub: diff > 0 ? "consl's value is higher" : "consl's value is lower" };
 
-  const matchText = noValue
-    ? `consl adds one adjustment on ${start} so Xero's inventory matches consl's stock value.`
-    : data?.pending
-      ? `consl reads both numbers at the end of ${day}, then adds one adjustment on ${start} so Xero's inventory matches consl.`
-      : diff === 0
-        ? "Xero already matches consl on that day. Nothing to adjust."
-        : diff !== null && diff > 0
-          ? `On ${start}, consl adds ${money(diff)} to Xero's inventory so it matches consl. The same amount lowers your costs that month, in the account below.`
-          : diff !== null
-            ? `On ${start}, consl takes ${money(-diff)} off Xero's inventory so it matches consl. The same amount is a cost that month, in the account below.`
-            : `On ${start}, consl adds one adjustment so Xero's inventory matches consl. The difference shows in that month's P&L, in the account below.`;
+  const matchText =
+    noValue || data?.xero.reconnect
+      ? `consl adds one adjustment on ${start} so Xero's inventory matches consl's stock value.`
+      : data?.pending
+        ? `consl reads both numbers at the end of ${day}, then adds one adjustment on ${start} so Xero's inventory matches consl.`
+        : diff === 0
+          ? "Xero already matches consl on that day. Nothing to adjust."
+          : diff !== null && diff > 0
+            ? `On ${start}, consl adds ${money(diff)} to Xero's inventory so it matches consl. The same amount lowers your costs that month, in the account below.`
+            : diff !== null
+              ? `On ${start}, consl takes ${money(-diff)} off Xero's inventory so it matches consl. The same amount is a cost that month, in the account below.`
+              : `On ${start}, consl adds one adjustment so Xero's inventory matches consl. The difference shows in that month's P&L, in the account below.`;
 
   return (
     <section className="overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface">
@@ -1359,24 +1367,30 @@ function StartingInventoryCard({
                 Match consl&apos;s value <span className={`${PILL} pill-chart`}>Recommended</span>
               </span>
               <span className="mt-0.5 block text-[12.5px] leading-snug text-muted">{matchText}</span>
-              {choice === "match" && noValue && (
-                <span className="mt-1.5 flex items-start gap-1.5 text-[12px] leading-snug text-warn">
-                  <AlertTriangle size={12} className="mt-[2px] shrink-0" />
-                  <span>
-                    consl has no stock value for {day}
-                    {data?.firstDay && data.firstDay > asOf ? ` (its stock history starts ${dayText(data.firstDay, locale)})` : ""}. Pick a later start date, or keep Xero&apos;s number.
-                  </span>
-                </span>
-              )}
-              {choice === "match" && !noValue && !data?.xero.newAccount && (error || data?.xero.error) && (
-                <span className="mt-1.5 flex items-start gap-1.5 text-[12px] leading-snug text-warn">
-                  <AlertTriangle size={12} className="mt-[2px] shrink-0" />
-                  <span>Couldn&apos;t read your inventory in Xero: {error ?? data?.xero.error}</span>
-                </span>
-              )}
             </span>
           </button>
-          {choice === "match" && !noValue && <div className="mx-3 mb-3 rounded-lg border border-border bg-surface">{adjustment}</div>}
+          {choice === "match" && (noValue || data?.xero.reconnect || (!data?.xero.newAccount && (error || data?.xero.error))) && (
+            <div className="-mt-1.5 flex items-start gap-1.5 pb-3 pl-[40px] pr-3.5 text-[12px] leading-snug text-warn">
+              <AlertTriangle size={12} className="mt-[2px] shrink-0" />
+              {noValue ? (
+                <span>
+                  consl has no stock value for {day}
+                  {data?.firstDay && data.firstDay > asOf ? ` (its stock history starts ${dayText(data.firstDay, locale)})` : ""}. Pick a later start date, or keep Xero&apos;s number.
+                </span>
+              ) : data?.xero.reconnect ? (
+                <span>
+                  consl needs one more permission from Xero to read your inventory there.{" "}
+                  <a href="/api/integrations/xero/connect" className="font-medium underline underline-offset-2">
+                    Reconnect Xero
+                  </a>{" "}
+                  (your setup stays as it is), or keep Xero&apos;s number.
+                </span>
+              ) : (
+                <span>Couldn&apos;t read your inventory in Xero: {error ?? data?.xero.error}</span>
+              )}
+            </div>
+          )}
+          {choice === "match" && !noValue && !data?.xero.reconnect && <div className="mx-3 mb-3 rounded-lg border border-border bg-surface">{adjustment}</div>}
         </div>
         <div className={`rounded-xl border transition-colors ${choice === "keep" ? "border-accent/50 bg-accent-soft/30" : "border-border"}`}>
           <button type="button" role="radio" aria-checked={choice === "keep"} disabled={disabled} onClick={() => onChoice("keep")} className="flex w-full items-start gap-2.5 px-3.5 py-3 text-left disabled:cursor-default">
