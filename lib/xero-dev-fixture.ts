@@ -37,6 +37,9 @@ const baseAccounts: FixtureAccount[] = [
   { AccountID: "dev-960", Code: "960", Name: "Retained Earnings", Type: "EQUITY", Status: "ACTIVE", SystemAccount: "RETAINEDEARNINGS" },
 ];
 
+/** Balances the demo chart holds (any day), for the starting-inventory comparison. */
+export const devBalances: Record<string, number> = { "dev-630": 41250 };
+
 // Kept on globalThis so accounts "created" by a save survive dev-server module reloads.
 const g = globalThis as { __xeroDevAccounts?: FixtureAccount[] };
 export const devAccounts: FixtureAccount[] = (g.__xeroDevAccounts ??= [...baseAccounts]);

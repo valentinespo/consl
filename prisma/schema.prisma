@@ -224,7 +224,11 @@ model XeroSetup {
   // The lines the company added itself in consl (custom fees and credits) that ARE sent:
   // "<CHANNEL>|<group>|<line>" → { account, balance } (keys above). Every other one stays out of Xero.
   customLines        Json          @default("{}")
-  // Saved but not published: the whole editor state ({ targets, customLines, tagChannels, startDate }).
+  // How Xero's Inventory starts, as published: { choice: "match" | "keep" } — matching also keeps
+  // the day read (asOf, the day before the start date), consl's stock value, Xero's Inventory
+  // balance and the difference the first journal adjusts (into the inventory-adjustment account).
+  inventoryOpening   Json?
+  // Saved but not published: the whole editor state ({ targets, customLines, tagChannels, startDate, inventoryOpening }).
   draft              Json?
   draftSavedAt       DateTime?
   sameForAllChannels Boolean       @default(true)

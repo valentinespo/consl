@@ -14,6 +14,8 @@ import type { XeroSetupScreen } from "@/lib/xero-setup";
 import {
   CHANNEL_NAME,
   CLASS_OF_TYPE,
+  INVENTORY_ADJUSTMENT_KEY,
+  INVENTORY_ADJUSTMENT_SUGGEST,
   LINES,
   LINE_ORDER,
   NEW_BALANCE_TYPES,
@@ -22,6 +24,7 @@ import {
   XERO_TYPE_LABEL,
   balancesOf,
   customClass,
+  dayBefore,
   isAddedAccount,
   isAddedBalance,
   lockedAccountOf,
@@ -32,6 +35,7 @@ import {
   type AccountClass,
   type LineKey,
   type SetupLine,
+  type StartingInventory,
   type XeroAccountOption,
   type XeroChannel,
   type XeroSetupState,
@@ -66,6 +70,7 @@ const snapshot = (s: XeroSetupState) =>
     c: Object.entries(s.customLines).map(([k, v]) => [k, v.account, v.balance]).sort(),
     tag: s.tagChannels,
     start: s.startDate,
+    inv: s.inventoryOpening ?? "match",
   });
 
 const plClass = (key: string, targets: Record<string, XeroTarget>): AccountClass =>
@@ -100,6 +105,7 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const lastRead = useRef(0);
+  const [opening, setOpening] = useState<{ key: string; data: StartingInventory | null; error: string | null } | null>(null);
   const busy = pending !== null;
   const editable = canEdit && !busy;
 
@@ -150,6 +156,32 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
       window.removeEventListener("focus", onVisible);
     };
   }, [refreshAccounts]);
+
+  // Starting inventory: consl's stock value and Xero's inventory balance at the end of the day
+  // before the start date, read again whenever the date or the inventory account changes.
+  const invTarget = targets.inventory;
+  const invAccount = invTarget?.kind === "account" ? invTarget.accountId : "";
+  const openingKey = `${state.startDate}|${invAccount}`;
+  useEffect(() => {
+    if (!state.startDate) return;
+    const key = `${state.startDate}|${invAccount}`;
+    const ctl = new AbortController();
+    fetch(`/api/integrations/xero/starting-inventory?start=${state.startDate}${invAccount ? `&account=${encodeURIComponent(invAccount)}` : ""}`, { cache: "no-store", signal: ctl.signal })
+      .then(async (r) => {
+        const j = (await r.json().catch(() => null)) as (StartingInventory & { error?: string }) | null;
+        setOpening(r.ok && j && !j.error ? { key, data: j, error: null } : { key, data: null, error: j?.error ?? "Couldn't read the starting balances." });
+      })
+      .catch(() => {
+        if (!ctl.signal.aborted) setOpening({ key, data: null, error: "Couldn't reach the server." });
+      });
+    return () => ctl.abort();
+  }, [state.startDate, invAccount]);
+  const openingNow = opening?.key === openingKey ? opening : null;
+  const choice = state.inventoryOpening ?? "match";
+  const openingData = openingNow?.data ?? null;
+  const openingDiff = openingData?.consl && openingData.xero.balance !== null ? Math.round((openingData.consl.total - openingData.xero.balance) * 100) / 100 : null;
+  // Matching needs consl's value for that day: a start date before consl's stock history can't match.
+  const matchBlocked = choice === "match" && !!openingData && !openingData.pending && !openingData.consl;
 
   const lines = data.lines;
   const byId = useMemo(() => new Map(lines.map((l) => [l.id, l])), [lines]);
@@ -323,8 +355,9 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
         if (placed[l.id].balance) keys.add(placed[l.id].balance);
       }
     }
+    if (choice === "match") keys.add(INVENTORY_ADJUSTMENT_KEY);
     return keys;
-  }, [lines, placed, data.balances]);
+  }, [lines, placed, data.balances, choice]);
   const { newAccounts, clashes } = useMemo(() => {
     const seen = new Map<string, { name: string; type: string }>();
     let taken = 0;
@@ -375,6 +408,10 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
   }
 
   function askPublish() {
+    if (matchBlocked) {
+      setError("consl has no stock value for the day before your start date. Pick a later start date, or keep Xero's inventory number.");
+      return;
+    }
     if (missingBalance) {
       setError(`Pick a balance account for ${missingBalance === 1 ? "the custom line" : `the ${missingBalance} custom lines`} you're sending to Xero.`);
       return;
@@ -577,6 +614,38 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
         )}
       </div>
 
+      <StartingInventoryCard
+        choice={choice}
+        onChoice={(c) => change((s) => ({ ...s, inventoryOpening: c }))}
+        data={openingData}
+        loading={!openingNow}
+        error={openingNow?.error ?? null}
+        diff={openingDiff}
+        startDate={state.startDate}
+        inventoryName={invTarget ? (invTarget.kind === "account" && invTarget.code ? `${invTarget.code} · ${invTarget.name}` : invTarget.name) : "Inventory"}
+        disabled={!editable}
+        money={money}
+        locale={locale}
+        onUseAccount={(a) => setTarget("inventory", { kind: "account", accountId: a.accountId, code: a.code, name: a.name, type: a.type })}
+        adjustment={
+          <AccountHeader
+            caption="Inventory adjustment account"
+            hint="Where the difference shows in your P&L"
+            target={targets[INVENTORY_ADJUSTMENT_KEY] ?? null}
+            options={optionsFor({ name: newAccountName(INVENTORY_ADJUSTMENT_SUGGEST.name), type: INVENTORY_ADJUSTMENT_SUGGEST.type }, targets[INVENTORY_ADJUSTMENT_KEY] ?? null, ["cost", "income"])}
+            clash={clashOf(targets[INVENTORY_ADJUSTMENT_KEY])}
+            stale={data.stale.includes(INVENTORY_ADJUSTMENT_KEY)}
+            disabled={!editable}
+            onPick={(v) => setTarget(INVENTORY_ADJUSTMENT_KEY, decode(v))}
+            onRename={(name) => {
+              const t = targets[INVENTORY_ADJUSTMENT_KEY];
+              if (t?.kind === "new") setTarget(INVENTORY_ADJUSTMENT_KEY, { kind: "new", type: t.type, name });
+            }}
+            total={null}
+          />
+        }
+      />
+
       {/* Lines added in consl that aren't sent. */}
       {customLines.length > 0 && (
         <section
@@ -702,7 +771,9 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
                 terms={terms}
                 codeHere={codeHere}
                 notes={
-                  b.key === "receivable:SHOPIFY"
+                  b.key === "inventory" && choice === "match"
+                    ? [`On ${dayText(state.startDate, locale)}, consl also adds one starting adjustment so this account matches consl's stock value (see Starting inventory).`]
+                    : b.key === "receivable:SHOPIFY"
                     ? [
                         ...(data.regularPaypal
                           ? [`Regular PayPal fees never reach Shopify's records, so consl adds PayPal's standard fee to those orders (${PAYPAL_STANDARD_FEE.percent}% + $${PAYPAL_STANDARD_FEE.fixed.toFixed(2)}). If your rate is different, change it in Orders › Automatic rules.`]
@@ -801,6 +872,18 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
                 </ul>
               </>
             )}
+            <div className="mt-3 rounded-xl border border-border px-3 py-2.5">
+              <p className="text-[12.5px] font-medium text-ink">Starting inventory</p>
+              <p className="mt-0.5 text-[12px] leading-relaxed text-muted">
+                {choice === "keep"
+                  ? "Xero's inventory number stays as it is."
+                  : openingDiff === 0
+                    ? "Xero already matches consl. Nothing to adjust."
+                    : openingDiff !== null
+                      ? `One adjustment on ${dayText(state.startDate, locale)}: ${openingDiff > 0 ? "+" : "−"}${money(Math.abs(openingDiff))} to Xero's inventory, in ${plainName(targets[INVENTORY_ADJUSTMENT_KEY]?.name ?? "Inventory Adjustments")}.`
+                      : `One adjustment on ${dayText(state.startDate, locale)} so Xero's inventory matches consl.`}
+              </p>
+            </div>
             {excluded.length > 0 && (
               <div className="mt-3 rounded-xl border border-warn/30 bg-warn/10 px-3 py-2.5">
                 <p className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-warn">
@@ -1134,6 +1217,189 @@ function HowItWorks() {
         </div>
       ))}
     </div>
+  );
+}
+
+/** "Sep 30, 2026" for a day. */
+function dayText(day: string, locale: string): string {
+  return day ? new Date(`${day}T00:00:00Z`).toLocaleDateString(locale, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : "";
+}
+
+/**
+ * How Xero's inventory starts: consl's stock value and Xero's number, both at the end of the day
+ * before the start date, and the owner's choice: move Xero to consl's value (one adjustment on the
+ * start date, in that month's P&L) or keep Xero's number.
+ */
+function StartingInventoryCard({
+  choice,
+  onChoice,
+  data,
+  loading,
+  error,
+  diff,
+  startDate,
+  inventoryName,
+  disabled,
+  money,
+  locale,
+  onUseAccount,
+  adjustment,
+}: {
+  choice: "match" | "keep";
+  onChoice: (c: "match" | "keep") => void;
+  data: StartingInventory | null;
+  loading: boolean;
+  error: string | null;
+  diff: number | null;
+  startDate: string;
+  inventoryName: string;
+  disabled: boolean;
+  money: (n: number) => string;
+  locale: string;
+  onUseAccount: (a: XeroAccountOption) => void;
+  adjustment: ReactNode;
+}) {
+  const asOf = data?.asOf ?? (startDate ? dayBefore(startDate) : "");
+  const day = dayText(asOf, locale);
+  const start = dayText(startDate, locale);
+  const noValue = !!data && !data.pending && !data.consl;
+  const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${money(Math.abs(n))}`;
+
+  const conslFigure = loading
+    ? { value: "…", sub: "Reading…" }
+    : data?.pending
+      ? { value: "—", sub: `Read at the end of ${day}` }
+      : data?.consl
+        ? { value: money(data.consl.total), sub: `Materials ${money(data.consl.raw)} · In production ${money(data.consl.inProduction)} · Finished ${money(data.consl.finished)}` }
+        : { value: "No value", sub: data?.firstDay && data.firstDay > asOf ? `consl's stock history starts ${dayText(data.firstDay, locale)}` : "consl has no stock value for that day", warn: true };
+  const xeroFigure = loading
+    ? { value: "…", sub: "Reading…" }
+    : data?.pending
+      ? { value: "—", sub: `Read at the end of ${day}` }
+      : data?.xero.newAccount
+        ? { value: money(0), sub: "A new account: nothing in it yet" }
+        : error || data?.xero.error
+          ? { value: "—", sub: "Couldn't read Xero", warn: true }
+          : { value: money(data?.xero.balance ?? 0), sub: inventoryName };
+  const others = data?.xero.newAccount ? (data.xero.others ?? []) : [];
+  const diffFigure =
+    diff === null
+      ? { value: "—", sub: data?.pending ? "Worked out once that day is over" : "" }
+      : diff === 0
+        ? { value: money(0), sub: "Xero already matches consl" }
+        : { value: signed(diff), sub: diff > 0 ? "consl's value is higher" : "consl's value is lower" };
+
+  const matchText = noValue
+    ? `consl adds one adjustment on ${start} so Xero's inventory matches consl's stock value.`
+    : data?.pending
+      ? `consl reads both numbers at the end of ${day}, then adds one adjustment on ${start} so Xero's inventory matches consl.`
+      : diff === 0
+        ? "Xero already matches consl on that day. Nothing to adjust."
+        : diff !== null && diff > 0
+          ? `On ${start}, consl adds ${money(diff)} to Xero's inventory so it matches consl. The same amount lowers your costs that month, in the account below.`
+          : diff !== null
+            ? `On ${start}, consl takes ${money(-diff)} off Xero's inventory so it matches consl. The same amount is a cost that month, in the account below.`
+            : `On ${start}, consl adds one adjustment so Xero's inventory matches consl. The difference shows in that month's P&L, in the account below.`;
+
+  return (
+    <section className="overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface">
+      <div className="px-5 py-4">
+        <h2 className="text-[15px] font-semibold text-ink">Starting inventory</h2>
+        <p className="mt-0.5 text-[12.5px] text-muted">
+          What your inventory is worth in Xero when consl starts sending, next to consl&apos;s stock value. Both are at the end of {day || "the day before your start date"}, the day before you start.
+        </p>
+      </div>
+      <div className="grid gap-px border-t border-line bg-line sm:grid-cols-3">
+        {[
+          { label: "consl's stock value", ...conslFigure },
+          { label: "Xero's inventory", ...xeroFigure },
+          { label: "Difference", ...diffFigure },
+        ].map((f) => (
+          <div key={f.label} className="min-w-0 bg-surface px-5 py-3">
+            <div className="text-[11.5px] text-muted">{f.label}</div>
+            <div className={`mt-0.5 text-[17px] font-semibold tabular-nums ${"warn" in f && f.warn ? "text-warn" : "text-ink"}`}>{f.value}</div>
+            {f.sub && <div className="mt-0.5 text-[11.5px] leading-snug text-muted">{f.sub}</div>}
+          </div>
+        ))}
+      </div>
+      {others.length > 0 && (
+        <div className="border-t border-line px-4 pt-3">
+          <div className="rounded-xl border border-warn/30 bg-warn/10 px-3 py-2.5">
+            <p className="flex items-start gap-1.5 text-[12.5px] font-medium leading-snug text-warn">
+              <AlertTriangle size={13} className="mt-[2px] shrink-0" />
+              Your Xero already has stock in {others.length === 1 ? "an inventory account" : "inventory accounts"}
+            </p>
+            <ul className="mt-1.5 space-y-1">
+              {others.map((a) => (
+                <li key={a.accountId} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-ink">
+                  <span className="min-w-0 truncate">
+                    {a.code ? `${a.code} · ` : ""}
+                    {a.name}: <span className="tabular-nums">{money(a.balance)}</span> on {day}
+                  </span>
+                  {!disabled && (
+                    <button type="button" onClick={() => onUseAccount(a)} className="rounded-md border border-border bg-surface px-2 py-0.5 text-[11.5px] font-medium text-ink-soft hover:bg-surface-2">
+                      Use this account
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1.5 text-[12px] leading-snug text-muted">
+              consl is set to put your stock in a new account, so that stock would be counted twice. Use your existing account instead (it becomes your Inventory account in the balance sheet below).
+            </p>
+          </div>
+        </div>
+      )}
+      <div className="space-y-2 border-t border-line p-4" role="radiogroup" aria-label="Starting inventory">
+        <div className={`overflow-hidden rounded-xl border transition-colors ${choice === "match" ? "border-accent/50 bg-accent-soft/30" : "border-border"}`}>
+          <button type="button" role="radio" aria-checked={choice === "match"} disabled={disabled} onClick={() => onChoice("match")} className="flex w-full items-start gap-2.5 px-3.5 py-3 text-left disabled:cursor-default">
+            <Radio on={choice === "match"} />
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-1.5 text-[13px] font-medium text-ink">
+                Match consl&apos;s value <span className={`${PILL} pill-chart`}>Recommended</span>
+              </span>
+              <span className="mt-0.5 block text-[12.5px] leading-snug text-muted">{matchText}</span>
+              {choice === "match" && noValue && (
+                <span className="mt-1.5 flex items-start gap-1.5 text-[12px] leading-snug text-warn">
+                  <AlertTriangle size={12} className="mt-[2px] shrink-0" />
+                  <span>
+                    consl has no stock value for {day}
+                    {data?.firstDay && data.firstDay > asOf ? ` (its stock history starts ${dayText(data.firstDay, locale)})` : ""}. Pick a later start date, or keep Xero&apos;s number.
+                  </span>
+                </span>
+              )}
+              {choice === "match" && !noValue && !data?.xero.newAccount && (error || data?.xero.error) && (
+                <span className="mt-1.5 flex items-start gap-1.5 text-[12px] leading-snug text-warn">
+                  <AlertTriangle size={12} className="mt-[2px] shrink-0" />
+                  <span>Couldn&apos;t read your inventory in Xero: {error ?? data?.xero.error}</span>
+                </span>
+              )}
+            </span>
+          </button>
+          {choice === "match" && !noValue && <div className="mx-3 mb-3 rounded-lg border border-border bg-surface">{adjustment}</div>}
+        </div>
+        <div className={`rounded-xl border transition-colors ${choice === "keep" ? "border-accent/50 bg-accent-soft/30" : "border-border"}`}>
+          <button type="button" role="radio" aria-checked={choice === "keep"} disabled={disabled} onClick={() => onChoice("keep")} className="flex w-full items-start gap-2.5 px-3.5 py-3 text-left disabled:cursor-default">
+            <Radio on={choice === "keep"} />
+            <span className="min-w-0 flex-1">
+              <span className="block text-[13px] font-medium text-ink">Keep Xero&apos;s number</span>
+              <span className="mt-0.5 block text-[12.5px] leading-snug text-muted">
+                Xero&apos;s inventory stays as it is. Pick this if your Xero number is already right, for example from a stock count on that day.
+              </span>
+            </span>
+          </button>
+        </div>
+        <p className="px-1 text-[11.5px] text-muted">Either way, from {start || "your start date"} on, the number moves with your stock bills and consl&apos;s monthly journals.</p>
+      </div>
+    </section>
+  );
+}
+
+function Radio({ on }: { on: boolean }) {
+  return (
+    <span className={`mt-[2px] grid h-4 w-4 shrink-0 place-items-center rounded-full border transition-colors ${on ? "border-accent" : "border-border"}`}>
+      {on && <span className="h-2 w-2 rounded-full bg-accent" />}
+    </span>
   );
 }
 

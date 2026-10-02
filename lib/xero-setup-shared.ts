@@ -101,7 +101,11 @@ export function targetValue(t: XeroTarget | null | undefined): string {
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 
 /** A real calendar day written "YYYY-MM-DD". */
-export const isIsoDay = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && isoDay(new Date(`${s}T00:00:00Z`)) === s;
+export const isIsoDay = (s: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && isoDay(d) === s;
+};
 
 /** The last day of the month `day` falls in. */
 export function monthEnd(day: string): string {
@@ -153,13 +157,44 @@ export const setupLineId = (channel: string, group: string, line: string) => `${
 /** A custom line placed in Xero: its P&L account and its balance account (setup keys). */
 export type CustomChoice = { account: string; balance: string };
 
+/** How Xero's Inventory starts on the start date: moved to consl's stock value (the difference an
+ *  inventory adjustment in that month's P&L), or left as Xero has it. */
+export type InventoryOpening = "match" | "keep";
+
 /** The whole setup: what Save keeps as a draft and Publish sends to Xero. */
 export type XeroSetupState = {
   targets: Record<string, XeroTarget>;
   customLines: Record<string, CustomChoice>;
   tagChannels: boolean;
   startDate: string;
+  inventoryOpening?: InventoryOpening;
 };
+
+/** The P&L account the starting-inventory difference posts to when Xero is matched to consl. */
+export const INVENTORY_ADJUSTMENT_KEY = "inventory_adjustment";
+export const INVENTORY_ADJUSTMENT_SUGGEST: Suggestion = { name: "Inventory Adjustments", type: "DIRECTCOSTS" };
+
+/** The two starting balances for the start date, both at the end of the day before it. */
+export type StartingInventory = {
+  asOf: string;
+  /** That day isn't over yet: both numbers are read once it is. */
+  pending: boolean;
+  /** consl's stock value that day, from its daily stock record (the dashboard's inventory value);
+   *  null when consl has none for that day. */
+  consl: { total: number; raw: number; inProduction: number; finished: number } | null;
+  /** The first day consl has a stock value for. */
+  firstDay: string | null;
+  /** Xero's balance in the inventory account that day (0 for an account consl will create). With a
+   *  new account, `others` are the company's own inventory accounts that hold stock that day: kept
+   *  beside a new one, that stock would be counted twice. */
+  xero: { balance: number | null; newAccount: boolean; error?: string; others?: (XeroAccountOption & { balance: number })[] };
+};
+
+/** The calendar day before `day` ("YYYY-MM-DD"). */
+export function dayBefore(day: string): string {
+  const [y, m, d] = day.split("-").map(Number);
+  return isoDay(new Date(Date.UTC(y, m - 1, d - 1)));
+}
 
 /** The consl P&L account a platform line is locked to: its section's (a section consl doesn't know
  *  yet: Other). Taxes post to none: they're the state's money, on the balance sheet only. */

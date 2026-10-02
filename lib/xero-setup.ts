@@ -3,7 +3,7 @@ import { Prisma } from "@/app/generated/prisma/client";
 import { prismaBase } from "@/lib/prisma-base";
 import { runWithOrg } from "@/lib/tenant";
 import { xeroAccessToken, xeroApi } from "@/lib/xero";
-import { devAccounts, devFixture, type FixtureAccount } from "@/lib/xero-dev-fixture";
+import { devAccounts, devBalances, devFixture, type FixtureAccount } from "@/lib/xero-dev-fixture";
 import { localDay } from "@/lib/tz";
 import { loadPnlHistory } from "@/lib/pnl-cache";
 import { PNL_SOURCE_ORDER, pnlLineOf, sourcesFromBits } from "@/lib/pnl-shared";
@@ -11,16 +11,21 @@ import {
   CHANNEL_NAME,
   CHANNEL_ORDER,
   CLASS_OF_TYPE,
+  INVENTORY_ADJUSTMENT_KEY,
+  INVENTORY_ADJUSTMENT_SUGGEST,
   LINES,
   LINE_ORDER,
   customClass,
+  dayBefore,
   isIsoDay,
   lockedAccountOf,
   newAccountName,
   setupLineId,
   type BalanceRow,
   type CustomChoice,
+  type InventoryOpening,
   type SetupLine,
+  type StartingInventory,
   type Suggestion,
   type XeroAccountOption,
   type XeroChannel,
@@ -271,7 +276,19 @@ function readState(raw: unknown): XeroSetupState | null {
     const c = v as Partial<CustomChoice> | null;
     if (c && typeof c.account === "string") customLines[k] = { account: c.account, balance: typeof c.balance === "string" ? c.balance : "" };
   }
-  return { targets, customLines, tagChannels: r.tagChannels !== false, startDate: typeof r.startDate === "string" ? r.startDate : "" };
+  return {
+    targets,
+    customLines,
+    tagChannels: r.tagChannels !== false,
+    startDate: typeof r.startDate === "string" ? r.startDate : "",
+    inventoryOpening: openingChoice(r.inventoryOpening),
+  };
+}
+
+/** A stored starting-inventory choice: "keep" only when it says so; matching consl is the default. */
+function openingChoice(v: unknown): InventoryOpening {
+  const c = v && typeof v === "object" ? (v as { choice?: unknown }).choice : v;
+  return c === "keep" ? "keep" : "match";
 }
 
 export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
@@ -301,6 +318,7 @@ export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
     const defaults: Record<string, XeroTarget> = {};
     for (const k of LINE_ORDER) defaults[k] = suggest(LINES[k].suggest, ours);
     for (const b of rows.balances) defaults[b.key] = suggest(b.suggest, ours);
+    defaults[INVENTORY_ADJUSTMENT_KEY] = suggest(INVENTORY_ADJUSTMENT_SUGGEST, ours);
 
     const stale = new Set<string>();
     // An account gone from Xero falls back to consl's proposal (an added one: to a new account of its name).
@@ -328,12 +346,19 @@ export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
         customLines: onlyLive((readState({ customLines: saved.customLines })?.customLines ?? {}) as Record<string, CustomChoice>),
         tagChannels: saved.tagChannels,
         startDate: saved.startDate ?? (saved.startMonth ? `${saved.startMonth}-01` : firstOfMonth),
+        inventoryOpening: openingChoice(saved.inventoryOpening),
       };
     }
     const draft = saved?.draft ? readState(saved.draft) : null;
-    const fresh: XeroSetupState = { targets: { ...defaults }, customLines: {}, tagChannels: true, startDate: firstOfMonth };
+    const fresh: XeroSetupState = { targets: { ...defaults }, customLines: {}, tagChannels: true, startDate: firstOfMonth, inventoryOpening: "match" };
     const current: XeroSetupState = draft
-      ? { targets: settle(draft.targets), customLines: onlyLive(draft.customLines), tagChannels: draft.tagChannels, startDate: draft.startDate || published?.startDate || firstOfMonth }
+      ? {
+          targets: settle(draft.targets),
+          customLines: onlyLive(draft.customLines),
+          tagChannels: draft.tagChannels,
+          startDate: draft.startDate || published?.startDate || firstOfMonth,
+          inventoryOpening: draft.inventoryOpening,
+        }
       : (published ?? fresh);
 
     return {
@@ -363,6 +388,77 @@ export async function listUsableXeroAccounts(orgId: string): Promise<{ accounts:
   if (!("conn" in got)) throw new Error(got.state === "not_connected" ? "Connect Xero first." : got.message);
   const [raw, saved] = await Promise.all([allAccounts(got.conn), prismaBase.xeroSetup.findUnique({ where: { orgId }, select: { createdAccountIds: true } })]);
   return { accounts: raw.filter(usable).map(option).sort(byCode), conslMade: idList(saved?.createdAccountIds) };
+}
+
+type ReportCell = { Value?: string; Attributes?: { Id?: string; Value?: string }[] };
+type ReportRow = { RowType?: string; Cells?: ReportCell[]; Rows?: ReportRow[] };
+
+/** Every account's balance at the end of a day, from Xero's balance sheet (standard layout,
+ *  accrual), by AccountID. The first value column is the day asked for; an account with nothing in
+ *  it isn't listed (its balance is 0). */
+async function xeroBalancesAt(c: Conn, day: string): Promise<Map<string, number>> {
+  if (DEV_FIXTURE) return new Map(Object.entries(devBalances));
+  const res = await xeroApi<{ Reports?: { Rows?: ReportRow[] }[] }>(c.token, c.tenantId, `/Reports/BalanceSheet?date=${day}&standardLayout=true`);
+  const out = new Map<string, number>();
+  const walk = (rows: ReportRow[] | undefined) => {
+    for (const r of rows ?? []) {
+      const id = r.RowType === "Row" ? r.Cells?.[0]?.Attributes?.find((a) => a.Id === "account")?.Value : undefined;
+      if (id) {
+        const v = Number(String(r.Cells?.[1]?.Value ?? "0").replace(/,/g, ""));
+        if (Number.isFinite(v)) out.set(id, v);
+      }
+      walk(r.Rows);
+    }
+  };
+  walk(res.Reports?.[0]?.Rows);
+  return out;
+}
+
+/** The company's own inventory accounts in Xero: Xero's Inventory type, or an asset named for stock. */
+const isInventoryAccount = (a: XeroApiAccount) =>
+  usable(a) && (a.Type === "INVENTORY" || (["CURRENT", "NONCURRENT"].includes(a.Type) && /inventor|stock/i.test(a.Name)));
+
+const cents = (n: number) => Math.round(n * 100) / 100;
+
+/** "Sep 30, 2026" for a day. */
+const dayLabel = (day: string) => new Date(`${day}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+
+/**
+ * The two starting balances for a start date, both at the end of the day before it: consl's stock
+ * value (its daily record, the dashboard's inventory value: raw materials, in production, finished
+ * stock everywhere) and Xero's balance in the inventory account (nothing yet in one consl will
+ * create). A day that isn't over yet has neither: both are read once it is.
+ */
+async function openingNumbers(c: Conn, orgId: string, startDate: string, accountId: string | null): Promise<StartingInventory> {
+  const asOf = dayBefore(startDate);
+  const tz = await companyZone(orgId);
+  const pending = asOf >= localDay(tz);
+  const [row, first] = await Promise.all([
+    pending ? null : prismaBase.inventoryValueSnapshot.findFirst({ where: { orgId, day: asOf } }),
+    prismaBase.inventoryValueSnapshot.findFirst({ where: { orgId }, orderBy: { day: "asc" }, select: { day: true } }),
+  ]);
+  const consl = row ? { total: cents(row.total), raw: cents(row.raw), inProduction: cents(row.inProduction), finished: cents(row.total - row.raw - row.inProduction) } : null;
+  let xero: StartingInventory["xero"] = { balance: accountId ? null : 0, newAccount: !accountId };
+  if (!pending) {
+    try {
+      const [balances, chart] = await Promise.all([xeroBalancesAt(c, asOf), accountId ? Promise.resolve([] as XeroApiAccount[]) : allAccounts(c)]);
+      const others = chart
+        .filter((a) => isInventoryAccount(a) && Math.abs(balances.get(a.AccountID) ?? 0) >= 0.005)
+        .map((a) => ({ ...option(a), balance: cents(balances.get(a.AccountID)!) }));
+      xero = accountId ? { balance: cents(balances.get(accountId) ?? 0), newAccount: false } : { balance: 0, newAccount: true, ...(others.length ? { others } : {}) };
+    } catch (e) {
+      xero = { balance: null, newAccount: !accountId, error: (e as Error).message };
+    }
+  }
+  return { asOf, pending, consl, firstDay: first?.day ?? null, xero };
+}
+
+/** The starting balances for the setup screen (see openingNumbers). */
+export async function startingInventory(orgId: string, startDate: string, accountId: string | null): Promise<StartingInventory> {
+  if (!isIsoDay(startDate)) throw new Error("Pick a start date.");
+  const got = await connection(orgId);
+  if (!("conn" in got)) throw new Error(got.state === "not_connected" ? "Connect Xero first." : got.message);
+  return openingNumbers(got.conn, orgId, startDate, accountId);
 }
 
 /** Keep the setup as a draft: consl only, nothing reaches Xero. */
@@ -489,6 +585,29 @@ export async function publishXeroSetup(orgId: string, raw0: XeroSetupState): Pro
     const t = input.targets[choice.account];
     if (t && CLASS_OF_TYPE[t.type] !== customClass(byLine.get(id)!)) throw new Error(`${byLine.get(id)!.line} needs ${customClass(byLine.get(id)!) === "income" ? "an income" : "a cost"} account.`);
   }
+  // Starting inventory: matching consl's value needs consl's value for the day before the start
+  // date, and an account for the difference. What's stored here is a preview: the first journal
+  // reads both numbers again when it's sent, in case either changed.
+  let opening: Prisma.InputJsonValue = { choice: "keep" };
+  if (input.inventoryOpening !== "keep") {
+    const inv = input.targets.inventory;
+    const s = await openingNumbers(c, orgId, input.startDate, inv?.kind === "account" ? inv.accountId : null);
+    if (!s.pending && !s.consl) {
+      throw new Error(
+        `consl has no stock value for ${dayLabel(s.asOf)}${s.firstDay && s.firstDay > s.asOf ? ` (its stock history starts ${dayLabel(s.firstDay)})` : ""}. Pick a later start date, or keep Xero's inventory number.`,
+      );
+    }
+    // A new inventory account starts empty; only an existing one needs its balance read.
+    if (s.xero.error && !s.xero.newAccount) throw new Error(`Couldn't read your inventory balance in Xero: ${s.xero.error}`);
+    plKeys.add(INVENTORY_ADJUSTMENT_KEY);
+    opening = {
+      choice: "match",
+      asOf: s.asOf,
+      account: INVENTORY_ADJUSTMENT_KEY,
+      ...(s.consl && s.xero.balance !== null ? { conslValue: s.consl.total, xeroBalance: s.xero.balance, difference: cents(s.consl.total - s.xero.balance) } : {}),
+      checkedAt: new Date().toISOString(),
+    };
+  }
   const keys = [...plKeys, ...balanceKeys];
   if (keys.some((k) => !input.targets[k])) throw new Error("Pick an account for every line before publishing.");
   // Each account keeps its kind: an income account for income, a cost account for costs, and a
@@ -580,6 +699,7 @@ export async function publishXeroSetup(orgId: string, raw0: XeroSetupState): Pro
       trackingCategoryId: tracking?.categoryId ?? null,
       trackingOptions: tracking?.options ?? {},
       startDate: input.startDate,
+      inventoryOpening: opening,
       createdAccountIds: [...conslMade],
       savedAt: new Date(),
       draft: Prisma.DbNull,
