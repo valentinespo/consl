@@ -224,6 +224,9 @@ model XeroSetup {
   // The lines the company added itself in consl (custom fees and credits) that ARE sent:
   // "<CHANNEL>|<group>|<line>" → { account, balance } (keys above). Every other one stays out of Xero.
   customLines        Json          @default("{}")
+  // One receivable account for every sales channel (the channels' receivable keys all hold it)
+  // instead of one per channel.
+  sharedReceivable   Boolean   @default(false)
   // How Xero's Inventory starts, as published: { choice: "match" | "keep" } — matching also keeps
   // the day read (asOf, the day before the start date), consl's stock value, Xero's Inventory
   // balance and the difference the first journal adjusts (into the inventory-adjustment account).

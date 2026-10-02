@@ -18,6 +18,9 @@ import {
   INVENTORY_ADJUSTMENT_SUGGEST,
   LINES,
   LINE_ORDER,
+  SHARED_RECEIVABLE_KEY,
+  SHARED_RECEIVABLE_SUGGEST,
+  isReceivableKey,
   NEW_BALANCE_TYPES,
   NEW_PL_TYPES,
   PAYPAL_STANDARD_FEE,
@@ -71,6 +74,7 @@ const snapshot = (s: XeroSetupState) =>
     tag: s.tagChannels,
     start: s.startDate,
     inv: s.inventoryOpening ?? "match",
+    shared: !!s.sharedReceivable,
   });
 
 const plClass = (key: string, targets: Record<string, XeroTarget>): AccountClass =>
@@ -200,8 +204,31 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
     ...LINE_ORDER.filter((k) => lines.some((l) => !l.custom && lockedAccountOf(l) === k) || Object.values(placed).some((c) => c.account === k)),
     ...Object.keys(state.targets).filter(isAddedAccount),
   ];
+  // Receivables: one per channel, or (shared) one card for every channel's, where the first one was.
+  const shared = !!state.sharedReceivable;
+  const receivableRows = data.balances.filter((b) => isReceivableKey(b.key));
+  const receivableChannels = receivableRows.map((b) => b.channel).filter((c): c is XeroChannel => !!c);
+  const canShare = receivableRows.length >= 2 || shared;
+  /** A balance key as the screen shows it: a channel's receivable is the shared one when shared. */
+  const viewKey = (k: string) => (shared && isReceivableKey(k) ? SHARED_RECEIVABLE_KEY : k);
+  const ownBalanceRows = data.balances.flatMap((b) => {
+    if (shared && isReceivableKey(b.key)) {
+      if (b.key !== receivableRows[0]?.key) return [];
+      return [
+        {
+          key: SHARED_RECEIVABLE_KEY,
+          label: "Sales receivable",
+          hint: "What your sales channels owe you, in one account.",
+          cls: "asset" as AccountClass,
+          suggest: SHARED_RECEIVABLE_SUGGEST,
+          channel: undefined as XeroChannel | undefined,
+        },
+      ];
+    }
+    return [{ key: b.key, label: b.label, hint: b.hint, cls: CLASS_OF_TYPE[b.suggest.type] as AccountClass, suggest: b.suggest, channel: b.channel }];
+  });
   const balanceRows = [
-    ...data.balances.map((b) => ({ key: b.key, label: b.label, hint: b.hint, cls: CLASS_OF_TYPE[b.suggest.type] as AccountClass, suggest: b.suggest, channel: b.channel })),
+    ...ownBalanceRows,
     ...Object.keys(state.targets)
       .filter(isAddedBalance)
       .map((key) => ({
@@ -213,6 +240,54 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
         channel: undefined,
       })),
   ];
+
+  // What the owner reconciles to each balance account in Xero, from the bank or card statement.
+  const codeHereOf = (key: string, cls: AccountClass): string[] =>
+    key === "receivable:AMAZON"
+      ? ["Amazon payouts", "Card charges from Amazon, when your Amazon balance runs negative"]
+      : key === "receivable:SHOPIFY"
+        ? ["Shopify payouts", ...(data.regularPaypal ? ["PayPal transfers, for orders paid with regular PayPal (money that lands in your PayPal balance)"] : [])]
+        : key === "receivable:TIKTOK"
+          ? ["TikTok Shop payouts"]
+          : key === "sales_tax"
+            ? ["Your sales tax payments to the state"]
+            : key === "payable:META_ADS"
+              ? ["Card charges from Meta"]
+              : key === "payable:AMAZON_ADS"
+                ? ["Card charges from Amazon Ads"]
+                : key === "inventory"
+                  ? ["Bills for stock and everything consl counts in your product cost (materials, packaging, production, freight in). Book them here, not as an expense, or Xero counts them twice."]
+                  : cls === "liability"
+                    ? ["Your payments of what you send here"]
+                    : ["Money you receive for what you send here"];
+
+  // Cards that post to one Xero account (the same account picked twice, or two new accounts with
+  // the same name) say so on each card, so sharing an account is never a surprise.
+  const cardLabel = (key: string) =>
+    key === SHARED_RECEIVABLE_KEY
+      ? "Sales receivable"
+      : key === INVENTORY_ADJUSTMENT_KEY
+        ? "Inventory adjustment"
+        : (LINE_ORDER as string[]).includes(key)
+          ? `your ${LINES[key as LineKey].label.toLowerCase()}`
+          : isAddedAccount(key)
+            ? "an account you added"
+            : isAddedBalance(key)
+              ? "a balance account you added"
+              : (data.balances.find((b) => b.key === key)?.label ?? key);
+  const identity = (t: XeroTarget | undefined) => (!t ? null : t.kind === "account" ? `acc:${t.accountId}` : `new:${t.type}:${norm(t.name)}`);
+  const byIdentity = new Map<string, string[]>();
+  for (const k of [...plKeys, ...(choice === "match" ? [INVENTORY_ADJUSTMENT_KEY] : []), ...balanceRows.map((b) => b.key)]) {
+    const id = identity(targets[k]);
+    if (id) byIdentity.set(id, [...(byIdentity.get(id) ?? []), k]);
+  }
+  const sameAsNote = (key: string): string | null => {
+    const id = identity(targets[key]);
+    const others = id ? (byIdentity.get(id) ?? []).filter((k) => k !== key) : [];
+    if (!others.length) return null;
+    const receivables = !shared && isReceivableKey(key) && others.some(isReceivableKey);
+    return `Same Xero account as ${listOf(others.map(cardLabel))}.${receivables ? " To share one receivable on purpose, choose “One for all channels” above." : ""}`;
+  };
 
   const accountOptions = (cls: AccountClass[]): SelectMenuOption[] =>
     accounts
@@ -308,7 +383,8 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
     ];
   };
   const balanceOptionsFor = (l: SetupLine): SelectMenuOption[] => {
-    const rec = balanceRows.some((b) => b.key === `receivable:${l.channel}`) ? `receivable:${l.channel}` : null;
+    const own = viewKey(`receivable:${l.channel}`);
+    const rec = balanceRows.some((b) => b.key === own) ? own : null;
     const rows = rec ? [...balanceRows.filter((b) => b.key === rec), ...balanceRows.filter((b) => b.key !== rec)] : balanceRows;
     return [
       ...rows.map((b) => ({
@@ -331,34 +407,36 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
       const pl = l.custom ? choice!.account : lockedAccountOf(l);
       const name = l.group === "taxes" ? "Tax owed" : pl ? plainName(targets[pl]?.name ?? "") : "";
       for (const b of balancesOf(l, choice)) {
-        const m = out.get(b.key) ?? new Map();
+        const key = shared && isReceivableKey(b.key) ? SHARED_RECEIVABLE_KEY : b.key;
+        const m = out.get(key) ?? new Map();
         // One term per account: a note ("ad invoices paid by card") stays only while every line in
         // the term carries it.
         const cur = m.get(name) ?? { name, amount: 0, note: b.note, tax: l.group === "taxes" };
         if (cur.note !== b.note) cur.note = undefined;
         cur.amount += l.amount;
         m.set(name, cur);
-        out.set(b.key, m);
+        out.set(key, m);
       }
     }
     return out;
-  }, [lines, placed, targets]);
+  }, [lines, placed, targets, shared]);
 
   // What publishing will create, what's still missing, and names Xero already has.
   const usedKeys = useMemo(() => {
-    const keys = new Set<string>(data.balances.map((b) => b.key));
+    const view = (k: string) => (shared && isReceivableKey(k) ? SHARED_RECEIVABLE_KEY : k);
+    const keys = new Set<string>(data.balances.map((b) => view(b.key)));
     for (const l of lines) {
       if (!l.custom) {
         const k = lockedAccountOf(l);
         if (k) keys.add(k);
       } else if (placed[l.id]) {
         keys.add(placed[l.id].account);
-        if (placed[l.id].balance) keys.add(placed[l.id].balance);
+        if (placed[l.id].balance) keys.add(view(placed[l.id].balance));
       }
     }
     if (choice === "match") keys.add(INVENTORY_ADJUSTMENT_KEY);
     return keys;
-  }, [lines, placed, data.balances, choice]);
+  }, [lines, placed, data.balances, choice, shared]);
   const { newAccounts, clashes } = useMemo(() => {
     const seen = new Map<string, { name: string; type: string }>();
     let taken = 0;
@@ -540,6 +618,7 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
       >
         <AccountHeader
           caption={own ? `Your ${LINES[key as LineKey].label.toLowerCase()}` : "An account you added"}
+          sameAs={sameAsNote(key)}
           target={t}
           options={optionsFor(own ? { name: newAccountName(LINES[key as LineKey].suggest.name), type: LINES[key as LineKey].suggest.type } : { name: t?.name ?? "", type: t?.type ?? "DIRECTCOSTS" }, t, [cls])}
           clash={clashOf(t)}
@@ -560,8 +639,13 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
                   <div className="w-[230px] shrink-0">
                     <SelectMenu
                       size="sm"
-                      value={placed[l.id]?.balance ?? ""}
-                      onChange={(v) => (v === NEW_OPTION ? setAdding({ kind: "balance", line: l.id }) : setLineBalance(l.id, v))}
+                      value={viewKey(placed[l.id]?.balance ?? "")}
+                      onChange={(v) =>
+                        v === NEW_OPTION
+                          ? setAdding({ kind: "balance", line: l.id })
+                          : // The shared receivable is kept as the line's own channel's, so switching back keeps it.
+                            setLineBalance(l.id, v === SHARED_RECEIVABLE_KEY ? `receivable:${l.channel}` : v)
+                      }
                       options={balanceOptionsFor(l)}
                       placeholder="Pick a balance account"
                       ariaLabel={`Balance account for ${l.line}`}
@@ -636,6 +720,7 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
           <AccountHeader
             caption="Inventory adjustment account"
             hint="Where the difference shows in your P&L"
+            sameAs={sameAsNote(INVENTORY_ADJUSTMENT_KEY)}
             target={targets[INVENTORY_ADJUSTMENT_KEY] ?? null}
             options={optionsFor({ name: newAccountName(INVENTORY_ADJUSTMENT_SUGGEST.name), type: INVENTORY_ADJUSTMENT_SUGGEST.type }, targets[INVENTORY_ADJUSTMENT_KEY] ?? null, ["cost", "income"])}
             clash={clashOf(targets[INVENTORY_ADJUSTMENT_KEY])}
@@ -731,37 +816,63 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
             </button>
           )}
         </div>
+        {canShare && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[var(--radius-card)] border border-border bg-surface px-4 py-3">
+            <span className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-ink">
+              Channel receivables
+              <HoverHint
+                title="Channel receivables"
+                body="One per channel: each sales channel gets its own receivable, and each payout is reconciled to its channel's account, so Xero shows what each channel still owes you. One for all channels: every channel shares one receivable account (for example the one your books already use), and every payout is reconciled to it."
+              />
+            </span>
+            <div role="tablist" aria-label="Channel receivables" className="flex h-8 items-center gap-0.5 rounded-lg border border-border bg-surface p-0.5">
+              {[false, true].map((v) => (
+                <button
+                  key={String(v)}
+                  type="button"
+                  role="tab"
+                  aria-selected={shared === v}
+                  disabled={!editable}
+                  onClick={() => change((s) => ({ ...s, sharedReceivable: v }))}
+                  className={`flex h-full items-center rounded-md px-2.5 text-[12px] transition-colors disabled:cursor-default ${shared === v ? "bg-surface-2 font-medium text-ink" : "text-muted hover:text-ink-soft"}`}
+                >
+                  {v ? "One for all channels" : "One per channel"}
+                </button>
+              ))}
+            </div>
+            <span className="basis-full text-[12px] leading-snug text-muted">
+              {shared
+                ? `${listOf(receivableChannels.map((c) => CHANNEL_NAME[c]))} share one receivable account. Reconcile every payout to it.${state.tagChannels ? " Channel tags still split it by channel in Xero's reports." : ""}`
+                : `${listOf(receivableChannels.map((c) => CHANNEL_NAME[c]))} each get their own receivable account. Reconcile each payout to its channel's account.`}
+            </span>
+          </div>
+        )}
         {balanceRows.map((b) => {
           const t = targets[b.key] ?? null;
+          const isShared = b.key === SHARED_RECEIVABLE_KEY;
           const terms = [...(formulas.get(b.key)?.values() ?? [])].map((x) => ({
             name: x.name,
             note: x.note,
             sign: (x.tax ? "+" : b.cls === "liability" ? (x.amount <= 0 ? "+" : "−") : x.amount >= 0 ? "+" : "−") as "+" | "−",
           }));
-          // What the owner codes to this account in Xero, from the bank or card statement.
-          const codeHere =
-            b.key === "receivable:AMAZON"
-              ? ["Amazon payouts", "Card charges from Amazon, when your Amazon balance runs negative"]
-              : b.key === "receivable:SHOPIFY"
-                ? ["Shopify payouts", ...(data.regularPaypal ? ["PayPal transfers, for orders paid with regular PayPal (money that lands in your PayPal balance)"] : [])]
-                : b.key === "receivable:TIKTOK"
-                  ? ["TikTok Shop payouts"]
-                  : b.key === "sales_tax"
-                    ? ["Your sales tax payments to the state"]
-                    : b.key === "payable:META_ADS"
-                      ? ["Card charges from Meta"]
-                      : b.key === "payable:AMAZON_ADS"
-                        ? ["Card charges from Amazon Ads"]
-                        : b.key === "inventory"
-                          ? ["Bills for stock and everything consl counts in your product cost (materials, packaging, production, freight in). Book them here, not as an expense, or Xero counts them twice."]
-                          : b.cls === "liability"
-                            ? ["Your payments of what you send here"]
-                            : ["Money you receive for what you send here"];
+          const hasShopify = b.key === "receivable:SHOPIFY" || (isShared && receivableChannels.includes("SHOPIFY"));
           return (
             <div key={b.key} className="overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface">
               <AccountHeader
                 caption={b.label}
                 hint={b.hint}
+                tags={
+                  isShared ? (
+                    <span className="inline-flex flex-wrap items-center gap-1">
+                      {receivableChannels.map((c) => (
+                        <span key={c} className={`${PILL} ${CHANNEL_PILL[c]}`}>
+                          {CHANNEL_NAME[c]}
+                        </span>
+                      ))}
+                    </span>
+                  ) : undefined
+                }
+                sameAs={sameAsNote(b.key)}
                 target={t}
                 options={optionsFor({ name: newAccountName(b.suggest.name), type: b.suggest.type }, t, [b.cls])}
                 clash={clashOf(t)}
@@ -774,19 +885,27 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
               />
               <BalanceBreakdown
                 terms={terms}
-                codeHere={codeHere}
-                notes={
-                  b.key === "inventory" && choice === "match"
+                codeHere={isShared ? receivableRows.flatMap((r) => codeHereOf(r.key, "asset")) : codeHereOf(b.key, b.cls)}
+                notes={[
+                  ...(b.key === "inventory" && choice === "match"
                     ? [`On ${dayText(state.startDate, locale)}, consl also adds one starting adjustment so this account matches consl's stock value (see Starting inventory).`]
-                    : b.key === "receivable:SHOPIFY"
+                    : []),
+                  ...(hasShopify && data.regularPaypal
+                    ? [`Regular PayPal fees never reach Shopify's records, so consl adds PayPal's standard fee to those orders (${PAYPAL_STANDARD_FEE.percent}% + $${PAYPAL_STANDARD_FEE.fixed.toFixed(2)}). If your rate is different, change it in Orders › Automatic rules.`]
+                    : []),
+                  ...(hasShopify
                     ? [
-                        ...(data.regularPaypal
-                          ? [`Regular PayPal fees never reach Shopify's records, so consl adds PayPal's standard fee to those orders (${PAYPAL_STANDARD_FEE.percent}% + $${PAYPAL_STANDARD_FEE.fixed.toFixed(2)}). If your rate is different, change it in Orders › Automatic rules.`]
-                          : []),
                         "Orders from other channels that come in through your Shopify store (Etsy, Faire, wholesale apps…): consl can't see their fees. Either add their fees with a rule and reconcile their payouts to this account, or void those orders and record them straight in Xero.",
                       ]
-                    : []
-                }
+                    : []),
+                  ...(isShared
+                    ? [
+                        state.tagChannels
+                          ? "Every line consl sends here keeps its sales channel tag, so Xero's reports can still split this account by channel."
+                          : "Turn on “Tag lines by sales channel” above to split this account by channel in Xero's reports.",
+                      ]
+                    : []),
+                ]}
               />
             </div>
           );
@@ -946,6 +1065,8 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
 function AccountHeader({
   caption,
   hint,
+  tags,
+  sameAs,
   target,
   options,
   clash,
@@ -958,6 +1079,10 @@ function AccountHeader({
 }: {
   caption: string;
   hint?: string;
+  /** Shown after the caption (the channels a shared receivable covers). */
+  tags?: ReactNode;
+  /** The other cards that post to this same Xero account, in words. */
+  sameAs?: string | null;
   target: XeroTarget | null;
   options: SelectMenuOption[];
   clash: XeroAccountOption | null;
@@ -1036,10 +1161,19 @@ function AccountHeader({
           )}
         </span>
       </div>
-      <div className="mt-1 text-[12px] text-muted">
-        {caption}
-        {hint ? ` · ${hint}` : ""}
+      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-muted">
+        <span>
+          {caption}
+          {hint ? ` · ${hint}` : ""}
+        </span>
+        {tags}
       </div>
+      {sameAs && (
+        <div className="mt-1 flex items-start gap-1 text-[11.5px] leading-snug text-ink-soft">
+          <Info size={11} className="mt-[2px] shrink-0 text-accent" />
+          <span>{sameAs}</span>
+        </div>
+      )}
       {stale && (
         <div className="mt-1 inline-flex items-center gap-1 text-[11.5px] text-warn">
           <AlertTriangle size={11} /> The account saved here is gone from Xero. Pick another.
@@ -1208,7 +1342,7 @@ function HowItWorks() {
   const steps = [
     { title: "Every line has an account", text: "Each line of your consl P&L sits under the Xero account it posts to. Lines you added in consl are yours to place." },
     { title: "Monthly journals", text: "When a month is complete, consl sends one journal per channel, dated when things happened." },
-    { title: "Reconcile your payouts", text: "Reconcile each payout to its channel's receivable account. What's left is what the channel still owes you." },
+    { title: "Reconcile your payouts", text: "Reconcile each payout to its receivable account in Xero. What's left is what your channels still owe you." },
   ];
   return (
     <div className="grid overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface sm:grid-cols-3">
@@ -1223,6 +1357,11 @@ function HowItWorks() {
       ))}
     </div>
   );
+}
+
+/** "A", "A and B", "A, B and C". */
+function listOf(xs: string[]): string {
+  return xs.length <= 1 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
 }
 
 /** "Sep 30, 2026" for a day. */

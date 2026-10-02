@@ -168,7 +168,16 @@ export type XeroSetupState = {
   tagChannels: boolean;
   startDate: string;
   inventoryOpening?: InventoryOpening;
+  /** One receivable for every sales channel (its account under SHARED_RECEIVABLE_KEY) instead of
+   *  one per channel. Each mode keeps its own accounts, so switching loses nothing. */
+  sharedReceivable?: boolean;
 };
+
+/** The one receivable every channel shares when `sharedReceivable` is on. Every `receivable:<CHANNEL>`
+ *  key (a channel's own, or a custom line's balance) then means this account. */
+export const SHARED_RECEIVABLE_KEY = "receivable:shared";
+export const SHARED_RECEIVABLE_SUGGEST: Suggestion = { name: "Sales Receivable", type: "CURRENT" };
+export const isReceivableKey = (k: string) => k.startsWith("receivable:");
 
 /** The P&L account the starting-inventory difference posts to when Xero is matched to consl. */
 export const INVENTORY_ADJUSTMENT_KEY = "inventory_adjustment";

@@ -14,6 +14,9 @@ import {
   INVENTORY_ADJUSTMENT_KEY,
   INVENTORY_ADJUSTMENT_SUGGEST,
   LINES,
+  SHARED_RECEIVABLE_KEY,
+  SHARED_RECEIVABLE_SUGGEST,
+  isReceivableKey,
   LINE_ORDER,
   customClass,
   dayBefore,
@@ -285,6 +288,7 @@ function readState(raw: unknown): XeroSetupState | null {
     tagChannels: r.tagChannels !== false,
     startDate: typeof r.startDate === "string" ? r.startDate : "",
     inventoryOpening: openingChoice(r.inventoryOpening),
+    sharedReceivable: r.sharedReceivable === true,
   };
 }
 
@@ -322,6 +326,7 @@ export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
     for (const k of LINE_ORDER) defaults[k] = suggest(LINES[k].suggest, ours);
     for (const b of rows.balances) defaults[b.key] = suggest(b.suggest, ours);
     defaults[INVENTORY_ADJUSTMENT_KEY] = suggest(INVENTORY_ADJUSTMENT_SUGGEST, ours);
+    defaults[SHARED_RECEIVABLE_KEY] = suggest(SHARED_RECEIVABLE_SUGGEST, ours);
 
     const stale = new Set<string>();
     // An account gone from Xero falls back to consl's proposal (an added one: to a new account of its name).
@@ -344,16 +349,24 @@ export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
     if (saved?.savedAt) {
       const stored: Record<string, XeroTarget> = {};
       for (const [k, v] of Object.entries({ ...(saved.lines as Record<string, Stored>), ...(saved.balances as Record<string, Stored>) })) stored[k] = { kind: "account", ...v };
+      // A shared receivable is stored under every channel's key: it shows as the one shared account,
+      // and the per-channel cards go back to consl's proposals (for switching back).
+      if (saved.sharedReceivable) {
+        const first = Object.keys(stored).find(isReceivableKey);
+        if (first) stored[SHARED_RECEIVABLE_KEY] = stored[first];
+        for (const k of Object.keys(stored)) if (isReceivableKey(k) && k !== SHARED_RECEIVABLE_KEY) delete stored[k];
+      }
       published = {
         targets: settle(stored),
         customLines: onlyLive((readState({ customLines: saved.customLines })?.customLines ?? {}) as Record<string, CustomChoice>),
         tagChannels: saved.tagChannels,
         startDate: saved.startDate ?? (saved.startMonth ? `${saved.startMonth}-01` : firstOfMonth),
         inventoryOpening: openingChoice(saved.inventoryOpening),
+        sharedReceivable: saved.sharedReceivable,
       };
     }
     const draft = saved?.draft ? readState(saved.draft) : null;
-    const fresh: XeroSetupState = { targets: { ...defaults }, customLines: {}, tagChannels: true, startDate: firstOfMonth, inventoryOpening: "match" };
+    const fresh: XeroSetupState = { targets: { ...defaults }, customLines: {}, tagChannels: true, startDate: firstOfMonth, inventoryOpening: "match", sharedReceivable: false };
     const current: XeroSetupState = draft
       ? {
           targets: settle(draft.targets),
@@ -361,6 +374,7 @@ export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
           tagChannels: draft.tagChannels,
           startDate: draft.startDate || published?.startDate || firstOfMonth,
           inventoryOpening: draft.inventoryOpening,
+          sharedReceivable: draft.sharedReceivable,
         }
       : (published ?? fresh);
 
@@ -575,7 +589,16 @@ export async function publishXeroSetup(orgId: string, raw0: XeroSetupState): Pro
 
   const [raw, rows, saved] = await Promise.all([allAccounts(c), companyRows(orgId), prismaBase.xeroSetup.findUnique({ where: { orgId }, select: { createdAccountIds: true } })]);
   const byLine = new Map(rows.lines.map((l) => [l.id, l]));
-  const custom = Object.fromEntries(Object.entries(input.customLines).filter(([id]) => byLine.has(id)));
+  // With one receivable for every channel, each channel's receivable key (and a custom line's) is
+  // the shared account.
+  const shared = input.sharedReceivable === true;
+  const targetOf = (k: string): XeroTarget | undefined => (shared && isReceivableKey(k) ? input.targets[SHARED_RECEIVABLE_KEY] : input.targets[k]);
+  // A custom line sent to a receivable keeps its own channel's key (the shared account when shared).
+  const custom: Record<string, CustomChoice> = Object.fromEntries(
+    Object.entries(input.customLines)
+      .filter(([id]) => byLine.has(id))
+      .map(([id, c]) => [id, shared && isReceivableKey(c.balance) ? { ...c, balance: `receivable:${byLine.get(id)!.channel}` } : c]),
+  );
   const plKeys = new Set<string>();
   const balanceKeys = new Set<string>(rows.balances.map((b) => b.key));
   for (const l of rows.lines) {
@@ -616,15 +639,15 @@ export async function publishXeroSetup(orgId: string, raw0: XeroSetupState): Pro
     };
   }
   const keys = [...plKeys, ...balanceKeys];
-  if (keys.some((k) => !input.targets[k])) throw new Error("Pick an account for every line before publishing.");
+  if (keys.some((k) => !targetOf(k))) throw new Error("Pick an account for every line before publishing.");
   // Each account keeps its kind: an income account for income, a cost account for costs, and a
   // balance account on the balance sheet.
-  const wrong = (k: string, want: string[]) => !want.includes(CLASS_OF_TYPE[input.targets[k].type] ?? "");
+  const wrong = (k: string, want: string[]) => !want.includes(CLASS_OF_TYPE[targetOf(k)!.type] ?? "");
   for (const k of plKeys) {
     const own = (LINE_ORDER as string[]).includes(k) ? [CLASS_OF_TYPE[LINES[k as keyof typeof LINES].suggest.type]] : ["income", "cost"];
-    if (wrong(k, own)) throw new Error(`${input.targets[k].name} is the wrong kind of account for its lines. Pick ${own[0] === "income" ? "an income" : "a cost"} account.`);
+    if (wrong(k, own)) throw new Error(`${targetOf(k)!.name} is the wrong kind of account for its lines. Pick ${own[0] === "income" ? "an income" : "a cost"} account.`);
   }
-  for (const k of balanceKeys) if (wrong(k, ["asset", "liability"])) throw new Error(`${input.targets[k].name} isn't a balance sheet account. Pick an asset or liability account.`);
+  for (const k of balanceKeys) if (wrong(k, ["asset", "liability"])) throw new Error(`${targetOf(k)!.name} isn't a balance sheet account. Pick an asset or liability account.`);
 
   const used = new Set(raw.map((a) => a.Code).filter((code): code is string => Boolean(code)));
   const live = new Map(raw.filter(usable).map((a) => [a.AccountID, option(a)]));
@@ -693,8 +716,8 @@ export async function publishXeroSetup(orgId: string, raw0: XeroSetupState): Pro
   const lines: Record<string, Stored> = {};
   const balances: Record<string, Stored> = {};
   try {
-    for (const k of plKeys) lines[k] = await resolve(input.targets[k]);
-    for (const k of balanceKeys) balances[k] = await resolve(input.targets[k]);
+    for (const k of plKeys) lines[k] = await resolve(targetOf(k)!);
+    for (const k of balanceKeys) balances[k] = await resolve(targetOf(k)!);
     const tracking = input.tagChannels && rows.channels.length > 0 ? await ensureTracking(c, rows.channels) : null;
 
     const data = {
@@ -707,6 +730,7 @@ export async function publishXeroSetup(orgId: string, raw0: XeroSetupState): Pro
       trackingOptions: tracking?.options ?? {},
       startDate: input.startDate,
       inventoryOpening: opening,
+      sharedReceivable: shared,
       createdAccountIds: [...conslMade],
       savedAt: new Date(),
       draft: Prisma.DbNull,
@@ -714,14 +738,21 @@ export async function publishXeroSetup(orgId: string, raw0: XeroSetupState): Pro
     };
     await prismaBase.xeroSetup.upsert({ where: { orgId }, create: { orgId, ...data }, update: data });
   } catch (e) {
-    const settled: Record<string, XeroTarget> = {};
-    for (const [k, v] of Object.entries({ ...lines, ...balances })) settled[k] = { kind: "account", ...v };
-    throw new XeroSaveError((e as Error).message, settled);
+    throw new XeroSaveError((e as Error).message, settledTargets(lines, balances, shared));
   }
-  console.log(`[xero] org ${orgId}: export setup published (${keys.length} accounts, ${Object.keys(custom).length} custom lines, ${created.length} accounts created)`);
-  const targets: Record<string, XeroTarget> = {};
-  for (const [k, v] of Object.entries({ ...lines, ...balances })) targets[k] = { kind: "account", ...v };
-  return { created, targets };
+  console.log(`[xero] org ${orgId}: export setup published (${keys.length} accounts, ${Object.keys(custom).length} custom lines, ${created.length} accounts created${shared ? ", one receivable for every channel" : ""})`);
+  return { created, targets: settledTargets(lines, balances, shared) };
+}
+
+/** The accounts a publish settled, as the screen holds them: with one receivable for every channel,
+ *  that account goes back under the shared key and the per-channel cards keep their own picks. */
+function settledTargets(lines: Record<string, Stored>, balances: Record<string, Stored>, shared: boolean): Record<string, XeroTarget> {
+  const out: Record<string, XeroTarget> = {};
+  for (const [k, v] of Object.entries({ ...lines, ...balances })) {
+    if (shared && isReceivableKey(k)) out[SHARED_RECEIVABLE_KEY] = { kind: "account", ...v };
+    else out[k] = { kind: "account", ...v };
+  }
+  return out;
 }
 
 /** For the P&L's Xero button: connected or not, and whether the setup has been saved. */
