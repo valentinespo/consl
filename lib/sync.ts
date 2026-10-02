@@ -4,7 +4,21 @@ import { ensureChannelFacilities } from "@/lib/integrations";
 import { prismaBase } from "@/lib/prisma-base";
 import { getCurrentOrgId } from "@/lib/tenant";
 import { decryptSecret } from "@/lib/secret-box";
-import { makeClient, getFbaInventory, getAwdInventory, getAllOrders } from "@/lib/spapi";
+import { makeClient, getFbaInventory, getAwdInventory, getAllOrders, type FbaRow } from "@/lib/spapi";
+
+/**
+ * Amazon names a product by its FNSKU, not its seller SKU, in some money rows (fee refunds): keep
+ * every mapped product's FNSKU on file, read from Amazon's own inventory, so the P&L recognises
+ * those rows (lib/pnl loadScope). Matched on the product's own seller SKU only — another listing of
+ * the same ASIN has an FNSKU of its own.
+ */
+async function rememberFnskus(products: { id: string; sellerSku: string | null; fnsku: string | null }[], inv: FbaRow[]): Promise<void> {
+  for (const p of products) {
+    if (!p.sellerSku) continue;
+    const fnsku = inv.find((x) => x.sellerSku === p.sellerSku)?.fnsku;
+    if (fnsku && fnsku !== p.fnsku) await prisma.product.update({ where: { id: p.id }, data: { fnsku } });
+  }
+}
 
 /** Units sold + days-with-sales over the last `n` days (kept for the stored rollups). */
 function windowStats(days: Record<string, number> | undefined, end: Date, n: number) {
@@ -122,6 +136,7 @@ export async function syncAmazonStockCore(): Promise<{ ok: true; count: number }
   });
   const inv = await getFbaInventory(client);
   const awd = await getAwdInventory(client);
+  await rememberFnskus(products, inv);
 
   const latest = await prisma.skuSnapshot.findMany({ distinct: ["productId"], orderBy: { capturedAt: "desc" } });
   const latestByProduct = new Map(latest.map((s) => [s.productId, s]));
@@ -198,6 +213,7 @@ export async function syncAmazonCore(): Promise<
     });
     return { ok: false, error: `Amazon inventory pull failed: ${msg}` };
   }
+  await rememberFnskus(products, inv);
 
   // Sales lag ~2 days; pull 90 days of per-day orders, fall back to the last snapshot on failure.
   const end = new Date(Date.now() - 2 * 86_400_000);

@@ -670,10 +670,18 @@ export function PnlClient({ history, initial }: { history: PnlHistory; initial: 
           {pnl.unmatchedSkus.length > 4 ? "…" : ""}
         </p>
       )}
-      {pnl.ignored.skus.length > 0 && (
+      {pnl.ignored.skus.length > 0 && (pnl.ignored.units > 0 || Math.abs(pnl.ignored.sales) >= 0.005 || Math.abs(pnl.ignored.other) >= 0.005) && (
         <p className="text-[12px] text-muted">
-          Left out: {pnl.ignored.units.toLocaleString()} unit{pnl.ignored.units === 1 ? "" : "s"} ({money(pnl.ignored.sales)} in sales) from{" "}
-          {pnl.ignored.skus.length} listing{pnl.ignored.skus.length === 1 ? "" : "s"} not managed in consl — {pnl.ignored.skus.slice(0, 4).join(", ")}
+          Left out:{" "}
+          {[
+            pnl.ignored.units > 0 || Math.abs(pnl.ignored.sales) >= 0.005
+              ? `${pnl.ignored.units.toLocaleString()} unit${pnl.ignored.units === 1 ? "" : "s"} (${money(pnl.ignored.sales)} in sales)`
+              : null,
+            Math.abs(pnl.ignored.other) >= 0.005 ? `${money(pnl.ignored.other)} in fees, refunds and other money` : null,
+          ]
+            .filter(Boolean)
+            .join(" and ")}{" "}
+          from {pnl.ignored.skus.length} listing{pnl.ignored.skus.length === 1 ? "" : "s"} not managed in consl — {pnl.ignored.skus.slice(0, 4).join(", ")}
           {pnl.ignored.skus.length > 4 ? "…" : ""}. Map {pnl.ignored.skus.length === 1 ? "it" : "them"} to a product to include{" "}
           {pnl.ignored.skus.length === 1 ? "it" : "them"}.
         </p>

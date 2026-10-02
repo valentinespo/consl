@@ -144,7 +144,7 @@ class DayFold {
   overflowUnits = 0;
   unplaced = { units: 0, cogs: 0 };
   unmatched = new Set<string>();
-  ignored = { skus: new Set<string>(), units: 0, sales: 0 };
+  ignored = { skus: new Set<string>(), units: 0, sales: 0, other: 0 };
   pending = new Map<PnlChannel, number>();
   gap = 0;
   seen = false;
@@ -179,6 +179,7 @@ class DayFold {
       for (const sku of day.ign[0]) this.ignored.skus.add(sku);
       this.ignored.units += day.ign[1];
       this.ignored.sales += day.ign[2];
+      this.ignored.other += day.ign[3] ?? 0;
     }
     if (day.pend) this.pending.set(day.c, (this.pending.get(day.c) ?? 0) + day.pend);
     this.gap += day.gap ?? 0;
@@ -229,7 +230,7 @@ export function foldPnl(history: PnlHistory, from: string, to: string, channels:
     overflowUnits: fold.overflowUnits,
     unplaced: fold.unplaced,
     estimated: { units: fold.estimated.units, cogs: fold.estimated.cogs, lots: [...fold.estimated.lots].map((id) => ({ id, label: lotLabel.get(id) ?? id })) },
-    ignored: { skus: [...fold.ignored.skus].sort(), units: fold.ignored.units, sales: fold.ignored.sales },
+    ignored: { skus: [...fold.ignored.skus].sort(), units: fold.ignored.units, sales: fold.ignored.sales, other: fold.ignored.other },
     ledgerGap: Math.round(fold.gap * 100) / 100,
     backfillInProgress: importProgress !== null,
     importProgress,

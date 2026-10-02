@@ -221,8 +221,8 @@ export function balancesOf(l: SetupLine, custom?: CustomChoice): { key: string; 
     if (src === "AMAZON" || src === "SHOPIFY" || src === "TIKTOK") out.push({ key: `receivable:${src}` });
     else if (src === "META") out.push({ key: "payable:META_ADS" });
     else if (src === "AMAZON_ADS") {
-      out.push({ key: "payable:AMAZON_ADS", note: "invoices paid by card" });
-      out.push({ key: "receivable:AMAZON", note: "invoices paid from your balance" });
+      out.push({ key: "payable:AMAZON_ADS", note: "ad invoices paid by card" });
+      out.push({ key: "receivable:AMAZON", note: "ad invoices paid from your Amazon balance" });
     }
   }
   if (!out.length) out.push({ key: `receivable:${l.channel}` });

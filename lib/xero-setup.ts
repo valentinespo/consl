@@ -7,6 +7,7 @@ import { devAccounts, devFixture, type FixtureAccount } from "@/lib/xero-dev-fix
 import { localDay } from "@/lib/tz";
 import { loadPnlHistory } from "@/lib/pnl-cache";
 import { PNL_SOURCE_ORDER, pnlLineOf, sourcesFromBits } from "@/lib/pnl-shared";
+import { paymentMethodLabel } from "@/lib/payment-methods";
 import {
   CHANNEL_NAME,
   CHANNEL_ORDER,
@@ -174,7 +175,7 @@ async function companyRows(orgId: string): Promise<{ channels: XeroChannel[]; li
     key: `receivable:${channel}`,
     channel,
     label: `${CHANNEL_NAME[channel]} receivable`,
-    hint: `What ${CHANNEL_NAME[channel]} owes you. Code its payout deposits here.`,
+    hint: `What ${CHANNEL_NAME[channel]} owes you.`,
     suggest: { name: `${CHANNEL_NAME[channel]} Receivable`, type: "CURRENT" },
   }));
   // Tax owed is the state's money, not income: it waits here until it's paid over.
@@ -182,20 +183,20 @@ async function companyRows(orgId: string): Promise<{ channels: XeroChannel[]; li
     balances.push({
       key: "sales_tax",
       label: "Sales tax payable",
-      hint: "Tax your customers paid that you still owe the state (the P&L's Tax owed). What a channel pays over for you never lands here.",
+      hint: "Tax your customers paid that you still owe the state (the P&L's Tax owed). Tax a channel pays over for you never lands here.",
       suggest: { name: "Sales Tax Payable", type: "CURRLIAB" },
     });
   }
   if (metaAccounts > 0 || sourced("META")) {
-    balances.push({ key: "payable:META_ADS", label: "Meta Ads payable", hint: "Meta ad spend as it happens. Code the card charges from Meta here.", suggest: { name: "Meta Ads Payable", type: "CURRLIAB" } });
+    balances.push({ key: "payable:META_ADS", label: "Meta Ads payable", hint: "Meta ad spend you haven't paid yet.", suggest: { name: "Meta Ads Payable", type: "CURRLIAB" } });
   }
   if (adsConn || sourced("AMAZON_ADS")) {
-    balances.push({ key: "payable:AMAZON_ADS", label: "Amazon Ads payable", hint: "Amazon ad invoices paid by card. Code those card charges here.", suggest: { name: "Amazon Ads Payable", type: "CURRLIAB" } });
+    balances.push({ key: "payable:AMAZON_ADS", label: "Amazon Ads payable", hint: "Amazon ad invoices you pay by card, until the card is charged.", suggest: { name: "Amazon Ads Payable", type: "CURRLIAB" } });
   }
   balances.push({
     key: "inventory",
     label: "Inventory",
-    hint: "Your stock at landed cost. Book stock purchases here in Xero; cost of goods leaves it each month.",
+    hint: "Your stock at landed cost.",
     suggest: { name: "Inventory", type: "INVENTORY" },
   });
 
@@ -246,6 +247,8 @@ export type XeroSetupScreen = {
   draftSavedAt: string | null;
   /** Accounts the setup names that are gone from Xero (archived or deleted there). */
   stale: string[];
+  /** Every way the company's Shopify orders were paid, as what to code to the Shopify receivable. */
+  shopifyPaidVia: string[];
 };
 
 export type XeroSetupLoad =
@@ -253,6 +256,23 @@ export type XeroSetupLoad =
   | { state: "not_connected" }
   | { state: "reconnect"; orgName: string | null; message: string }
   | { state: "error"; orgName: string | null; message: string };
+
+/** What lands in the Shopify receivable besides Shopify's own payouts: orders paid another way
+ *  (Faire pays its orders itself; PayPal and other gateways deposit on their own). A Shopify copy
+ *  of another channel's order is that channel's money, never Shopify's. */
+function paidVia(rows: { method: string | null; source: string | null }[]): string[] {
+  const out = new Set<string>(["Shopify payouts"]);
+  for (const r of rows) {
+    const src = (r.source ?? "").toLowerCase();
+    if (src.includes("tiktok") || src.includes("amazon")) continue;
+    if (src === "faire") out.add("Faire payouts, for your Faire orders");
+    else if (r.method && r.method !== "shopify_payments") {
+      const label = paymentMethodLabel(r.method);
+      out.add(r.method === "paypal" ? "PayPal deposits, for orders paid with PayPal" : `Payments for orders paid with ${label}`);
+    }
+  }
+  return [...out];
+}
 
 const isTarget = (v: unknown): v is XeroTarget =>
   !!v && typeof v === "object" && ((v as XeroTarget).kind === "account" || (v as XeroTarget).kind === "new") && typeof (v as { name?: unknown }).name === "string";
@@ -282,7 +302,15 @@ export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
     return { state: "reconnect", orgName: null, message: (e as Error).message };
   }
   try {
-    const [raw, rows, saved, tz] = await Promise.all([allAccounts(c), companyRows(orgId), prismaBase.xeroSetup.findUnique({ where: { orgId } }), companyZone(orgId)]);
+    const [raw, rows, saved, tz, paid] = await Promise.all([
+      allAccounts(c),
+      companyRows(orgId),
+      prismaBase.xeroSetup.findUnique({ where: { orgId } }),
+      companyZone(orgId),
+      prismaBase.$queryRaw<{ method: string | null; source: string | null }[]>`
+        SELECT DISTINCT "paymentMethod" AS method, source FROM "SalesOrder"
+        WHERE "orgId" = ${orgId} AND channel = 'SHOPIFY' AND cancelled = false AND voided = false`,
+    ]);
     const accounts = raw.filter(usable).map(option).sort(byCode);
     const live = new Map(accounts.map((a) => [a.accountId, a]));
     const conslMade = idList(saved?.createdAccountIds);
@@ -342,6 +370,7 @@ export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
       savedAt: saved?.savedAt?.toISOString() ?? null,
       draftSavedAt: draft ? (saved?.draftSavedAt?.toISOString() ?? null) : null,
       stale: [...stale],
+      shopifyPaidVia: paidVia(paid),
     };
   } catch (e) {
     return { state: "error", orgName: c.orgName, message: (e as Error).message };

@@ -6,7 +6,7 @@ import { SelectMenu, type SelectMenuOption } from "@/components/SelectMenu";
 import { DatePicker } from "@/components/DatePicker";
 import { HoverHint } from "@/components/HoverHint";
 import { useMoney } from "@/components/CurrencyProvider";
-import { AlertTriangle, Check, GripVertical, Info, Lock, Pencil, Plus, RefreshCw, Trash2, X } from "@/components/icons";
+import { AlertTriangle, ArrowRight, Check, GripVertical, Info, Lock, Pencil, Plus, RefreshCw, Trash2, X } from "@/components/icons";
 import { SOURCE_LOGO } from "@/lib/channel-logos";
 import { GROUP_LABEL } from "@/lib/pnl-shared";
 import { discardXeroDraftAction, publishXeroSetupAction, saveXeroDraftAction } from "@/app/(app)/pnl/xero/actions";
@@ -280,10 +280,12 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
       const name = l.group === "taxes" ? "Tax owed" : pl ? plainName(targets[pl]?.name ?? "") : "";
       for (const b of balancesOf(l, choice)) {
         const m = out.get(b.key) ?? new Map();
-        const k = `${name}|${b.note ?? ""}`;
-        const cur = m.get(k) ?? { name, amount: 0, note: b.note, tax: l.group === "taxes" };
+        // One term per account: a note ("ad invoices paid by card") stays only while every line in
+        // the term carries it.
+        const cur = m.get(name) ?? { name, amount: 0, note: b.note, tax: l.group === "taxes" };
+        if (cur.note !== b.note) cur.note = undefined;
         cur.amount += l.amount;
-        m.set(k, cur);
+        m.set(name, cur);
         out.set(b.key, m);
       }
     }
@@ -643,18 +645,25 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
             note: x.note,
             sign: (x.tax ? "+" : b.cls === "liability" ? (x.amount <= 0 ? "+" : "−") : x.amount >= 0 ? "+" : "−") as "+" | "−",
           }));
-          const channel = b.key.startsWith("receivable:") ? (b.key.slice(11) as keyof typeof CHANNEL_NAME) : null;
-          const tail = channel
-            ? `− ${CHANNEL_NAME[channel]} payouts you code here`
-            : b.key === "sales_tax"
-              ? "− payments to the state you code here"
-              : b.key.startsWith("payable:")
-                ? "− card charges you code here"
-                : b.key === "inventory"
-                  ? ""
-                  : b.cls === "liability"
-                    ? "− payments you code here"
-                    : "− money you receive, coded here";
+          // What the owner codes to this account in Xero, from the bank or card statement.
+          const codeHere =
+            b.key === "receivable:AMAZON"
+              ? ["Amazon payouts", "Card charges from Amazon, when your Amazon balance runs negative"]
+              : b.key === "receivable:SHOPIFY"
+                ? data.shopifyPaidVia
+                : b.key === "receivable:TIKTOK"
+                  ? ["TikTok Shop payouts"]
+                  : b.key === "sales_tax"
+                    ? ["Your sales tax payments to the state"]
+                    : b.key === "payable:META_ADS"
+                      ? ["Card charges from Meta"]
+                      : b.key === "payable:AMAZON_ADS"
+                        ? ["Card charges from Amazon Ads"]
+                        : b.key === "inventory"
+                          ? ["Bills for stock and everything consl counts in your product cost (materials, packaging, production, freight in). Book them here, not as an expense, or Xero counts them twice."]
+                          : b.cls === "liability"
+                            ? ["Your payments of what you send here"]
+                            : ["Money you receive for what you send here"];
           return (
             <div key={b.key} className="overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface">
               <AccountHeader
@@ -670,7 +679,7 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
                 onRemove={isAddedBalance(b.key) && editable ? () => removeAdded(b.key) : undefined}
                 total={null}
               />
-              <Formula terms={terms} lead={b.key === "inventory" ? "Stock purchases you book in Xero" : undefined} tail={tail} />
+              <BalanceBreakdown terms={terms} codeHere={codeHere} />
             </div>
           );
         })}
@@ -929,25 +938,38 @@ function AccountHeader({
   );
 }
 
-/** How a balance account's number is made, in the names of the accounts that move it. */
-function Formula({ terms, lead, tail }: { terms: { name: string; sign: "+" | "−"; note?: string }[]; lead?: string; tail: string }) {
+/** How a balance account's number is made: what consl's journals send to it (the accounts that
+ *  move it, each with its sign), then — highlighted — what the owner codes to it in Xero. */
+function BalanceBreakdown({ terms, codeHere }: { terms: { name: string; sign: "+" | "−"; note?: string }[]; codeHere: string[] }) {
   return (
-    <div className="border-t border-dashed border-line px-4 py-2.5 text-[12px] leading-relaxed text-muted">
-      {terms.length === 0 && !lead ? (
-        "Nothing posts here yet."
-      ) : (
-        <>
-          <span className="font-medium text-ink-soft">=</span> {lead && <span>{lead}</span>}
-          {terms.map((t, i) => (
-            <span key={`${t.name}|${t.note ?? ""}`}>
-              {i > 0 || lead ? ` ${t.sign} ` : t.sign === "−" ? "− " : ""}
-              <span className="font-medium text-ink">{t.name}</span>
-              {t.note && <span> ({t.note})</span>}
-            </span>
+    <div className="border-t border-line">
+      <div className="px-4 py-2.5">
+        <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-muted">consl sends here</div>
+        <div className="mt-1 text-[12.5px] leading-relaxed text-ink-soft">
+          {terms.length === 0 ? (
+            <span className="text-muted">Nothing yet.</span>
+          ) : (
+            terms.map((t, i) => (
+              <span key={t.name}>
+                {i > 0 ? ` ${t.sign} ` : t.sign === "−" ? "− " : ""}
+                <span className="font-medium text-ink">{t.name}</span>
+                {t.note && <span className="text-muted"> ({t.note})</span>}
+              </span>
+            ))
+          )}
+        </div>
+      </div>
+      <div className="mx-3 mb-3 rounded-lg border border-accent/25 bg-accent-soft/60 px-3 py-2.5">
+        <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-accent">You code here in Xero</div>
+        <ul className="mt-1 space-y-1">
+          {codeHere.map((c) => (
+            <li key={c} className="flex items-start gap-1.5 text-[12.5px] leading-snug text-ink">
+              <ArrowRight size={12} className="mt-[3px] shrink-0 text-accent" />
+              <span>{c}</span>
+            </li>
           ))}
-          {tail && <span> {tail}</span>}
-        </>
-      )}
+        </ul>
+      </div>
     </div>
   );
 }

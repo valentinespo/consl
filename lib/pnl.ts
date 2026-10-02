@@ -67,18 +67,20 @@ export async function presentPnlChannels(): Promise<PnlChannel[]> {
 }
 
 type ProductCost = { id: string; code: string; openingUnitCost: number | null; preConslUnitCost: number | null };
-/** The statement's scope: the company's products, keyed the way each channel's ledger names them. */
+/** The statement's scope: the company's products, keyed the way each channel's ledger names them.
+ *  Amazon names a product by its seller SKU, and in some money rows (fee refunds) by its FNSKU. */
 type Scope = { amazon: Map<string, ProductCost>; tiktok: Map<string, ProductCost>; byId: Map<string, ProductCost> };
 
 async function loadScope(): Promise<Scope> {
   const products = await prisma.product.findMany({
-    select: { id: true, code: true, sellerSku: true, tiktokSku: true, openingUnitCost: true, preConslUnitCost: true },
+    select: { id: true, code: true, sellerSku: true, fnsku: true, tiktokSku: true, openingUnitCost: true, preConslUnitCost: true },
   });
   const scope: Scope = { amazon: new Map(), tiktok: new Map(), byId: new Map() };
   for (const p of products) {
     const cost = { id: p.id, code: p.code, openingUnitCost: p.openingUnitCost, preConslUnitCost: p.preConslUnitCost };
     scope.byId.set(p.id, cost);
     if (p.sellerSku) scope.amazon.set(p.sellerSku, cost);
+    if (p.fnsku) scope.amazon.set(p.fnsku, cost);
     if (p.tiktokSku) scope.tiktok.set(p.tiktokSku, cost);
   }
   return scope;
@@ -667,7 +669,7 @@ async function tiktokPendingBridge(orgId: string, from: Date, to: Date, baseCurr
 
 const EMPTY: Pnl = {
   groups: [], sales: 0, cogs: 0, unitsSold: 0, stock: emptyPnlStock(), netProfit: 0, margin: null, roi: null, pending: [],
-  unmatchedSkus: [], preHistoryUnits: 0, overflowUnits: 0, unplaced: { units: 0, cogs: 0 }, mcf: { units: 0, cogs: 0 }, unreported: { units: 0, cogs: 0 }, ignored: { skus: [], units: 0, sales: 0 }, ledgerGap: 0, backfillInProgress: false, importProgress: null, importing: [], estimated: { units: 0, cogs: 0, lots: [] }, hasData: false,
+  unmatchedSkus: [], preHistoryUnits: 0, overflowUnits: 0, unplaced: { units: 0, cogs: 0 }, mcf: { units: 0, cogs: 0 }, unreported: { units: 0, cogs: 0 }, ignored: { skus: [], units: 0, sales: 0, other: 0 }, ledgerGap: 0, backfillInProgress: false, importProgress: null, importing: [], estimated: { units: 0, cogs: 0, lots: [] }, hasData: false,
 };
 
 /**
@@ -928,8 +930,9 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
   }
   for (const f of feeByName.values()) add(f.bucket, f.name, f.amount, "CUSTOM");
 
-  // What the scope left out: listings sold that the company doesn't manage here.
-  const ignored = { skus: [] as string[], units: 0, sales: 0 };
+  // What the scope left out: listings sold that the company doesn't manage here — and any other
+  // money (fees, refunds) under a product code nothing matches, so a miss is never silent.
+  const ignored = { skus: [] as string[], units: 0, sales: 0, other: 0 };
   if (selectedSet.has("AMAZON")) {
     const left = await prisma.financeEvent.groupBy({
       by: ["sku"],
@@ -940,6 +943,15 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
       ignored.skus.push(r.sku as string);
       ignored.units += r._sum.quantity ?? 0;
       ignored.sales += r._sum.baseAmount ?? 0;
+    }
+    const rest = await prisma.financeEvent.groupBy({
+      by: ["sku"],
+      where: { channel: "AMAZON", eventAt: { gte: from, lte: to }, group: { notIn: ["cash", "taxes"] }, sku: { notIn: amazonSkus, not: null }, NOT: { group: "sales", type: "Principal" } },
+      _sum: { baseAmount: true },
+    });
+    for (const r of rest) {
+      if (!ignored.skus.includes(r.sku as string)) ignored.skus.push(r.sku as string);
+      ignored.other += r._sum.baseAmount ?? 0;
     }
   }
   if (lineChannels.length) {
@@ -970,6 +982,15 @@ export async function getPnl(from: Date, to: Date, channels?: PnlChannel[], brea
       ignored.skus.push(r.sku as string);
       ignored.units += r._sum.quantity ?? 0;
       ignored.sales += r._sum.baseAmount ?? 0;
+    }
+    const rest = await prisma.financeEvent.groupBy({
+      by: ["sku"],
+      where: { channel: "TIKTOK", eventAt: { gte: from, lte: to }, group: { notIn: ["sales", "cash", "taxes"] }, sku: { notIn: tiktokSkus, not: null } },
+      _sum: { baseAmount: true },
+    });
+    for (const r of rest) {
+      if (!ignored.skus.includes(r.sku as string)) ignored.skus.push(r.sku as string);
+      ignored.other += r._sum.baseAmount ?? 0;
     }
   }
   ignored.skus.sort();
@@ -1109,7 +1130,7 @@ type DayTally = {
   overflowUnits: number;
   unplaced: { units: number; cogs: number };
   unmatched: Set<string>;
-  ignored: { skus: Set<string>; units: number; sales: number };
+  ignored: { skus: Set<string>; units: number; sales: number; other: number };
   /** Ledger money of the day on no line of the statement and with no reason — see ledgerBuckets. */
   gap: number;
   pending: number;
@@ -1190,7 +1211,7 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
       t = {
         blocks: new Map(), cogs: 0, units: 0, mcf: { units: 0, cogs: 0 }, unreported: { units: 0, cogs: 0 }, stock: emptyPnlStock(),
         estimated: { units: 0, cogs: 0, lots: new Set() }, preHistoryUnits: 0, overflowUnits: 0, unplaced: { units: 0, cogs: 0 },
-        unmatched: new Set(), ignored: { skus: new Set(), units: 0, sales: 0 }, pending: 0, gap: 0,
+        unmatched: new Set(), ignored: { skus: new Set(), units: 0, sales: 0, other: 0 }, pending: 0, gap: 0,
       };
       tallies.set(k, t);
     }
@@ -1286,6 +1307,18 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
       t.ignored.units += r.units;
       t.ignored.sales += r.sales;
     }
+    // Any other money (fees, refunds) under a product code nothing matches: said, never silent.
+    const rest = await prisma.$queryRaw<{ sku: string; day: string; amount: number }[]>`
+      SELECT fe.sku, (fe."eventAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::date::text AS day, COALESCE(SUM(fe."baseAmount"), 0)::float8 AS amount
+      FROM "FinanceEvent" fe
+      WHERE fe."orgId" = ${orgId} AND fe.channel = 'AMAZON' AND fe."group" NOT IN ('cash', 'taxes') AND NOT (fe."group" = 'sales' AND fe.type = 'Principal')
+        AND fe.sku IS NOT NULL AND NOT (fe.sku = ANY(${amazonSkus}::text[]))
+      GROUP BY 1, 2`;
+    for (const r of rest) {
+      const t = tally("AMAZON", r.day);
+      t.ignored.skus.add(r.sku);
+      t.ignored.other += r.amount;
+    }
   }
   const reportedByOrders = new Set<string>();
   if (lineChannels.length) {
@@ -1322,6 +1355,17 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
       t.ignored.skus.add(r.sku);
       t.ignored.units += r.units;
       t.ignored.sales += r.sales;
+    }
+    const rest = await prisma.$queryRaw<{ sku: string; day: string; amount: number }[]>`
+      SELECT fe.sku, (fe."eventAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::date::text AS day, COALESCE(SUM(fe."baseAmount"), 0)::float8 AS amount
+      FROM "FinanceEvent" fe
+      WHERE fe."orgId" = ${orgId} AND fe.channel = 'TIKTOK' AND fe."group" NOT IN ('sales', 'cash', 'taxes')
+        AND fe.sku IS NOT NULL AND NOT (fe.sku = ANY(${tiktokSkus}::text[]))
+      GROUP BY 1, 2`;
+    for (const r of rest) {
+      const t = tally("TIKTOK", r.day);
+      t.ignored.skus.add(r.sku);
+      t.ignored.other += r.amount;
     }
   }
 
@@ -1405,7 +1449,7 @@ export async function getPnlHistory(tz: string): Promise<PnlHistory> {
     if (t.overflowUnits) day.over = t.overflowUnits;
     if (t.unplaced.units) day.unpl = [t.unplaced.units, t.unplaced.cogs];
     if (t.unmatched.size) day.unm = [...t.unmatched].sort();
-    if (t.ignored.units || t.ignored.skus.size) day.ign = [[...t.ignored.skus].sort(), t.ignored.units, t.ignored.sales];
+    if (t.ignored.units || t.ignored.skus.size) day.ign = [[...t.ignored.skus].sort(), t.ignored.units, t.ignored.sales, t.ignored.other];
     if (t.pending) day.pend = t.pending;
     if (t.gap) day.gap = Math.round(t.gap * 100) / 100;
     if (rows.length || day.units || day.cogs || day.ign || day.pend || day.gap) days.push(day);
