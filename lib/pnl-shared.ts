@@ -108,8 +108,9 @@ export type PnlStatement = Pick<Pnl, "groups" | "sales" | "cogs" | "unitsSold" |
 /** One Cost of goods line beside the units sold: units (signed: − left, + came back) and cost. */
 export type PnlStockLine = { units: number; cogs: number };
 /** Stock that left without a sale or came back, inside Cost of goods. Amazon's (lib/amazon-stock-
- *  events): removal orders; lost & destroyed (lost in the warehouse or on the way in, destroyed,
- *  taken out by Amazon); found & returned (found, credited back, customer returns back in stock).
+ *  events): removal orders; lost & destroyed (lost in the warehouse, FBA or AWD, or on the way in,
+ *  destroyed, taken out by Amazon); found & returned (found, credited back, customer returns back in
+ *  stock).
  *  The company's own (Movements): write-offs — lost raw materials, finished goods written off or
  *  sent out as samples — split across channels by units sold. */
 export type PnlStock = { removals: PnlStockLine; lost: PnlStockLine; back: PnlStockLine; writeoffs: PnlStockLine };

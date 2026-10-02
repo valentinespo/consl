@@ -173,7 +173,7 @@ model StockEvent {
   organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
   channel      String // "AMAZON"
   source       String // "ledger" | "reimbursement" — each import replaces its own rows by window
-  kind         String // REMOVAL | DESTROYED | LOST | LOST_INBOUND | REIMBURSED | FOUND | CREDITED | RETURNED
+  kind         String // REMOVAL | DESTROYED | LOST | LOST_INBOUND | LOST_AWD | REIMBURSED | FOUND | CREDITED | RETURNED
   at           DateTime
   sku          String // the channel's seller SKU
   quantity     Int // signed: − left the channel's stock, + came back into it

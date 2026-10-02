@@ -447,7 +447,7 @@ function CogsRow({ pnl, money }: { pnl: Pnl; money: (n: number) => string }) {
 /** What each Amazon stock line holds, in a few words. */
 const STOCK_NOTE: Record<(typeof PNL_STOCK_LINES)[number], string> = {
   removals: "shipped out of Amazon",
-  lost: "lost in the warehouse or on the way in, destroyed",
+  lost: "lost in the warehouse (FBA or AWD) or on the way in, destroyed",
   back: "found, credited back, customer returns",
   writeoffs: "lost materials and stock written off in Movements",
 };

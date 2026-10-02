@@ -101,11 +101,11 @@ type Sale = { productId: string; units: number; at: number | null; channel: PnlC
 type StockMove = { productId: string; units: number; at: number; kind: string; line: keyof PnlStock };
 
 /** The Cost of goods line a move lands on: removal orders; lost & destroyed (lost in the warehouse,
- *  destroyed, taken out by Amazon, and lost on the way in — net: inbound units Amazon finds later
- *  come off this line, never shown again as found); or found & returned (found in the warehouse,
- *  credited back, customer returns). */
+ *  destroyed, taken out by Amazon, lost on the way in and lost inside AWD — net: units Amazon finds
+ *  later come off this line, never shown again as found); or found & returned (found in the
+ *  warehouse, credited back, customer returns). */
 const stockLine = (kind: string, units: number): keyof PnlStock =>
-  kind === "REMOVAL" ? "removals" : kind === "LOST_INBOUND" || units < 0 ? "lost" : "back";
+  kind === "REMOVAL" ? "removals" : kind === "LOST_INBOUND" || kind === "LOST_AWD" || units < 0 ? "lost" : "back";
 
 /** Every stock event of the company's managed Amazon products. */
 async function loadStockMoves(scope: Scope): Promise<StockMove[]> {
@@ -437,9 +437,9 @@ async function rawWriteOffs(): Promise<{ at: number; amount: number }[]> {
 }
 
 /** A recovery and the loss it can undo: found ← lost in the warehouse; a reversed lost-inbound
- *  reimbursement ← lost on the way in. */
-const RECOVERS_FROM: Record<string, string> = { FOUND: "LOST", LOST_INBOUND: "LOST_INBOUND" };
-const POOLED = new Set(["LOST", "LOST_INBOUND"]);
+ *  reimbursement ← lost on the way in; a reversed AWD one ← lost inside AWD. */
+const RECOVERS_FROM: Record<string, string> = { FOUND: "LOST", LOST_INBOUND: "LOST_INBOUND", LOST_AWD: "LOST_AWD" };
+const POOLED = new Set(["LOST", "LOST_INBOUND", "LOST_AWD"]);
 
 /**
  * One stock move on Amazon's queue: the units that count and their signed cost. Units that left
@@ -450,9 +450,9 @@ const POOLED = new Set(["LOST", "LOST_INBOUND"]);
  */
 function priceMove(move: StockMove, layers: Layer[], product: ProductCost, cursor: Map<string, { idx: number; left: number }>, recoverable: Map<string, number>): { amount: number; units: number } {
   const ck = `AMAZON|${product.id}`;
-  // A found unit, or a reversed lost-on-the-way-in reimbursement, gives back only what was counted
-  // lost: Amazon's reports reach 18 months back, and a unit lost before that was never taken off
-  // the walk, so it isn't put back on.
+  // A found unit, or a reversed lost-on-the-way-in or AWD reimbursement, gives back only what was
+  // counted lost: Amazon's reports reach 18 months back, and a unit lost before that was never taken
+  // off the walk, so it isn't put back on.
   const pool = `${RECOVERS_FROM[move.kind] ?? move.kind}|${product.id}`;
   if (move.units < 0 && POOLED.has(move.kind)) recoverable.set(pool, (recoverable.get(pool) ?? 0) - move.units);
   if (move.units > 0 && move.kind in RECOVERS_FROM) {

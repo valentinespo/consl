@@ -18,9 +18,12 @@ import { fetchReportText, makeClient } from "@/lib/spapi";
  *   or units a reimbursement gave back). Damage and condition changes (E, 6, 7, H, K, U, Q, P)
  *   move units between conditions inside Amazon's stock and always pair up, so they're skipped;
  *   so are receipts, customer shipments and transfers between Amazon's warehouses.
- * - The REIMBURSEMENTS report, for the one loss the ledger can't show: units lost on the way in
- *   (never received). Each lost-inbound reimbursement counts its units (paid in cash or given back
- *   as stock — stock given back comes in again through the ledger's N); a reversal counts them
+ * - The REIMBURSEMENTS report, for the losses the ledger can't show: units lost on the way in (never
+ *   received), and anything lost in AWD — the ledger is FBA's alone, AWD stock never appears in it
+ *   (checked on Herbl: July 2026's 1,800 LDX units into AWD are nowhere in it, nor is any AWD
+ *   warehouse). A lost-inbound reimbursement for FBA counts its units paid in cash or given back
+ *   as stock (stock given back comes in again through the ledger's N); an AWD one counts the units
+ *   paid in cash only (stock given back stays in AWD: nothing was lost). A reversal counts them
  *   back. Every other reimbursement is money only: its units are already in the ledger.
  *
  * Amazon keeps 18 months of both. The first read takes all of it; later reads replace the last 45
@@ -35,6 +38,8 @@ const DAY = 86_400_000;
 
 const ADJUSTMENT_KIND: Record<string, string> = { D: "DESTROYED", M: "LOST", "5": "LOST", F: "FOUND", O: "REIMBURSED", N: "CREDITED" };
 const LOST_INBOUND = new Set(["Lost_Inbound", "AWD_Lost_Inbound"]);
+// Any AWD reason: its units are in no ledger. On the way in it is LOST_INBOUND, inside AWD LOST_AWD.
+const isAwd = (reason: string | undefined) => /^AWD/i.test(reason ?? "");
 
 type EventRow = { channel: string; source: string; kind: string; at: Date; sku: string; quantity: number; detail: string | null; reference: string | null };
 
@@ -84,16 +89,18 @@ export function reimbursementEvents(text: string): EventRow[] {
   for (const r of rowsOf(text)) {
     const reason = r["reason"];
     const reversal = reason === "Reimbursement_Reversal";
-    const lostInbound = LOST_INBOUND.has(reason) || (reversal && LOST_INBOUND.has(r["original-reimbursement-type"]));
-    if (!lostInbound) continue;
+    const type = reversal ? r["original-reimbursement-type"] : reason;
+    const awd = isAwd(type);
+    if (!LOST_INBOUND.has(type) && !awd) continue;
     // A reimbursement for lost units: they left. A reversal (the cash taken back): they came back.
-    const units = Math.trunc(Number(r["quantity-reimbursed-cash"] || 0)) + Math.trunc(Number(r["quantity-reimbursed-inventory"] || 0));
+    const cash = Math.trunc(Number(r["quantity-reimbursed-cash"] || 0));
+    const units = awd ? cash : cash + Math.trunc(Number(r["quantity-reimbursed-inventory"] || 0));
     const at = new Date(r["approval-date"]);
     if (!units || !r["sku"] || Number.isNaN(at.getTime())) continue;
     out.push({
       channel: "AMAZON",
       source: "reimbursement",
-      kind: "LOST_INBOUND",
+      kind: LOST_INBOUND.has(type) ? "LOST_INBOUND" : "LOST_AWD",
       at,
       sku: r["sku"],
       quantity: -units,
