@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { getInventory } from "@/lib/queries";
+import { computeEngineResult } from "@/lib/recompute";
 import { getOrgSettings } from "@/lib/settings";
 import { isLayerKind } from "@/lib/constants";
 import { appearedAt } from "@/lib/lot-status";
@@ -84,12 +85,40 @@ export type RestockTotals = {
   coverMonths: number; // total inventory value ÷ monthlyCOGS = months of cover
 };
 
+/** The units the channels report holding at one moment — the one part of a day's stock value that
+ *  can't be worked out again later. Amazon per product (its own count fields), Shopify and TikTok
+ *  per facility × product (the stock cells readChannelStock returns). */
+export type StockCounts = {
+  amazon: Record<string, { fbaTotal: number; awdOnhand: number; awdReserved: number; awdInbound: number }>;
+  channel: { channel: string; facilityId: string; productId: string; units: number }[];
+};
+
+/** What the channels report holding right now (the latest synced counts). */
+export async function readStockCounts(): Promise<StockCounts> {
+  const { readChannelStock } = await import("@/lib/channel-stock");
+  const [snaps, channel] = await Promise.all([
+    prisma.skuSnapshot.findMany({ distinct: ["productId"], orderBy: { capturedAt: "desc" } }),
+    readChannelStock(),
+  ]);
+  return {
+    amazon: Object.fromEntries(snaps.map((s) => [s.productId, { fbaTotal: s.fbaTotal, awdOnhand: s.awdOnhand, awdReserved: s.awdReserved, awdInbound: s.awdInbound }])),
+    channel: channel.cells.map((c) => ({ channel: c.channel, facilityId: c.facilityId, productId: c.productId, units: c.units })),
+  };
+}
+
 /** Finished units at one of your own facilities, per product — the per-place view Reorder 2.0 plans from. */
 export type OwnStockCell = { productId: string; facilityId: string; units: number };
 /** Units in production per product and the facility making them, with the soonest PO date. */
 export type InProductionCell = { productId: string; facilityId: string; units: number; soonestPoISO: string | null };
 
-export async function getRestock(): Promise<{
+/**
+ * The Restock picture and the stock value. With `asOf` it is the stock as it stood at that moment
+ * (lib/inventory-close): only purchases, bills, lots and stock moves dated up to it, each lot
+ * costed from the bills dated up to it, a line still in production if it finished later — and the
+ * channels' units from `counts` (what they reported then). Only the live call records the day's
+ * value for the dashboard.
+ */
+export async function getRestock(opts: { asOf?: Date; counts?: StockCounts } = {}): Promise<{
   rows: RestockRow[];
   lastSync: Date | null;
   totals: RestockTotals;
@@ -106,13 +135,18 @@ export async function getRestock(): Promise<{
   };
   sortMode: string;
 }> {
-  const [products, snaps, lots, rawInv, settings, allProducts, movements, allFacilities] = await Promise.all([
+  const asOf = opts.asOf;
+  const cut = asOf?.getTime();
+  const upTo = (d: Date) => cut === undefined || d.getTime() <= cut;
+  const [products, snaps, lotsAll, rawInv, settings, allProducts, movementsAll, allFacilities] = await Promise.all([
     prisma.product.findMany({ where: { asin: { not: null } }, orderBy: { code: "asc" } }),
     prisma.skuSnapshot.findMany({ distinct: ["productId"], orderBy: { capturedAt: "desc" } }),
     // Order here is only a stable starting point — the finished lines are re-sorted by the date
     // their units appeared (their finish date) before anything reads them.
     prisma.lot.findMany({ include: { lines: true }, orderBy: [{ poDate: "desc" }, { createdAt: "desc" }] }),
-    getInventory(),
+    asOf
+      ? computeEngineResult({ asOf }).then(({ result }) => ({ totalValue: result.pools.reduce((s, p) => s + p.valueRemaining, 0), lineCost: new Map([...result.lines].map(([k, v]) => [k, v.cogPerUnit])) }))
+      : getInventory().then((inv) => ({ totalValue: inv.totalValue, lineCost: null as Map<string, number> | null })),
     getOrgSettings(),
     // Finished-goods stock covers EVERY product, not just the Amazon-mapped ones — a customer
     // who doesn't sell on Amazon still holds inventory.
@@ -121,6 +155,17 @@ export async function getRestock(): Promise<{
     prisma.facility.findMany({ select: { id: true, code: true } }),
   ]);
   const snapByProduct = new Map(snaps.map((s) => [s.productId, s]));
+  // As of a moment: the lots that existed by then and the stock moves dated up to it, each line
+  // costed from the bills dated up to it (the live view uses the costs recomputeAll persisted).
+  const lots = lotsAll.filter((l) => upTo(l.poDate ?? l.createdAt));
+  const movements = movementsAll.filter((m) => upTo(m.date));
+  const costOf = (ln: { id: string; cogPerUnit: number }) => rawInv.lineCost?.get(ln.id) ?? ln.cogPerUnit;
+  // Amazon's units: what it reported then, or its latest synced counts.
+  const amazonCounts = (productId: string) => {
+    if (opts.counts) return opts.counts.amazon[productId] ?? { fbaTotal: 0, awdOnhand: 0, awdReserved: 0, awdInbound: 0 };
+    const s = snapByProduct.get(productId);
+    return { fbaTotal: s?.fbaTotal ?? 0, awdOnhand: s?.awdOnhand ?? 0, awdReserved: s?.awdReserved ?? 0, awdInbound: s?.awdInbound ?? 0 };
+  };
   const lastSync = snaps.reduce<Date | null>((m, s) => (!m || s.capturedAt > m ? s.capturedAt : m), null);
 
   // Per-SKU: in-production units/value, soonest open-lot PO date, and finished lots.
@@ -139,9 +184,10 @@ export async function getRestock(): Promise<{
     const poDate = lot.poDate ?? lot.createdAt;
     for (const ln of lot.lines) {
       // Status is per LINE — a finished SKU becomes sellable stock while its lot-mates cook.
-      if (ln.status === "IN_PRODUCTION") {
+      // As of a moment, a line that finished after it was still in production then.
+      if (ln.status === "IN_PRODUCTION" || !upTo(appearedAt(ln, lot))) {
         inProdUnits.set(ln.productId, (inProdUnits.get(ln.productId) ?? 0) + ln.units);
-        inProductionValue += ln.units * ln.cogPerUnit;
+        inProductionValue += ln.units * costOf(ln);
         const cur = soonestPo.get(ln.productId);
         if (!cur || poDate < cur) soonestPo.set(ln.productId, poDate);
         const k = `${ln.productId}|${lot.facilityId}`;
@@ -162,7 +208,7 @@ export async function getRestock(): Promise<{
       sku: f.ln.productId,
       facilityId: f.lot.facilityId,
       units: f.ln.units,
-      unitCost: f.ln.cogPerUnit,
+      unitCost: costOf(f.ln),
       date: f.at,
       seq: i,
     }),
@@ -171,7 +217,7 @@ export async function getRestock(): Promise<{
   for (let i = finishedLines.length - 1; i >= 0; i--) {
     const f = finishedLines[i];
     if (!finishedLots.has(f.ln.productId)) finishedLots.set(f.ln.productId, []);
-    finishedLots.get(f.ln.productId)!.push({ units: f.ln.units, cog: f.ln.cogPerUnit });
+    finishedLots.get(f.ln.productId)!.push({ units: f.ln.units, cog: costOf(f.ln) });
   }
   // Layers added after production continue the same sequence.
   let supplySeq = finishedLines.length;
@@ -265,11 +311,12 @@ export async function getRestock(): Promise<{
   let monthlyCOGS = 0; // Σ monthly units sold × newest lot cost → blended sell-through at cost
   const rows: RestockRow[] = products.map((p) => {
     const s = snapByProduct.get(p.id);
-    const fbaTotal = s?.fbaTotal ?? 0;
+    const c = amazonCounts(p.id);
+    const fbaTotal = c.fbaTotal;
     // Reserved-in-AWD units are picked for an FBA replenishment, and Amazon creates the FBA
     // inbound shipment the moment the replenishment exists — so they already sit in fbaTotal.
     // Subtracting them here is what keeps a replenishment from counting twice while it's staged.
-    const awdTotal = Math.max(0, (s?.awdOnhand ?? 0) - (s?.awdReserved ?? 0)) + (s?.awdInbound ?? 0);
+    const awdTotal = Math.max(0, c.awdOnhand - c.awdReserved) + c.awdInbound;
     const inProduction = inProdUnits.get(p.id) ?? 0;
     fbaUnits += fbaTotal;
     awdUnits += awdTotal;
@@ -337,7 +384,7 @@ export async function getRestock(): Promise<{
   // One platform per facility (its stock source) — a warehouse two platforms report is never
   // counted twice; see readChannelStock.
   const { readChannelStock } = await import("@/lib/channel-stock");
-  const channelHeld = (await readChannelStock()).cells;
+  const channelHeld = opts.counts ? opts.counts.channel : (await readChannelStock()).cells;
   const channelGroups = new Map<string, { channel: string; productId: string; cells: { facilityId: string; units: number }[] }>();
   for (const c of channelHeld) {
     const ch = c.channel;
@@ -384,7 +431,7 @@ export async function getRestock(): Promise<{
     coverMonths: monthlyCOGS > 0 ? grandTotal / monthlyCOGS : 0,
   };
 
-  await recordDailyInventoryValue(totals, settings.syncTz);
+  if (!asOf && !opts.counts) await recordDailyInventoryValue(totals, settings.syncTz);
 
   return {
     rows,

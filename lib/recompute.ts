@@ -14,9 +14,14 @@ import {
 } from "./fifo";
 
 /** Loads data + runs the engine WITHOUT persisting. Used by read-only queries.
- *  `excludeMovementId` runs the world WITHOUT one movement — a what-if for delete warnings. */
-export async function computeEngineResult(opts: { excludeMovementId?: string } = {}) {
-  const [purchasesRaw, lotsRaw, txRaw, rawMovesAll] = await Promise.all([
+ *  `excludeMovementId` runs the world WITHOUT one movement — a what-if for delete warnings.
+ *  `asOf` runs the world as it stood at that moment: only purchases, stock moves, lots and bills
+ *  dated up to it (a bill by its own date, else its invoice's, else when it was entered) — what
+ *  the stock was worth then, with everything consl knows now. */
+export async function computeEngineResult(opts: { excludeMovementId?: string; asOf?: Date } = {}) {
+  const cut = opts.asOf?.getTime();
+  const upTo = (d: Date) => cut === undefined || d.getTime() <= cut;
+  const [purchasesAll, lotsAll, txAll, rawMovesDated] = await Promise.all([
     prisma.purchase.findMany({
       include: { materialType: true, facility: true, product: true, invoice: { select: { createdAt: true } } },
       // FIFO consumes layers in this order, so it must be total and reproducible. Without an
@@ -30,13 +35,17 @@ export async function computeEngineResult(opts: { excludeMovementId?: string } =
         lines: { include: { product: true, materials: { include: { materialType: true, product: true } } } },
       },
     }),
-    prisma.transaction.findMany(),
+    prisma.transaction.findMany({ include: { invoice: { select: { date: true } } } }),
     prisma.stockMovement.findMany({
       where: { itemType: "RAW" },
       include: { materialType: true, fromFacility: true, toFacility: true, product: true },
       orderBy: [{ date: "asc" }, { createdAt: "asc" }],
     }),
   ]);
+  const purchasesRaw = purchasesAll.filter((p) => upTo(p.date));
+  const lotsRaw = lotsAll.filter((l) => upTo(l.poDate ?? l.createdAt));
+  const txRaw = txAll.filter((t) => upTo(t.date ?? t.invoice?.date ?? t.createdAt));
+  const rawMovesAll = rawMovesDated.filter((m) => upTo(m.date));
   const rawMovesRaw = opts.excludeMovementId ? rawMovesAll.filter((m) => m.id !== opts.excludeMovementId) : rawMovesAll;
 
   const purchases: EnginePurchase[] = purchasesRaw.map((p, i) => ({

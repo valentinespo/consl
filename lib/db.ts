@@ -18,6 +18,7 @@ export const TENANT_MODELS = new Set([
   "SkuSnapshot",
   "DismissedNotification",
   "InventoryValueSnapshot",
+  "InventoryClose",
   "Settings",
   "MaterialType",
   "PurchaseInvoice",

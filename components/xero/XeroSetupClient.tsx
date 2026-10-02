@@ -716,6 +716,7 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
         money={money}
         locale={locale}
         onUseAccount={(a) => setTarget("inventory", { kind: "account", accountId: a.accountId, code: a.code, name: a.name, type: a.type })}
+        published={published?.inventoryOpening !== "keep" ? data.publishedOpening : null}
         adjustment={
           <AccountHeader
             caption="Inventory adjustment account"
@@ -1387,6 +1388,7 @@ function StartingInventoryCard({
   money,
   locale,
   onUseAccount,
+  published,
   adjustment,
 }: {
   choice: "match" | "keep";
@@ -1401,6 +1403,8 @@ function StartingInventoryCard({
   money: (n: number) => string;
   locale: string;
   onUseAccount: (a: XeroAccountOption) => void;
+  /** consl's value as last published (matching consl), to say when it has moved since. */
+  published: { asOf: string; conslValue: number } | null;
   adjustment: ReactNode;
 }) {
   const asOf = data?.asOf ?? (startDate ? dayBefore(startDate) : "");
@@ -1428,6 +1432,9 @@ function StartingInventoryCard({
           ? { value: "—", sub: "Couldn't read Xero", warn: true }
           : { value: money(data?.xero.balance ?? 0), sub: inventoryName };
   const others = data?.xero.newAccount ? (data.xero.others ?? []) : [];
+  // The closing worked out again now: what moved it since that night, and since it was published.
+  const moved = data?.consl?.savedTotal !== undefined ? Math.round((data.consl.total - data.consl.savedTotal) * 100) / 100 : 0;
+  const sincePublished = published && data?.consl && published.asOf === asOf ? Math.round((data.consl.total - published.conslValue) * 100) / 100 : 0;
   const diffFigure =
     diff === null
       ? { value: "—", sub: data?.pending ? "Worked out once that day is over" : "" }
@@ -1469,6 +1476,40 @@ function StartingInventoryCard({
           </div>
         ))}
       </div>
+      {(moved !== 0 || sincePublished !== 0) && (
+        <div className="border-t border-line px-4 pt-3">
+          <div className="rounded-xl border border-border bg-surface-2/60 px-3 py-2.5">
+            {moved !== 0 && (
+              <>
+                <p className="flex items-start gap-1.5 text-[12.5px] font-medium leading-snug text-ink">
+                  <Info size={13} className="mt-[2px] shrink-0 text-accent" />
+                  Updated since {day} closed: {signed(moved)}
+                </p>
+                <p className="mt-0.5 pl-[19px] text-[12px] leading-snug text-muted">Things dated {day} or earlier were added or changed after that night. consl counted them automatically.</p>
+                {(data?.consl?.changes ?? []).length > 0 && (
+                  <ul className="mt-1.5 space-y-0.5 pl-[19px]">
+                    {data!.consl!.changes!.map((c, i) => (
+                      <li key={`${c.what}|${c.at}|${i}`} className="text-[12px] leading-snug text-ink-soft">
+                        {c.what}, dated {dayText(c.date, locale)}, {dayText(c.at.slice(0, 10), locale) === dayText(c.date, locale) ? "entered later that day" : `entered ${dayText(c.at.slice(0, 10), locale)}`}
+                        {c.amount !== null ? `: ${money(c.amount)}` : ""}
+                      </li>
+                    ))}
+                    {(data?.consl?.moreChanges ?? 0) > 0 && <li className="text-[12px] text-muted">and {data!.consl!.moreChanges} more</li>}
+                  </ul>
+                )}
+              </>
+            )}
+            {sincePublished !== 0 && (
+              <p className={`flex items-start gap-1.5 text-[12.5px] leading-snug text-ink ${moved !== 0 ? "mt-2" : ""}`}>
+                <Info size={13} className="mt-[2px] shrink-0 text-accent" />
+                <span>
+                  <span className="font-medium">Changed since you published: {signed(sincePublished)}.</span> The first journal uses the new number.
+                </span>
+              </p>
+            )}
+          </div>
+        </div>
+      )}
       {others.length > 0 && (
         <div className="border-t border-line px-4 pt-3">
           <div className="rounded-xl border border-warn/30 bg-warn/10 px-3 py-2.5">

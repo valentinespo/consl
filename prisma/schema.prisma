@@ -83,6 +83,7 @@ model Organization {
   skuSnapshots            SkuSnapshot[]
   dismissedNotifications  DismissedNotification[]
   inventoryValueSnapshots InventoryValueSnapshot[]
+  inventoryCloses         InventoryClose[]
   settings                Settings[]
   channelListings         ChannelListing[]
   channelStock            ChannelStock[]
@@ -548,6 +549,30 @@ model InventoryValueSnapshot {
   shopify      Float         @default(0) // channel-held stock value (Shopify locations)
   tiktok       Float         @default(0) // channel-held stock value (TikTok warehouses)
   atLocations  Float         @default(0) // finished goods held at your own facilities / 3PLs
+  total        Float
+
+  @@unique([orgId, day])
+}
+
+/// A company's stock at the end of each of its days (its own clock), saved seconds after midnight:
+/// the units the channels reported at that moment (`counts`, which can't be read again later) and
+/// what they were worth then. lib/inventory-close works the day's value out again from those
+/// counts with everything consl knows now, so a bill dated that day or earlier but entered later
+/// still counts — the starting inventory the Xero export matches.
+model InventoryClose {
+  id           String        @id @default(cuid())
+  orgId        String?
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  day          String        // "YYYY-MM-DD": the day that ended
+  capturedAt   DateTime      // when the channels' units were read, seconds after that midnight
+  counts       Json          // StockCounts (lib/restock): Amazon per product, Shopify/TikTok per facility × product
+  raw          Float
+  inProduction Float
+  fba          Float
+  awd          Float
+  shopify      Float
+  tiktok       Float
+  atLocations  Float
   total        Float
 
   @@unique([orgId, day])

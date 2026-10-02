@@ -6,6 +6,7 @@ import { getOrgSettings, saveOrgSettings } from "@/lib/settings";
 import { syncAmazonCore, syncAmazonStockCore } from "@/lib/sync";
 import { syncShopifyStock, syncTikTokStock } from "@/lib/channel-stock";
 import { getRestock } from "@/lib/restock";
+import { captureClose, dayToClose } from "@/lib/inventory-close";
 import { refreshChannelPlaces } from "@/lib/fulfillment";
 import {
   lastDailyAttempt,
@@ -639,6 +640,69 @@ async function tick(): Promise<void> {
   }
 }
 
+/**
+ * Every few seconds: right after a company's midnight (its own clock), save the closing of the day
+ * that just ended (lib/inventory-close): fresh units from every channel, then what the stock was
+ * worth. Seconds matter (the units must be midnight's), so it runs on its own short tick instead of
+ * the minute one. Each company's day closes once; the table's unique key settles two replicas.
+ */
+const CLOSING_TICK_MS = 5_000;
+const closedDay = new Map<string, string>(); // company → the last day it closed (or was found closed)
+const closingInFlight = new Set<string>();
+let closingZones: { at: number; rows: { orgId: string; tz: string }[] } = { at: 0, rows: [] };
+
+async function closingTick(): Promise<void> {
+  // Who and on which clock, re-read every minute (not every 5 seconds).
+  if (Date.now() - closingZones.at > 60_000) {
+    const orgs = await prismaBase.organization.findMany({ where: { deactivatedAt: null }, select: { id: true } });
+    const tzs = await prismaBase.settings.findMany({ where: { orgId: { in: orgs.map((o) => o.id) } }, select: { orgId: true, syncTz: true } });
+    const tzOf = new Map(tzs.map((t) => [t.orgId, t.syncTz]));
+    closingZones = { at: Date.now(), rows: orgs.map((o) => ({ orgId: o.id, tz: tzOf.get(o.id) ?? "UTC" })) };
+  }
+  // Each due company closes on its own, so a slow one never holds back another's midnight.
+  for (const { orgId, tz } of closingZones.rows) {
+    const day = dayToClose(nowInTz(tz));
+    if (!day || closedDay.get(orgId) === day || closingInFlight.has(orgId)) continue;
+    closingInFlight.add(orgId);
+    void closeOrgDay(orgId, day).finally(() => closingInFlight.delete(orgId));
+  }
+}
+
+async function closeOrgDay(orgId: string, day: string): Promise<void> {
+  try {
+    if (await prismaBase.inventoryClose.findFirst({ where: { orgId, day }, select: { id: true } })) {
+      closedDay.set(orgId, day);
+      return;
+    }
+    await runWithOrg(orgId, async () => {
+      const s = await getOrgSettings();
+      const r = await captureClose(orgId, day, () => (s.syncEnabled ? readChannelUnitsNow(orgId) : Promise.resolve()));
+      console.log(`[scheduler] stock closed for ${day}, org ${orgId}: ${r.saved ? `$${r.total.toFixed(2)} in ${r.seconds.toFixed(1)}s` : "saved by another process"}`);
+    });
+    closedDay.set(orgId, day);
+  } catch (e) {
+    // Left open: the next tick tries again while the window lasts.
+    console.error(`[scheduler] stock close for ${day} failed for org ${orgId}:`, (e as Error).message);
+  }
+}
+
+/** Fresh units from every connected channel, right now (the closing's reads). One failing
+ *  channel keeps its last synced units (read within the last minute) rather than stopping the rest. */
+async function readChannelUnitsNow(orgId: string): Promise<void> {
+  const conns = await prisma.integration.findMany({ where: { provider: { in: ["amazon", "shopify", "tiktok"] }, status: "connected" }, select: { provider: true } });
+  await Promise.all(
+    conns.map(async (c) => {
+      try {
+        if (c.provider === "amazon") await syncAmazonStockCore();
+        else if (c.provider === "shopify") await syncShopifyStock();
+        else await syncTikTokStock();
+      } catch (e) {
+        console.error(`[scheduler] ${c.provider} units for the stock close failed for org ${orgId}:`, (e as Error).message);
+      }
+    }),
+  );
+}
+
 let started = false;
 
 // History preparation must not wait behind stock, ads or a long-running Amazon report.
@@ -703,6 +767,8 @@ export function startDailyScheduler(): void {
   // Shopify App Pricing sends no plan-change webhooks: re-read the plans of Shopify-billed companies.
   setInterval(() => void shopifyBillingTick().catch(() => {}), TICK_MS);
   setTimeout(() => void shopifyBillingTick().catch(() => {}), 90_000);
+  // Each company's stock closing, seconds after its midnight.
+  setInterval(() => void closingTick().catch((e: Error) => console.error("[scheduler] closing tick failed:", e.message)), CLOSING_TICK_MS);
   // Xero connections stay alive however rarely a company exports.
   setInterval(() => void xeroKeepAliveTick().catch(() => {}), TICK_MS);
   console.log("[scheduler] daily sync scheduler started");

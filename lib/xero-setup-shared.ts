@@ -188,9 +188,20 @@ export type StartingInventory = {
   asOf: string;
   /** That day isn't over yet: both numbers are read once it is. */
   pending: boolean;
-  /** consl's stock value that day, from its daily stock record (the dashboard's inventory value);
-   *  null when consl has none for that day. */
-  consl: { total: number; raw: number; inProduction: number; finished: number } | null;
+  /** consl's stock value at the end of that day; null when consl has none for it. From the day's
+   *  closing when there is one (worked out again now, so later bills dated that day or earlier
+   *  count: `closedAt`, `savedTotal` and `changes` say what moved it), else the day's dashboard
+   *  record (days before closings began). */
+  consl: {
+    total: number;
+    raw: number;
+    inProduction: number;
+    finished: number;
+    closedAt?: string;
+    savedTotal?: number;
+    changes?: { what: string; date: string; at: string; amount: number | null }[];
+    moreChanges?: number;
+  } | null;
   /** The first day consl has a stock value for. */
   firstDay: string | null;
   /** Xero's balance in the inventory account that day (0 for an account consl will create). With a

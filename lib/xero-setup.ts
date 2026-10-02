@@ -5,6 +5,7 @@ import { runWithOrg } from "@/lib/tenant";
 import { BALANCE_SHEET_SCOPE, xeroAccessToken, xeroApi } from "@/lib/xero";
 import { devAccounts, devBalances, devFixture, type FixtureAccount } from "@/lib/xero-dev-fixture";
 import { localDay } from "@/lib/tz";
+import { closingValue } from "@/lib/inventory-close";
 import { loadPnlHistory } from "@/lib/pnl-cache";
 import { PNL_SOURCE_ORDER, pnlLineOf, sourcesFromBits } from "@/lib/pnl-shared";
 import {
@@ -259,6 +260,8 @@ export type XeroSetupScreen = {
   stale: string[];
   /** Some Shopify orders were paid with regular PayPal (into the merchant's PayPal balance). */
   regularPaypal: boolean;
+  /** consl's starting stock value as last published (matching consl), to show if it has moved since. */
+  publishedOpening: { asOf: string; conslValue: number } | null;
 };
 
 export type XeroSetupLoad =
@@ -290,6 +293,12 @@ function readState(raw: unknown): XeroSetupState | null {
     inventoryOpening: openingChoice(r.inventoryOpening),
     sharedReceivable: r.sharedReceivable === true,
   };
+}
+
+/** The consl value a published "match" was previewed with, if any. */
+function publishedOpeningOf(v: unknown): { asOf: string; conslValue: number } | null {
+  const o = v && typeof v === "object" ? (v as { choice?: unknown; asOf?: unknown; conslValue?: unknown }) : null;
+  return o?.choice === "match" && typeof o.asOf === "string" && typeof o.conslValue === "number" ? { asOf: o.asOf, conslValue: o.conslValue } : null;
 }
 
 /** A stored starting-inventory choice: "keep" only when it says so; matching consl is the default. */
@@ -393,6 +402,7 @@ export async function loadXeroSetup(orgId: string): Promise<XeroSetupLoad> {
       draftSavedAt: draft ? (saved?.draftSavedAt?.toISOString() ?? null) : null,
       stale: [...stale],
       regularPaypal: paid > 0,
+      publishedOpening: publishedOpeningOf(saved?.inventoryOpening),
     };
   } catch (e) {
     return { state: "error", orgName: c.orgName, message: (e as Error).message };
@@ -450,11 +460,17 @@ async function openingNumbers(c: Conn, orgId: string, startDate: string, account
   const asOf = dayBefore(startDate);
   const tz = await companyZone(orgId);
   const pending = asOf >= localDay(tz);
-  const [row, first] = await Promise.all([
+  // The day's closing (worked out again now) when there is one, else its dashboard record.
+  const [close, row, first] = await Promise.all([
+    pending ? null : closingValue(orgId, asOf),
     pending ? null : prismaBase.inventoryValueSnapshot.findFirst({ where: { orgId, day: asOf } }),
     prismaBase.inventoryValueSnapshot.findFirst({ where: { orgId }, orderBy: { day: "asc" }, select: { day: true } }),
   ]);
-  const consl = row ? { total: cents(row.total), raw: cents(row.raw), inProduction: cents(row.inProduction), finished: cents(row.total - row.raw - row.inProduction) } : null;
+  const consl: StartingInventory["consl"] = close
+    ? { ...close.now, closedAt: close.capturedAt, savedTotal: close.saved.total, changes: close.changes, moreChanges: close.moreChanges }
+    : row
+      ? { total: cents(row.total), raw: cents(row.raw), inProduction: cents(row.inProduction), finished: cents(row.total - row.raw - row.inProduction) }
+      : null;
   let xero: StartingInventory["xero"] = { balance: accountId ? null : 0, newAccount: !accountId };
   if (!pending && !c.readsBalances) xero = { balance: null, newAccount: !accountId, reconnect: true };
   else if (!pending) {
