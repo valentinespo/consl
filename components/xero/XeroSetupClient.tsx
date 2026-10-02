@@ -174,7 +174,7 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
       .map((key) => ({
         key,
         label: "Added by you",
-        hint: "Code the payments of what goes here to this account in Xero.",
+        hint: "Reconcile the payments of what goes here to this account in Xero.",
         cls: (CLASS_OF_TYPE[state.targets[key].type] ?? "liability") as AccountClass,
         suggest: { name: state.targets[key].name.replace(/^consl - /, ""), type: state.targets[key].type },
         channel: undefined,
@@ -257,18 +257,36 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
     });
 
   const nameOf = (key: string) => targets[key]?.name ?? "";
+  // A custom line's recommended accounts: its own P&L section's account (where consl's P&L shows
+  // it), and the receivable of the channel its orders belong to. Each goes first in its picker.
   const plOptionsFor = (l: SetupLine): SelectMenuOption[] => {
     const cls = customClass(l);
+    const rec = (LINE_ORDER as string[]).includes(l.group) && plClass(l.group, targets) === cls ? l.group : null;
     const keys = [...LINE_ORDER.filter((k) => plClass(k, targets) === cls), ...Object.keys(state.targets).filter((k) => isAddedAccount(k) && plClass(k, targets) === cls)];
+    const ordered = rec ? [rec, ...keys.filter((k) => k !== rec)] : keys;
     return [
-      ...keys.map((k) => ({ value: k, label: nameOf(k), hint: (LINE_ORDER as string[]).includes(k) ? `consl's account for ${LINES[k as LineKey].label.toLowerCase()}` : "An account you added" })),
+      ...ordered.map((k) => ({
+        value: k,
+        label: nameOf(k),
+        hint: (LINE_ORDER as string[]).includes(k) ? `consl's account for ${LINES[k as LineKey].label.toLowerCase()}` : "An account you added",
+        ...(k === rec ? { badge: "Recommended" } : {}),
+      })),
       { value: NEW_OPTION, label: "New account…", hint: "Create one for this line", icon: <span className="grid h-5 w-5 place-items-center rounded-md bg-chart-soft text-chart"><Plus size={12} /></span> },
     ];
   };
-  const balanceOptions: SelectMenuOption[] = [
-    ...balanceRows.map((b) => ({ value: b.key, label: nameOf(b.key) || b.label, hint: b.label === "Added by you" ? "A balance account you added" : b.label })),
-    { value: NEW_OPTION, label: "New balance account…", hint: "Create one for this line", icon: <span className="grid h-5 w-5 place-items-center rounded-md bg-chart-soft text-chart"><Plus size={12} /></span> },
-  ];
+  const balanceOptionsFor = (l: SetupLine): SelectMenuOption[] => {
+    const rec = balanceRows.some((b) => b.key === `receivable:${l.channel}`) ? `receivable:${l.channel}` : null;
+    const rows = rec ? [...balanceRows.filter((b) => b.key === rec), ...balanceRows.filter((b) => b.key !== rec)] : balanceRows;
+    return [
+      ...rows.map((b) => ({
+        value: b.key,
+        label: nameOf(b.key) || b.label,
+        hint: b.label === "Added by you" ? "A balance account you added" : b.label,
+        ...(b.key === rec ? { badge: "Recommended" } : {}),
+      })),
+      { value: NEW_OPTION, label: "New balance account…", hint: "Create one for this line", icon: <span className="grid h-5 w-5 place-items-center rounded-md bg-chart-soft text-chart"><Plus size={12} /></span> },
+    ];
+  };
 
   // Where each balance account's number comes from: the P&L accounts (or Tax owed) whose lines
   // move its money, each with the sign it moves it by.
@@ -502,7 +520,7 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
                       size="sm"
                       value={placed[l.id]?.balance ?? ""}
                       onChange={(v) => (v === NEW_OPTION ? setAdding({ kind: "balance", line: l.id }) : setLineBalance(l.id, v))}
-                      options={balanceOptions}
+                      options={balanceOptionsFor(l)}
                       placeholder="Pick a balance account"
                       ariaLabel={`Balance account for ${l.line}`}
                       disabled={!editable}
@@ -630,7 +648,7 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
           <div>
             <h2 className="text-[15px] font-semibold text-ink">Balance sheet</h2>
             <p className="mt-0.5 text-[12.5px] text-muted">
-              Where the money waits until cash moves, and how each number is made. When a payout or card charge reaches your bank, code it to the matching account.
+              Where the money waits until cash moves, and how each number is made. When a payout or card charge reaches your bank, reconcile it to the matching account.
             </p>
           </div>
           {editable && (
@@ -689,7 +707,7 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
                         ...(data.regularPaypal
                           ? [`Regular PayPal fees never reach Shopify's records, so consl adds PayPal's standard fee to those orders (${PAYPAL_STANDARD_FEE.percent}% + $${PAYPAL_STANDARD_FEE.fixed.toFixed(2)}). If your rate is different, change it in Orders › Automatic rules.`]
                           : []),
-                        "Orders from other channels that come in through your Shopify store (Etsy, Faire, wholesale apps…): consl can't see their fees. Either void those orders and record their payouts straight in Xero, or add their fees with a rule and code their payouts to a receivable: this one, or a new one you add for that channel.",
+                        "Orders from other channels that come in through your Shopify store (Etsy, Faire, wholesale apps…): consl can't see their fees. Either add their fees with a rule and reconcile their payouts to this account, or void those orders and record them straight in Xero.",
                       ]
                     : []
                 }
@@ -974,7 +992,7 @@ function BalanceBreakdown({ terms, codeHere, notes }: { terms: { name: string; s
         </div>
       </div>
       <div className="mx-3 mb-3 rounded-lg border border-accent/25 bg-accent-soft/60 px-3 py-2.5">
-        <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-accent">You code here in Xero</div>
+        <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-accent">Reconcile to this account in Xero</div>
         <ul className="mt-1 space-y-1">
           {codeHere.map((c) => (
             <li key={c} className="flex items-start gap-1.5 text-[12.5px] leading-snug text-ink">
@@ -1102,7 +1120,7 @@ function HowItWorks() {
   const steps = [
     { title: "Every line has an account", text: "Each line of your consl P&L sits under the Xero account it posts to. Lines you added in consl are yours to place." },
     { title: "Monthly journals", text: "When a month is complete, consl sends one journal per channel, dated when things happened." },
-    { title: "Code your payouts", text: "Code each payout deposit to its channel's receivable account. What's left is what the channel still owes you." },
+    { title: "Reconcile your payouts", text: "Reconcile each payout to its channel's receivable account. What's left is what the channel still owes you." },
   ];
   return (
     <div className="grid overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface sm:grid-cols-3">

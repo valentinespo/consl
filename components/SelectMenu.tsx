@@ -14,6 +14,8 @@ export type SelectMenuOption = {
   hint?: string;
   /** Shown but not choosable — a dangling value that needs reassigning, never a real choice. */
   disabled?: boolean;
+  /** A small violet pill on the option's second line, before the hint ("Recommended"). */
+  badge?: string;
 };
 
 /**
@@ -196,7 +198,14 @@ export function SelectMenu({
                     {o.icon && <span className="shrink-0">{o.icon}</span>}
                     <span className="min-w-0 flex-1">
                       <span className="block truncate">{o.label}</span>
-                      {o.hint && <span className="block truncate text-[11.5px] font-normal text-muted">{o.hint}</span>}
+                      {(o.hint || o.badge) && (
+                        <span className="flex min-w-0 items-center gap-1.5 text-[11.5px] font-normal text-muted">
+                          {o.badge && (
+                            <span className="pill-chart inline-flex shrink-0 items-center rounded-full border px-1.5 py-[1px] text-[10px] font-medium">{o.badge}</span>
+                          )}
+                          {o.hint && <span className="truncate">{o.hint}</span>}
+                        </span>
+                      )}
                     </span>
                     {active && <Check size={13} className="shrink-0" />}
                   </button>
