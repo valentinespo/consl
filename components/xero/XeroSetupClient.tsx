@@ -7,7 +7,7 @@ import { DatePicker } from "@/components/DatePicker";
 import { HoverHint } from "@/components/HoverHint";
 import { useMoney } from "@/components/CurrencyProvider";
 import { AlertTriangle, Check, GripVertical, Info, Lock, Pencil, Plus, RefreshCw, Trash2, X } from "@/components/icons";
-import { ROOT_LOGO } from "@/lib/channel-logos";
+import { SOURCE_LOGO } from "@/lib/channel-logos";
 import { GROUP_LABEL } from "@/lib/pnl-shared";
 import { discardXeroDraftAction, publishXeroSetupAction, saveXeroDraftAction } from "@/app/(app)/pnl/xero/actions";
 import type { XeroSetupScreen } from "@/lib/xero-setup";
@@ -25,17 +25,36 @@ import {
   isAddedBalance,
   lockedAccountOf,
   monthEnd,
+  NEW_ACCOUNT_PREFIX,
   newAccountName,
   targetValue,
   type AccountClass,
   type LineKey,
   type SetupLine,
   type XeroAccountOption,
+  type XeroChannel,
   type XeroSetupState,
   type XeroTarget,
 } from "@/lib/xero-setup-shared";
 
 const norm = (s: string) => s.trim().toLowerCase();
+const PILL = "inline-flex shrink-0 items-center whitespace-nowrap rounded-full border px-1.5 py-[1px] text-[10.5px] font-medium";
+/** The channel a line is tagged to in Xero, in that channel's colour. */
+const CHANNEL_PILL: Record<XeroChannel, string> = { AMAZON: "pill-amber", SHOPIFY: "pill-green", TIKTOK: "pill-pink" };
+/** Where a line's money came through (its sources), as the P&L marks it: a fee or credit added in consl wears consl's mark. */
+const SOURCE_MARK: Record<string, { src: string; title: string }> = {
+  AMAZON: { src: SOURCE_LOGO.AMAZON, title: "Amazon" },
+  AMAZON_ADS: { src: SOURCE_LOGO.AMAZON_ADS, title: "Amazon Ads" },
+  META: { src: SOURCE_LOGO.META, title: "Meta" },
+  SHOPIFY: { src: SOURCE_LOGO.SHOPIFY, title: "Shopify" },
+  TIKTOK: { src: SOURCE_LOGO.TIKTOK, title: "TikTok" },
+  CONSL: { src: SOURCE_LOGO.CONSL, title: "consl" },
+  CUSTOM: { src: SOURCE_LOGO.CONSL, title: "Added in consl" },
+};
+const marksOf = (l: SetupLine) =>
+  l.sources.map((x) => SOURCE_MARK[x]).filter((m, i, all): m is { src: string; title: string } => !!m && all.findIndex((o) => o?.src === m.src) === i);
+/** An account's name in a formula: without consl's prefix, which every new account carries. */
+const plainName = (name: string) => (name.startsWith(NEW_ACCOUNT_PREFIX) ? name.slice(NEW_ACCOUNT_PREFIX.length) : name);
 /** Re-read the Xero chart when the tab comes back into view, at most this often. */
 const REFRESH_EVERY_MS = 20_000;
 const NEW_OPTION = "__new";
@@ -258,7 +277,7 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
       const choice = l.custom ? placed[l.id] : undefined;
       if (l.custom && !choice?.balance) continue;
       const pl = l.custom ? choice!.account : lockedAccountOf(l);
-      const name = l.group === "taxes" ? "Tax owed" : pl ? (targets[pl]?.name ?? "") : "";
+      const name = l.group === "taxes" ? "Tax owed" : pl ? plainName(targets[pl]?.name ?? "") : "";
       for (const b of balancesOf(l, choice)) {
         const m = out.get(b.key) ?? new Map();
         const k = `${name}|${b.note ?? ""}`;
@@ -422,14 +441,22 @@ export function XeroSetupClient({ data, canEdit }: { data: XeroSetupScreen; canE
           <Lock size={13} />
         </span>
       )}
-      <MarkTile src={ROOT_LOGO[l.channel]} title={CHANNEL_NAME[l.channel]} />
+      <span className="flex shrink-0 items-center gap-1">
+        {marksOf(l).map((m) => (
+          <MarkTile key={m.src} src={m.src} title={m.title} />
+        ))}
+      </span>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] text-ink">{l.line}</div>
-        {(l.custom || (l.channel !== "AMAZON" && l.sources.includes("AMAZON"))) && (
-          <div className="truncate text-[11px] text-muted">
-            {l.custom ? `Added in consl · shows under ${GROUP_LABEL[l.group] ?? l.group} in your P&L` : "Charged by Amazon: its money comes off the Amazon receivable"}
-          </div>
-        )}
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-[13px] text-ink" title={l.line}>
+            {l.line}
+          </span>
+          <span className={`${PILL} ${CHANNEL_PILL[l.channel]}`} title={`Tagged ${CHANNEL_NAME[l.channel]} in Xero`}>
+            {CHANNEL_NAME[l.channel]}
+          </span>
+          {l.custom && <span className={`${PILL} pill-neutral`}>{l.credit ? "Custom credit" : "Custom fee"}</span>}
+        </div>
+        {l.custom && <div className="truncate text-[11px] text-muted">Shows under {GROUP_LABEL[l.group] ?? l.group} in your P&amp;L</div>}
       </div>
       {slot}
       <span className="w-[92px] shrink-0 text-right text-[12.5px] tabular-nums text-ink-soft">{money(l.amount)}</span>

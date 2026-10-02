@@ -143,14 +143,17 @@ async function companyRows(orgId: string): Promise<{ channels: XeroChannel[]; li
   const byId = new Map<string, SetupLine>();
   for (const t of types.values()) {
     const sources = sourcesFromBits(t.bits);
-    const line = pnlLineOf(t.group, t.type, sources);
-    const id = setupLineId(t.channel, t.group, line);
-    const cur = byId.get(id) ?? { id, channel: t.channel, group: t.group, line, amount: 0, sources: [], custom: false };
+    // A fee or credit added in consl keeps its own name (as the P&L shows it) and is placed on its
+    // own; every other line is the P&L's grouped line.
+    const custom = sources.length > 0 && sources.every((x) => x === "CUSTOM");
+    const line = custom ? t.type : pnlLineOf(t.group, t.type, sources);
+    const id = setupLineId(t.channel, t.group, custom ? `custom:${t.type}` : line);
+    const cur = byId.get(id) ?? { id, channel: t.channel, group: t.group, line, amount: 0, sources: [], custom };
     cur.amount += t.amount;
     cur.sources = PNL_SOURCE_ORDER.filter((x) => cur.sources.includes(x) || sources.includes(x));
     byId.set(id, cur);
   }
-  for (const l of byId.values()) l.custom = l.sources.length > 0 && l.sources.every((x) => x === "CUSTOM");
+  for (const l of byId.values()) if (l.custom) l.credit = l.group === "sales" || l.amount > 0;
   for (const [channel, amount] of cogs) {
     const id = setupLineId(channel, "cogs", "Cost of goods");
     byId.set(id, { id, channel, group: "cogs", line: "Cost of goods", amount, sources: ["CONSL"], custom: false });

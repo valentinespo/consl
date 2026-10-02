@@ -22,6 +22,7 @@
   --color-positive: #16a34a; /* vivid green — supporting accent */
   --color-negative: #dc2626; /* red */
   --color-warn: #ea580c; /* tangerine */
+  --color-pink: #db2777; /* TikTok's pink — its sales-channel tag */
 
   --color-header: #fbfbfb; /* the chrome — top strip and sidebar share this gray (shadcn's sidebar token, as efferd uses) */
   --color-sidebar: #fbfbfb; /* same as the header: sidebar and top strip read as one merged surface */
@@ -56,6 +57,7 @@ html[data-theme="dark"] {
   --color-positive: #22c55e;
   --color-negative: #ef4444;
   --color-warn: #f97316;
+  --color-pink: #f472b6;
   --color-header: #18181b; /* chrome gray, dark — still identical to the sidebar */
   --color-sidebar: #18181b;
   --color-nav-active: #242428; /* selected tab chip — neutral, mirrors the light zinc-100 choice */
@@ -92,7 +94,8 @@ html[data-theme="dark"] .iso-invert {
  * The recipe is the Finished-lot pill's frosted look: a translucent wash of the signal
  * colour, a faint border of the same hue, and the hue itself as text — all token-driven, so
  * both themes follow. green = good, amber = needs attention, red = critical, neutral =
- * informational, chart = violet accents tied to chart-owned controls. */
+ * informational, chart = violet accents tied to chart-owned controls. Sales-channel tags reuse
+ * them by brand: Amazon = amber (orange), Shopify = green, TikTok = pink. */
 .pill-green {
   background-color: color-mix(in srgb, var(--color-positive) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-positive) 25%, transparent);
@@ -117,6 +120,11 @@ html[data-theme="dark"] .iso-invert {
   background-color: color-mix(in srgb, var(--color-chart) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-chart) 25%, transparent);
   color: var(--color-chart);
+}
+.pill-pink {
+  background-color: color-mix(in srgb, var(--color-pink) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-pink) 25%, transparent);
+  color: var(--color-pink);
 }
 
 /* The pill recipe applied to BOXES — banners, danger zones, marked rows, inline chips: a

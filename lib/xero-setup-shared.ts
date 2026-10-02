@@ -141,8 +141,11 @@ export type SetupLine = {
   line: string;
   amount: number;
   sources: PnlSource[];
-  /** Added in consl (custom fees and credits): sent to Xero only once placed. */
+  /** Added in consl (custom fees and credits): sent to Xero only once placed. Each keeps its own
+   *  name (the fee's, as on the P&L) and is placed on its own. */
   custom: boolean;
+  /** A custom line that adds money (a credit) rather than costing it. */
+  credit?: boolean;
 };
 
 export const setupLineId = (channel: string, group: string, line: string) => `${channel}|${group}|${line}`;
